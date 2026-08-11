@@ -8,6 +8,29 @@ const CONDITION_COLORS = {
   1: "var(--cond-1)",
 };
 
+const COMPASS_DEGREES = {
+  N: 0, NNE: 22.5, NE: 45, ENE: 67.5, E: 90, ESE: 112.5, SE: 135, SSE: 157.5,
+  S: 180, SSW: 202.5, SW: 225, WSW: 247.5, W: 270, WNW: 292.5, NW: 315, NNW: 337.5,
+};
+
+function dirToArrowRotation(dirText) {
+  if (!dirText) return 0;
+  const deg = COMPASS_DEGREES[String(dirText).trim().toUpperCase()];
+  if (deg == null) return 0;
+  // Arrow points downwind (the direction the wind is blowing toward), which is
+  // the compass "from" direction plus 180°. Chart.js triangle rotation: 0 = pointing up/north.
+  return (deg + 180) % 360;
+}
+
+function windColor(speed) {
+  if (speed == null) return "#9ca3af";
+  if (speed < 10) return "#22c55e";
+  if (speed < 20) return "#a5de37";
+  if (speed < 30) return "#eab308";
+  if (speed < 40) return "#f97316";
+  return "#dc2626";
+}
+
 let state = { data: null, rowsByLocation: {}, chart: null };
 
 async function init() {
@@ -204,16 +227,26 @@ function renderCharts(rows) {
     {
       label: "Wind Forecast (km/h)",
       data: rows.map((r) => r["Wind Forecast (km/h)"] ?? null),
-      borderColor: "#dc2626",
-      pointRadius: 0,
+      borderColor: "#fca5a5",
+      borderWidth: 1,
+      pointStyle: "triangle",
+      pointRadius: rows.map((r) => (r["Wind Forecast (km/h)"] != null ? 5 : 0)),
+      pointRotation: rows.map((r) => dirToArrowRotation(r["Wind Forecast Dir"])),
+      pointBackgroundColor: rows.map((r) => windColor(r["Wind Forecast (km/h)"])),
+      pointBorderColor: rows.map((r) => windColor(r["Wind Forecast (km/h)"])),
       yAxisID: "yWind",
       tension: 0.3,
     },
     {
       label: "Wind Realtime (km/h)",
       data: rows.map((r) => r["Wind Realtime (km/h)"] ?? null),
-      borderColor: "#16a34a",
-      pointRadius: 0,
+      borderColor: "#86efac",
+      borderWidth: 1,
+      pointStyle: "triangle",
+      pointRadius: rows.map((r) => (r["Wind Realtime (km/h)"] != null ? 5 : 0)),
+      pointRotation: rows.map((r) => dirToArrowRotation(r["Wind Realtime Dir"])),
+      pointBackgroundColor: rows.map((r) => windColor(r["Wind Realtime (km/h)"])),
+      pointBorderColor: rows.map((r) => windColor(r["Wind Realtime (km/h)"])),
       yAxisID: "yWind",
       tension: 0.3,
     },
@@ -235,7 +268,7 @@ function renderCharts(rows) {
     data: { labels, datasets },
     options: {
       responsive: true,
-      spanGaps: false,
+      spanGaps: true,
       interaction: { mode: "index", intersect: false },
       scales: {
         // Left axis, visible: Temperature. Rainfall shares the visual left side but on its
