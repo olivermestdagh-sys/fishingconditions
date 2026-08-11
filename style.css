@@ -347,27 +347,31 @@ main.wide {
 }
 
 .good-layout {
-  display: flex;
+  display: grid;
   gap: 16px;
-  align-items: flex-start;
-  flex-wrap: wrap;
+  /* Mobile-first: graph on top (stuck to the viewport top while you scroll),
+     then the windows list, then the thresholds at the very bottom — the graph
+     is what you actually want visible while scrolling through the windows. */
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "detail"
+    "windows"
+    "filters";
 }
 
-.good-main {
-  flex: 1 1 380px;
-  min-width: 300px;
+.gc-filters {
+  grid-area: filters;
 }
 
-.good-detail {
-  flex: 1 1 380px;
-  min-width: 300px;
+.gc-windows {
+  grid-area: windows;
 }
 
-@media (min-width: 900px) {
-  .good-detail {
-    position: sticky;
-    top: 12px;
-  }
+.gc-detail {
+  grid-area: detail;
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 
 .window-card {
@@ -382,6 +386,22 @@ main.wide {
 .window-card.selected {
   outline: 3px solid var(--blue-900);
   outline-offset: 1px;
+}
+
+/* On desktop, revert to the original side-by-side arrangement: thresholds above the
+   windows list on the left, graph as its own sticky column on the right — the
+   top-sticky mobile graph arrangement above is a small-screen-only affordance. */
+@media (min-width: 900px) {
+  .good-layout {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "filters detail"
+      "windows detail";
+  }
+
+  .gc-detail {
+    top: 12px;
+  }
 }
 
 /* On desktop, let the Conditions graph escape the centered 720px column and

@@ -21,44 +21,40 @@
 
 <main class="wide">
   <div class="good-layout">
-    <div class="good-main">
-      <section class="summary-card">
-        <p class="footnote" style="margin:0 0 12px;text-align:left;">
-          Every hourly forecast row that sits inside a run of consecutive hours meeting the thresholds below (evaluated per location).
-        </p>
-        <div class="filter-row">
-          <div>
-            <label for="minCondition">Min Condition rating</label>
-            <input type="number" id="minCondition" min="1" max="5" value="3" />
-          </div>
-          <div>
-            <label for="minHours">Min consecutive hours</label>
-            <input type="number" id="minHours" min="1" max="24" value="3" />
-          </div>
+    <section class="summary-card gc-filters">
+      <p class="footnote" style="margin:0 0 12px;text-align:left;">
+        Every hourly forecast row that sits inside a run of consecutive hours meeting the thresholds below (evaluated per location).
+      </p>
+      <div class="filter-row">
+        <div>
+          <label for="minCondition">Min Condition rating</label>
+          <input type="number" id="minCondition" min="1" max="5" value="3" />
         </div>
-        <p class="footnote" style="margin:8px 0 0;text-align:left;">
-          "Min consecutive hours" counts qualifying hourly points in a row — the Hours column below shows the resulting clock duration (one less).
-        </p>
-      </section>
+        <div>
+          <label for="minHours">Min consecutive hours</label>
+          <input type="number" id="minHours" min="1" max="24" value="3" />
+        </div>
+      </div>
+      <p class="footnote" style="margin:8px 0 0;text-align:left;">
+        "Min consecutive hours" counts qualifying hourly points in a row — the Hours column below shows the resulting clock duration (one less).
+      </p>
+    </section>
 
-      <section class="table-section">
-        <h2>Qualifying windows</h2>
-        <p class="footnote" style="margin:0 0 10px;text-align:left;">
-          One box per day — Hours shows the whole contiguous window, with * where it spans multiple days.
-          Tap a window to see that location's full day of conditions →
-        </p>
-        <div id="windowsContainer"></div>
-        <div id="emptyState" class="empty-state" style="display:none;">No windows meet the criteria</div>
-      </section>
-    </div>
+    <section class="table-section gc-windows">
+      <h2>Qualifying windows</h2>
+      <p class="footnote" style="margin:0 0 10px;text-align:left;">
+        One box per day — Hours shows the whole contiguous window, with * where it spans multiple days.
+        Tap a window to see that location's full day of conditions →
+      </p>
+      <div id="windowsContainer"></div>
+      <div id="emptyState" class="empty-state" style="display:none;">No windows meet the criteria</div>
+    </section>
 
-    <div class="good-detail">
-      <section class="chart-section" id="detailPanel">
-        <h2 id="detailHeading">Day detail</h2>
-        <div id="detailPlaceholder" class="empty-state">Tap a location/window on the left to see its full day here.</div>
-        <canvas id="detailChart" height="280" style="display:none;"></canvas>
-      </section>
-    </div>
+    <section class="chart-section gc-detail" id="detailPanel">
+      <h2 id="detailHeading">Day detail</h2>
+      <div id="detailPlaceholder" class="empty-state">Tap a location/window below to see its full day here.</div>
+      <canvas id="detailChart" height="280" style="display:none;"></canvas>
+    </section>
   </div>
 
   <footer class="footnote">
