@@ -42,33 +42,27 @@ function formatDayHeading(dayKey) {
   return new Intl.DateTimeFormat([], { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" }).format(dt);
 }
 
-function findNearestIndexInRange(rows, targetIso, startIdx, endIdx) {
-  if (!targetIso) return null;
-  const target = new Date(targetIso.replace(" ", "T")).getTime();
-  let best = null, bestDiff = Infinity;
-  for (let i = startIdx; i <= endIdx; i++) {
-    const t = new Date(rows[i].dateTime).getTime();
-    const diff = Math.abs(t - target);
-    if (diff < bestDiff) { bestDiff = diff; best = i; }
-  }
-  return best;
-}
-
 const DAY_BAND_COLORS = ["rgba(31, 78, 120, 0.055)", "rgba(31, 78, 120, 0)"];
 const NIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.10)";
 const TWILIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.05)";
 
 function buildDayBandPlugin(rows, sunTimes) {
-  // Group row indices by calendar day, in the order they already appear (rows are pre-sorted).
+  // Group rows by calendar day, tracking each day's exact start/end timestamp —
+  // now that the x-axis is a true linear time scale, bands are positioned by
+  // real elapsed time rather than by row index, so they're pixel-accurate
+  // regardless of how densely each day happens to be sampled.
   const dayGroups = [];
   let currentKey = null;
-  for (let i = 0; i < rows.length; i++) {
-    const key = dayKeyOf(rows[i].dateTime);
+  for (const r of rows) {
+    const key = dayKeyOf(r.dateTime);
+    const t = r._t;
     if (key !== currentKey) {
       currentKey = key;
-      dayGroups.push({ key, startIdx: i, endIdx: i });
+      dayGroups.push({ key, minT: t, maxT: t });
     } else {
-      dayGroups[dayGroups.length - 1].endIdx = i;
+      const g = dayGroups[dayGroups.length - 1];
+      if (t < g.minT) g.minT = t;
+      if (t > g.maxT) g.maxT = t;
     }
   }
   const sunByDate = new Map((sunTimes || []).map((s) => [s.date, s]));
@@ -79,15 +73,18 @@ function buildDayBandPlugin(rows, sunTimes) {
       const { ctx, chartArea, scales } = chart;
       if (!chartArea || dayGroups.length === 0) return;
       const xScale = scales.x;
-      const { top, bottom, right } = chartArea;
-      const oneStep = rows.length > 1 ? xScale.getPixelForValue(1) - xScale.getPixelForValue(0) : 0;
+      const { top, bottom, right, left } = chartArea;
 
       ctx.save();
       dayGroups.forEach((g, gi) => {
-        const xStart = xScale.getPixelForValue(g.startIdx) - oneStep / 2;
-        const xEnd = gi + 1 < dayGroups.length
-          ? xScale.getPixelForValue(dayGroups[gi + 1].startIdx) - oneStep / 2
-          : right;
+        // Each day spans its own local midnight to the next day's midnight, not just
+        // the range of its actual data points — matches the reference image's day columns.
+        const [y, m, d] = g.key.split("-").map(Number);
+        const dayStartT = Date.UTC(y, m - 1, d); // Date.UTC month is 0-indexed; g.key's is not
+        const dayEndT = dayStartT + 24 * 3600 * 1000;
+
+        const xStart = gi === 0 ? left : xScale.getPixelForValue(dayStartT);
+        const xEnd = gi + 1 < dayGroups.length ? xScale.getPixelForValue(dayEndT) : right;
 
         // Alternating faint day band, so consecutive days are visually distinguishable
         ctx.fillStyle = DAY_BAND_COLORS[gi % 2];
@@ -96,16 +93,10 @@ function buildDayBandPlugin(rows, sunTimes) {
         // Night / twilight shading, using this day's actual sunrise & sunset
         const sun = sunByDate.get(g.key);
         if (sun) {
-          const firstLightIdx = findNearestIndexInRange(rows, sun.firstLight, g.startIdx, g.endIdx);
-          const sunriseIdx = findNearestIndexInRange(rows, sun.sunrise, g.startIdx, g.endIdx);
-          const sunsetIdx = findNearestIndexInRange(rows, sun.sunset, g.startIdx, g.endIdx);
-          const lastLightIdx = findNearestIndexInRange(rows, sun.lastLight, g.startIdx, g.endIdx);
-
-          const px = (idx) => (idx == null ? null : xScale.getPixelForValue(idx));
-          const xFirstLight = px(firstLightIdx);
-          const xSunrise = px(sunriseIdx);
-          const xSunset = px(sunsetIdx);
-          const xLastLight = px(lastLightIdx);
+          const xFirstLight = sun.firstLight != null ? xScale.getPixelForValue(parseNaive(sun.firstLight)) : null;
+          const xSunrise = sun.sunrise != null ? xScale.getPixelForValue(parseNaive(sun.sunrise)) : null;
+          const xSunset = sun.sunset != null ? xScale.getPixelForValue(parseNaive(sun.sunset)) : null;
+          const xLastLight = sun.lastLight != null ? xScale.getPixelForValue(parseNaive(sun.lastLight)) : null;
 
           // Pre-dawn: night from day-start to first light, twilight from first light to sunrise
           if (xFirstLight != null) {
@@ -180,12 +171,13 @@ async function init() {
 function groupRowsByLocation() {
   state.rowsByLocation = {};
   for (const row of state.data.rows) {
+    row._t = parseNaive(row.dateTime);
     const key = row["Location Name"];
     if (!state.rowsByLocation[key]) state.rowsByLocation[key] = [];
     state.rowsByLocation[key].push(row);
   }
   for (const key in state.rowsByLocation) {
-    state.rowsByLocation[key].sort((a, b) => a.dateTime.localeCompare(b.dateTime));
+    state.rowsByLocation[key].sort((a, b) => a._t - b._t);
   }
 }
 
@@ -239,16 +231,25 @@ function nearestRowWithField(rows, field, now) {
   return best;
 }
 
+function parseNaive(iso) {
+  // Parse "YYYY-MM-DDTHH:MM:SS" (or with a space) into a timezone-neutral ms value,
+  // treated as UTC purely for arithmetic/positioning — matches goodconditions.js's approach,
+  // so both pages interpret the same conditions.json timestamps identically.
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+  if (!m) return null;
+  const [, y, mo, d, h, mi, s] = m.map(Number);
+  return Date.UTC(y, mo - 1, d, h, mi, s);
+}
+
 function fmtTime(iso) {
   const d = new Date(iso);
   return d.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-function fmtChartTick(iso) {
-  // Time only — the day is now shown as a banner heading by the day-band plugin,
+function fmtChartTick(ms) {
+  // Time only — the day is shown as a banner heading by the day-band plugin,
   // so repeating the weekday on every tick would just be redundant clutter.
-  const d = new Date(iso);
-  return d.toLocaleString([], { hour: "2-digit", minute: "2-digit" });
+  return new Intl.DateTimeFormat([], { timeZone: "UTC", hour: "2-digit", minute: "2-digit" }).format(new Date(ms));
 }
 
 function conditionPill(value) {
@@ -316,13 +317,18 @@ function renderSummary(loc, rows, now) {
 }
 
 function renderCharts(rows, loc) {
-  const labels = rows.map((r) => fmtChartTick(r.dateTime));
   const sunTimes = (loc && state.data.sunTimes && state.data.sunTimes[loc.name]) || [];
+
+  // {x, y} points on a true linear time axis, so equal elapsed time gets equal pixel
+  // width regardless of how densely each day happens to be sampled (today's rows include
+  // 10-min realtime readings; other days are hourly-forecast-only, so row *counts* per
+  // day vary a lot — a category axis would stretch today's column wide to fit them all).
+  const pointsFor = (field) => rows.map((r) => ({ x: r._t, y: r[field] ?? null }));
 
   const datasets = [
     {
       label: "Temp Forecast (°C)",
-      data: rows.map((r) => r["Temp Forecast (C)"] ?? null),
+      data: pointsFor("Temp Forecast (C)"),
       borderColor: "#60a5fa",
       borderDash: [4, 3],
       pointRadius: 2,
@@ -332,7 +338,7 @@ function renderCharts(rows, loc) {
     },
     {
       label: "Temp Realtime (°C)",
-      data: rows.map((r) => r["Temp Realtime (C)"] ?? null),
+      data: pointsFor("Temp Realtime (C)"),
       borderColor: "#0f172a",
       pointRadius: 0,
       yAxisID: "yTemp",
@@ -340,7 +346,7 @@ function renderCharts(rows, loc) {
     },
     {
       label: "Rainfall Probability (%)",
-      data: rows.map((r) => r["Rainfall Probability (%)"] ?? null),
+      data: pointsFor("Rainfall Probability (%)"),
       borderColor: "#eab308",
       pointRadius: 2,
       pointBackgroundColor: "#eab308",
@@ -349,7 +355,7 @@ function renderCharts(rows, loc) {
     },
     {
       label: "Wind Forecast (km/h)",
-      data: rows.map((r) => r["Wind Forecast (km/h)"] ?? null),
+      data: pointsFor("Wind Forecast (km/h)"),
       borderColor: "#fca5a5",
       borderWidth: 1,
       pointStyle: "triangle",
@@ -362,7 +368,7 @@ function renderCharts(rows, loc) {
     },
     {
       label: "Wind Realtime (km/h)",
-      data: rows.map((r) => r["Wind Realtime (km/h)"] ?? null),
+      data: pointsFor("Wind Realtime (km/h)"),
       borderColor: "#86efac",
       borderWidth: 1,
       pointStyle: "triangle",
@@ -375,7 +381,7 @@ function renderCharts(rows, loc) {
     },
     {
       label: "Tide Height (m)",
-      data: rows.map((r) => r["Tide Height (m)"] ?? null),
+      data: pointsFor("Tide Height (m)"),
       borderColor: "#4f46e5",
       backgroundColor: "rgba(79, 70, 229, 0.15)",
       fill: true,
@@ -385,10 +391,13 @@ function renderCharts(rows, loc) {
     },
   ];
 
+  const minT = rows.length ? rows[0]._t : undefined;
+  const maxT = rows.length ? rows[rows.length - 1]._t : undefined;
+
   if (state.chart) state.chart.destroy();
   state.chart = new Chart(document.getElementById("conditionsChart"), {
     type: "line",
-    data: { labels, datasets },
+    data: { datasets },
     plugins: rows.length > 0 ? [buildDayBandPlugin(rows, sunTimes)] : [],
     options: {
       responsive: true,
@@ -396,6 +405,16 @@ function renderCharts(rows, loc) {
       layout: { padding: { top: 20 } },
       interaction: { mode: "index", intersect: false },
       scales: {
+        x: {
+          type: "linear",
+          min: minT,
+          max: maxT,
+          ticks: {
+            maxTicksLimit: 10,
+            callback: (value) => fmtChartTick(value),
+          },
+          grid: { color: "rgba(0,0,0,0.05)" },
+        },
         // Left axis, visible: Temperature. Rainfall shares the visual left side but on its
         // own hidden scale (0-100) so it doesn't get squashed by the temperature range.
         yTemp: { position: "left", title: { display: true, text: "Temperature (°C)" } },
@@ -405,7 +424,14 @@ function renderCharts(rows, loc) {
         yWind: { position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: "Wind (km/h)" } },
         yTide: { display: false, min: 0 },
       },
-      plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 10 } } } },
+      plugins: {
+        legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 10 } } },
+        tooltip: {
+          callbacks: {
+            title: (items) => (items.length ? new Intl.DateTimeFormat([], { timeZone: "UTC", weekday: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(items[0].parsed.x)) : ""),
+          },
+        },
+      },
     },
   });
 }
