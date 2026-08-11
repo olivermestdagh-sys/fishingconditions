@@ -13,7 +13,8 @@ GitHub Actions (on a schedule)
   -> writes data/conditions.json
   -> commits it back to the repo
 GitHub Pages
-  -> serves index.html, which reads data/conditions.json and renders the page
+  -> serves index.html (the Good Conditions page — the site's home page), plus
+     conditions.html and locations.html, which all read data/conditions.json and render
 ```
 
 Your WillyWeather API key lives only as a GitHub Actions secret — it's never
@@ -85,13 +86,48 @@ handy way to build/check a cron expression.
 
 ## Files in this project
 
-- `index.html`, `style.css`, `app.js` — the website itself (no build step, no dependencies)
+- `index.html` — Good Conditions (the site's home page), `conditions.html` — the
+  per-location table/graph view, `locations.html` — the locations editor, `style.css`,
+  `app.js`, `goodconditions.js`, `locationsadmin.js`, `charts.js` (shared charting code
+  used by both `app.js` and `goodconditions.js`) — the website itself (no build step, no dependencies)
 - `scripts/fetch_conditions.py` — fetches from WillyWeather, writes `data/conditions.json`
   (pure Python standard library only, no `pip install` needed)
 - `config/locations.json` — your tracked locations
 - `.github/workflows/update.yml` — the schedule that runs the fetch script
 - `data/conditions.json` — the generated data file (starts empty; gets
   overwritten automatically by the workflow)
+
+## Editing locations from the site itself
+
+There's now a **Locations** tab that lets you view and edit `config/locations.json`
+without going into GitHub's file editor. Since this is a static site with no server,
+saving works by committing directly to your repo from your browser — which needs a
+GitHub token with permission to do that.
+
+**One-time setup:**
+
+1. On GitHub: your profile photo (top right) → **Settings** → **Developer settings**
+   (bottom of the left sidebar) → **Personal access tokens** → **Fine-grained tokens**
+   → **Generate new token**.
+2. Give it a name (e.g. "Kayak site locations editor"), set an expiration (90 days is
+   fine — you'll just regenerate it when it lapses).
+3. **Repository access**: "Only select repositories" → choose this repo. Don't grant
+   access to your other repos.
+4. **Permissions** → **Repository permissions** → set **Contents** to **Read and write**.
+   If you also want the "Save & refresh data now" button to work, also set **Actions**
+   to **Read and write**.
+5. Generate the token, copy it (you won't see it again).
+6. On the site's Locations tab: enter your GitHub username, this repo's name, and paste
+   the token in, then "Save connection". It's stored only in your browser's local
+   storage — never sent anywhere except directly to GitHub's API.
+
+After that, edit/add/remove locations on that tab and click **Save changes** (or
+**Save & refresh data now** to also trigger an immediate data pull instead of waiting
+for the next scheduled run).
+
+**If you ever want to revoke access**: either click "Forget token" on the site (clears
+it from that device only), or delete/revoke the token itself from GitHub's Developer
+settings page (immediately invalidates it everywhere).
 
 ## Troubleshooting
 
@@ -103,5 +139,8 @@ handy way to build/check a cron expression.
   Excel version — include the state, e.g. "VIC", for a good match).
 - **Workflow fails with an access/authorization error**: same fix as the
   Excel version — check the enabled services in your WillyWeather API admin
-  settings (Search, Forecasts → Temperature/Wind/Tides/Rainfall Probability,
+  settings (Search, Forecasts → Temperature/Wind/Tides/Rainfall Probability/Sun,
   Observational Graphs → Temperature/Wind).
+- **Chart has no night/twilight shading**: the day bands and headings work regardless,
+  but shading needs the Sun (sunrise/sunset) forecast type enabled on your WillyWeather
+  API key — see the Access error section above.

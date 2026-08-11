@@ -1,16 +1,11 @@
 const DATA_URL = "data/conditions.json";
 
 let allRows = [];
+let sunTimesData = {};
+let currentDetailChart = null;
+let selectedCardEl = null;
 
-// Parse a naive "YYYY-MM-DDTHH:MM:SS" string into a timezone-neutral ms value
-// (treated as UTC purely for arithmetic, so results don't depend on the
-// viewer's browser timezone).
-function parseNaive(iso) {
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
-  if (!m) return null;
-  const [, y, mo, d, h, mi, s] = m.map(Number);
-  return Date.UTC(y, mo - 1, d, h, mi, s);
-}
+// parseNaive comes from charts.js (loaded before this file).
 
 function fmtNaive(ms, opts) {
   const d = new Date(ms);
@@ -32,6 +27,7 @@ async function init() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     allRows = data.rows.map((r) => ({ ...r, _t: parseNaive(r.dateTime) }));
+    sunTimesData = data.sunTimes || {};
 
     if (!data.generatedAt) {
       document.getElementById("updated").textContent = "Not updated yet — waiting on the first scheduled run";
@@ -155,6 +151,44 @@ function conditionColor(avgValue) {
   return CONDITION_COLORS[rounded] || "var(--cond-none)";
 }
 
+function selectWindow(w, cardEl) {
+  if (selectedCardEl) selectedCardEl.classList.remove("selected");
+  if (cardEl) {
+    cardEl.classList.add("selected");
+    selectedCardEl = cardEl;
+  }
+
+  // Full calendar day for this location — not just the qualifying window's hour
+  // span — so the graph shows the whole day's context around the good window.
+  const dayStart = dateOnly(w.from);
+  const dayRows = allRows
+    .filter((r) => r["Location Name"] === w.locationName && dateOnly(r._t) === dayStart)
+    .sort((a, b) => a._t - b._t);
+
+  document.getElementById("detailHeading").textContent =
+    `${w.locationName} — ${fmtNaive(w.from, { weekday: "long", day: "numeric", month: "long" })}`;
+
+  const placeholder = document.getElementById("detailPlaceholder");
+  const canvas = document.getElementById("detailChart");
+
+  if (dayRows.length === 0) {
+    placeholder.textContent = "No data available for that day.";
+    placeholder.style.display = "block";
+    canvas.style.display = "none";
+    if (currentDetailChart) { currentDetailChart.destroy(); currentDetailChart = null; }
+    return;
+  }
+
+  placeholder.style.display = "none";
+  canvas.style.display = "block";
+  currentDetailChart = renderConditionsChart({
+    canvas,
+    rows: dayRows,
+    sunTimes: sunTimesData[w.locationName] || [],
+    existingChart: currentDetailChart,
+  });
+}
+
 function render() {
   const minCondition = Number(document.getElementById("minCondition").value) || 1;
   const minHours = Number(document.getElementById("minHours").value) || 1;
@@ -251,6 +285,7 @@ function render() {
         </div>
         <div class="window-tides">Tides: ${w.tides}</div>
       `;
+      card.addEventListener("click", () => selectWindow(w, card));
       dayGroup.appendChild(card);
     }
 

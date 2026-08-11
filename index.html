@@ -3,63 +3,72 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Kayak &amp; Surf Conditions</title>
+<title>Good Conditions</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
 <header class="topbar">
-  <h1>Kayak &amp; Surf Conditions</h1>
+  <h1>Good Conditions</h1>
   <div id="updated" class="updated">Loading…</div>
 </header>
 
 <nav class="tabnav">
-  <a href="index.html" class="active">Conditions</a>
-  <a href="good.html">Good Conditions</a>
+  <a href="conditions.html">Conditions</a>
   <a href="locations.html">Locations</a>
+  <a href="index.html" class="active">Good Conditions</a>
 </nav>
 
-<main>
-  <section class="picker-row">
-    <label for="locationSelect">Location</label>
-    <select id="locationSelect"></select>
-  </section>
+<main class="wide">
+  <div class="good-layout">
+    <div class="good-main">
+      <section class="summary-card">
+        <p class="footnote" style="margin:0 0 12px;text-align:left;">
+          Every hourly forecast row that sits inside a run of consecutive hours meeting the thresholds below (evaluated per location).
+        </p>
+        <div class="filter-row">
+          <div>
+            <label for="minCondition">Min Condition rating</label>
+            <input type="number" id="minCondition" min="1" max="5" value="3" />
+          </div>
+          <div>
+            <label for="minHours">Min consecutive hours</label>
+            <input type="number" id="minHours" min="1" max="24" value="3" />
+          </div>
+        </div>
+        <p class="footnote" style="margin:8px 0 0;text-align:left;">
+          "Min consecutive hours" counts qualifying hourly points in a row — the Hours column below shows the resulting clock duration (one less).
+        </p>
+      </section>
 
-  <section id="summaryCard" class="summary-card">
-    <!-- filled by app.js -->
-  </section>
-
-  <section class="chart-section">
-    <h2>Conditions Graph</h2>
-    <canvas id="conditionsChart" height="280"></canvas>
-  </section>
-
-  <section class="table-section">
-    <h2>Full Forecast</h2>
-    <div class="table-scroll">
-      <table id="dataTable">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Temp (°C)</th>
-            <th>Wind</th>
-            <th>Rain %</th>
-            <th>Tide</th>
-            <th>Condition</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+      <section class="table-section">
+        <h2>Qualifying windows</h2>
+        <p class="footnote" style="margin:0 0 10px;text-align:left;">
+          One box per day — Hours shows the whole contiguous window, with * where it spans multiple days.
+          Tap a window to see that location's full day of conditions →
+        </p>
+        <div id="windowsContainer"></div>
+        <div id="emptyState" class="empty-state" style="display:none;">No windows meet the criteria</div>
+      </section>
     </div>
-  </section>
+
+    <div class="good-detail">
+      <section class="chart-section" id="detailPanel">
+        <h2 id="detailHeading">Day detail</h2>
+        <div id="detailPlaceholder" class="empty-state">Tap a location/window on the left to see its full day here.</div>
+        <canvas id="detailChart" height="280" style="display:none;"></canvas>
+      </section>
+    </div>
+  </div>
 
   <footer class="footnote">
     Data from <a href="https://www.willyweather.com.au/" target="_blank" rel="noopener">WillyWeather</a>.
-    Refreshed automatically every 30 minutes.
+    Refreshed automatically every 3 hours.
   </footer>
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
-<script src="app.js"></script>
+<script src="charts.js"></script>
+<script src="goodconditions.js"></script>
 </body>
 </html>
