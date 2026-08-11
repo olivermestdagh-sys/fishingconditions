@@ -397,6 +397,12 @@ main.wide {
     grid-template-areas:
       "filters detail"
       "windows detail";
+    /* Grid items stretch to fill their row's height by default, which for "detail"
+       means stretching to match the combined height of filters+windows (often very
+       tall) — leaving the sticky panel with nothing to travel through as you scroll,
+       so it never appears to move/stick. align-items:start keeps it its natural,
+       short height instead, so the sticky positioning actually has room to work. */
+    align-items: start;
   }
 
   .gc-detail {
