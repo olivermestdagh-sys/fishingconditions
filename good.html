@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Good Conditions</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Good Conditions</h1>
+  <div id="updated" class="updated">Loading…</div>
+</header>
+
+<nav class="tabnav">
+  <a href="index.html">Conditions</a>
+  <a href="good.html" class="active">Good Conditions</a>
+</nav>
+
+<main>
+  <section class="summary-card">
+    <p class="footnote" style="margin:0 0 12px;text-align:left;">
+      Every hourly forecast row that sits inside a run of consecutive hours meeting the thresholds below (evaluated per location).
+    </p>
+    <div class="filter-row">
+      <div>
+        <label for="minCondition">Min Condition rating</label>
+        <input type="number" id="minCondition" min="1" max="5" value="3" />
+      </div>
+      <div>
+        <label for="minHours">Min consecutive hours</label>
+        <input type="number" id="minHours" min="1" max="24" value="3" />
+      </div>
+    </div>
+    <p class="footnote" style="margin:8px 0 0;text-align:left;">
+      "Min consecutive hours" counts qualifying hourly points in a row — the Hours column below shows the resulting clock duration (one less).
+    </p>
+  </section>
+
+  <section class="table-section">
+    <h2>Qualifying windows</h2>
+    <p class="footnote" style="margin:0 0 10px;text-align:left;">
+      One row per qualifying window, split at midnight so each row covers a single calendar day — Hours shows the whole contiguous window, with * where it spans multiple days.
+    </p>
+    <div class="table-scroll">
+      <table id="goodTable">
+        <thead>
+          <tr>
+            <th>Location</th>
+            <th>Type</th>
+            <th>Shore</th>
+            <th>From</th>
+            <th>To</th>
+            <th>Hours</th>
+            <th>Avg Cond.</th>
+            <th>Avg Temp</th>
+            <th>Avg Wind</th>
+            <th>Avg Rain %</th>
+            <th>Tides in Window</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="emptyState" class="empty-state" style="display:none;">No windows meet the criteria</div>
+  </section>
+
+  <footer class="footnote">
+    Data from <a href="https://www.willyweather.com.au/" target="_blank" rel="noopener">WillyWeather</a>.
+    Refreshed automatically every 3 hours.
+  </footer>
+</main>
+
+<script src="goodconditions.js"></script>
+</body>
+</html>
