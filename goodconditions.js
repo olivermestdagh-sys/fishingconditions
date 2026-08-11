@@ -118,8 +118,28 @@ function tidesInWindow(rows, from, to) {
     .filter((r) => r._t >= from && r._t <= to && (r["Tide Status"] === "High" || r["Tide Status"] === "Low"))
     .sort((a, b) => a._t - b._t)
     .map((r) => `${r["Tide Status"]} ${Number(r["Tide Height (m)"]).toFixed(2)}m @ ${fmtNaive(r._t, { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })}`);
-  return events.length ? events.join(", ") : "—";
+  if (events.length) return events.join(", ");
+
+  // No High/Low event actually falls inside this window — describe the trend instead
+  // (Incoming/Outgoing), taken from whichever row is closest to the window's start.
+  let nearest = null, nearestDiff = Infinity;
+  for (const r of rows) {
+    if (r["Tide Status"] == null) continue;
+    const diff = Math.abs(r._t - from);
+    if (diff < nearestDiff) { nearestDiff = diff; nearest = r; }
+  }
+  return nearest ? nearest["Tide Status"] : "—";
 }
+
+const DAY_COLORS = [
+  { bg: "#eaf2fb", accent: "#1f4e78" }, // blue
+  { bg: "#fef3e0", accent: "#b45309" }, // amber
+  { bg: "#e8f7ee", accent: "#15803d" }, // green
+  { bg: "#f3e8fd", accent: "#7c3aed" }, // purple
+  { bg: "#fde8ec", accent: "#be123c" }, // rose
+  { bg: "#e0f6f8", accent: "#0e7490" }, // cyan
+  { bg: "#fdf6e3", accent: "#a16207" }, // olive
+];
 
 const CONDITION_COLORS = {
   5: "var(--cond-5)",
@@ -186,18 +206,24 @@ function render() {
   }
   const dayKeys = Array.from(byDay.keys()).sort((a, b) => a - b);
 
-  for (const dayKey of dayKeys) {
+  dayKeys.forEach((dayKey, dayIndex) => {
+    const colors = DAY_COLORS[dayIndex % DAY_COLORS.length];
+
     const dayGroup = document.createElement("section");
     dayGroup.className = "day-group";
 
     const heading = document.createElement("h3");
     heading.className = "day-heading";
     heading.textContent = fmtNaive(dayKey, { weekday: "long", day: "numeric", month: "long" });
+    heading.style.color = colors.accent;
+    heading.style.borderBottomColor = colors.accent;
     dayGroup.appendChild(heading);
 
     for (const w of byDay.get(dayKey)) {
       const card = document.createElement("div");
       card.className = "window-card";
+      card.style.background = colors.bg;
+      card.style.borderLeft = `4px solid ${colors.accent}`;
       const timeRange = `${fmtNaive(w.from, { hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(w.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
       card.innerHTML = `
         <div class="window-card-top">
@@ -229,7 +255,7 @@ function render() {
     }
 
     container.appendChild(dayGroup);
-  }
+  });
 }
 
 init();
