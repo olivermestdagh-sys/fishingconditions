@@ -31,6 +31,121 @@ function windColor(speed) {
   return "#dc2626";
 }
 
+function dayKeyOf(iso) {
+  return iso.slice(0, 10); // "YYYY-MM-DD" — matches how conditions.json's dateTime strings are formatted
+}
+
+function formatDayHeading(dayKey) {
+  // dayKey is "YYYY-MM-DD"; parse as UTC purely for formatting, no timezone shift intended
+  const [y, m, d] = dayKey.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return new Intl.DateTimeFormat([], { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" }).format(dt);
+}
+
+function findNearestIndexInRange(rows, targetIso, startIdx, endIdx) {
+  if (!targetIso) return null;
+  const target = new Date(targetIso.replace(" ", "T")).getTime();
+  let best = null, bestDiff = Infinity;
+  for (let i = startIdx; i <= endIdx; i++) {
+    const t = new Date(rows[i].dateTime).getTime();
+    const diff = Math.abs(t - target);
+    if (diff < bestDiff) { bestDiff = diff; best = i; }
+  }
+  return best;
+}
+
+const DAY_BAND_COLORS = ["rgba(31, 78, 120, 0.055)", "rgba(31, 78, 120, 0)"];
+const NIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.10)";
+const TWILIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.05)";
+
+function buildDayBandPlugin(rows, sunTimes) {
+  // Group row indices by calendar day, in the order they already appear (rows are pre-sorted).
+  const dayGroups = [];
+  let currentKey = null;
+  for (let i = 0; i < rows.length; i++) {
+    const key = dayKeyOf(rows[i].dateTime);
+    if (key !== currentKey) {
+      currentKey = key;
+      dayGroups.push({ key, startIdx: i, endIdx: i });
+    } else {
+      dayGroups[dayGroups.length - 1].endIdx = i;
+    }
+  }
+  const sunByDate = new Map((sunTimes || []).map((s) => [s.date, s]));
+
+  return {
+    id: "dayBands",
+    beforeDraw(chart) {
+      const { ctx, chartArea, scales } = chart;
+      if (!chartArea || dayGroups.length === 0) return;
+      const xScale = scales.x;
+      const { top, bottom, right } = chartArea;
+      const oneStep = rows.length > 1 ? xScale.getPixelForValue(1) - xScale.getPixelForValue(0) : 0;
+
+      ctx.save();
+      dayGroups.forEach((g, gi) => {
+        const xStart = xScale.getPixelForValue(g.startIdx) - oneStep / 2;
+        const xEnd = gi + 1 < dayGroups.length
+          ? xScale.getPixelForValue(dayGroups[gi + 1].startIdx) - oneStep / 2
+          : right;
+
+        // Alternating faint day band, so consecutive days are visually distinguishable
+        ctx.fillStyle = DAY_BAND_COLORS[gi % 2];
+        ctx.fillRect(xStart, top, xEnd - xStart, bottom - top);
+
+        // Night / twilight shading, using this day's actual sunrise & sunset
+        const sun = sunByDate.get(g.key);
+        if (sun) {
+          const firstLightIdx = findNearestIndexInRange(rows, sun.firstLight, g.startIdx, g.endIdx);
+          const sunriseIdx = findNearestIndexInRange(rows, sun.sunrise, g.startIdx, g.endIdx);
+          const sunsetIdx = findNearestIndexInRange(rows, sun.sunset, g.startIdx, g.endIdx);
+          const lastLightIdx = findNearestIndexInRange(rows, sun.lastLight, g.startIdx, g.endIdx);
+
+          const px = (idx) => (idx == null ? null : xScale.getPixelForValue(idx));
+          const xFirstLight = px(firstLightIdx);
+          const xSunrise = px(sunriseIdx);
+          const xSunset = px(sunsetIdx);
+          const xLastLight = px(lastLightIdx);
+
+          // Pre-dawn: night from day-start to first light, twilight from first light to sunrise
+          if (xFirstLight != null) {
+            ctx.fillStyle = NIGHT_BAND_COLOR;
+            ctx.fillRect(xStart, top, xFirstLight - xStart, bottom - top);
+            if (xSunrise != null) {
+              ctx.fillStyle = TWILIGHT_BAND_COLOR;
+              ctx.fillRect(xFirstLight, top, xSunrise - xFirstLight, bottom - top);
+            }
+          } else if (xSunrise != null) {
+            ctx.fillStyle = NIGHT_BAND_COLOR;
+            ctx.fillRect(xStart, top, xSunrise - xStart, bottom - top);
+          }
+
+          // Dusk: twilight from sunset to last light, night from last light to day-end
+          if (xLastLight != null) {
+            if (xSunset != null) {
+              ctx.fillStyle = TWILIGHT_BAND_COLOR;
+              ctx.fillRect(xSunset, top, xLastLight - xSunset, bottom - top);
+            }
+            ctx.fillStyle = NIGHT_BAND_COLOR;
+            ctx.fillRect(xLastLight, top, xEnd - xLastLight, bottom - top);
+          } else if (xSunset != null) {
+            ctx.fillStyle = NIGHT_BAND_COLOR;
+            ctx.fillRect(xSunset, top, xEnd - xSunset, bottom - top);
+          }
+        }
+
+        // Day heading, centered in the reserved top margin above this day's band
+        ctx.fillStyle = "#1f4e78";
+        ctx.font = "600 11px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(formatDayHeading(g.key), (xStart + xEnd) / 2, top - 16);
+      });
+      ctx.restore();
+    },
+  };
+}
+
 let state = { data: null, rowsByLocation: {}, chart: null };
 
 async function init() {
@@ -129,6 +244,13 @@ function fmtTime(iso) {
   return d.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+function fmtChartTick(iso) {
+  // Time only — the day is now shown as a banner heading by the day-band plugin,
+  // so repeating the weekday on every tick would just be redundant clutter.
+  const d = new Date(iso);
+  return d.toLocaleString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 function conditionPill(value) {
   if (value == null) return `<span class="pill" style="background:var(--cond-none)">–</span>`;
   const color = CONDITION_COLORS[value] || "var(--cond-none)";
@@ -147,7 +269,7 @@ function renderLocation(name) {
   const now = new Date();
 
   renderSummary(loc, rows, now);
-  renderCharts(rows);
+  renderCharts(rows, loc);
   renderTable(rows);
 }
 
@@ -193,8 +315,9 @@ function renderSummary(loc, rows, now) {
   `;
 }
 
-function renderCharts(rows) {
-  const labels = rows.map((r) => fmtTime(r.dateTime));
+function renderCharts(rows, loc) {
+  const labels = rows.map((r) => fmtChartTick(r.dateTime));
+  const sunTimes = (loc && state.data.sunTimes && state.data.sunTimes[loc.name]) || [];
 
   const datasets = [
     {
@@ -266,9 +389,11 @@ function renderCharts(rows) {
   state.chart = new Chart(document.getElementById("conditionsChart"), {
     type: "line",
     data: { labels, datasets },
+    plugins: rows.length > 0 ? [buildDayBandPlugin(rows, sunTimes)] : [],
     options: {
       responsive: true,
       spanGaps: true,
+      layout: { padding: { top: 20 } },
       interaction: { mode: "index", intersect: false },
       scales: {
         // Left axis, visible: Temperature. Rainfall shares the visual left side but on its
