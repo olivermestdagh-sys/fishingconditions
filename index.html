@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kayak &amp; Surf Conditions</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Kayak &amp; Surf Conditions</h1>
+  <div id="updated" class="updated">Loading…</div>
+</header>
+
+<main>
+  <section class="picker-row">
+    <label for="locationSelect">Location</label>
+    <select id="locationSelect"></select>
+  </section>
+
+  <section id="summaryCard" class="summary-card">
+    <!-- filled by app.js -->
+  </section>
+
+  <section class="chart-section">
+    <h2>Temperature &amp; Rainfall</h2>
+    <canvas id="tempRainChart" height="220"></canvas>
+  </section>
+
+  <section class="chart-section">
+    <h2>Wind &amp; Tide</h2>
+    <canvas id="windTideChart" height="220"></canvas>
+  </section>
+
+  <section class="table-section">
+    <h2>Full Forecast</h2>
+    <div class="table-scroll">
+      <table id="dataTable">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Temp (°C)</th>
+            <th>Wind</th>
+            <th>Rain %</th>
+            <th>Tide</th>
+            <th>Condition</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="footnote">
+    Data from <a href="https://www.willyweather.com.au/" target="_blank" rel="noopener">WillyWeather</a>.
+    Refreshed automatically every 30 minutes.
+  </footer>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
