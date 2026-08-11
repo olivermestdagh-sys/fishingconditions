@@ -48,6 +48,46 @@ function windColor(speed) {
   return "#dc2626";
 }
 
+// Chart.js has no built-in "arrow" point style (only triangle, circle, etc.), so draw a real
+// arrow — a shaft with an arrowhead, pointing up by default — onto a small offscreen canvas
+// per color, and use that as a custom pointStyle. Chart.js rotates/positions a canvas
+// pointStyle exactly like a built-in one, so dirToArrowRotation's angle math still applies
+// unchanged. Cached per color since there are only a handful of distinct wind-speed colors.
+const ARROW_CANVAS_CACHE = new Map();
+
+function makeArrowCanvas(color) {
+  if (ARROW_CANVAS_CACHE.has(color)) return ARROW_CANVAS_CACHE.get(color);
+  const size = 14;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const cx = size / 2;
+
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 1.6;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  // Shaft
+  ctx.beginPath();
+  ctx.moveTo(cx, size - 1);
+  ctx.lineTo(cx, 4);
+  ctx.stroke();
+
+  // Arrowhead
+  ctx.beginPath();
+  ctx.moveTo(cx, 0);
+  ctx.lineTo(cx - 3.5, 5.5);
+  ctx.lineTo(cx + 3.5, 5.5);
+  ctx.closePath();
+  ctx.fill();
+
+  ARROW_CANVAS_CACHE.set(color, canvas);
+  return canvas;
+}
+
 const DAY_BAND_COLORS = ["rgba(31, 78, 120, 0.055)", "rgba(31, 78, 120, 0)"];
 const NIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.10)";
 const TWILIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.05)";
@@ -158,7 +198,6 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart }) {
       data: pointsFor("Temp Forecast (C)"),
       borderColor: "#f97316",
       borderWidth: 1,
-      borderDash: [4, 3],
       pointRadius: 2,
       pointBackgroundColor: "#f97316",
       yAxisID: "yTemp",
@@ -185,26 +224,22 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart }) {
     {
       label: "Wind Forecast (km/h)",
       data: pointsFor("Wind Forecast (km/h)"),
-      borderColor: "#dc2626",
+      borderColor: "#16a34a",
       borderWidth: 1,
-      pointStyle: "triangle",
-      pointRadius: rows.map((r) => (r["Wind Forecast (km/h)"] != null ? 5 : 0)),
+      pointStyle: rows.map((r) => makeArrowCanvas(windColor(r["Wind Forecast (km/h)"]))),
+      pointRadius: rows.map((r) => (r["Wind Forecast (km/h)"] != null ? 7 : 0)),
       pointRotation: rows.map((r) => dirToArrowRotation(r["Wind Forecast Dir"])),
-      pointBackgroundColor: rows.map((r) => windColor(r["Wind Forecast (km/h)"])),
-      pointBorderColor: rows.map((r) => windColor(r["Wind Forecast (km/h)"])),
       yAxisID: "yWind",
       tension: 0.3,
     },
     {
       label: "Wind Realtime (km/h)",
       data: pointsFor("Wind Realtime (km/h)"),
-      borderColor: "#ec4899",
+      borderColor: "#86efac",
       borderWidth: 1,
-      pointStyle: "triangle",
-      pointRadius: rows.map((r) => (r["Wind Realtime (km/h)"] != null ? 5 : 0)),
+      pointStyle: rows.map((r) => makeArrowCanvas(windColor(r["Wind Realtime (km/h)"]))),
+      pointRadius: rows.map((r) => (r["Wind Realtime (km/h)"] != null ? 7 : 0)),
       pointRotation: rows.map((r) => dirToArrowRotation(r["Wind Realtime Dir"])),
-      pointBackgroundColor: rows.map((r) => windColor(r["Wind Realtime (km/h)"])),
-      pointBorderColor: rows.map((r) => windColor(r["Wind Realtime (km/h)"])),
       yAxisID: "yWind",
       tension: 0.3,
     },

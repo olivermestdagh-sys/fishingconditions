@@ -378,3 +378,23 @@ main.wide {
   outline: 3px solid var(--blue-900);
   outline-offset: 1px;
 }
+
+/* On desktop, let the Conditions graph escape the centered 720px column and
+   fill the actual browser width, while the rest of the page (summary card,
+   table) stays at a comfortable reading width. */
+@media (min-width: 900px) {
+  .full-width-chart {
+    width: 100vw;
+    max-width: 100vw;
+    margin-left: calc(-50vw + 50%);
+    margin-right: calc(-50vw + 50%);
+    border-radius: 0;
+    box-sizing: border-box;
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+
+  .full-width-chart canvas {
+    max-height: 480px;
+  }
+}
