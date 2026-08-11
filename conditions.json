@@ -1,0 +1,22 @@
+{
+  "generatedAt": null,
+  "forecastDays": 6,
+  "locations": [
+    {"name": "Flinders Pier, VIC", "type": "Kayak", "shore": "W"},
+    {"name": "Lang Lang Boat Ramp, VIC", "type": "Kayak", "shore": "E"},
+    {"name": "Corinella Boat Ramp, VIC", "type": "Kayak", "shore": "E"},
+    {"name": "Coronet Bay, VIC 3984", "type": "Kayak", "shore": "E"},
+    {"name": "Williamstown Beach, VIC", "type": "Kayak", "shore": "N"},
+    {"name": "Sorrento Pier, VIC", "type": "Kayak", "shore": "SW"},
+    {"name": "Rosebud Pier, VIC", "type": "Kayak", "shore": "E"},
+    {"name": "Safety Beach Boat Ramp, VIC", "type": "Kayak", "shore": "E"},
+    {"name": "Mornington Pier, VIC", "type": "Kayak", "shore": "E"},
+    {"name": "Patterson River Entrance, VIC", "type": "Kayak", "shore": "E"},
+    {"name": "Stony Point Boat Ramp, VIC", "type": "Kayak", "shore": "W"},
+    {"name": "Hastings Jetty, VIC", "type": "Kayak", "shore": "W"},
+    {"name": "Balnarring Beach, VIC 3926", "type": "Kayak", "shore": "NW"},
+    {"name": "Gunnamatta Beach, VIC", "type": "Surf", "shore": "N"},
+    {"name": "Kilcunda, VIC 3995", "type": "Surf", "shore": "N"}
+  ],
+  "rows": []
+}

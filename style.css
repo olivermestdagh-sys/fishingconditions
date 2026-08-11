@@ -341,3 +341,40 @@ tbody tr:nth-child(even) {
 .btn-secondary:hover {
   background: #d1d5db;
 }
+
+main.wide {
+  max-width: 1100px;
+}
+
+.good-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.good-main {
+  flex: 1 1 380px;
+  min-width: 300px;
+}
+
+.good-detail {
+  flex: 1 1 380px;
+  min-width: 300px;
+  position: sticky;
+  top: 12px;
+}
+
+.window-card {
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.window-card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+}
+
+.window-card.selected {
+  outline: 3px solid var(--blue-900);
+  outline-offset: 1px;
+}
