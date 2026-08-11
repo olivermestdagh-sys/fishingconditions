@@ -349,14 +349,14 @@ main.wide {
 .good-layout {
   display: grid;
   gap: 16px;
-  /* Mobile-first: graph on top (stuck to the viewport top while you scroll),
-     then the windows list, then the thresholds at the very bottom — the graph
-     is what you actually want visible while scrolling through the windows. */
+  /* Mobile-first: thresholds at the top (scrolls away normally), then the graph,
+     which sticks to the viewport top once you've scrolled past the thresholds,
+     then the windows list scrolling beneath it. */
   grid-template-columns: 1fr;
   grid-template-areas:
+    "filters"
     "detail"
-    "windows"
-    "filters";
+    "windows";
 }
 
 .gc-filters {
