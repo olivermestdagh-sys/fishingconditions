@@ -77,6 +77,7 @@ async function init() {
   document.getElementById("minCondition").addEventListener("input", render);
   document.getElementById("minHours").addEventListener("input", render);
   render();
+  requestAnimationFrame(updateStickyOffset);
 }
 
 function persistSelectedLocations() {
@@ -210,6 +211,24 @@ function conditionColor(avgValue) {
   return CONDITION_COLORS[rounded] || "var(--cond-none)";
 }
 
+// Measures the sticky graph panel's actual rendered height (varies: short placeholder
+// text before any window is clicked, vs. a full chart afterward, and the chart's own
+// height varies by viewport width) and exposes it as a CSS variable so the sticky day
+// headings in the list below know exactly how far down to stick, without hardcoding
+// a guessed pixel value that would drift out of sync on different screens.
+function updateStickyOffset() {
+  const panel = document.getElementById("detailPanel");
+  if (!panel) return;
+  const height = panel.getBoundingClientRect().height;
+  document.documentElement.style.setProperty("--detail-panel-height", `${height}px`);
+}
+
+let stickyOffsetResizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(stickyOffsetResizeTimer);
+  stickyOffsetResizeTimer = setTimeout(updateStickyOffset, 150);
+});
+
 function selectWindow(w, cardEl) {
   if (selectedCardEl) selectedCardEl.classList.remove("selected");
   if (cardEl) {
@@ -235,6 +254,7 @@ function selectWindow(w, cardEl) {
     placeholder.style.display = "block";
     canvas.style.display = "none";
     if (currentDetailChart) { currentDetailChart.destroy(); currentDetailChart = null; }
+    requestAnimationFrame(updateStickyOffset);
     return;
   }
 
@@ -252,7 +272,10 @@ function selectWindow(w, cardEl) {
   // zero-size if this runs in the same paint tick as becoming visible (seen on some mobile
   // browsers, especially right after scrolling to reveal the panel).
   if (currentDetailChart) {
-    requestAnimationFrame(() => currentDetailChart && currentDetailChart.resize());
+    requestAnimationFrame(() => {
+      currentDetailChart && currentDetailChart.resize();
+      updateStickyOffset();
+    });
   }
 }
 
