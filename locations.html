@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Manage Locations</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Manage Locations</h1>
+  <div id="status" class="updated">Loading…</div>
+</header>
+
+<nav class="tabnav">
+  <a href="index.html">Conditions</a>
+  <a href="good.html">Good Conditions</a>
+  <a href="locations.html" class="active">Locations</a>
+</nav>
+
+<main>
+  <section id="connectionCard" class="summary-card">
+    <div class="summary-title" style="margin-bottom:6px;">GitHub connection</div>
+    <p class="footnote" style="margin:0 0 12px;text-align:left;">
+      Saving changes here commits directly to your repo, so it needs a GitHub token with permission
+      to write to it. This is entered once and kept only on this device (localStorage) — it's never
+      sent anywhere except GitHub's own API. See the README for how to create one.
+    </p>
+    <div class="filter-row" style="margin-bottom:10px;">
+      <div style="flex:1;min-width:160px;">
+        <label for="ghOwner">GitHub username</label>
+        <input type="text" id="ghOwner" placeholder="e.g. olivermestdagh-sys" style="width:100%;" />
+      </div>
+      <div style="flex:1;min-width:160px;">
+        <label for="ghRepo">Repository name</label>
+        <input type="text" id="ghRepo" placeholder="e.g. fishingconditions" style="width:100%;" />
+      </div>
+    </div>
+    <div style="margin-bottom:10px;">
+      <label for="ghToken" style="display:block;font-size:0.75rem;font-weight:600;color:var(--grey-500);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Personal access token</label>
+      <input type="password" id="ghToken" placeholder="github_pat_..." style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button id="btnConnect" class="btn-primary">Save connection</button>
+      <button id="btnDisconnect" class="btn-secondary">Forget token</button>
+    </div>
+  </section>
+
+  <section id="locationsSection" class="table-section" style="display:none;">
+    <h2>Locations</h2>
+    <p class="footnote" style="margin:0 0 12px;text-align:left;">
+      Changes take effect on the next data refresh (scheduled, or trigger it immediately below after saving).
+    </p>
+    <div id="locationsList"></div>
+    <button id="btnAddRow" class="btn-secondary" style="margin-top:10px;">+ Add location</button>
+
+    <div style="margin-top:20px;display:flex;gap:8px;flex-wrap:wrap;">
+      <button id="btnSave" class="btn-primary">Save changes</button>
+      <button id="btnSaveAndRefresh" class="btn-primary">Save &amp; refresh data now</button>
+    </div>
+    <div id="saveStatus" style="margin-top:10px;font-size:0.85rem;"></div>
+  </section>
+
+  <footer class="footnote">
+    Data from <a href="https://www.willyweather.com.au/" target="_blank" rel="noopener">WillyWeather</a>.
+  </footer>
+</main>
+
+<script src="locationsadmin.js"></script>
+</body>
+</html>

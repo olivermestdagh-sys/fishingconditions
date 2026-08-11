@@ -314,3 +314,30 @@ tbody tr:nth-child(even) {
   color: var(--grey-500);
   margin-top: 10px;
 }
+
+.btn-primary, .btn-secondary {
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: var(--blue-700);
+  color: var(--white);
+}
+
+.btn-primary:hover {
+  background: var(--blue-900);
+}
+
+.btn-secondary {
+  background: var(--grey-200);
+  color: #374151;
+}
+
+.btn-secondary:hover {
+  background: #d1d5db;
+}
