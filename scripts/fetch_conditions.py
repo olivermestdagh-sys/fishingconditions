@@ -62,11 +62,33 @@ def search_location(name):
 def get_weather(location_id):
     url = (
         f"{BASE_URL}/{API_KEY}/locations/{location_id}/weather.json"
-        f"?forecasts=temperature,wind,rainfallprobability,tides"
+        f"?forecasts=temperature,wind,rainfallprobability,tides,sunrisesunset"
         f"&days={FORECAST_DAYS}&observationalGraphs=temperature,wind"
     )
     data = http_get_json(url)
     return data or {}
+
+
+def extract_sun_times(weather):
+    """Returns a list of {date, firstLight, sunrise, sunset, lastLight} — one per forecast day."""
+    days = ((weather.get("forecasts", {}) or {}).get("sunrisesunset") or {}).get("days") or []
+    out = []
+    for day in days:
+        entries = day.get("entries") or []
+        if not entries:
+            continue
+        e = entries[0]
+        date_str = (day.get("dateTime") or "")[:10]
+        if not date_str:
+            continue
+        out.append({
+            "date": date_str,
+            "firstLight": e.get("firstLightDateTime"),
+            "sunrise": e.get("riseDateTime"),
+            "sunset": e.get("setDateTime"),
+            "lastLight": e.get("lastLightDateTime"),
+        })
+    return out
 
 
 def get_numeric_field(entry):
@@ -268,7 +290,8 @@ def process_location(loc):
         row["Region"] = region
         row["State"] = state
 
-    return rows
+    sun_times = extract_sun_times(weather)
+    return rows, sun_times
 
 
 def main():
@@ -280,10 +303,13 @@ def main():
         locations = json.load(f)
 
     all_rows = []
+    sun_times_by_location = {}
     for loc in locations:
         print(f"Fetching {loc['name']}...")
         try:
-            all_rows.extend(process_location(loc))
+            rows, sun_times = process_location(loc)
+            all_rows.extend(rows)
+            sun_times_by_location[loc["name"]] = sun_times
         except Exception as e:  # noqa: BLE001 - one bad location shouldn't kill the whole run
             print(f"WARNING: failed to process {loc['name']}: {e}", file=sys.stderr)
 
@@ -292,6 +318,7 @@ def main():
         "forecastDays": FORECAST_DAYS,
         "locations": locations,
         "rows": all_rows,
+        "sunTimes": sun_times_by_location,
     }
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
