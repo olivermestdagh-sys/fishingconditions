@@ -361,8 +361,13 @@ main.wide {
 .good-detail {
   flex: 1 1 380px;
   min-width: 300px;
-  position: sticky;
-  top: 12px;
+}
+
+@media (min-width: 900px) {
+  .good-detail {
+    position: sticky;
+    top: 12px;
+  }
 }
 
 .window-card {
