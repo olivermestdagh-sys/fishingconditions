@@ -121,6 +121,20 @@ function tidesInWindow(rows, from, to) {
   return events.length ? events.join(", ") : "—";
 }
 
+const CONDITION_COLORS = {
+  5: "var(--cond-5)",
+  4: "var(--cond-4)",
+  3: "var(--cond-3)",
+  2: "var(--cond-2)",
+  1: "var(--cond-1)",
+};
+
+function conditionColor(avgValue) {
+  if (avgValue == null) return "var(--cond-none)";
+  const rounded = Math.min(5, Math.max(1, Math.round(avgValue)));
+  return CONDITION_COLORS[rounded] || "var(--cond-none)";
+}
+
 function render() {
   const minCondition = Number(document.getElementById("minCondition").value) || 1;
   const minHours = Number(document.getElementById("minHours").value) || 1;
@@ -150,34 +164,71 @@ function render() {
   // SORT by {From, Location Name} ascending, matching the Excel SORT({4,1},{1,1})
   results.sort((a, b) => a.from - b.from || a.locationName.localeCompare(b.locationName));
 
-  const tbody = document.querySelector("#goodTable tbody");
+  const container = document.getElementById("windowsContainer");
   const emptyState = document.getElementById("emptyState");
-  tbody.innerHTML = "";
+  container.innerHTML = "";
 
   if (results.length === 0) {
     emptyState.style.display = "block";
-    document.getElementById("goodTable").style.display = "none";
+    container.style.display = "none";
     return;
   }
   emptyState.style.display = "none";
-  document.getElementById("goodTable").style.display = "table";
+  container.style.display = "block";
 
+  // Group by calendar day of "From" — each window's from/to is already clipped to
+  // a single day by computeWindowsForLocation, so this grouping is always clean.
+  const byDay = new Map();
   for (const w of results) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${w.locationName}</td>
-      <td>${w.type || "–"}</td>
-      <td>${w.shore || "–"}</td>
-      <td>${fmtNaive(w.from, { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })}</td>
-      <td>${fmtNaive(w.to, { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })}</td>
-      <td>${w.hoursLabel}</td>
-      <td>${w.avgCondition != null ? w.avgCondition.toFixed(1) : "–"}</td>
-      <td>${w.avgTemp != null ? w.avgTemp.toFixed(1) + "°" : "–"}</td>
-      <td>${w.avgWind != null ? Math.round(w.avgWind) + " km/h" : "–"}</td>
-      <td>${w.avgRain != null ? Math.round(w.avgRain) + "%" : "–"}</td>
-      <td>${w.tides}</td>
-    `;
-    tbody.appendChild(tr);
+    const dayKey = dateOnly(w.from);
+    if (!byDay.has(dayKey)) byDay.set(dayKey, []);
+    byDay.get(dayKey).push(w);
+  }
+  const dayKeys = Array.from(byDay.keys()).sort((a, b) => a - b);
+
+  for (const dayKey of dayKeys) {
+    const dayGroup = document.createElement("section");
+    dayGroup.className = "day-group";
+
+    const heading = document.createElement("h3");
+    heading.className = "day-heading";
+    heading.textContent = fmtNaive(dayKey, { weekday: "long", day: "numeric", month: "long" });
+    dayGroup.appendChild(heading);
+
+    for (const w of byDay.get(dayKey)) {
+      const card = document.createElement("div");
+      card.className = "window-card";
+      const timeRange = `${fmtNaive(w.from, { hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(w.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+      card.innerHTML = `
+        <div class="window-card-top">
+          <div>
+            <div class="window-loc">${w.locationName}</div>
+            <div class="window-sub">${w.type || "–"} · shore ${w.shore || "–"} · ${timeRange} · ${w.hoursLabel}h</div>
+          </div>
+          <div class="condition-badge" style="background:${conditionColor(w.avgCondition)}">
+            ${w.avgCondition != null ? w.avgCondition.toFixed(1) : "–"}
+          </div>
+        </div>
+        <div class="stat-grid">
+          <div class="stat">
+            <div class="label">Avg Temp</div>
+            <div class="value">${w.avgTemp != null ? w.avgTemp.toFixed(1) + "°" : "–"}</div>
+          </div>
+          <div class="stat">
+            <div class="label">Avg Wind</div>
+            <div class="value">${w.avgWind != null ? Math.round(w.avgWind) + " km/h" : "–"}</div>
+          </div>
+          <div class="stat">
+            <div class="label">Avg Rain</div>
+            <div class="value">${w.avgRain != null ? Math.round(w.avgRain) + "%" : "–"}</div>
+          </div>
+        </div>
+        <div class="window-tides">Tides: ${w.tides}</div>
+      `;
+      dayGroup.appendChild(card);
+    }
+
+    container.appendChild(dayGroup);
   }
 }
 
