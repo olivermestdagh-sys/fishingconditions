@@ -8,7 +8,7 @@ const CONDITION_COLORS = {
   1: "var(--cond-1)",
 };
 
-let state = { data: null, rowsByLocation: {}, tempRainChart: null, windTideChart: null };
+let state = { data: null, rowsByLocation: {}, chart: null };
 
 async function init() {
   try {
@@ -170,50 +170,86 @@ function renderSummary(loc, rows, now) {
   `;
 }
 
-function buildChart(ctx, existingChart, labels, datasets, rightAxisLabel) {
-  if (existingChart) existingChart.destroy();
-  return new Chart(ctx, {
+function renderCharts(rows) {
+  const labels = rows.map((r) => fmtTime(r.dateTime));
+
+  const datasets = [
+    {
+      label: "Temp Forecast (°C)",
+      data: rows.map((r) => r["Temp Forecast (C)"] ?? null),
+      borderColor: "#60a5fa",
+      borderDash: [4, 3],
+      pointRadius: 2,
+      pointBackgroundColor: "#60a5fa",
+      yAxisID: "yTemp",
+      tension: 0.3,
+    },
+    {
+      label: "Temp Realtime (°C)",
+      data: rows.map((r) => r["Temp Realtime (C)"] ?? null),
+      borderColor: "#0f172a",
+      pointRadius: 0,
+      yAxisID: "yTemp",
+      tension: 0.3,
+    },
+    {
+      label: "Rainfall Probability (%)",
+      data: rows.map((r) => r["Rainfall Probability (%)"] ?? null),
+      borderColor: "#eab308",
+      pointRadius: 2,
+      pointBackgroundColor: "#eab308",
+      yAxisID: "yRain",
+      tension: 0.3,
+    },
+    {
+      label: "Wind Forecast (km/h)",
+      data: rows.map((r) => r["Wind Forecast (km/h)"] ?? null),
+      borderColor: "#dc2626",
+      pointRadius: 0,
+      yAxisID: "yWind",
+      tension: 0.3,
+    },
+    {
+      label: "Wind Realtime (km/h)",
+      data: rows.map((r) => r["Wind Realtime (km/h)"] ?? null),
+      borderColor: "#16a34a",
+      pointRadius: 0,
+      yAxisID: "yWind",
+      tension: 0.3,
+    },
+    {
+      label: "Tide Height (m)",
+      data: rows.map((r) => r["Tide Height (m)"] ?? null),
+      borderColor: "#4f46e5",
+      backgroundColor: "rgba(79, 70, 229, 0.15)",
+      fill: true,
+      pointRadius: 0,
+      yAxisID: "yTide",
+      tension: 0.4,
+    },
+  ];
+
+  if (state.chart) state.chart.destroy();
+  state.chart = new Chart(document.getElementById("conditionsChart"), {
     type: "line",
     data: { labels, datasets },
     options: {
       responsive: true,
-      interaction: { mode: "index", intersect: false },
       spanGaps: false,
+      interaction: { mode: "index", intersect: false },
       scales: {
-        y: { position: "left" },
-        y1: { position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: rightAxisLabel } },
+        // Left axis, visible: Temperature. Rainfall shares the visual left side but on its
+        // own hidden scale (0-100) so it doesn't get squashed by the temperature range.
+        yTemp: { position: "left", title: { display: true, text: "Temperature (°C)" } },
+        yRain: { display: false, min: 0, max: 100 },
+        // Right axis, visible: Wind speed. Tide shares the visual right side on its own
+        // hidden scale so it keeps a sensible 0-few-metres range regardless of wind values.
+        yWind: { position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: "Wind (km/h)" } },
+        yTide: { display: false, min: 0 },
       },
-      plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 10 } } } },
     },
   });
-}
-
-function renderCharts(rows) {
-  const labels = rows.map((r) => fmtTime(r.dateTime));
-
-  state.tempRainChart = buildChart(
-    document.getElementById("tempRainChart"),
-    state.tempRainChart,
-    labels,
-    [
-      { label: "Temp Forecast (°C)", data: rows.map((r) => r["Temp Forecast (C)"] ?? null), borderColor: "#1f4e78", yAxisID: "y", tension: 0.3 },
-      { label: "Temp Realtime (°C)", data: rows.map((r) => r["Temp Realtime (C)"] ?? null), borderColor: "#0ea5e9", yAxisID: "y", tension: 0.3 },
-      { label: "Rainfall Probability (%)", data: rows.map((r) => r["Rainfall Probability (%)"] ?? null), borderColor: "#eab308", yAxisID: "y1", tension: 0.3 },
-    ],
-    "Rainfall %"
-  );
-
-  state.windTideChart = buildChart(
-    document.getElementById("windTideChart"),
-    state.windTideChart,
-    labels,
-    [
-      { label: "Wind Forecast (km/h)", data: rows.map((r) => r["Wind Forecast (km/h)"] ?? null), borderColor: "#dc2626", yAxisID: "y", tension: 0.3 },
-      { label: "Wind Realtime (km/h)", data: rows.map((r) => r["Wind Realtime (km/h)"] ?? null), borderColor: "#f97316", yAxisID: "y", tension: 0.3 },
-      { label: "Tide Height (m)", data: rows.map((r) => r["Tide Height (m)"] ?? null), borderColor: "#1d4ed8", yAxisID: "y1", tension: 0.3 },
-    ],
-    "Tide (m)"
-  );
 }
 
 function renderTable(rows) {
