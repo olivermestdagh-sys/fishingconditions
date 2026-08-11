@@ -256,10 +256,61 @@ tbody tr:nth-child(even) {
   letter-spacing: 0.03em;
 }
 
-.filter-row input {
-  font-size: 1rem;
+.day-group {
+  margin-bottom: 18px;
+}
+
+.day-heading {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--blue-900);
+  margin: 0 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--blue-100);
+}
+
+.window-card {
+  background: var(--blue-100);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.window-card:last-child {
+  margin-bottom: 0;
+}
+
+.window-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.window-loc {
+  font-weight: 700;
+  color: var(--blue-900);
+  font-size: 0.95rem;
+}
+
+.window-sub {
+  font-size: 0.8rem;
+  color: var(--grey-500);
+  margin-top: 2px;
+}
+
+.window-card .stat-grid {
+  margin-top: 10px;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.window-card .stat {
+  background: var(--white);
   padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--grey-200);
-  width: 90px;
+}
+
+.window-tides {
+  font-size: 0.8rem;
+  color: var(--grey-500);
+  margin-top: 10px;
 }

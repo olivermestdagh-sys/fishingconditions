@@ -41,28 +41,9 @@
   <section class="table-section">
     <h2>Qualifying windows</h2>
     <p class="footnote" style="margin:0 0 10px;text-align:left;">
-      One row per qualifying window, split at midnight so each row covers a single calendar day — Hours shows the whole contiguous window, with * where it spans multiple days.
+      One box per day — Hours shows the whole contiguous window, with * where it spans multiple days.
     </p>
-    <div class="table-scroll">
-      <table id="goodTable">
-        <thead>
-          <tr>
-            <th>Location</th>
-            <th>Type</th>
-            <th>Shore</th>
-            <th>From</th>
-            <th>To</th>
-            <th>Hours</th>
-            <th>Avg Cond.</th>
-            <th>Avg Temp</th>
-            <th>Avg Wind</th>
-            <th>Avg Rain %</th>
-            <th>Tides in Window</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
+    <div id="windowsContainer"></div>
     <div id="emptyState" class="empty-state" style="display:none;">No windows meet the criteria</div>
   </section>
 
