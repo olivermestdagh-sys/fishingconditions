@@ -1,7 +1,10 @@
 const DATA_URL = "data/conditions.json";
+const LOC_FILTER_STORAGE_KEY = "goodConditionsSelectedLocations";
 
 let allRows = [];
+let allLocations = [];
 let sunTimesData = {};
+let selectedLocations = new Set();
 let currentDetailChart = null;
 let selectedCardEl = null;
 
@@ -27,7 +30,23 @@ async function init() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     allRows = data.rows.map((r) => ({ ...r, _t: parseNaive(r.dateTime) }));
+    allLocations = data.locations || [];
     sunTimesData = data.sunTimes || {};
+
+    let saved = null;
+    try {
+      saved = JSON.parse(localStorage.getItem(LOC_FILTER_STORAGE_KEY) || "null");
+    } catch {
+      saved = null;
+    }
+    const allNames = allLocations.map((l) => l.name);
+    if (Array.isArray(saved) && saved.length) {
+      // Keep only saved selections that still exist, so a removed/renamed location
+      // doesn't leave a phantom entry silently excluding nothing.
+      selectedLocations = new Set(saved.filter((n) => allNames.includes(n)));
+    } else {
+      selectedLocations = new Set(allNames);
+    }
 
     if (!data.generatedAt) {
       document.getElementById("updated").textContent = "Not updated yet — waiting on the first scheduled run";
@@ -41,9 +60,49 @@ async function init() {
     return;
   }
 
+  renderLocationChips();
+  document.getElementById("btnLocAll").addEventListener("click", () => {
+    selectedLocations = new Set(allLocations.map((l) => l.name));
+    persistSelectedLocations();
+    renderLocationChips();
+    render();
+  });
+  document.getElementById("btnLocNone").addEventListener("click", () => {
+    selectedLocations = new Set();
+    persistSelectedLocations();
+    renderLocationChips();
+    render();
+  });
+
   document.getElementById("minCondition").addEventListener("input", render);
   document.getElementById("minHours").addEventListener("input", render);
   render();
+}
+
+function persistSelectedLocations() {
+  localStorage.setItem(LOC_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedLocations)));
+}
+
+function renderLocationChips() {
+  const container = document.getElementById("locationChips");
+  container.innerHTML = "";
+  for (const loc of allLocations) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "loc-chip" + (selectedLocations.has(loc.name) ? " active" : "");
+    chip.textContent = loc.name;
+    chip.addEventListener("click", () => {
+      if (selectedLocations.has(loc.name)) {
+        selectedLocations.delete(loc.name);
+      } else {
+        selectedLocations.add(loc.name);
+      }
+      persistSelectedLocations();
+      chip.classList.toggle("active");
+      render();
+    });
+    container.appendChild(chip);
+  }
 }
 
 function computeWindowsForLocation(locRows, minCondition, minHours) {
@@ -204,6 +263,7 @@ function render() {
   const byLocation = {};
   for (const r of allRows) {
     const key = r["Location Name"];
+    if (!selectedLocations.has(key)) continue;
     (byLocation[key] || (byLocation[key] = [])).push(r);
   }
 
@@ -231,6 +291,9 @@ function render() {
   container.innerHTML = "";
 
   if (results.length === 0) {
+    emptyState.textContent = selectedLocations.size === 0
+      ? "No locations selected — pick some above to see qualifying windows."
+      : "No windows meet the criteria";
     emptyState.style.display = "block";
     container.style.display = "none";
     return;
