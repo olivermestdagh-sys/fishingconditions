@@ -187,6 +187,14 @@ function selectWindow(w, cardEl) {
     sunTimes: sunTimesData[w.locationName] || [],
     existingChart: currentDetailChart,
   });
+
+  // Safety net: force Chart.js to re-measure after the browser has actually committed the
+  // display:block change and settled layout — guards against the canvas being measured as
+  // zero-size if this runs in the same paint tick as becoming visible (seen on some mobile
+  // browsers, especially right after scrolling to reveal the panel).
+  if (currentDetailChart) {
+    requestAnimationFrame(() => currentDetailChart && currentDetailChart.resize());
+  }
 }
 
 function render() {
