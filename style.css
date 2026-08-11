@@ -429,3 +429,63 @@ main.wide {
     max-height: 480px;
   }
 }
+
+.loc-filter-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 14px 0 8px;
+}
+
+.loc-filter-header label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--grey-500);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.loc-filter-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.chip-action {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--grey-200);
+  background: var(--white);
+  color: var(--blue-700);
+  cursor: pointer;
+}
+
+.chip-action:hover {
+  background: var(--blue-100);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.loc-chip {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--grey-200);
+  background: var(--white);
+  color: var(--grey-500);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  white-space: nowrap;
+}
+
+.loc-chip.active {
+  background: var(--blue-700);
+  border-color: var(--blue-700);
+  color: var(--white);
+}
