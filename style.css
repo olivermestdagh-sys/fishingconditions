@@ -571,6 +571,7 @@ main.wide {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 3px;
+  margin-top: 8px;
 }
 
 .schedule-step {
@@ -602,15 +603,18 @@ main.wide {
 }
 
 /* Fishing time stays full-size at every screen width — it's the number that
-   actually matters, the timeline above it is just supporting detail. */
+   actually matters. It's also the tap target that shows/hides the full timeline
+   below it, which is collapsed by default to save space. */
 .schedule-fishing-time {
-  margin-top: 12px;
+  margin-top: 6px;
   padding: 10px 14px;
   background: var(--cond-5);
   color: var(--white);
   border-radius: 8px;
   font-size: 0.9rem;
   font-weight: 600;
+  cursor: pointer;
+  user-select: none;
 }
 
 .schedule-fishing-time.negative {
@@ -619,6 +623,17 @@ main.wide {
 
 .schedule-fishing-time strong {
   font-size: 1.1rem;
+}
+
+.schedule-toggle-hint {
+  float: right;
+  font-size: 0.7rem;
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+.schedule-timeline.collapsed {
+  display: none;
 }
 
 /* Desktop has plenty of room — switch back from the mobile grid to a normal

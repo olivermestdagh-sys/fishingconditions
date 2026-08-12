@@ -109,7 +109,12 @@ function renderSchedule() {
 
   container.innerHTML = `
     <label class="loc-edit-label" style="display:block;margin:16px 0 8px;">Trip schedule — ${loc.name}</label>
-    <div class="schedule-timeline">
+    <div class="schedule-fishing-time ${schedule.fishingTimeNegative ? "negative" : ""}" id="fishingTimeToggle" role="button" tabindex="0">
+      Fishing time: <strong>${schedule.fishingTime}</strong>
+      <span class="schedule-toggle-hint" id="scheduleToggleHint">▸ tap for times</span>
+      ${schedule.fishingTimeNegative ? "<br>times don't add up, check Launch Time / Home By against this location's timings" : ""}
+    </div>
+    <div class="schedule-timeline collapsed" id="scheduleTimelineWrap">
       <div class="schedule-step"><span class="schedule-time">${schedule.leaveHome}</span><span class="schedule-label">Leave Home</span></div>
       <div class="schedule-step"><span class="schedule-time">${schedule.arrive}</span><span class="schedule-label">Arrive</span></div>
       <div class="schedule-step"><span class="schedule-time">${schedule.launch}</span><span class="schedule-label">Launch</span></div>
@@ -118,11 +123,20 @@ function renderSchedule() {
       <div class="schedule-step"><span class="schedule-time">${schedule.driveHome}</span><span class="schedule-label">Drive Home</span></div>
       <div class="schedule-step"><span class="schedule-time">${schedule.homeBy}</span><span class="schedule-label">Home By</span></div>
     </div>
-    <div class="schedule-fishing-time ${schedule.fishingTimeNegative ? "negative" : ""}">
-      Fishing time: <strong>${schedule.fishingTime}</strong>
-      ${schedule.fishingTimeNegative ? " — times don't add up, check Launch Time / Home By against this location's timings" : ""}
-    </div>
   `;
+
+  const toggle = document.getElementById("fishingTimeToggle");
+  const wrap = document.getElementById("scheduleTimelineWrap");
+  const hint = document.getElementById("scheduleToggleHint");
+  const toggleFn = () => {
+    const nowCollapsed = wrap.classList.toggle("collapsed");
+    hint.textContent = nowCollapsed ? "▸ tap for times" : "▾ hide times";
+    requestAnimationFrame(updateStickyOffset);
+  };
+  toggle.addEventListener("click", toggleFn);
+  toggle.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFn(); }
+  });
 }
 
 async function init() {
