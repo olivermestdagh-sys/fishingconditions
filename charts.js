@@ -92,7 +92,7 @@ const DAY_BAND_COLORS = ["rgba(31, 78, 120, 0.055)", "rgba(31, 78, 120, 0)"];
 const NIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.10)";
 const TWILIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.05)";
 
-function buildDayBandPlugin(rows, sunTimes) {
+function buildDayBandPlugin(rows, sunTimes, locationName) {
   // Group rows by calendar day, tracking each day's exact start/end timestamp — bands
   // are positioned by real elapsed time (via the linear x-axis), not by row index, so
   // they're pixel-accurate regardless of how densely each day happens to be sampled.
@@ -167,10 +167,24 @@ function buildDayBandPlugin(rows, sunTimes) {
         }
 
         ctx.fillStyle = "#1f4e78";
-        ctx.font = "600 11px -apple-system, BlinkMacSystemFont, sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
-        ctx.fillText(formatDayHeading(g.key), (xStart + xEnd) / 2, top - 16);
+
+        const headingText = locationName ? `${locationName} — ${formatDayHeading(g.key)}` : formatDayHeading(g.key);
+
+        // Shrink the font until the text actually fits this band's width, rather
+        // than risk it overflowing onto a second line or running off the edge —
+        // matters more now that a location name can make this considerably longer,
+        // and needs to hold up on narrow phone screens too.
+        const maxTextWidth = xEnd - xStart - 8;
+        let fontSize = 11;
+        ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        while (ctx.measureText(headingText).width > maxTextWidth && fontSize > 7) {
+          fontSize -= 0.5;
+          ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        }
+
+        ctx.fillText(headingText, (xStart + xEnd) / 2, top - 16);
       });
       ctx.restore();
     },
@@ -184,9 +198,14 @@ function buildDayBandPlugin(rows, sunTimes) {
  * @param {Array} opts.rows - rows for a single location, each with a numeric `_t` timestamp
  * @param {Array} opts.sunTimes - that location's sun times (from data.sunTimes[locationName])
  * @param {Chart|null} opts.existingChart - a previous Chart instance to destroy, if any
+ * @param {string} [opts.locationName] - if provided, prefixed onto the day heading drawn on
+ *   the chart itself (e.g. "Spot A — Tue, 11 Aug"). Intended for single-day views (the Good
+ *   Conditions detail panel) where combining them avoids a separate heading above the chart;
+ *   omit it for multi-day views (the main Conditions page) where the location's already shown
+ *   elsewhere on the page and repeating it on every day's band would just be clutter.
  * @returns {Chart|null} the new Chart instance, or null if there were no rows
  */
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
 
@@ -269,7 +288,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart }) {
   const chart = new Chart(canvas, {
     type: "line",
     data: { datasets },
-    plugins: [buildDayBandPlugin(rows, sunTimes)],
+    plugins: [buildDayBandPlugin(rows, sunTimes, locationName)],
     options: {
       responsive: true,
       spanGaps: true,

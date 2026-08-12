@@ -378,9 +378,6 @@ function selectWindow(w, cardEl) {
     .filter((r) => r["Location Name"] === w.locationName && dateOnly(r._t) === dayStart)
     .sort((a, b) => a._t - b._t);
 
-  document.getElementById("detailHeading").textContent =
-    `${w.locationName} — ${fmtNaive(w.from, { weekday: "long", day: "numeric", month: "long" })}`;
-
   const placeholder = document.getElementById("detailPlaceholder");
   const canvas = document.getElementById("detailChart");
 
@@ -401,6 +398,7 @@ function selectWindow(w, cardEl) {
     rows: dayRows,
     sunTimes: sunTimesData[w.locationName] || [],
     existingChart: currentDetailChart,
+    locationName: w.locationName,
   });
   renderSchedule();
 
