@@ -565,35 +565,43 @@ main.wide {
 
 .schedule-timeline {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 6px;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .schedule-step {
   display: flex;
   flex-direction: column;
   align-items: center;
+  flex-shrink: 0;
   background: var(--blue-100);
-  border-radius: 8px;
-  padding: 8px 12px;
-  min-width: 72px;
+  border-radius: 6px;
+  padding: 4px 7px;
+  min-width: 50px;
 }
 
 .schedule-time {
   font-weight: 700;
-  font-size: 1rem;
+  font-size: 0.75rem;
   color: var(--blue-900);
+  white-space: nowrap;
 }
 
 .schedule-label {
-  font-size: 0.68rem;
+  font-size: 0.52rem;
   color: var(--grey-500);
   text-transform: uppercase;
-  letter-spacing: 0.02em;
-  margin-top: 2px;
+  letter-spacing: 0.01em;
+  margin-top: 1px;
   text-align: center;
+  white-space: nowrap;
 }
 
+/* Fishing time stays full-size at every screen width — it's the number that
+   actually matters, the timeline above it is just supporting detail. */
 .schedule-fishing-time {
   margin-top: 12px;
   padding: 10px 14px;
@@ -610,4 +618,29 @@ main.wide {
 
 .schedule-fishing-time strong {
   font-size: 1.1rem;
+}
+
+/* Desktop has plenty of room — restore the larger, wrapped (non-scrolling) layout. */
+@media (min-width: 900px) {
+  .schedule-timeline {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    gap: 10px;
+    padding-bottom: 0;
+  }
+
+  .schedule-step {
+    padding: 8px 12px;
+    min-width: 72px;
+  }
+
+  .schedule-time {
+    font-size: 1rem;
+  }
+
+  .schedule-label {
+    font-size: 0.68rem;
+    letter-spacing: 0.02em;
+    margin-top: 2px;
+  }
 }
