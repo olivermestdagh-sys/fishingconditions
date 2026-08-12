@@ -21,6 +21,16 @@ function utf8ToBase64(str) {
   return btoa(unescape(encodeURIComponent(str)));
 }
 
+function parseHM(value) {
+  const m = String(value || "").match(/^(\d{1,2}):(\d{1,2})$/);
+  if (!m) return { h: 0, m: 0 };
+  return { h: Math.min(23, Number(m[1])), m: Math.min(59, Number(m[2])) };
+}
+
+function formatHM(h, m) {
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
 function getConnection() {
   try {
     return JSON.parse(localStorage.getItem("ghConnection") || "null");
@@ -120,14 +130,21 @@ function renderRows() {
         <button data-remove="${i}" class="btn-secondary" style="height:38px;">Remove</button>
       </div>
 
-      <label class="loc-edit-label" style="display:block;margin:12px 0 6px;">Timings (hours:minutes)</label>
+      <label class="loc-edit-label" style="display:block;margin:12px 0 6px;">Timings (duration, hours : minutes)</label>
       <div class="loc-time-grid">
-        ${TIME_FIELDS.map((f) => `
+        ${TIME_FIELDS.map((f) => {
+          const { h, m } = parseHM(loc[f.key]);
+          return `
           <div>
             <label class="loc-edit-label">${f.label}</label>
-            <input type="time" data-field="${f.key}" data-idx="${i}" value="${loc[f.key] || "00:00"}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+            <div class="hm-pair">
+              <input type="number" min="0" max="23" step="1" inputmode="numeric" data-hmfield="${f.key}" data-hmpart="h" data-idx="${i}" value="${h}" aria-label="${f.label} hours" />
+              <span class="hm-sep">:</span>
+              <input type="number" min="0" max="59" step="1" inputmode="numeric" data-hmfield="${f.key}" data-hmpart="m" data-idx="${i}" value="${String(m).padStart(2, "0")}" aria-label="${f.label} minutes" />
+            </div>
           </div>
-        `).join("")}
+        `;
+        }).join("")}
       </div>
     `;
     list.appendChild(row);
@@ -138,6 +155,18 @@ function renderRows() {
       const idx = Number(e.target.dataset.idx);
       const field = e.target.dataset.field;
       locations[idx][field] = e.target.value;
+    });
+  });
+  list.querySelectorAll("input[data-hmfield]").forEach((el) => {
+    el.addEventListener("input", (e) => {
+      const idx = Number(e.target.dataset.idx);
+      const field = e.target.dataset.hmfield;
+      const part = e.target.dataset.hmpart;
+      const current = parseHM(locations[idx][field]);
+      const raw = Math.max(0, Math.floor(Number(e.target.value) || 0));
+      if (part === "h") current.h = Math.min(23, raw);
+      else current.m = Math.min(59, raw);
+      locations[idx][field] = formatHM(current.h, current.m);
     });
   });
   list.querySelectorAll("button[data-remove]").forEach((btn) => {
