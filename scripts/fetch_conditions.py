@@ -182,7 +182,50 @@ def angle_diff(a, b):
     return 360 - raw if raw > 180 else raw
 
 
-def compute_condition(loc_type, shore, wind_dir, wind_speed):
+def tide_flow_degrees(tide_status):
+    """Tidal current direction, fixed for all locations per local knowledge of
+    how the tide actually runs through these bays (not derived from each
+    location's own Shore bearing): incoming flows north, outgoing flows south."""
+    if tide_status == "Incoming":
+        return 0  # North
+    if tide_status == "Outgoing":
+        return 180  # South
+    return None
+
+
+def wind_tide_angle_diff(wind_dir, tide_status):
+    """Angular difference between the wind's direction of travel and the
+    tide's current direction: 0 = wind blowing exactly with the tide, 180 =
+    directly against it. None if either isn't known, or near slack water
+    (Low/High), where there's no meaningful current to be "against"."""
+    tide_deg = tide_flow_degrees(tide_status)
+    wind_deg = compass_to_degrees(wind_dir)
+    if tide_deg is None or wind_deg is None:
+        return None
+    wind_travel_deg = (wind_deg + 180) % 360  # direction the wind is blowing TOWARD
+    return angle_diff(wind_travel_deg, tide_deg)
+
+
+def wind_against_tide_penalty(wind_dir, wind_speed, tide_status):
+    """How much to subtract from the Kayak base score for wind opposing the
+    tide's current — graduated rather than all-or-nothing:
+      - Directly opposed (180°, e.g. wind straight from the south into a
+        north-flowing incoming tide): full 1-point penalty.
+      - Partially/quarteringly opposed (>90° but not dead-on, e.g. a NE or NW
+        wind into an incoming tide): half-point penalty — real chop, but not
+        as steep and short as a true head-on clash.
+      - 90° or less (crosswind or aligned): no penalty.
+    Only applies above 10 km/h — light wind doesn't create meaningful chop
+    regardless of direction."""
+    if wind_speed is None or wind_speed <= 10:
+        return 0
+    diff = wind_tide_angle_diff(wind_dir, tide_status)
+    if diff is None or diff <= 90:
+        return 0
+    return 1 if diff == 180 else 0.5
+
+
+def compute_condition(loc_type, shore, wind_dir, wind_speed, tide_status=None):
     if loc_type == "Surf":
         diff = angle_diff(compass_to_degrees(shore), compass_to_degrees(wind_dir))
         if diff is None:
@@ -196,21 +239,27 @@ def compute_condition(loc_type, shore, wind_dir, wind_speed):
         if diff == 45:
             return 4
         return 2
+
     if loc_type == "Kayak":
         if wind_speed is None:
             return None
         if wind_speed < 5:
-            return 5
-        if wind_speed < 10:
-            return 4
-        if wind_speed < 15:
+            base = 5
+        elif wind_speed < 10:
+            base = 4
+        elif wind_speed < 15:
             diff = angle_diff(compass_to_degrees(shore), compass_to_degrees(wind_dir))
             if diff is None:
                 return None
-            return 4 if diff <= 90 else 3
-        if wind_speed < 20:
-            return 2
-        return 1
+            base = 4 if diff <= 90 else 3
+        elif wind_speed < 20:
+            base = 2
+        else:
+            base = 1
+
+        base = max(1, base - wind_against_tide_penalty(wind_dir, wind_speed, tide_status))
+        return base
+
     return None
 
 
@@ -281,7 +330,8 @@ def process_location(loc):
             running_prev = this_type
 
         row["Condition"] = compute_condition(
-            loc_type, shore, row.get("Wind Forecast Dir"), row.get("Wind Forecast (km/h)")
+            loc_type, shore, row.get("Wind Forecast Dir"), row.get("Wind Forecast (km/h)"),
+            tide_status=row.get("Tide Status"),
         )
         row["Location Name"] = name
         row["Type"] = loc_type
