@@ -190,11 +190,19 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
 
+  // On mobile, the full descriptive legend labels take up a lot of vertical space
+  // under the chart (often wrapping to several lines) — shorten them there, since
+  // desktop has plenty of room to keep the fuller, more descriptive text.
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 900;
+  const L = isMobile
+    ? { tempFcst: "Tmp Fcst", tempNow: "Tmp Now", rain: "Rain %", windFcst: "Wind Fcst", windNow: "Wind Now", tide: "Tide" }
+    : { tempFcst: "Temp Forecast (°C)", tempNow: "Temp Realtime (°C)", rain: "Rainfall Probability (%)", windFcst: "Wind Forecast (km/h)", windNow: "Wind Realtime (km/h)", tide: "Tide Height (m)" };
+
   const pointsFor = (field) => rows.map((r) => ({ x: r._t, y: r[field] ?? null }));
 
   const datasets = [
     {
-      label: "Temp Forecast (°C)",
+      label: L.tempFcst,
       data: pointsFor("Temp Forecast (C)"),
       borderColor: "#f97316",
       borderWidth: 1,
@@ -204,7 +212,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart }) {
       tension: 0.3,
     },
     {
-      label: "Temp Realtime (°C)",
+      label: L.tempNow,
       data: pointsFor("Temp Realtime (C)"),
       borderColor: "#fdba74",
       borderWidth: 1,
@@ -213,7 +221,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart }) {
       tension: 0.3,
     },
     {
-      label: "Rainfall Probability (%)",
+      label: L.rain,
       data: pointsFor("Rainfall Probability (%)"),
       borderColor: "#3b82f6",
       pointRadius: 2,
@@ -222,7 +230,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart }) {
       tension: 0.3,
     },
     {
-      label: "Wind Forecast (km/h)",
+      label: L.windFcst,
       data: pointsFor("Wind Forecast (km/h)"),
       borderColor: "#16a34a",
       borderWidth: 1,
@@ -233,7 +241,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart }) {
       tension: 0.3,
     },
     {
-      label: "Wind Realtime (km/h)",
+      label: L.windNow,
       data: pointsFor("Wind Realtime (km/h)"),
       borderColor: "#86efac",
       borderWidth: 1,
@@ -244,7 +252,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart }) {
       tension: 0.3,
     },
     {
-      label: "Tide Height (m)",
+      label: L.tide,
       data: pointsFor("Tide Height (m)"),
       borderColor: "#4f46e5",
       backgroundColor: "rgba(79, 70, 229, 0.15)",
@@ -281,7 +289,15 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart }) {
         yTide: { display: false, min: 0 },
       },
       plugins: {
-        legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 10 } } },
+        legend: {
+          position: "bottom",
+          labels: {
+            boxWidth: isMobile ? 8 : 12,
+            boxHeight: isMobile ? 8 : 12,
+            padding: isMobile ? 6 : 10,
+            font: { size: isMobile ? 8 : 10 },
+          },
+        },
         tooltip: {
           callbacks: {
             title: (items) =>
