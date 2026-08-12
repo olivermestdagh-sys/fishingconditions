@@ -564,40 +564,41 @@ main.wide {
 }
 
 .schedule-timeline {
-  display: flex;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  gap: 6px;
-  padding-bottom: 4px;
-  -webkit-overflow-scrolling: touch;
+  /* A fixed 7-column grid guarantees all steps fit the actual screen width exactly,
+     however narrow — unlike a flex row with min-widths, which needs horizontal
+     scrolling once those minimums no longer add up. minmax(0, 1fr) lets each
+     column shrink freely instead of being held to its content's natural width. */
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
 }
 
 .schedule-step {
   display: flex;
   flex-direction: column;
   align-items: center;
-  flex-shrink: 0;
+  min-width: 0;
   background: var(--blue-100);
-  border-radius: 6px;
-  padding: 4px 7px;
-  min-width: 50px;
+  border-radius: 5px;
+  padding: 3px 1px;
 }
 
 .schedule-time {
   font-weight: 700;
-  font-size: 0.75rem;
+  font-size: 0.62rem;
   color: var(--blue-900);
   white-space: nowrap;
 }
 
 .schedule-label {
-  font-size: 0.52rem;
+  font-size: 0.4rem;
+  line-height: 1.15;
   color: var(--grey-500);
   text-transform: uppercase;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   margin-top: 1px;
   text-align: center;
-  white-space: nowrap;
+  word-break: break-word;
 }
 
 /* Fishing time stays full-size at every screen width — it's the number that
@@ -620,13 +621,13 @@ main.wide {
   font-size: 1.1rem;
 }
 
-/* Desktop has plenty of room — restore the larger, wrapped (non-scrolling) layout. */
+/* Desktop has plenty of room — switch back from the mobile grid to a normal
+   wrapped flex row of larger, more comfortably-spaced steps. */
 @media (min-width: 900px) {
   .schedule-timeline {
+    display: flex;
     flex-wrap: wrap;
-    overflow-x: visible;
     gap: 10px;
-    padding-bottom: 0;
   }
 
   .schedule-step {
@@ -642,5 +643,6 @@ main.wide {
     font-size: 0.68rem;
     letter-spacing: 0.02em;
     margin-top: 2px;
+    white-space: nowrap;
   }
 }
