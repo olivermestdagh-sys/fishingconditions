@@ -541,3 +541,24 @@ main.wide {
 .loc-edit-card {
   cursor: default; /* override the generic .window-card pointer cursor — this one isn't clickable */
 }
+
+.hm-pair {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hm-pair input[type="number"] {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 4px;
+  text-align: center;
+  border-radius: 8px;
+  border: 1px solid var(--grey-200);
+  font-size: 0.9rem;
+}
+
+.hm-sep {
+  color: var(--grey-500);
+  font-weight: 700;
+}
