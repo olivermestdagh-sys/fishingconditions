@@ -505,3 +505,39 @@ main.wide {
   border-color: var(--blue-700);
   color: var(--white);
 }
+
+.loc-edit-label {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--grey-500);
+  margin-bottom: 4px;
+}
+
+.loc-edit-top {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.loc-time-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+@media (min-width: 560px) {
+  .loc-time-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 900px) {
+  .loc-time-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+
+.loc-edit-card {
+  cursor: default; /* override the generic .window-card pointer cursor — this one isn't clickable */
+}

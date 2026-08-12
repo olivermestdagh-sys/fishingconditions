@@ -51,14 +51,29 @@ That's it — from here it updates itself on the schedule below.
 
 ## Changing which locations are tracked
 
-Edit `config/locations.json` directly on GitHub (click the file → pencil icon
-to edit → commit). Same three fields as the Excel Locations tab:
+Easiest way: use the **Locations** tab on the site itself (see "Editing locations
+from the site itself" below). Or edit `config/locations.json` directly on GitHub
+(click the file → pencil icon to edit → commit):
 
 ```json
-{"name": "Flinders Pier, VIC", "type": "Kayak", "shore": "W"}
+{
+  "name": "Flinders Pier, VIC",
+  "type": "Kayak",
+  "shore": "W",
+  "driveTo": "00:45",
+  "driveBack": "00:45",
+  "prep": "00:15",
+  "packUp": "00:15",
+  "paddleOut": "00:20",
+  "paddleBack": "00:20"
+}
 ```
 
 `type` must be exactly `"Kayak"` or `"Surf"` for the Condition scoring to work.
+The six timing fields (`driveTo`, `driveBack`, `prep`, `packUp`, `paddleOut`,
+`paddleBack`) are `HH:MM` durations — how long each part of a trip to that spot
+takes. They're not currently used in any calculation on the site, just stored
+per location for your own reference (and for anything built on top of them later).
 Changes take effect on the next scheduled or manual run.
 
 ## Changing the update frequency — and what it costs
