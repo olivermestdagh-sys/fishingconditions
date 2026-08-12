@@ -1,5 +1,6 @@
 const DATA_URL = "data/conditions.json";
 const LOC_FILTER_STORAGE_KEY = "goodConditionsSelectedLocations";
+const TRIP_TIMES_STORAGE_KEY = "goodConditionsTripTimes";
 
 let allRows = [];
 let allLocations = [];
@@ -7,6 +8,7 @@ let sunTimesData = {};
 let selectedLocations = new Set();
 let currentDetailChart = null;
 let selectedCardEl = null;
+let currentSelectedWindow = null;
 
 // parseNaive comes from charts.js (loaded before this file).
 
@@ -22,6 +24,105 @@ function hourOf(ms) {
 function dateOnly(ms) {
   const d = new Date(ms);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+// Time-of-day / duration arithmetic, all working in minutes-since-midnight.
+// Intermediate results are kept unwrapped (can go negative or past 1440) so a
+// chain of subtractions that crosses midnight still produces a sensible answer —
+// wrapping only happens at the point a value is displayed as a clock time.
+function timeToMinutes(hhmm) {
+  const m = String(hhmm || "").match(/^(\d{1,2}):(\d{1,2})$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function minutesToClock(mins) {
+  const wrapped = ((Math.round(mins) % 1440) + 1440) % 1440;
+  const h = Math.floor(wrapped / 60);
+  const m = wrapped % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function minutesToDuration(mins) {
+  const rounded = Math.round(mins);
+  const sign = rounded < 0 ? "-" : "";
+  const abs = Math.abs(rounded);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  return `${sign}${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function computeSchedule(loc, launchStr, homeByStr) {
+  const launch = timeToMinutes(launchStr);
+  const homeBy = timeToMinutes(homeByStr);
+  if (launch == null || homeBy == null || !loc) return null;
+
+  const prep = timeToMinutes(loc.prep) || 0;
+  const driveTo = timeToMinutes(loc.driveTo) || 0;
+  const paddleOut = timeToMinutes(loc.paddleOut) || 0;
+  const driveBack = timeToMinutes(loc.driveBack) || 0;
+  const packUp = timeToMinutes(loc.packUp) || 0;
+  const paddleBack = timeToMinutes(loc.paddleBack) || 0;
+
+  const arrive = launch - prep;
+  const leaveHome = arrive - driveTo;
+  const fishAt = launch + paddleOut;
+  const driveHome = homeBy - driveBack;
+  const headBack = driveHome - packUp - paddleBack;
+  const fishingTimeMins = headBack - fishAt;
+
+  return {
+    leaveHome: minutesToClock(leaveHome),
+    arrive: minutesToClock(arrive),
+    launch: minutesToClock(launch),
+    fishAt: minutesToClock(fishAt),
+    headBack: minutesToClock(headBack),
+    driveHome: minutesToClock(driveHome),
+    homeBy: minutesToClock(homeBy),
+    fishingTime: minutesToDuration(fishingTimeMins),
+    fishingTimeNegative: fishingTimeMins < 0,
+  };
+}
+
+function persistTripTimes() {
+  const launch = document.getElementById("launchTime").value;
+  const homeBy = document.getElementById("homeBy").value;
+  localStorage.setItem(TRIP_TIMES_STORAGE_KEY, JSON.stringify({ launch, homeBy }));
+}
+
+function renderSchedule() {
+  const container = document.getElementById("scheduleContainer");
+  if (!currentSelectedWindow) {
+    container.innerHTML = "";
+    return;
+  }
+
+  const loc = allLocations.find((l) => l.name === currentSelectedWindow.locationName);
+  const launchStr = document.getElementById("launchTime").value;
+  const homeByStr = document.getElementById("homeBy").value;
+  const schedule = computeSchedule(loc, launchStr, homeByStr);
+
+  if (!schedule) {
+    container.innerHTML = `<p class="footnote" style="margin:14px 0 0;text-align:left;">Set Launch Time and Home By above to see a full trip schedule for this location.</p>`;
+    return;
+  }
+
+  container.innerHTML = `
+    <label class="loc-edit-label" style="display:block;margin:16px 0 8px;">Trip schedule — ${loc.name}</label>
+    <div class="schedule-timeline">
+      <div class="schedule-step"><span class="schedule-time">${schedule.leaveHome}</span><span class="schedule-label">Leave Home</span></div>
+      <div class="schedule-step"><span class="schedule-time">${schedule.arrive}</span><span class="schedule-label">Arrive</span></div>
+      <div class="schedule-step"><span class="schedule-time">${schedule.launch}</span><span class="schedule-label">Launch</span></div>
+      <div class="schedule-step"><span class="schedule-time">${schedule.fishAt}</span><span class="schedule-label">Fish at</span></div>
+      <div class="schedule-step"><span class="schedule-time">${schedule.headBack}</span><span class="schedule-label">Head Back</span></div>
+      <div class="schedule-step"><span class="schedule-time">${schedule.driveHome}</span><span class="schedule-label">Drive Home</span></div>
+      <div class="schedule-step"><span class="schedule-time">${schedule.homeBy}</span><span class="schedule-label">Home By</span></div>
+    </div>
+    <div class="schedule-fishing-time ${schedule.fishingTimeNegative ? "negative" : ""}">
+      Fishing time: <strong>${schedule.fishingTime}</strong>
+      ${schedule.fishingTimeNegative ? " — times don't add up, check Launch Time / Home By against this location's timings" : ""}
+    </div>
+  `;
 }
 
 async function init() {
@@ -72,6 +173,25 @@ async function init() {
     persistSelectedLocations();
     renderLocationChips();
     render();
+  });
+
+  let savedTripTimes = null;
+  try {
+    savedTripTimes = JSON.parse(localStorage.getItem(TRIP_TIMES_STORAGE_KEY) || "null");
+  } catch {
+    savedTripTimes = null;
+  }
+  if (savedTripTimes) {
+    document.getElementById("launchTime").value = savedTripTimes.launch || "";
+    document.getElementById("homeBy").value = savedTripTimes.homeBy || "";
+  }
+  document.getElementById("launchTime").addEventListener("input", () => {
+    persistTripTimes();
+    renderSchedule();
+  });
+  document.getElementById("homeBy").addEventListener("input", () => {
+    persistTripTimes();
+    renderSchedule();
   });
 
   document.getElementById("minCondition").addEventListener("input", render);
@@ -235,6 +355,7 @@ function selectWindow(w, cardEl) {
     cardEl.classList.add("selected");
     selectedCardEl = cardEl;
   }
+  currentSelectedWindow = w;
 
   // Full calendar day for this location — not just the qualifying window's hour
   // span — so the graph shows the whole day's context around the good window.
@@ -254,6 +375,7 @@ function selectWindow(w, cardEl) {
     placeholder.style.display = "block";
     canvas.style.display = "none";
     if (currentDetailChart) { currentDetailChart.destroy(); currentDetailChart = null; }
+    renderSchedule();
     requestAnimationFrame(updateStickyOffset);
     return;
   }
@@ -266,6 +388,7 @@ function selectWindow(w, cardEl) {
     sunTimes: sunTimesData[w.locationName] || [],
     existingChart: currentDetailChart,
   });
+  renderSchedule();
 
   // Safety net: force Chart.js to re-measure after the browser has actually committed the
   // display:block change and settled layout — guards against the canvas being measured as

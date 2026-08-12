@@ -39,6 +39,21 @@
         "Min consecutive hours" counts qualifying hourly points in a row — the Hours column below shows the resulting clock duration (one less).
       </p>
 
+      <label class="loc-edit-label" style="display:block;margin:14px 0 6px;">Trip times</label>
+      <div class="filter-row">
+        <div>
+          <label for="launchTime">Launch Time</label>
+          <input type="time" id="launchTime" />
+        </div>
+        <div>
+          <label for="homeBy">Home By</label>
+          <input type="time" id="homeBy" />
+        </div>
+      </div>
+      <p class="footnote" style="margin:8px 0 0;text-align:left;">
+        Select a window below to work out a full trip schedule for that location, shown under the graph.
+      </p>
+
       <div class="loc-filter-header">
         <label>Locations</label>
         <div class="loc-filter-actions">
@@ -63,6 +78,7 @@
       <h2 id="detailHeading">Day detail</h2>
       <div id="detailPlaceholder" class="empty-state">Tap a location/window below to see its full day here.</div>
       <canvas id="detailChart" height="280" style="display:none;"></canvas>
+      <div id="scheduleContainer"></div>
     </section>
   </div>
 
