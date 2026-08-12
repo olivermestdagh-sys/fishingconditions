@@ -1,86 +1,182 @@
 {
-  "generatedAt": "2026-08-12T00:20:55.619142+00:00",
+  "generatedAt": "2026-08-12T00:31:14.059383+00:00",
   "forecastDays": 6,
   "locations": [
     {
       "name": "Balnarring Beach, VIC 3926",
       "type": "Kayak",
-      "shore": "NW"
+      "shore": "NW",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     },
     {
       "name": "Corinella Boat Ramp, VIC",
       "type": "Kayak",
-      "shore": "E"
+      "shore": "E",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     },
     {
       "name": "Coronet Bay, VIC 3984",
       "type": "Kayak",
-      "shore": "E"
+      "shore": "E",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     },
     {
       "name": "Flinders Pier, VIC",
       "type": "Kayak",
-      "shore": "W"
+      "shore": "W",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     },
     {
       "name": "Gunnamatta Beach, VIC",
       "type": "Surf",
-      "shore": "N"
+      "shore": "N",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     },
     {
       "name": "Hastings Jetty, VIC",
       "type": "Kayak",
-      "shore": "W"
+      "shore": "W",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     },
     {
       "name": "Kilcunda, VIC 3995",
       "type": "Surf",
-      "shore": "N"
+      "shore": "N",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     },
     {
       "name": "Lang Lang Boat Ramp, VIC",
       "type": "Kayak",
-      "shore": "E"
+      "shore": "E",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     },
     {
       "name": "Mornington Pier, VIC",
       "type": "Kayak",
-      "shore": "E"
+      "shore": "E",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     },
     {
       "name": "Patterson River Entrance, VIC",
       "type": "Kayak",
-      "shore": "E"
+      "shore": "E",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     },
     {
       "name": "Rosebud Pier, VIC",
       "type": "Kayak",
-      "shore": "E"
+      "shore": "E",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     },
     {
       "name": "Safety Beach Boat Ramp, VIC",
       "type": "Kayak",
-      "shore": "E"
+      "shore": "E",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     },
     {
       "name": "Sorrento Pier, VIC",
       "type": "Kayak",
-      "shore": "SW"
+      "shore": "SW",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     },
     {
       "name": "Stony Point Boat Ramp, VIC",
       "type": "Kayak",
-      "shore": "W"
+      "shore": "W",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     },
     {
       "name": "Warneet Boat Ramp, VIC",
       "type": "Kayak",
-      "shore": "N"
+      "shore": "N",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     },
     {
       "name": "Williamstown Beach, VIC",
       "type": "Kayak",
-      "shore": "N"
+      "shore": "N",
+      "driveTo": "00:00",
+      "driveBack": "00:00",
+      "prep": "00:00",
+      "packUp": "00:00",
+      "paddleOut": "00:00",
+      "paddleBack": "00:00"
     }
   ],
   "rows": [
@@ -991,6 +1087,20 @@
       "dateTime": "2026-08-12T10:10:00",
       "Temp Realtime (C)": 10.8,
       "Wind Realtime (km/h)": 16.7,
+      "Wind Realtime Dir": "WNW",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Balnarring Beach, VIC 3926",
+      "Type": "Kayak",
+      "Shore": "NW",
+      "Matched Name": "Balnarring Beach",
+      "Region": "Mornington Peninsula",
+      "State": "VIC"
+    },
+    {
+      "dateTime": "2026-08-12T10:20:00",
+      "Temp Realtime (C)": 10.8,
+      "Wind Realtime (km/h)": 14.8,
       "Wind Realtime Dir": "WNW",
       "Tide Status": "Incoming",
       "Condition": null,
@@ -4089,6 +4199,20 @@
       "State": "VIC"
     },
     {
+      "dateTime": "2026-08-12T10:20:00",
+      "Temp Realtime (C)": 10.9,
+      "Wind Realtime (km/h)": 14.8,
+      "Wind Realtime Dir": "WNW",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Corinella Boat Ramp, VIC",
+      "Type": "Kayak",
+      "Shore": "E",
+      "Matched Name": "Corinella Boat Ramp",
+      "Region": "Gippsland",
+      "State": "VIC"
+    },
+    {
       "dateTime": "2026-08-12T11:00:00",
       "Temp Forecast (C)": 11.7,
       "Wind Forecast (km/h)": 24.1,
@@ -7154,6 +7278,20 @@
       "dateTime": "2026-08-12T10:10:00",
       "Temp Realtime (C)": 11.3,
       "Wind Realtime (km/h)": 9.3,
+      "Wind Realtime Dir": "WNW",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Coronet Bay, VIC 3984",
+      "Type": "Kayak",
+      "Shore": "E",
+      "Matched Name": "Coronet Bay",
+      "Region": "Gippsland",
+      "State": "VIC"
+    },
+    {
+      "dateTime": "2026-08-12T10:20:00",
+      "Temp Realtime (C)": 10.9,
+      "Wind Realtime (km/h)": 14.8,
       "Wind Realtime Dir": "WNW",
       "Tide Status": "Incoming",
       "Condition": null,
@@ -10252,6 +10390,20 @@
       "State": "VIC"
     },
     {
+      "dateTime": "2026-08-12T10:20:00",
+      "Temp Realtime (C)": 10.8,
+      "Wind Realtime (km/h)": 14.8,
+      "Wind Realtime Dir": "WNW",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Flinders Pier, VIC",
+      "Type": "Kayak",
+      "Shore": "W",
+      "Matched Name": "Flinders Pier",
+      "Region": "Mornington Peninsula",
+      "State": "VIC"
+    },
+    {
       "dateTime": "2026-08-12T11:00:00",
       "Temp Forecast (C)": 11.5,
       "Wind Forecast (km/h)": 40,
@@ -13328,6 +13480,20 @@
       "dateTime": "2026-08-12T10:10:00",
       "Temp Realtime (C)": 10.8,
       "Wind Realtime (km/h)": 38.9,
+      "Wind Realtime Dir": "W",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Gunnamatta Beach, VIC",
+      "Type": "Surf",
+      "Shore": "N",
+      "Matched Name": "Gunnamatta Beach",
+      "Region": "Mornington Peninsula",
+      "State": "VIC"
+    },
+    {
+      "dateTime": "2026-08-12T10:20:00",
+      "Temp Realtime (C)": 10.8,
+      "Wind Realtime (km/h)": 37,
       "Wind Realtime Dir": "W",
       "Tide Status": "Incoming",
       "Condition": null,
@@ -16426,6 +16592,20 @@
       "State": "VIC"
     },
     {
+      "dateTime": "2026-08-12T10:20:00",
+      "Temp Realtime (C)": 10.8,
+      "Wind Realtime (km/h)": 14.8,
+      "Wind Realtime Dir": "WNW",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Hastings Jetty, VIC",
+      "Type": "Kayak",
+      "Shore": "W",
+      "Matched Name": "Hastings Jetty",
+      "Region": "Mornington Peninsula",
+      "State": "VIC"
+    },
+    {
       "dateTime": "2026-08-12T11:00:00",
       "Temp Forecast (C)": 11.5,
       "Wind Forecast (km/h)": 23.8,
@@ -19513,6 +19693,20 @@
       "State": "VIC"
     },
     {
+      "dateTime": "2026-08-12T10:20:00",
+      "Temp Realtime (C)": 10.9,
+      "Wind Realtime (km/h)": 14.8,
+      "Wind Realtime Dir": "WNW",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Kilcunda, VIC 3995",
+      "Type": "Surf",
+      "Shore": "N",
+      "Matched Name": "Kilcunda",
+      "Region": "Gippsland",
+      "State": "VIC"
+    },
+    {
       "dateTime": "2026-08-12T10:59:00",
       "Tide Height (m)": 2.44,
       "Tide Status": "High",
@@ -22578,6 +22772,20 @@
       "dateTime": "2026-08-12T10:10:00",
       "Temp Realtime (C)": 11.3,
       "Wind Realtime (km/h)": 9.3,
+      "Wind Realtime Dir": "WNW",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Lang Lang Boat Ramp, VIC",
+      "Type": "Kayak",
+      "Shore": "E",
+      "Matched Name": "Lang Lang Boat Ramp",
+      "Region": "Gippsland",
+      "State": "VIC"
+    },
+    {
+      "dateTime": "2026-08-12T10:20:00",
+      "Temp Realtime (C)": 10.9,
+      "Wind Realtime (km/h)": 14.8,
       "Wind Realtime Dir": "WNW",
       "Tide Status": "Incoming",
       "Condition": null,
@@ -25677,6 +25885,20 @@
       "State": "VIC"
     },
     {
+      "dateTime": "2026-08-12T10:20:00",
+      "Temp Realtime (C)": 10.9,
+      "Wind Realtime (km/h)": 35.2,
+      "Wind Realtime Dir": "WNW",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Mornington Pier, VIC",
+      "Type": "Kayak",
+      "Shore": "E",
+      "Matched Name": "Mornington Pier",
+      "Region": "Mornington Peninsula",
+      "State": "VIC"
+    },
+    {
       "dateTime": "2026-08-12T11:00:00",
       "Temp Forecast (C)": 11.2,
       "Wind Forecast (km/h)": 31.7,
@@ -28741,6 +28963,20 @@
       "dateTime": "2026-08-12T10:10:00",
       "Temp Realtime (C)": 10.8,
       "Wind Realtime (km/h)": 31.5,
+      "Wind Realtime Dir": "WNW",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Patterson River Entrance, VIC",
+      "Type": "Kayak",
+      "Shore": "E",
+      "Matched Name": "Patterson River Entrance",
+      "Region": "Melbourne",
+      "State": "VIC"
+    },
+    {
+      "dateTime": "2026-08-12T10:20:00",
+      "Temp Realtime (C)": 10.9,
+      "Wind Realtime (km/h)": 35.2,
       "Wind Realtime Dir": "WNW",
       "Tide Status": "Incoming",
       "Condition": null,
@@ -31827,6 +32063,20 @@
       "State": "VIC"
     },
     {
+      "dateTime": "2026-08-12T10:20:00",
+      "Temp Realtime (C)": 10.8,
+      "Wind Realtime (km/h)": 37,
+      "Wind Realtime Dir": "W",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Rosebud Pier, VIC",
+      "Type": "Kayak",
+      "Shore": "E",
+      "Matched Name": "Rosebud Pier",
+      "Region": "Mornington Peninsula",
+      "State": "VIC"
+    },
+    {
       "dateTime": "2026-08-12T11:00:00",
       "Temp Forecast (C)": 11.1,
       "Wind Forecast (km/h)": 29.9,
@@ -34902,6 +35152,20 @@
       "State": "VIC"
     },
     {
+      "dateTime": "2026-08-12T10:20:00",
+      "Temp Realtime (C)": 10.8,
+      "Wind Realtime (km/h)": 37,
+      "Wind Realtime Dir": "W",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Safety Beach Boat Ramp, VIC",
+      "Type": "Kayak",
+      "Shore": "E",
+      "Matched Name": "Safety Beach Boat Ramp",
+      "Region": "Mornington Peninsula",
+      "State": "VIC"
+    },
+    {
       "dateTime": "2026-08-12T11:00:00",
       "Temp Forecast (C)": 11.2,
       "Wind Forecast (km/h)": 31.7,
@@ -37955,6 +38219,20 @@
       "dateTime": "2026-08-12T10:10:00",
       "Temp Realtime (C)": 12.1,
       "Wind Realtime (km/h)": 38.9,
+      "Wind Realtime Dir": "W",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Sorrento Pier, VIC",
+      "Type": "Kayak",
+      "Shore": "SW",
+      "Matched Name": "Sorrento Pier",
+      "Region": "Mornington Peninsula",
+      "State": "VIC"
+    },
+    {
+      "dateTime": "2026-08-12T10:20:00",
+      "Temp Realtime (C)": 12.6,
+      "Wind Realtime (km/h)": 37,
       "Wind Realtime Dir": "W",
       "Tide Status": "Incoming",
       "Condition": null,
@@ -41053,6 +41331,20 @@
       "State": "VIC"
     },
     {
+      "dateTime": "2026-08-12T10:20:00",
+      "Temp Realtime (C)": 10.8,
+      "Wind Realtime (km/h)": 14.8,
+      "Wind Realtime Dir": "WNW",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Stony Point Boat Ramp, VIC",
+      "Type": "Kayak",
+      "Shore": "W",
+      "Matched Name": "Stony Point Boat Ramp",
+      "Region": "Mornington Peninsula",
+      "State": "VIC"
+    },
+    {
       "dateTime": "2026-08-12T11:00:00",
       "Temp Forecast (C)": 11.5,
       "Wind Forecast (km/h)": 24.8,
@@ -44140,6 +44432,20 @@
       "State": "VIC"
     },
     {
+      "dateTime": "2026-08-12T10:20:00",
+      "Temp Realtime (C)": 10.9,
+      "Wind Realtime (km/h)": 13,
+      "Wind Realtime Dir": "WNW",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Warneet Boat Ramp, VIC",
+      "Type": "Kayak",
+      "Shore": "N",
+      "Matched Name": "Warneet Boat Ramp",
+      "Region": "Melbourne",
+      "State": "VIC"
+    },
+    {
       "dateTime": "2026-08-12T11:00:00",
       "Temp Forecast (C)": 11.2,
       "Wind Forecast (km/h)": 22.7,
@@ -47214,6 +47520,20 @@
     },
     {
       "dateTime": "2026-08-12T10:10:00",
+      "Temp Realtime (C)": 12.7,
+      "Wind Realtime (km/h)": 33.3,
+      "Wind Realtime Dir": "W",
+      "Tide Status": "Incoming",
+      "Condition": null,
+      "Location Name": "Williamstown Beach, VIC",
+      "Type": "Kayak",
+      "Shore": "N",
+      "Matched Name": "Williamstown Beach",
+      "Region": "Melbourne",
+      "State": "VIC"
+    },
+    {
+      "dateTime": "2026-08-12T10:20:00",
       "Temp Realtime (C)": 12.7,
       "Wind Realtime (km/h)": 33.3,
       "Wind Realtime Dir": "W",
