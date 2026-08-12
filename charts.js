@@ -214,8 +214,8 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   // desktop has plenty of room to keep the fuller, more descriptive text.
   const isMobile = typeof window !== "undefined" && window.innerWidth < 900;
   const L = isMobile
-    ? { tempFcst: "Tmp Fcst", tempNow: "Tmp Now", rain: "Rain %", windFcst: "Wind Fcst", windNow: "Wind Now", tide: "Tide" }
-    : { tempFcst: "Temp Forecast (°C)", tempNow: "Temp Realtime (°C)", rain: "Rainfall Probability (%)", windFcst: "Wind Forecast (km/h)", windNow: "Wind Realtime (km/h)", tide: "Tide Height (m)" };
+    ? { tempFcst: "Tmp Fcst", tempNow: "Tmp Now", rain: "Rain %", windFcst: "Wind Fcst", windNow: "Wind Now", tide: "Tide", condition: "Loc Cond" }
+    : { tempFcst: "Temp Forecast (°C)", tempNow: "Temp Realtime (°C)", rain: "Rainfall Probability (%)", windFcst: "Wind Forecast (km/h)", windNow: "Wind Realtime (km/h)", tide: "Tide Height (m)", condition: "Location Condition (1-5)" };
 
   const pointsFor = (field) => rows.map((r) => ({ x: r._t, y: r[field] ?? null }));
 
@@ -280,6 +280,16 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       yAxisID: "yTide",
       tension: 0.4,
     },
+    {
+      label: L.condition,
+      data: pointsFor("Condition"),
+      borderColor: "#9333ea",
+      borderWidth: 2,
+      pointRadius: 2,
+      pointBackgroundColor: "#9333ea",
+      yAxisID: "yCondition",
+      tension: 0.3,
+    },
   ];
 
   const minT = rows[0]._t;
@@ -306,6 +316,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
         yRain: { display: false, min: 0, max: 100 },
         yWind: { position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: "Wind (km/h)" } },
         yTide: { display: false, min: 0 },
+        yCondition: { display: false, min: 0, max: 5.5 },
       },
       plugins: {
         legend: {
