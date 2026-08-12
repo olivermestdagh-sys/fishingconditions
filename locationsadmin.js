@@ -5,6 +5,14 @@ const WORKFLOW_FILE = "update.yml";
 
 const TYPE_OPTIONS = ["Kayak", "Surf"];
 const SHORE_OPTIONS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+const TIME_FIELDS = [
+  { key: "driveTo", label: "Drive to" },
+  { key: "driveBack", label: "Drive back" },
+  { key: "prep", label: "Prep" },
+  { key: "packUp", label: "Pack up" },
+  { key: "paddleOut", label: "Paddle out" },
+  { key: "paddleBack", label: "Paddle back" },
+];
 
 let locations = [];
 let currentSha = null;
@@ -44,7 +52,11 @@ async function init() {
   document.getElementById("btnConnect").addEventListener("click", onConnect);
   document.getElementById("btnDisconnect").addEventListener("click", onDisconnect);
   document.getElementById("btnAddRow").addEventListener("click", () => {
-    locations.push({ name: "", type: "Kayak", shore: "N" });
+    locations.push({
+      name: "", type: "Kayak", shore: "N",
+      driveTo: "00:00", driveBack: "00:00", prep: "00:00",
+      packUp: "00:00", paddleOut: "00:00", paddleBack: "00:00",
+    });
     renderRows();
   });
   document.getElementById("btnSave").addEventListener("click", () => onSave(false));
@@ -86,29 +98,37 @@ function renderRows() {
   list.innerHTML = "";
   locations.forEach((loc, i) => {
     const row = document.createElement("div");
-    row.className = "window-card";
-    row.style.display = "flex";
-    row.style.gap = "8px";
-    row.style.alignItems = "flex-end";
-    row.style.flexWrap = "wrap";
+    row.className = "window-card loc-edit-card";
     row.innerHTML = `
-      <div style="flex:2;min-width:180px;">
-        <label style="display:block;font-size:0.72rem;color:var(--grey-500);margin-bottom:4px;">Location name</label>
-        <input type="text" data-field="name" data-idx="${i}" value="${(loc.name || "").replace(/"/g, "&quot;")}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+      <div class="loc-edit-top">
+        <div style="flex:2;min-width:180px;">
+          <label class="loc-edit-label">Location name</label>
+          <input type="text" data-field="name" data-idx="${i}" value="${(loc.name || "").replace(/"/g, "&quot;")}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+        </div>
+        <div style="min-width:110px;">
+          <label class="loc-edit-label">Type</label>
+          <select data-field="type" data-idx="${i}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);">
+            ${TYPE_OPTIONS.map((t) => `<option value="${t}" ${loc.type === t ? "selected" : ""}>${t}</option>`).join("")}
+          </select>
+        </div>
+        <div style="min-width:100px;">
+          <label class="loc-edit-label">Shore faces</label>
+          <select data-field="shore" data-idx="${i}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);">
+            ${SHORE_OPTIONS.map((s) => `<option value="${s}" ${loc.shore === s ? "selected" : ""}>${s}</option>`).join("")}
+          </select>
+        </div>
+        <button data-remove="${i}" class="btn-secondary" style="height:38px;">Remove</button>
       </div>
-      <div style="min-width:110px;">
-        <label style="display:block;font-size:0.72rem;color:var(--grey-500);margin-bottom:4px;">Type</label>
-        <select data-field="type" data-idx="${i}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);">
-          ${TYPE_OPTIONS.map((t) => `<option value="${t}" ${loc.type === t ? "selected" : ""}>${t}</option>`).join("")}
-        </select>
+
+      <label class="loc-edit-label" style="display:block;margin:12px 0 6px;">Timings (hours:minutes)</label>
+      <div class="loc-time-grid">
+        ${TIME_FIELDS.map((f) => `
+          <div>
+            <label class="loc-edit-label">${f.label}</label>
+            <input type="time" data-field="${f.key}" data-idx="${i}" value="${loc[f.key] || "00:00"}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+          </div>
+        `).join("")}
       </div>
-      <div style="min-width:100px;">
-        <label style="display:block;font-size:0.72rem;color:var(--grey-500);margin-bottom:4px;">Shore faces</label>
-        <select data-field="shore" data-idx="${i}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);">
-          ${SHORE_OPTIONS.map((s) => `<option value="${s}" ${loc.shore === s ? "selected" : ""}>${s}</option>`).join("")}
-        </select>
-      </div>
-      <button data-remove="${i}" class="btn-secondary" style="height:38px;">Remove</button>
     `;
     list.appendChild(row);
   });
@@ -169,6 +189,14 @@ async function onSave(alsoRefresh) {
   if (problem) {
     setSaveStatus(problem, true);
     return;
+  }
+
+  // Native time inputs return "" if left untouched/cleared — normalize to "00:00"
+  // so every saved location always has a valid HH:MM value for all six fields.
+  for (const loc of locations) {
+    for (const f of TIME_FIELDS) {
+      if (!loc[f.key]) loc[f.key] = "00:00";
+    }
   }
 
   setSaveStatus("Saving…");
