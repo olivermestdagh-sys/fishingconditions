@@ -266,7 +266,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart }) {
   const minT = rows[0]._t;
   const maxT = rows[rows.length - 1]._t;
 
-  return new Chart(canvas, {
+  const chart = new Chart(canvas, {
     type: "line",
     data: { datasets },
     plugins: [buildDayBandPlugin(rows, sunTimes)],
@@ -290,6 +290,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart }) {
       },
       plugins: {
         legend: {
+          display: false,
           position: "bottom",
           labels: {
             boxWidth: isMobile ? 8 : 12,
@@ -309,4 +310,22 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart }) {
       },
     },
   });
+
+  // Tap the graph to show/hide the legend — cursor:pointer signals it's clickable.
+  // Attach only once per canvas element (guarded via dataset), since the canvas
+  // persists in the DOM across repeated calls even as the Chart.js instance itself
+  // gets destroyed/recreated on every render — Chart.getChart() always looks up
+  // whichever instance is *currently* attached, so a stale closure isn't a risk.
+  canvas.style.cursor = "pointer";
+  if (!canvas.dataset.legendToggleAttached) {
+    canvas.dataset.legendToggleAttached = "true";
+    canvas.addEventListener("click", () => {
+      const current = Chart.getChart(canvas);
+      if (!current) return;
+      current.options.plugins.legend.display = !current.options.plugins.legend.display;
+      current.update();
+    });
+  }
+
+  return chart;
 }
