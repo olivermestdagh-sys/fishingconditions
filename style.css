@@ -422,21 +422,23 @@ main.wide {
   z-index: 5;
 }
 
-.session-block {
+.window-card {
   cursor: pointer;
   transition: box-shadow 0.15s ease, transform 0.15s ease;
-  border-radius: 8px;
-  padding: 6px;
-  margin: 6px -6px 0;
 }
 
-.session-block:hover {
+.window-card:hover {
   box-shadow: 0 2px 8px rgba(0,0,0,0.12);
 }
 
-.session-block.selected {
+.window-card.selected {
   outline: 3px solid var(--blue-900);
   outline-offset: 1px;
+}
+
+.session-block {
+  padding: 6px;
+  margin: 6px -6px 0;
 }
 
 .session-block + .session-block {
