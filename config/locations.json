@@ -3,12 +3,12 @@
     "name": "Balnarring Beach, VIC 3926",
     "type": "Kayak",
     "shore": "NW",
-    "driveTo": "00:00",
-    "driveBack": "00:00",
-    "prep": "00:00",
-    "packUp": "00:00",
-    "paddleOut": "00:00",
-    "paddleBack": "00:00"
+    "driveTo": "01:00",
+    "driveBack": "01:10",
+    "prep": "00:30",
+    "packUp": "00:30",
+    "paddleOut": "00:10",
+    "paddleBack": "00:10"
   },
   {
     "name": "Corinella Boat Ramp, VIC",
