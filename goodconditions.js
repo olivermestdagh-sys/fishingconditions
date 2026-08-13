@@ -433,6 +433,7 @@ function render() {
       results.push({
         ...w,
         avgCondition: average(locRows, "Condition", w.from, w.to),
+        avgFishingCondition: average(locRows, "Fishing Condition", w.from, w.to),
         avgTemp: average(locRows, "Temp Forecast (C)", w.from, w.to),
         avgWind: average(locRows, "Wind Forecast (km/h)", w.from, w.to),
         avgRain: average(locRows, "Rainfall Probability (%)", w.from, w.to),
@@ -494,8 +495,19 @@ function render() {
             <div class="window-loc">${w.locationName}</div>
             <div class="window-sub">${w.type || "–"} · shore ${w.shore || "–"} · ${timeRange} · ${w.hoursLabel}h</div>
           </div>
-          <div class="condition-badge" style="background:${conditionColor(w.avgCondition)}">
-            ${w.avgCondition != null ? w.avgCondition.toFixed(1) : "–"}
+          <div class="badge-stack">
+            <div class="badge-item">
+              <div class="condition-badge" style="background:${conditionColor(w.avgCondition)}">
+                ${w.avgCondition != null ? w.avgCondition.toFixed(1) : "–"}
+              </div>
+              <div class="badge-label">Location</div>
+            </div>
+            <div class="badge-item">
+              <div class="condition-badge" style="background:${conditionColor(w.avgFishingCondition)}">
+                ${w.avgFishingCondition != null ? w.avgFishingCondition.toFixed(1) : "–"}
+              </div>
+              <div class="badge-label">Fishing</div>
+            </div>
           </div>
         </div>
         <div class="stat-grid">

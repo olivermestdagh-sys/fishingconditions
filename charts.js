@@ -129,9 +129,9 @@ function conditionStripColor(value) {
 }
 
 function buildConditionStripsPlugin(rows, isMobile) {
-  const stripHeight = isMobile ? 9 : 12;
-  const rowGap = isMobile ? 11 : 14; // includes room for that row's own label
-  const topMargin = isMobile ? 15 : 18; // space between x-axis and the first strip's label
+  const stripHeight = isMobile ? 11 : 14;
+  const rowGap = isMobile ? 2 : 3; // tight stacking — labels no longer need space above each row
+  const topMargin = isMobile ? 6 : 8; // just a small gap below the x-axis
 
   return {
     id: "conditionStrips",
@@ -146,11 +146,16 @@ function buildConditionStripsPlugin(rows, isMobile) {
 
       const drawStrip = (field, label, stripTop) => {
         ctx.save();
-        ctx.font = `600 ${isMobile ? 8 : 9}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.font = `700 ${isMobile ? 8 : 9}px -apple-system, BlinkMacSystemFont, sans-serif`;
         ctx.fillStyle = "#475569";
-        ctx.textAlign = "left";
-        ctx.textBaseline = "bottom";
-        ctx.fillText(label, left, stripTop - 2);
+        // Right-aligned, ending just before chartArea.left — sits in the same
+        // margin the y-axis's own tick labels/title already reserve, rather
+        // than eating into the strip's own width (which would misalign it
+        // with the graph above, since the strip still needs to start exactly
+        // at chartArea.left to match the plotted timeline).
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, left - 4, stripTop + stripHeight / 2);
 
         for (let i = 0; i < rows.length; i++) {
           const val = rows[i][field];
@@ -167,8 +172,8 @@ function buildConditionStripsPlugin(rows, isMobile) {
       };
 
       const firstStripTop = bottom + topMargin;
-      drawStrip("Condition", "Location Condition", firstStripTop);
-      drawStrip("Fishing Condition", "Fishing Condition", firstStripTop + stripHeight + rowGap);
+      drawStrip("Condition", "Loc", firstStripTop);
+      drawStrip("Fishing Condition", "Fish", firstStripTop + stripHeight + rowGap);
     },
   };
 }
@@ -373,7 +378,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
     options: {
       responsive: true,
       spanGaps: true,
-      layout: { padding: { top: 20, bottom: isMobile ? 50 : 62 } },
+      layout: { padding: { top: 20, bottom: isMobile ? 33 : 43 } },
       interaction: { mode: "index", intersect: false },
       scales: {
         x: {
@@ -385,7 +390,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
         },
         yTemp: { position: "left", title: { display: true, text: "Temperature (°C)" } },
         yRain: { display: false, min: 0, max: 100 },
-        yWind: { position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: "Wind (km/h)" } },
+        yWind: { position: "right", min: 0, max: 100, grid: { drawOnChartArea: false }, title: { display: true, text: "Wind (km/h)" } },
         yTide: { display: false, min: 0 },
       },
       plugins: {

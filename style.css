@@ -312,9 +312,20 @@ tbody tr:nth-child(even) {
 
 .window-card-top {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: flex-start;
   gap: 10px;
+}
+
+.window-card .condition-badge {
+  min-width: 36px;
+  height: 36px;
+  font-size: 0.95rem;
+}
+
+.window-card .badge-label {
+  font-size: 0.58rem;
 }
 
 .window-loc {
