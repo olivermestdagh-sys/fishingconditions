@@ -393,10 +393,14 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
           ticks: { maxTicksLimit: 10, callback: (value) => fmtChartTick(value) },
           grid: { color: "rgba(0,0,0,0.05)" },
         },
-        yTemp: { position: "left", title: { display: true, text: "Temperature (°C)" } },
-        yRain: { display: false, min: 0, max: 100 },
-        yWind: { position: "right", min: 0, max: 50, grid: { drawOnChartArea: false }, title: { display: true, text: "Wind (km/h)" } },
-        yTide: { display: false, min: 0 },
+        // Each axis's min is pushed well below any realistic data value on
+        // purpose — it compresses real data into the upper 60-70% of the
+        // chart, leaving genuine clear space at the bottom for the condition
+        // strips rather than the strips having to overlap low readings.
+        yTemp: { position: "left", min: -10, max: 40, title: { display: true, text: "Temperature (°C)" } },
+        yRain: { display: false, min: -30, max: 100 },
+        yWind: { position: "right", min: -15, max: 50, grid: { drawOnChartArea: false }, title: { display: true, text: "Wind (km/h)" } },
+        yTide: { display: false, min: -1.5, max: 3 },
       },
       plugins: {
         legend: {
