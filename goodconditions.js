@@ -574,9 +574,12 @@ function render() {
         ${sessionsHtml}
       `;
 
-      card.querySelectorAll(".session-block").forEach((el, idx) => {
-        el.addEventListener("click", () => selectWindow(sessions[idx], el));
-      });
+      // One click target for the whole card (heading + every session), not
+      // per-session — every session in a merged card is the same calendar
+      // day, so selectWindow's "full day" graph comes out identical no
+      // matter which specific session triggered it. Uses the first session
+      // as the representative window passed to selectWindow.
+      card.addEventListener("click", () => selectWindow(sessions[0], card));
 
       dayGroup.appendChild(card);
     }
