@@ -142,7 +142,14 @@ function buildConditionStripsPlugin(rows, isMobile) {
       const { ctx, chartArea, scales } = chart;
       if (!chartArea) return;
       const xScale = scales.x;
-      const { left, right, bottom } = chartArea;
+      const { left, right } = chartArea;
+      // chartArea.bottom is only the bottom of the plotted LINES — the x-axis's
+      // own tick labels are drawn in extra space below that, which Chart.js
+      // reserves separately and isn't part of chartArea. Using the x-scale's
+      // own .bottom (its actual rendered extent, including those tick labels)
+      // instead of chartArea.bottom is what actually avoids drawing on top of
+      // the time labels.
+      const axisBottom = xScale.bottom;
 
       const drawStrip = (field, label, stripTop) => {
         ctx.save();
@@ -171,7 +178,7 @@ function buildConditionStripsPlugin(rows, isMobile) {
         ctx.restore();
       };
 
-      const firstStripTop = bottom + topMargin;
+      const firstStripTop = axisBottom + topMargin;
       drawStrip("Condition", "Loc", firstStripTop);
       drawStrip("Fishing Condition", "Fish", firstStripTop + stripHeight + rowGap);
     },
@@ -378,7 +385,14 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
     options: {
       responsive: true,
       spanGaps: true,
-      layout: { padding: { top: 20, bottom: isMobile ? 33 : 43 } },
+      // Extra bottom padding needs to cover BOTH the x-axis's own tick-label
+      // height (not otherwise reserved by Chart.js's own layout, since our
+      // strips draw below xScale.bottom, not chartArea.bottom) AND the strip
+      // rows themselves. Tick label height isn't something we can query before
+      // layout happens, so this is a reasonable fixed estimate for a single
+      // line of short "HH:MM" labels — a little generous is fine, a little
+      // short causes visible overlap, so we err upward.
+      layout: { padding: { top: 20, bottom: isMobile ? 53 : 67 } },
       interaction: { mode: "index", intersect: false },
       scales: {
         x: {
@@ -390,7 +404,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
         },
         yTemp: { position: "left", title: { display: true, text: "Temperature (°C)" } },
         yRain: { display: false, min: 0, max: 100 },
-        yWind: { position: "right", min: 0, max: 100, grid: { drawOnChartArea: false }, title: { display: true, text: "Wind (km/h)" } },
+        yWind: { position: "right", min: 0, max: 50, grid: { drawOnChartArea: false }, title: { display: true, text: "Wind (km/h)" } },
         yTide: { display: false, min: 0 },
       },
       plugins: {
