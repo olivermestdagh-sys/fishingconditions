@@ -176,6 +176,13 @@ main {
 
 .table-scroll {
   overflow-x: auto;
+  /* Without this, the browser implicitly treats overflow-y as "auto" too
+     (per the CSS overflow spec, setting only one axis forces the other),
+     which makes this div its own vertical scroll container — and since it
+     has no height limit of its own, it never actually scrolls, so the
+     sticky header below ends up stuck relative to a box that never moves
+     instead of the actual page. */
+  overflow-y: visible;
 }
 
 table {
