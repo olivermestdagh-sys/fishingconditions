@@ -699,3 +699,19 @@ main.wide {
     white-space: nowrap;
   }
 }
+
+.filters-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.filters-content {
+  margin-top: 10px;
+}
+
+.filters-content.collapsed {
+  display: none;
+}

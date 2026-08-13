@@ -189,6 +189,18 @@ async function init() {
     render();
   });
 
+  const filtersToggle = document.getElementById("filtersToggle");
+  const filtersContent = document.getElementById("filtersContent");
+  const filtersHint = document.getElementById("filtersToggleHint");
+  const toggleFilters = () => {
+    const nowCollapsed = filtersContent.classList.toggle("collapsed");
+    filtersHint.textContent = nowCollapsed ? "▸ tap to show" : "▾ hide";
+  };
+  filtersToggle.addEventListener("click", toggleFilters);
+  filtersToggle.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFilters(); }
+  });
+
   let savedTripTimes = null;
   try {
     savedTripTimes = JSON.parse(localStorage.getItem(TRIP_TIMES_STORAGE_KEY) || "null");

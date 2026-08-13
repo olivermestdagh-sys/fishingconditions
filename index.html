@@ -22,6 +22,11 @@
 <main class="wide">
   <div class="good-layout">
     <section class="summary-card gc-filters">
+      <div class="filters-toggle" id="filtersToggle" role="button" tabindex="0">
+        <label class="loc-edit-label" style="margin:0;">Thresholds &amp; filters</label>
+        <span class="schedule-toggle-hint" id="filtersToggleHint">▸ tap to show</span>
+      </div>
+      <div class="filters-content collapsed" id="filtersContent">
       <p class="footnote" style="margin:0 0 12px;text-align:left;">
         Every hourly forecast row that sits inside a run of consecutive hours meeting the thresholds below (evaluated per location).
       </p>
@@ -62,6 +67,7 @@
         </div>
       </div>
       <div id="locationChips" class="chip-row"></div>
+      </div>
     </section>
 
     <section class="table-section gc-windows">
