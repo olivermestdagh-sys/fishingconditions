@@ -296,9 +296,55 @@ function buildDayBandPlugin(rows, sunTimes, locationName) {
  *   elsewhere on the page and repeating it on every day's band would just be clutter.
  * @returns {Chart|null} the new Chart instance, or null if there were no rows
  */
+const HOURLY_NUMERIC_FIELDS = [
+  "Temp Forecast (C)", "Temp Realtime (C)", "Rainfall Probability (%)",
+  "Wind Forecast (km/h)", "Wind Realtime (km/h)", "Tide Height (m)",
+  "Condition", "Fishing Condition",
+];
+
+/**
+ * Collapses rows finer than an hour (e.g. today's 10-minute realtime
+ * readings) into one row per hour, averaging numeric fields. Already-hourly
+ * data (forecast-only future days) passes through unchanged — a hour with
+ * only one row is a no-op, so this is safe to apply universally rather than
+ * needing to special-case which rows are "dense".
+ */
+function bucketRowsHourly(rows) {
+  if (!rows || rows.length <= 1) return rows;
+
+  const buckets = new Map();
+  for (const r of rows) {
+    const hourKey = Math.floor(r._t / 3600000) * 3600000;
+    if (!buckets.has(hourKey)) buckets.set(hourKey, []);
+    buckets.get(hourKey).push(r);
+  }
+
+  const result = [];
+  for (const [hourKey, group] of buckets) {
+    if (group.length === 1) {
+      result.push(group[0]);
+      continue;
+    }
+    // Non-numeric fields (direction text, Tide Status, reason strings, etc.)
+    // aren't meaningfully averageable — take them from the last reading in
+    // the hour as the most "current" representative value.
+    const merged = { ...group[group.length - 1] };
+    merged._t = hourKey;
+    merged.dateTime = new Date(hourKey).toISOString().slice(0, 19);
+    for (const field of HOURLY_NUMERIC_FIELDS) {
+      const vals = group.map((r) => r[field]).filter((v) => v != null);
+      merged[field] = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    }
+    result.push(merged);
+  }
+
+  return result.sort((a, b) => a._t - b._t);
+}
+
 function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
+  rows = bucketRowsHourly(rows);
 
   // On mobile, the full descriptive legend labels take up a lot of vertical space
   // under the chart (often wrapping to several lines) — shorten them there, since
