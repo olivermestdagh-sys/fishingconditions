@@ -400,7 +400,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
         yTemp: { position: "left", min: -5, max: 40, title: { display: true, text: "Temperature (°C)" } },
         yRain: { display: false, min: -10, max: 100 },
         yWind: { position: "right", min: -5, max: 50, grid: { drawOnChartArea: false }, title: { display: true, text: "Wind (km/h)" } },
-        yTide: { display: false, min: 0, max: 3 },
+        yTide: { display: false, min: 0, max: 3.5 },
       },
       plugins: {
         legend: {
