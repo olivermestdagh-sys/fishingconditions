@@ -475,10 +475,10 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
               if (!row) return [];
               const lines = [];
               if (row["Condition"] != null) {
-                lines.push(`Location ${row["Condition"]}/5 — ${row["Condition Reason"] || ""}`);
+                lines.push(`Location ${row["Condition"].toFixed(1)}/5 — ${row["Condition Reason"] || ""}`);
               }
               if (row["Fishing Condition"] != null) {
-                lines.push(`Fishing ${row["Fishing Condition"]}/5 — ${row["Fishing Condition Reason"] || ""}`);
+                lines.push(`Fishing ${row["Fishing Condition"].toFixed(1)}/5 — ${row["Fishing Condition Reason"] || ""}`);
               }
               return lines;
             },
