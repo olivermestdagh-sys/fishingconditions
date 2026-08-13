@@ -110,10 +110,11 @@ function fmtTime(iso) {
   return d.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-function conditionPill(value) {
+function conditionPill(value, reason) {
   if (value == null) return `<span class="pill" style="background:var(--cond-none)">–</span>`;
   const color = CONDITION_COLORS[Math.round(value)] || "var(--cond-none)";
-  return `<span class="pill" style="background:${color}">${value}/5</span>`;
+  const titleAttr = reason ? ` title="${reason.replace(/"/g, "&quot;")}"` : "";
+  return `<span class="pill" style="background:${color}"${titleAttr}>${value}/5</span>`;
 }
 
 function tidePill(status) {
@@ -157,13 +158,13 @@ function renderSummary(loc, rows, now) {
       </div>
       <div class="badge-stack">
         <div class="badge-item">
-          <div class="condition-badge" style="background:${conditionVal != null ? (CONDITION_COLORS[Math.round(conditionVal)] || "var(--cond-none)") : "var(--cond-none)"}">
+          <div class="condition-badge" style="background:${conditionVal != null ? (CONDITION_COLORS[Math.round(conditionVal)] || "var(--cond-none)") : "var(--cond-none)"}" title="${conditionRow && conditionRow["Condition Reason"] ? conditionRow["Condition Reason"].replace(/"/g, "&quot;") : ""}">
             ${conditionVal != null ? conditionVal + "/5" : "–"}
           </div>
           <div class="badge-label">Location</div>
         </div>
         <div class="badge-item">
-          <div class="condition-badge" style="background:${fishingVal != null ? (CONDITION_COLORS[Math.round(fishingVal)] || "var(--cond-none)") : "var(--cond-none)"}">
+          <div class="condition-badge" style="background:${fishingVal != null ? (CONDITION_COLORS[Math.round(fishingVal)] || "var(--cond-none)") : "var(--cond-none)"}" title="${fishingRow && fishingRow["Fishing Condition Reason"] ? fishingRow["Fishing Condition Reason"].replace(/"/g, "&quot;") : ""}">
             ${fishingVal != null ? fishingVal + "/5" : "–"}
           </div>
           <div class="badge-label">Fishing</div>
@@ -213,7 +214,8 @@ function renderTable(rows) {
       <td>${wind != null ? Math.round(wind) + " km/h " + (windDir || "") : "–"}</td>
       <td>${r["Rainfall Probability (%)"] != null ? r["Rainfall Probability (%)"] + "%" : "–"}</td>
       <td>${tidePill(r["Tide Status"])}${r["Tide Height (m)"] != null ? " " + r["Tide Height (m)"] + "m" : ""}</td>
-      <td>${conditionPill(r["Condition"])}</td>
+      <td>${conditionPill(r["Condition"], r["Condition Reason"])}</td>
+      <td>${conditionPill(r["Fishing Condition"], r["Fishing Condition Reason"])}</td>
     `;
     tbody.appendChild(tr);
   }
