@@ -92,6 +92,87 @@ const DAY_BAND_COLORS = ["rgba(31, 78, 120, 0.055)", "rgba(31, 78, 120, 0)"];
 const NIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.10)";
 const TWILIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.05)";
 
+// Condition strips — Location Condition and Fishing Condition are drawn as two
+// thin colour-coded horizontal bands beneath the graph, rather than as more
+// lines sharing the same axis as temperature/wind/rain/tide. Two derived 1-5
+// scores don't read well as continuous lines next to six lines of raw
+// weather data — a strip (like a UV-index or pollen bar) is a clearer, more
+// compact way to show "how good was it" at a glance without adding visual
+// competition to the actual data. Colour interpolates smoothly between the
+// same five reference colours the badges use, since these scores are
+// commonly fractional (e.g. 3.8), not just whole numbers.
+const CONDITION_COLOR_STOPS = {
+  1: [220, 38, 38],   // --cond-1
+  2: [249, 115, 22],  // --cond-2
+  3: [234, 179, 8],   // --cond-3
+  4: [101, 163, 13],  // --cond-4
+  5: [22, 163, 74],   // --cond-5
+};
+const CONDITION_NONE_COLOR = "rgb(156, 163, 175)"; // --cond-none
+
+function conditionStripColor(value) {
+  if (value == null) return CONDITION_NONE_COLOR;
+  const clamped = Math.max(1, Math.min(5, value));
+  const lower = Math.floor(clamped);
+  const upper = Math.min(5, Math.ceil(clamped));
+  if (lower === upper) {
+    const [r, g, b] = CONDITION_COLOR_STOPS[lower];
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+  const t = clamped - lower;
+  const [r1, g1, b1] = CONDITION_COLOR_STOPS[lower];
+  const [r2, g2, b2] = CONDITION_COLOR_STOPS[upper];
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+function buildConditionStripsPlugin(rows, isMobile) {
+  const stripHeight = isMobile ? 9 : 12;
+  const rowGap = isMobile ? 11 : 14; // includes room for that row's own label
+  const topMargin = isMobile ? 15 : 18; // space between x-axis and the first strip's label
+
+  return {
+    id: "conditionStrips",
+    // Reserves its own space via chart.options.layout.padding.bottom (set by
+    // the caller) — draws in that reserved area after everything else,
+    // so it never overlaps the plotted lines or the x-axis ticks.
+    afterDraw(chart) {
+      const { ctx, chartArea, scales } = chart;
+      if (!chartArea) return;
+      const xScale = scales.x;
+      const { left, right, bottom } = chartArea;
+
+      const drawStrip = (field, label, stripTop) => {
+        ctx.save();
+        ctx.font = `600 ${isMobile ? 8 : 9}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.fillStyle = "#475569";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(label, left, stripTop - 2);
+
+        for (let i = 0; i < rows.length; i++) {
+          const val = rows[i][field];
+          if (val == null) continue;
+          const xStart = xScale.getPixelForValue(rows[i]._t);
+          const xEnd = i + 1 < rows.length ? xScale.getPixelForValue(rows[i + 1]._t) : right;
+          const clippedStart = Math.max(xStart, left);
+          const clippedEnd = Math.min(xEnd, right);
+          if (clippedEnd <= clippedStart) continue;
+          ctx.fillStyle = conditionStripColor(val);
+          ctx.fillRect(clippedStart, stripTop, clippedEnd - clippedStart, stripHeight);
+        }
+        ctx.restore();
+      };
+
+      const firstStripTop = bottom + topMargin;
+      drawStrip("Condition", "Location Condition", firstStripTop);
+      drawStrip("Fishing Condition", "Fishing Condition", firstStripTop + stripHeight + rowGap);
+    },
+  };
+}
+
 function buildDayBandPlugin(rows, sunTimes, locationName) {
   // Group rows by calendar day, tracking each day's exact start/end timestamp — bands
   // are positioned by real elapsed time (via the linear x-axis), not by row index, so
@@ -214,8 +295,8 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   // desktop has plenty of room to keep the fuller, more descriptive text.
   const isMobile = typeof window !== "undefined" && window.innerWidth < 900;
   const L = isMobile
-    ? { tempFcst: "Tmp Fcst", tempNow: "Tmp Now", rain: "Rain %", windFcst: "Wind Fcst", windNow: "Wind Now", tide: "Tide", condition: "Loc Cond", fishingCondition: "Fish Cond" }
-    : { tempFcst: "Temp Forecast (°C)", tempNow: "Temp Realtime (°C)", rain: "Rainfall Probability (%)", windFcst: "Wind Forecast (km/h)", windNow: "Wind Realtime (km/h)", tide: "Tide Height (m)", condition: "Location Condition (1-5)", fishingCondition: "Fishing Condition (1-5)" };
+    ? { tempFcst: "Tmp Fcst", tempNow: "Tmp Now", rain: "Rain %", windFcst: "Wind Fcst", windNow: "Wind Now", tide: "Tide" }
+    : { tempFcst: "Temp Forecast (°C)", tempNow: "Temp Realtime (°C)", rain: "Rainfall Probability (%)", windFcst: "Wind Forecast (km/h)", windNow: "Wind Realtime (km/h)", tide: "Tide Height (m)" };
 
   const pointsFor = (field) => rows.map((r) => ({ x: r._t, y: r[field] ?? null }));
 
@@ -280,27 +361,6 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       yAxisID: "yTide",
       tension: 0.4,
     },
-    {
-      label: L.condition,
-      data: pointsFor("Condition"),
-      borderColor: "#9333ea",
-      borderWidth: 2,
-      pointRadius: 2,
-      pointBackgroundColor: "#9333ea",
-      yAxisID: "yCondition",
-      tension: 0.3,
-    },
-    {
-      label: L.fishingCondition,
-      data: pointsFor("Fishing Condition"),
-      borderColor: "#0d9488",
-      borderWidth: 2,
-      borderDash: [6, 3],
-      pointRadius: 2,
-      pointBackgroundColor: "#0d9488",
-      yAxisID: "yCondition",
-      tension: 0.3,
-    },
   ];
 
   const minT = rows[0]._t;
@@ -309,11 +369,11 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   const chart = new Chart(canvas, {
     type: "line",
     data: { datasets },
-    plugins: [buildDayBandPlugin(rows, sunTimes, locationName)],
+    plugins: [buildDayBandPlugin(rows, sunTimes, locationName), buildConditionStripsPlugin(rows, isMobile)],
     options: {
       responsive: true,
       spanGaps: true,
-      layout: { padding: { top: 20 } },
+      layout: { padding: { top: 20, bottom: isMobile ? 50 : 62 } },
       interaction: { mode: "index", intersect: false },
       scales: {
         x: {
@@ -327,7 +387,6 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
         yRain: { display: false, min: 0, max: 100 },
         yWind: { position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: "Wind (km/h)" } },
         yTide: { display: false, min: 0 },
-        yCondition: { display: false, min: 0, max: 5.5 },
       },
       plugins: {
         legend: {
