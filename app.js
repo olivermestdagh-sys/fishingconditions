@@ -112,7 +112,7 @@ function fmtTime(iso) {
 
 function conditionPill(value) {
   if (value == null) return `<span class="pill" style="background:var(--cond-none)">–</span>`;
-  const color = CONDITION_COLORS[value] || "var(--cond-none)";
+  const color = CONDITION_COLORS[Math.round(value)] || "var(--cond-none)";
   return `<span class="pill" style="background:${color}">${value}/5</span>`;
 }
 
@@ -142,10 +142,12 @@ function renderSummary(loc, rows, now) {
   const tempRt = lastNonNullAtOrBefore(rows, "Temp Realtime (C)", now);
   const windRt = lastNonNullAtOrBefore(rows, "Wind Realtime (km/h)", now);
   const conditionRow = nearestRowWithField(rows, "Condition", now);
+  const fishingRow = nearestRowWithField(rows, "Fishing Condition", now);
   const tideRow = nearestRowWithField(rows, "Tide Status", now);
   const tideHeightRow = nearestRowWithField(rows, "Tide Height (m)", now);
 
   const conditionVal = conditionRow ? conditionRow["Condition"] : null;
+  const fishingVal = fishingRow ? fishingRow["Fishing Condition"] : null;
 
   card.innerHTML = `
     <div class="summary-top">
@@ -153,8 +155,19 @@ function renderSummary(loc, rows, now) {
         <div class="summary-title">${loc.name}</div>
         <div class="summary-sub">${loc.type} · shore faces ${loc.shore}</div>
       </div>
-      <div class="condition-badge" style="background:${conditionVal != null ? (CONDITION_COLORS[conditionVal] || "var(--cond-none)") : "var(--cond-none)"}">
-        ${conditionVal != null ? conditionVal + "/5" : "–"}
+      <div class="badge-stack">
+        <div class="badge-item">
+          <div class="condition-badge" style="background:${conditionVal != null ? (CONDITION_COLORS[Math.round(conditionVal)] || "var(--cond-none)") : "var(--cond-none)"}">
+            ${conditionVal != null ? conditionVal + "/5" : "–"}
+          </div>
+          <div class="badge-label">Location</div>
+        </div>
+        <div class="badge-item">
+          <div class="condition-badge" style="background:${fishingVal != null ? (CONDITION_COLORS[Math.round(fishingVal)] || "var(--cond-none)") : "var(--cond-none)"}">
+            ${fishingVal != null ? fishingVal + "/5" : "–"}
+          </div>
+          <div class="badge-label">Fishing</div>
+        </div>
       </div>
     </div>
     <div class="stat-grid">
