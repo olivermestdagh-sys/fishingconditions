@@ -419,6 +419,23 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
               items.length
                 ? new Intl.DateTimeFormat([], { timeZone: "UTC", weekday: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(items[0].parsed.x))
                 : "",
+            // Location/Fishing Condition are drawn as strips, not real
+            // datasets, so they don't get their own tooltip line from Chart.js
+            // automatically — this adds one manually, looking up the same row
+            // by index that the hovered point already resolved to.
+            afterBody: (items) => {
+              if (!items.length) return [];
+              const row = rows[items[0].dataIndex];
+              if (!row) return [];
+              const lines = [];
+              if (row["Condition"] != null) {
+                lines.push(`Location ${row["Condition"]}/5 — ${row["Condition Reason"] || ""}`);
+              }
+              if (row["Fishing Condition"] != null) {
+                lines.push(`Fishing ${row["Fishing Condition"]}/5 — ${row["Fishing Condition Reason"] || ""}`);
+              }
+              return lines;
+            },
           },
         },
       },
