@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Olie's Kayak and Surf Fishing Conditions – Good Conditions</title>
+<title>Olie's Kayak and Surf Fishing Conditions – Trip Planner</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -14,9 +14,9 @@
 </header>
 
 <nav class="tabnav">
-  <a href="index.html" class="active">Good Conditions</a>
-  <a href="conditions.html">Conditions</a>
-  <a href="locations.html">Locations</a>
+  <a href="index.html" class="active">Trip planner</a>
+  <a href="conditions.html">Location</a>
+  <a href="locations.html">Settings</a>
 </nav>
 
 <main class="wide">
@@ -56,7 +56,7 @@
         </div>
       </div>
       <p class="footnote" style="margin:8px 0 0;text-align:left;">
-        Select a window below to work out a full trip schedule for that location, shown under the graph.
+        Select a session below to work out a full trip schedule for that location, shown under the graph.
       </p>
 
       <div class="loc-filter-header">
@@ -71,17 +71,17 @@
     </section>
 
     <section class="table-section gc-windows">
-      <h2>Qualifying windows</h2>
+      <h2>Available Sessions</h2>
       <p class="footnote" style="margin:0 0 10px;text-align:left;">
-        One box per day — Hours shows the whole contiguous window, with * where it spans multiple days.
-        Tap a window to see that location's full day of conditions →
+        One box per day — Hours shows the whole contiguous session, with * where it spans multiple days.
+        Tap a session to see that location's full day of conditions →
       </p>
       <div id="windowsContainer"></div>
-      <div id="emptyState" class="empty-state" style="display:none;">No windows meet the criteria</div>
+      <div id="emptyState" class="empty-state" style="display:none;">No sessions meet the criteria</div>
     </section>
 
     <section class="chart-section gc-detail" id="detailPanel">
-      <div id="detailPlaceholder" class="empty-state">Tap a location/window below to see its full day here.</div>
+      <div id="detailPlaceholder" class="empty-state">Tap a location/session below to see its full day here.</div>
       <canvas id="detailChart" height="280" style="display:none;"></canvas>
       <div id="scheduleContainer"></div>
     </section>

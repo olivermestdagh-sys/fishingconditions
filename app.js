@@ -105,24 +105,6 @@ function nearestRowWithField(rows, field, now) {
   return best;
 }
 
-function fmtTime(iso) {
-  const d = new Date(iso);
-  return d.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
-}
-
-function conditionPill(value, reason) {
-  if (value == null) return `<span class="pill" style="background:var(--cond-none)">–</span>`;
-  const color = CONDITION_COLORS[Math.round(value)] || "var(--cond-none)";
-  const titleAttr = reason ? ` title="${reason.replace(/"/g, "&quot;")}"` : "";
-  return `<span class="pill" style="background:${color}"${titleAttr}>${value}/5</span>`;
-}
-
-function tidePill(status) {
-  const colors = { Low: "#0ea5e9", High: "#1d4ed8", Incoming: "#22c55e", Outgoing: "#f97316" };
-  if (!status) return "–";
-  return `<span class="pill" style="background:${colors[status] || "var(--cond-none)"}">${status}</span>`;
-}
-
 function renderLocation(name) {
   const loc = state.data.locations.find((l) => l.name === name);
   const rows = state.rowsByLocation[name] || [];
@@ -130,7 +112,6 @@ function renderLocation(name) {
 
   renderSummary(loc, rows, now);
   renderCharts(rows, loc);
-  renderTable(rows);
 }
 
 function renderSummary(loc, rows, now) {
@@ -196,29 +177,6 @@ function renderCharts(rows, loc) {
     sunTimes,
     existingChart: state.chart,
   });
-}
-
-function renderTable(rows) {
-  const tbody = document.querySelector("#dataTable tbody");
-  tbody.innerHTML = "";
-
-  for (const r of rows) {
-    const temp = r["Temp Forecast (C)"] ?? r["Temp Realtime (C)"];
-    const wind = r["Wind Forecast (km/h)"] ?? r["Wind Realtime (km/h)"];
-    const windDir = r["Wind Forecast Dir"] ?? r["Wind Realtime Dir"];
-
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${fmtTime(r.dateTime)}</td>
-      <td>${temp != null ? temp + "°" : "–"}</td>
-      <td>${wind != null ? Math.round(wind) + " km/h " + (windDir || "") : "–"}</td>
-      <td>${r["Rainfall Probability (%)"] != null ? r["Rainfall Probability (%)"] + "%" : "–"}</td>
-      <td>${tidePill(r["Tide Status"])}${r["Tide Height (m)"] != null ? " " + r["Tide Height (m)"] + "m" : ""}</td>
-      <td>${conditionPill(r["Condition"], r["Condition Reason"])}</td>
-      <td>${conditionPill(r["Fishing Condition"], r["Fishing Condition Reason"])}</td>
-    `;
-    tbody.appendChild(tr);
-  }
 }
 
 init();
