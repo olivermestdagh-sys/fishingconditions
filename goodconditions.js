@@ -26,6 +26,18 @@ function dateOnly(ms) {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
+// Session timestamps (w.from/w.to) use the same "naive local time treated as
+// UTC" convention as everything else in this app (see parseNaive in
+// charts.js) — they're NOT real UTC instants. To compare one against the
+// browser's actual current time, re-interpret those same wall-clock digits
+// as the browser's own local time instead (matching the same assumption
+// app.js already relies on: the viewer's browser is in the same timezone
+// the data represents, i.e. Melbourne).
+function naiveMsToLocalDate(ms) {
+  const d = new Date(ms);
+  return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds());
+}
+
 // Time-of-day / duration arithmetic, all working in minutes-since-midnight.
 // Intermediate results are kept unwrapped (can go negative or past 1440) so a
 // chain of subtractions that crosses midnight still produces a sensible answer —
@@ -457,6 +469,11 @@ function render() {
   // SORT by {From, Location Name} ascending, matching the Excel SORT({4,1},{1,1})
   results.sort((a, b) => a.from - b.from || a.locationName.localeCompare(b.locationName));
 
+  // Don't show sessions that have already finished — no point suggesting a
+  // trip window that's already in the past.
+  const nowLocal = new Date();
+  results = results.filter((w) => naiveMsToLocalDate(w.to) >= nowLocal);
+
   const container = document.getElementById("windowsContainer");
   const emptyState = document.getElementById("emptyState");
   container.innerHTML = "";
@@ -464,7 +481,7 @@ function render() {
   if (results.length === 0) {
     emptyState.textContent = selectedLocations.size === 0
       ? "No locations selected — pick some above to see qualifying windows."
-      : "No windows meet the criteria";
+      : "No sessions meet the criteria";
     emptyState.style.display = "block";
     container.style.display = "none";
     return;
@@ -495,50 +512,72 @@ function render() {
     heading.style.borderBottomColor = colors.accent;
     dayGroup.appendChild(heading);
 
+    // If the same location has more than one qualifying session today (e.g.
+    // a morning window and a separate evening window), combine them into ONE
+    // card listing every session, rather than showing duplicate cards for
+    // the same spot.
+    const byLocationThisDay = new Map();
     for (const w of byDay.get(dayKey)) {
+      if (!byLocationThisDay.has(w.locationName)) byLocationThisDay.set(w.locationName, []);
+      byLocationThisDay.get(w.locationName).push(w);
+    }
+
+    for (const [, sessions] of byLocationThisDay) {
+      const first = sessions[0];
       const card = document.createElement("div");
       card.className = "window-card";
       card.style.background = colors.bg;
       card.style.borderLeft = `4px solid ${colors.accent}`;
-      const timeRange = `${fmtNaive(w.from, { hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(w.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+
+      const sessionsHtml = sessions.map((w, idx) => {
+        const timeRange = `${fmtNaive(w.from, { hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(w.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+        return `
+        <div class="session-block" data-session-idx="${idx}">
+          <div class="window-card-top">
+            <div class="window-sub">${timeRange} · ${w.hoursLabel}h</div>
+            <div class="badge-stack">
+              <div class="badge-item">
+                <div class="condition-badge" style="background:${conditionColor(w.avgCondition)}">
+                  ${w.avgCondition != null ? w.avgCondition.toFixed(1) : "–"}
+                </div>
+                <div class="badge-label">Location</div>
+              </div>
+              <div class="badge-item">
+                <div class="condition-badge" style="background:${conditionColor(w.avgFishingCondition)}">
+                  ${w.avgFishingCondition != null ? w.avgFishingCondition.toFixed(1) : "–"}
+                </div>
+                <div class="badge-label">Fishing</div>
+              </div>
+            </div>
+          </div>
+          <div class="stat-grid">
+            <div class="stat">
+              <div class="label">Avg Temp</div>
+              <div class="value">${w.avgTemp != null ? w.avgTemp.toFixed(1) + "°" : "–"}</div>
+            </div>
+            <div class="stat">
+              <div class="label">Avg Wind</div>
+              <div class="value">${w.avgWind != null ? Math.round(w.avgWind) + " km/h" : "–"}</div>
+            </div>
+            <div class="stat">
+              <div class="label">Avg Rain</div>
+              <div class="value">${w.avgRain != null ? Math.round(w.avgRain) + "%" : "–"}</div>
+            </div>
+          </div>
+          <div class="window-tides">Tides: ${w.tides}</div>
+        </div>`;
+      }).join("");
+
       card.innerHTML = `
-        <div class="window-card-top">
-          <div>
-            <div class="window-loc">${w.locationName}</div>
-            <div class="window-sub">${w.type || "–"} · shore ${w.shore || "–"} · ${timeRange} · ${w.hoursLabel}h</div>
-          </div>
-          <div class="badge-stack">
-            <div class="badge-item">
-              <div class="condition-badge" style="background:${conditionColor(w.avgCondition)}">
-                ${w.avgCondition != null ? w.avgCondition.toFixed(1) : "–"}
-              </div>
-              <div class="badge-label">Location</div>
-            </div>
-            <div class="badge-item">
-              <div class="condition-badge" style="background:${conditionColor(w.avgFishingCondition)}">
-                ${w.avgFishingCondition != null ? w.avgFishingCondition.toFixed(1) : "–"}
-              </div>
-              <div class="badge-label">Fishing</div>
-            </div>
-          </div>
-        </div>
-        <div class="stat-grid">
-          <div class="stat">
-            <div class="label">Avg Temp</div>
-            <div class="value">${w.avgTemp != null ? w.avgTemp.toFixed(1) + "°" : "–"}</div>
-          </div>
-          <div class="stat">
-            <div class="label">Avg Wind</div>
-            <div class="value">${w.avgWind != null ? Math.round(w.avgWind) + " km/h" : "–"}</div>
-          </div>
-          <div class="stat">
-            <div class="label">Avg Rain</div>
-            <div class="value">${w.avgRain != null ? Math.round(w.avgRain) + "%" : "–"}</div>
-          </div>
-        </div>
-        <div class="window-tides">Tides: ${w.tides}</div>
+        <div class="window-loc">${first.locationName}</div>
+        <div class="window-sub" style="margin-bottom:8px;">${first.type || "–"} · shore ${first.shore || "–"}</div>
+        ${sessionsHtml}
       `;
-      card.addEventListener("click", () => selectWindow(w, card));
+
+      card.querySelectorAll(".session-block").forEach((el, idx) => {
+        el.addEventListener("click", () => selectWindow(sessions[idx], el));
+      });
+
       dayGroup.appendChild(card);
     }
 

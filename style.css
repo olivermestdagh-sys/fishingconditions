@@ -422,18 +422,27 @@ main.wide {
   z-index: 5;
 }
 
-.window-card {
+.session-block {
   cursor: pointer;
   transition: box-shadow 0.15s ease, transform 0.15s ease;
+  border-radius: 8px;
+  padding: 6px;
+  margin: 6px -6px 0;
 }
 
-.window-card:hover {
+.session-block:hover {
   box-shadow: 0 2px 8px rgba(0,0,0,0.12);
 }
 
-.window-card.selected {
+.session-block.selected {
   outline: 3px solid var(--blue-900);
   outline-offset: 1px;
+}
+
+.session-block + .session-block {
+  border-top: 1px dashed rgba(0,0,0,0.15);
+  padding-top: 10px;
+  margin-top: 6px;
 }
 
 /* On desktop, revert to the original side-by-side arrangement: thresholds above the
