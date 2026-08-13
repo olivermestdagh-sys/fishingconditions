@@ -375,54 +375,75 @@ def explain_condition(loc_type, shore, wind_dir, wind_speed, tide_status):
 # answering "are the fish likely to be active" rather than "is it comfortable
 # to paddle/launch here". Same formula for every location — fish behaviour
 # doesn't care what kind of craft you're in. Baseline 3.0, each factor nudges
-# it up/down, clamped to 1-5. See fishing-condition-formula.md for the
-# reasoning behind the specific weights and thresholds below.
+# it up/down, clamped to 1-5.
+#
+# Pressure and tide stage are weighted as DOMINANT factors (±0.8 each);
+# tide strength, light, and water temp trend are MINOR modifiers (±0.1-0.2).
+# This isn't just a numeric tweak — five roughly-equal independent factors
+# summed together mathematically cluster toward the middle almost always
+# (same reason 5 dice rarely sum to all-1s or all-6s), which was tested and
+# confirmed: the original equal-weight version reached within 0.4 of either
+# true extreme in under 2% of possible combinations. Concentrating weight on
+# the two best-evidenced factors (pressure was the strongest locally-specific
+# claim found; tide movement was one of the most consistently-supported
+# findings generally) both fixes that clustering AND leans the score harder
+# on the factors that most deserve the trust. See fishing-condition-formula.md
+# for the full analysis.
 
 def tide_strength_score(date_str, daily_ranges):
-    """+0.4 if today's tidal range is in the top third of the whole fetched
-    window, -0.4 if bottom third, 0 otherwise. Relative rather than a fixed
-    number, so it adapts to each bay's actual tidal magnitude (Western Port's
-    2-3m swings vs Port Phillip's sub-1m ones) without hardcoding anything
-    per location. Needs at least 3 days of range data to rank meaningfully;
-    returns neutral (0) otherwise rather than over-interpreting too little data."""
+    """MINOR factor. +0.2 if today's tidal range is in the top third of the
+    whole fetched window, -0.2 if bottom third, 0 otherwise. Relative rather
+    than a fixed number, so it adapts to each bay's actual tidal magnitude
+    (Western Port's 2-3m swings vs Port Phillip's sub-1m ones) without
+    hardcoding anything per location. Needs at least 3 days of range data to
+    rank meaningfully; returns neutral (0) otherwise rather than
+    over-interpreting too little data."""
     if date_str not in daily_ranges or len(daily_ranges) < 3:
         return 0
     sorted_items = sorted(daily_ranges.items(), key=lambda kv: kv[1])
     n = len(sorted_items)
     rank = next(i for i, (d, _) in enumerate(sorted_items) if d == date_str)
     if rank >= (2 * n) / 3:
-        return 0.4
+        return 0.2
     if rank < n / 3:
-        return -0.4
+        return -0.2
     return 0
 
 
 def tide_stage_score(tide_status):
-    """+0.4 when the tide is actively moving (Incoming/Outgoing), -0.4 near
-    slack water (Low/High) where there's minimal current."""
+    """DOMINANT factor. +0.8 when the tide is actively moving
+    (Incoming/Outgoing), -0.8 near slack water (Low/High) where there's
+    minimal current. Weighted heavily — along with pressure below — since
+    these two are the most consistently evidence-backed factors from the
+    research, and giving them outsized weight (rather than splitting evenly
+    across all five factors) is also what lets the score actually reach the
+    ends of the 1-5 range without needing every single factor to align."""
     if tide_status in ("Incoming", "Outgoing"):
-        return 0.4
+        return 0.8
     if tide_status in ("Low", "High"):
-        return -0.4
+        return -0.8
     return 0
 
 
 def pressure_score(pressure_hpa):
-    """+0.4 for high pressure, -0.4 for low — Southern Hemisphere specific
-    (the opposite of common Northern Hemisphere/freshwater advice)."""
+    """DOMINANT factor. +0.8 for high pressure, -0.8 for low — Southern
+    Hemisphere specific (the opposite of common Northern Hemisphere/
+    freshwater advice). This was the single strongest, most locally-specific
+    claim from the research (Reedy's Rigs), which is why it carries the same
+    outsized weight as tide stage above rather than an equal fifth-share."""
     if pressure_hpa is None:
         return 0
     if pressure_hpa >= 1025:
-        return 0.4
+        return 0.8
     if pressure_hpa < 1010:
-        return -0.4
+        return -0.8
     return 0
 
 
 def light_score(dt, sunrise_str, sunset_str):
-    """+0.4 within 1 hour of sunrise/sunset, +0.2 within 2 hours, 0
-    otherwise — never a penalty, since the research said not to write off
-    the middle of the day."""
+    """MINOR factor. +0.2 within 1 hour of sunrise/sunset, +0.1 within 2
+    hours, 0 otherwise — never a penalty, since the research said not to
+    write off the middle of the day."""
     best_diff_hours = None
     for edge_str in (sunrise_str, sunset_str):
         if not edge_str:
@@ -437,18 +458,19 @@ def light_score(dt, sunrise_str, sunset_str):
     if best_diff_hours is None:
         return 0
     if best_diff_hours <= 1:
-        return 0.4
-    if best_diff_hours <= 2:
         return 0.2
+    if best_diff_hours <= 2:
+        return 0.1
     return 0
 
 
 def water_temp_trend_score(date_str, daily_sst_avgs):
-    """+0.4 if today's average sea surface temperature is higher than
-    yesterday's, -0.2 if lower (asymmetric: rising is the real trigger per
-    the research, falling just means "less exciting", not "avoid"), 0 if
-    steady/unknown. Needs yesterday's average too (fetched via past_days=1),
-    so day one of the window gets a real trend, not just day two onward."""
+    """MINOR factor. +0.2 if today's average sea surface temperature is
+    higher than yesterday's, -0.1 if lower (asymmetric: rising is the real
+    trigger per the research, falling just means "less exciting", not
+    "avoid"), 0 if steady/unknown. Needs yesterday's average too (fetched
+    via past_days=1), so day one of the window gets a real trend, not just
+    day two onward."""
     if date_str not in daily_sst_avgs:
         return 0
     try:
@@ -460,9 +482,9 @@ def water_temp_trend_score(date_str, daily_sst_avgs):
         return 0
     diff = daily_sst_avgs[date_str] - daily_sst_avgs[prev_date_str]
     if diff > 0.05:
-        return 0.4
+        return 0.2
     if diff < -0.05:
-        return -0.2
+        return -0.1
     return 0
 
 
