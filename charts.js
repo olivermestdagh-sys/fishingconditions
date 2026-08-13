@@ -130,36 +130,35 @@ function conditionStripColor(value) {
 
 function buildConditionStripsPlugin(rows, isMobile) {
   const stripHeight = isMobile ? 11 : 14;
-  const rowGap = isMobile ? 2 : 3; // tight stacking — labels no longer need space above each row
-  const topMargin = isMobile ? 6 : 8; // just a small gap below the x-axis
+  const rowGap = isMobile ? 2 : 3;
+  const bottomMargin = 4; // small gap above the axis line itself
 
   return {
     id: "conditionStrips",
-    // Reserves its own space via chart.options.layout.padding.bottom (set by
-    // the caller) — draws in that reserved area after everything else,
-    // so it never overlaps the plotted lines or the x-axis ticks.
+    // Drawn INSIDE the plot area, anchored to its bottom edge — deliberately
+    // overlapping whatever data lines happen to be low at that point, rather
+    // than reserving separate space below the graph. A semi-opaque backing
+    // behind each strip keeps it legible against anything crossing behind it.
     afterDraw(chart) {
       const { ctx, chartArea, scales } = chart;
       if (!chartArea) return;
       const xScale = scales.x;
-      const { left, right } = chartArea;
-      // chartArea.bottom is only the bottom of the plotted LINES — the x-axis's
-      // own tick labels are drawn in extra space below that, which Chart.js
-      // reserves separately and isn't part of chartArea. Using the x-scale's
-      // own .bottom (its actual rendered extent, including those tick labels)
-      // instead of chartArea.bottom is what actually avoids drawing on top of
-      // the time labels.
-      const axisBottom = xScale.bottom;
+      const { left, right, bottom } = chartArea;
+
+      const fishStripTop = bottom - bottomMargin - stripHeight;
+      const locStripTop = fishStripTop - rowGap - stripHeight;
+
+      ctx.save();
+      ctx.fillStyle = "rgba(255, 255, 255, 0.72)";
+      ctx.fillRect(left, locStripTop - 2, right - left, (fishStripTop + stripHeight) - locStripTop + 4);
+      ctx.restore();
 
       const drawStrip = (field, label, stripTop) => {
         ctx.save();
         ctx.font = `700 ${isMobile ? 8 : 9}px -apple-system, BlinkMacSystemFont, sans-serif`;
         ctx.fillStyle = "#475569";
         // Right-aligned, ending just before chartArea.left — sits in the same
-        // margin the y-axis's own tick labels/title already reserve, rather
-        // than eating into the strip's own width (which would misalign it
-        // with the graph above, since the strip still needs to start exactly
-        // at chartArea.left to match the plotted timeline).
+        // margin the y-axis's own tick labels/title already reserve.
         ctx.textAlign = "right";
         ctx.textBaseline = "middle";
         ctx.fillText(label, left - 4, stripTop + stripHeight / 2);
@@ -178,9 +177,8 @@ function buildConditionStripsPlugin(rows, isMobile) {
         ctx.restore();
       };
 
-      const firstStripTop = axisBottom + topMargin;
-      drawStrip("Condition", "Loc", firstStripTop);
-      drawStrip("Fishing Condition", "Fish", firstStripTop + stripHeight + rowGap);
+      drawStrip("Condition", "Loc", locStripTop);
+      drawStrip("Fishing Condition", "Fish", fishStripTop);
     },
   };
 }
@@ -385,14 +383,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
     options: {
       responsive: true,
       spanGaps: true,
-      // Extra bottom padding needs to cover BOTH the x-axis's own tick-label
-      // height (not otherwise reserved by Chart.js's own layout, since our
-      // strips draw below xScale.bottom, not chartArea.bottom) AND the strip
-      // rows themselves. Tick label height isn't something we can query before
-      // layout happens, so this is a reasonable fixed estimate for a single
-      // line of short "HH:MM" labels — a little generous is fine, a little
-      // short causes visible overlap, so we err upward.
-      layout: { padding: { top: 20, bottom: isMobile ? 53 : 67 } },
+      layout: { padding: { top: 20 } },
       interaction: { mode: "index", intersect: false },
       scales: {
         x: {
