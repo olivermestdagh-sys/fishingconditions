@@ -324,6 +324,53 @@ def compute_condition(loc_type, shore, wind_dir, wind_speed, tide_status=None):
     return None
 
 
+def explain_condition(loc_type, shore, wind_dir, wind_speed, tide_status):
+    """Short human-readable reason for the Location Condition score — same
+    inputs, same branching as compute_condition above, so the explanation
+    can never disagree with the number it's explaining."""
+    if loc_type == "Surf":
+        diff = angle_diff(compass_to_degrees(shore), compass_to_degrees(wind_dir))
+        if diff is None:
+            return "Insufficient wind data"
+        if diff == 0:
+            return "Straight offshore — clean waves"
+        if diff == 45:
+            return "Mostly offshore — good waves"
+        if diff == 90:
+            return "Cross-shore wind"
+        if diff == 135:
+            return "Mostly onshore — messy surf"
+        return "Straight onshore — blown out"
+
+    if loc_type == "Kayak":
+        if wind_speed is None:
+            return "Insufficient wind data"
+        if wind_speed < 5:
+            text = f"Calm ({wind_speed:.0f} km/h)"
+        elif wind_speed < 10:
+            text = f"Light wind ({wind_speed:.0f} km/h)"
+        elif wind_speed < 15:
+            diff = angle_diff(compass_to_degrees(shore), compass_to_degrees(wind_dir))
+            if diff is not None and diff <= 90:
+                text = f"Moderate wind ({wind_speed:.0f} km/h), from behind/side"
+            else:
+                text = f"Moderate wind ({wind_speed:.0f} km/h), from ahead"
+        elif wind_speed < 20:
+            text = f"Strong wind ({wind_speed:.0f} km/h)"
+        else:
+            text = f"Very strong wind ({wind_speed:.0f} km/h)"
+
+        penalty = wind_against_tide_penalty(wind_dir, wind_speed, tide_status)
+        if penalty == 1:
+            text += " · wind against tide"
+        elif penalty == 0.5:
+            text += " · wind partly against tide"
+
+        return text
+
+    return None
+
+
 # --- Fishing Condition: a separate score from the above (Location Condition),
 # answering "are the fish likely to be active" rather than "is it comfortable
 # to paddle/launch here". Same formula for every location — fish behaviour
@@ -430,6 +477,49 @@ def compute_fishing_condition(date_str, tide_status, daily_tide_ranges, pressure
     return max(1.0, min(5.0, round(score, 2)))
 
 
+def explain_fishing_condition(date_str, tide_status, daily_tide_ranges, pressure_hpa,
+                               dt, sunrise_str, sunset_str, daily_sst_avgs):
+    """Short human-readable reason for the Fishing Condition score — lists
+    whichever of the five factors actually nudged the score, so it stays
+    concise on a fully neutral day and only grows as more factors kick in.
+    Same five calls as compute_fishing_condition above, on purpose — this
+    can never disagree with the number it's explaining."""
+    parts = []
+
+    ts = tide_strength_score(date_str, daily_tide_ranges)
+    if ts > 0:
+        parts.append("strong tide")
+    elif ts < 0:
+        parts.append("weak tide")
+
+    tg = tide_stage_score(tide_status)
+    if tg > 0:
+        parts.append("tide moving")
+    elif tg < 0:
+        parts.append("near slack water")
+
+    ps = pressure_score(pressure_hpa)
+    if ps > 0:
+        parts.append("high pressure")
+    elif ps < 0:
+        parts.append("low pressure")
+
+    ls = light_score(dt, sunrise_str, sunset_str)
+    if ls > 0:
+        parts.append("near dawn/dusk")
+
+    wt = water_temp_trend_score(date_str, daily_sst_avgs)
+    if wt > 0:
+        parts.append("water warming")
+    elif wt < 0:
+        parts.append("water cooling")
+
+    if not parts:
+        return "Neutral across all factors"
+    text = ", ".join(parts)
+    return text[0].upper() + text[1:]
+
+
 def process_location(loc):
     name = loc["name"]
     loc_type = loc.get("type")
@@ -508,6 +598,10 @@ def process_location(loc):
             loc_type, shore, row.get("Wind Forecast Dir"), row.get("Wind Forecast (km/h)"),
             tide_status=row.get("Tide Status"),
         )
+        row["Condition Reason"] = explain_condition(
+            loc_type, shore, row.get("Wind Forecast Dir"), row.get("Wind Forecast (km/h)"),
+            row.get("Tide Status"),
+        )
         row["Location Name"] = name
         row["Type"] = loc_type
         row["Shore"] = shore
@@ -532,6 +626,11 @@ def process_location(loc):
         dt = datetime.fromisoformat(row["dateTime"])
         sun = sun_by_date.get(date_str, {})
         row["Fishing Condition"] = compute_fishing_condition(
+            date_str, row.get("Tide Status"), daily_tide_ranges,
+            pressure_by_date.get(date_str), dt, sun.get("sunrise"), sun.get("sunset"),
+            sst_by_date,
+        )
+        row["Fishing Condition Reason"] = explain_fishing_condition(
             date_str, row.get("Tide Status"), daily_tide_ranges,
             pressure_by_date.get(date_str), dt, sun.get("sunrise"), sun.get("sunset"),
             sst_by_date,
