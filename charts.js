@@ -214,8 +214,8 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   // desktop has plenty of room to keep the fuller, more descriptive text.
   const isMobile = typeof window !== "undefined" && window.innerWidth < 900;
   const L = isMobile
-    ? { tempFcst: "Tmp Fcst", tempNow: "Tmp Now", rain: "Rain %", windFcst: "Wind Fcst", windNow: "Wind Now", tide: "Tide", condition: "Loc Cond" }
-    : { tempFcst: "Temp Forecast (°C)", tempNow: "Temp Realtime (°C)", rain: "Rainfall Probability (%)", windFcst: "Wind Forecast (km/h)", windNow: "Wind Realtime (km/h)", tide: "Tide Height (m)", condition: "Location Condition (1-5)" };
+    ? { tempFcst: "Tmp Fcst", tempNow: "Tmp Now", rain: "Rain %", windFcst: "Wind Fcst", windNow: "Wind Now", tide: "Tide", condition: "Loc Cond", fishingCondition: "Fish Cond" }
+    : { tempFcst: "Temp Forecast (°C)", tempNow: "Temp Realtime (°C)", rain: "Rainfall Probability (%)", windFcst: "Wind Forecast (km/h)", windNow: "Wind Realtime (km/h)", tide: "Tide Height (m)", condition: "Location Condition (1-5)", fishingCondition: "Fishing Condition (1-5)" };
 
   const pointsFor = (field) => rows.map((r) => ({ x: r._t, y: r[field] ?? null }));
 
@@ -287,6 +287,17 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       borderWidth: 2,
       pointRadius: 2,
       pointBackgroundColor: "#9333ea",
+      yAxisID: "yCondition",
+      tension: 0.3,
+    },
+    {
+      label: L.fishingCondition,
+      data: pointsFor("Fishing Condition"),
+      borderColor: "#0d9488",
+      borderWidth: 2,
+      borderDash: [6, 3],
+      pointRadius: 2,
+      pointBackgroundColor: "#0d9488",
       yAxisID: "yCondition",
       tension: 0.3,
     },

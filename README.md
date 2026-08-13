@@ -10,6 +10,8 @@ no server to run, no ongoing cost beyond WillyWeather's own API pricing.
 GitHub Actions (on a schedule)
   -> runs scripts/fetch_conditions.py
   -> calls the WillyWeather API (same logic as the Excel Power Query)
+  -> calls Open-Meteo (free, no API key) for barometric pressure and sea
+     surface temperature — two things WillyWeather doesn't offer as forecasts
   -> writes data/conditions.json
   -> commits it back to the repo
 GitHub Pages
@@ -19,6 +21,7 @@ GitHub Pages
 
 Your WillyWeather API key lives only as a GitHub Actions secret — it's never
 sent to anyone's browser, so it's safe to make this repo public if you want.
+The Open-Meteo calls need no key or secret at all — nothing to set up for them.
 
 ## One-time setup
 
@@ -93,11 +96,31 @@ AUD $0.0009945 (~$0.001) per request after that:
 
 \*After the free 5,000 requests are used up; check your actual WillyWeather
 account billing page for current allowance and pricing, since this can change.
+This table only counts WillyWeather requests — the Open-Meteo calls (pressure
+and sea temperature) are free with no request limit worth worrying about at
+this scale, so they don't add to the cost above.
 
 To adjust: change the `cron:` line, e.g. `0 */6 * * *` for every 6 hours, or
 `0 6,18 * * *` for twice a day (6am/6pm UTC — remember GitHub Actions cron
 runs in UTC, not Melbourne time). [crontab.guru](https://crontab.guru) is a
 handy way to build/check a cron expression.
+
+## The two condition scores
+
+The site tracks two separate 1–5 scores per location, per hour:
+
+- **Location Condition** — is it comfortable/safe to paddle or launch here?
+  Wind speed and direction for Kayak locations (plus a penalty when wind
+  blows against the tide's current), wind-vs-shore direction for Surf.
+- **Fishing Condition** — are the fish likely to be active? Same formula
+  everywhere regardless of Kayak/Surf, built from tide strength, tide stage,
+  barometric pressure, light (dawn/dusk), and sea surface temperature trend.
+
+Both are plotted on the Conditions graph and shown as separate badges on
+each location's summary card. Fishing Condition is the newer of the two and
+deliberately leaves out moon-phase/solunar-period scoring — the one
+peer-reviewed-adjacent study we found that directly tested it found no
+correlation with actual catch rate, so we didn't build on it.
 
 ## Files in this project
 

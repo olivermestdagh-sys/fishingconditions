@@ -109,6 +109,26 @@ main {
   padding: 0 10px;
 }
 
+.badge-stack {
+  display: flex;
+  gap: 10px;
+}
+
+.badge-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.badge-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--grey-500);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
