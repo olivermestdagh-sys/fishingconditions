@@ -263,32 +263,59 @@ def angle_diff(a, b):
     return 360 - raw if raw > 180 else raw
 
 
-def wind_against_tide_penalty(wind_dir, wind_speed, current_velocity, current_direction):
-    """How much to subtract from the Kayak base score for wind opposing the
-    ACTUAL tidal current (real hourly forecast from Open-Meteo, not a fixed
-    north/south guess) — graduated rather than all-or-nothing:
-      - Within 30° of directly opposed (150-180°): full 1-point penalty.
-      - Partially/quarteringly opposed (>90° but not near dead-on): half-point
-        penalty — real chop, but not as steep and short as a true head-on clash.
-      - 90° or less (crosswind or aligned): no penalty.
-    Gated on the current actually being meaningful (>=0.3 km/h — below that,
-    there's negligible flow to be "against" regardless of direction) and on
-    wind speed >10 km/h, since light wind doesn't create meaningful chop
-    regardless of direction."""
-    if wind_speed is None or wind_speed <= 10:
-        return 0
+def wind_against_tide_severity(wind_dir, wind_speed, current_velocity, current_direction):
+    """How much wind is piling onto an opposing current, and how bad it is —
+    a real, documented phenomenon (wave-action conservation: an opposing
+    current slows a wave's group velocity, so its energy packs into less
+    space and it steepens). Two things determine severity together, not
+    just wind speed alone:
+
+      - How DIRECTLY the wind opposes the current (>=150° = "direct",
+        90-150° = "partial", <=90° = no penalty at all — crosswind/aligned).
+      - How much wind speed exceeds a threshold that itself SLIDES DOWN as
+        the current strengthens (10 km/h at a barely-meaningful 0.3 km/h
+        current, down to a floor of 5 km/h once current reaches ~2 km/h) —
+        a moderate wind matters far more against a strong current than the
+        same wind against a weak one, e.g. 12 km/h against a 2 km/h current
+        creates real chop that a fixed threshold would completely miss.
+
+    Combined into three tiers — needing BOTH direct opposition and a large
+    speed excess (>=5 km/h over the threshold) to reach "major":
+
+                        partial (90-150°)   direct (>=150°)
+      small excess (<5)      minor              medium
+      large excess (>=5)     medium             major
+
+    Returns (penalty, label) — label is None when no penalty applies, so
+    the score and its explanation can never disagree with each other.
+    Gated on the current actually being meaningful (>=0.3 km/h — below
+    that, there's negligible flow to be "against" regardless of direction)."""
     if current_velocity is None or current_velocity < 0.3:
-        return 0
-    if current_direction is None:
-        return 0
+        return 0, None
+    if current_direction is None or wind_speed is None:
+        return 0, None
+
     wind_deg = compass_to_degrees(wind_dir)
     if wind_deg is None:
-        return 0
+        return 0, None
     wind_travel_deg = (wind_deg + 180) % 360  # direction the wind is blowing TOWARD
     diff = angle_diff(wind_travel_deg, current_direction)
     if diff is None or diff <= 90:
-        return 0
-    return 1 if diff >= 150 else 0.5
+        return 0, None
+
+    threshold = max(5, min(10, 10 - current_velocity * 2.5))
+    excess = wind_speed - threshold
+    if excess <= 0:
+        return 0, None
+
+    direct = diff >= 150
+    large_excess = excess >= 5
+
+    if direct and large_excess:
+        return 1.0, "major"
+    if direct or large_excess:
+        return 0.5, "medium"
+    return 0.25, "minor"
 
 
 def compute_condition(loc_type, shore, wind_dir, wind_speed, current_velocity=None, current_direction=None):
@@ -323,7 +350,8 @@ def compute_condition(loc_type, shore, wind_dir, wind_speed, current_velocity=No
         else:
             base = 1
 
-        base = max(1, base - wind_against_tide_penalty(wind_dir, wind_speed, current_velocity, current_direction))
+        penalty, _ = wind_against_tide_severity(wind_dir, wind_speed, current_velocity, current_direction)
+        base = max(1, base - penalty)
         return base
 
     return None
@@ -365,11 +393,9 @@ def explain_condition(loc_type, shore, wind_dir, wind_speed, current_velocity=No
         else:
             text = f"Very strong wind ({wind_speed:.0f} km/h)"
 
-        penalty = wind_against_tide_penalty(wind_dir, wind_speed, current_velocity, current_direction)
-        if penalty == 1:
-            text += f" · wind against {current_velocity:.1f}km/h current"
-        elif penalty == 0.5:
-            text += f" · wind partly against {current_velocity:.1f}km/h current"
+        _, severity = wind_against_tide_severity(wind_dir, wind_speed, current_velocity, current_direction)
+        if severity:
+            text += f" · wind {severity} against {current_velocity:.1f}km/h current"
 
         return text
 
