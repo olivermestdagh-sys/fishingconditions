@@ -111,8 +111,10 @@ handy way to build/check a cron expression.
 The site tracks two separate 1–5 scores per location, per hour:
 
 - **Location Condition** — is it comfortable/safe to paddle or launch here?
-  Wind speed and direction for Kayak locations (plus a penalty when wind
-  blows against the tide's current), wind-vs-shore direction for Surf.
+  Wind speed and direction for Kayak locations (plus a graduated
+  minor/medium/major penalty when wind piles onto an opposing tidal
+  current — real ocean current data, not a fixed guess), wind-vs-shore
+  direction for Surf.
 - **Fishing Condition** — are the fish likely to be active? Same formula
   everywhere regardless of Kayak/Surf, built from tide strength, tide stage,
   barometric pressure, light (dawn/dusk), and sea surface temperature trend.
