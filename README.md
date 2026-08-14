@@ -10,8 +10,9 @@ no server to run, no ongoing cost beyond WillyWeather's own API pricing.
 GitHub Actions (on a schedule)
   -> runs scripts/fetch_conditions.py
   -> calls the WillyWeather API (same logic as the Excel Power Query)
-  -> calls Open-Meteo (free, no API key) for barometric pressure and sea
-     surface temperature — two things WillyWeather doesn't offer as forecasts
+  -> calls Open-Meteo (free, no API key) for barometric pressure, sea
+     surface temperature, and ocean current velocity/direction — data
+     WillyWeather doesn't offer as a forecast — two things WillyWeather doesn't offer as forecasts
   -> writes data/conditions.json
   -> commits it back to the repo
 GitHub Pages
