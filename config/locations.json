@@ -174,5 +174,16 @@
     "packUp": "00:40",
     "paddleOut": "00:15",
     "paddleBack": "00:15"
+  },
+  {
+    "name": "Mallacoota Inlet, VIC",
+    "type": "Kayak",
+    "shore": "N",
+    "driveTo": "00:05",
+    "driveBack": "00:05",
+    "prep": "00:20",
+    "packUp": "00:20",
+    "paddleOut": "00:10",
+    "paddleBack": "00:10"
   }
 ]
