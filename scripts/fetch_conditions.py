@@ -78,24 +78,31 @@ def get_pressure_forecast(lat, lng):
     return dict(zip(hourly.get("time", []) or [], hourly.get("pressure_msl", []) or []))
 
 
-def get_water_temp_forecast(lat, lng):
-    """Hourly sea surface temperature from Open-Meteo's Marine API (free, no
-    API key, a separate endpoint from the main forecast). past_days=1 so we
-    can compute a trend for the very first day of our window too, not just
-    day two onward. cell_selection=sea avoids the grid cell resolving to a
-    nearby land pixel for coastal locations."""
+def get_marine_forecast(lat, lng):
+    """Hourly sea surface temperature, ocean current velocity, and ocean
+    current direction — all from Open-Meteo's Marine API in ONE request
+    (free, no API key, a separate endpoint from the main forecast). Current
+    velocity/direction replace the old fixed north/south tide-flow guess
+    with a real per-hour forecast. past_days=1 so water-temp trend has a
+    real comparison point for the very first day of our window too, not
+    just day two onward. cell_selection=sea avoids the grid cell resolving
+    to a nearby land pixel for coastal locations."""
     if lat is None or lng is None:
-        return {}
+        return {}, {}, {}
     url = (
         f"{OPEN_METEO_MARINE_URL}?latitude={lat}&longitude={lng}"
-        f"&hourly=sea_surface_temperature&forecast_days={min(FORECAST_DAYS, 8)}"
-        f"&past_days=1&timezone=auto&cell_selection=sea"
+        f"&hourly=sea_surface_temperature,ocean_current_velocity,ocean_current_direction"
+        f"&forecast_days={min(FORECAST_DAYS, 8)}&past_days=1&timezone=auto&cell_selection=sea"
     )
     data = http_get_json(url)
     if not data:
-        return {}
+        return {}, {}, {}
     hourly = data.get("hourly", {}) or {}
-    return dict(zip(hourly.get("time", []) or [], hourly.get("sea_surface_temperature", []) or []))
+    times = hourly.get("time", []) or []
+    sst = dict(zip(times, hourly.get("sea_surface_temperature", []) or []))
+    velocity = dict(zip(times, hourly.get("ocean_current_velocity", []) or []))
+    direction = dict(zip(times, hourly.get("ocean_current_direction", []) or []))
+    return sst, velocity, direction
 
 
 def normalize_open_meteo_dt(t):
@@ -105,6 +112,19 @@ def normalize_open_meteo_dt(t):
         return datetime.strptime(t, "%Y-%m-%dT%H:%M")
     except (ValueError, TypeError):
         return None
+
+
+def hourly_lookup(hourly_dict):
+    """Given {iso_string: value}, returns {'YYYY-MM-DD HH': value} — for
+    values scored hour by hour (current velocity/direction), unlike
+    pressure/water-temperature which are scored as a daily figure."""
+    result = {}
+    for t, v in hourly_dict.items():
+        dt = normalize_open_meteo_dt(t)
+        if dt is None or v is None:
+            continue
+        result[dt.strftime("%Y-%m-%d %H")] = v
+    return result
 
 
 def daily_averages(hourly_dict):
@@ -243,50 +263,35 @@ def angle_diff(a, b):
     return 360 - raw if raw > 180 else raw
 
 
-def tide_flow_degrees(tide_status):
-    """Tidal current direction, fixed for all locations per local knowledge of
-    how the tide actually runs through these bays (not derived from each
-    location's own Shore bearing): incoming flows north, outgoing flows south."""
-    if tide_status == "Incoming":
-        return 0  # North
-    if tide_status == "Outgoing":
-        return 180  # South
-    return None
-
-
-def wind_tide_angle_diff(wind_dir, tide_status):
-    """Angular difference between the wind's direction of travel and the
-    tide's current direction: 0 = wind blowing exactly with the tide, 180 =
-    directly against it. None if either isn't known, or near slack water
-    (Low/High), where there's no meaningful current to be "against"."""
-    tide_deg = tide_flow_degrees(tide_status)
-    wind_deg = compass_to_degrees(wind_dir)
-    if tide_deg is None or wind_deg is None:
-        return None
-    wind_travel_deg = (wind_deg + 180) % 360  # direction the wind is blowing TOWARD
-    return angle_diff(wind_travel_deg, tide_deg)
-
-
-def wind_against_tide_penalty(wind_dir, wind_speed, tide_status):
+def wind_against_tide_penalty(wind_dir, wind_speed, current_velocity, current_direction):
     """How much to subtract from the Kayak base score for wind opposing the
-    tide's current — graduated rather than all-or-nothing:
-      - Directly opposed (180°, e.g. wind straight from the south into a
-        north-flowing incoming tide): full 1-point penalty.
-      - Partially/quarteringly opposed (>90° but not dead-on, e.g. a NE or NW
-        wind into an incoming tide): half-point penalty — real chop, but not
-        as steep and short as a true head-on clash.
+    ACTUAL tidal current (real hourly forecast from Open-Meteo, not a fixed
+    north/south guess) — graduated rather than all-or-nothing:
+      - Within 30° of directly opposed (150-180°): full 1-point penalty.
+      - Partially/quarteringly opposed (>90° but not near dead-on): half-point
+        penalty — real chop, but not as steep and short as a true head-on clash.
       - 90° or less (crosswind or aligned): no penalty.
-    Only applies above 10 km/h — light wind doesn't create meaningful chop
+    Gated on the current actually being meaningful (>=0.3 km/h — below that,
+    there's negligible flow to be "against" regardless of direction) and on
+    wind speed >10 km/h, since light wind doesn't create meaningful chop
     regardless of direction."""
     if wind_speed is None or wind_speed <= 10:
         return 0
-    diff = wind_tide_angle_diff(wind_dir, tide_status)
+    if current_velocity is None or current_velocity < 0.3:
+        return 0
+    if current_direction is None:
+        return 0
+    wind_deg = compass_to_degrees(wind_dir)
+    if wind_deg is None:
+        return 0
+    wind_travel_deg = (wind_deg + 180) % 360  # direction the wind is blowing TOWARD
+    diff = angle_diff(wind_travel_deg, current_direction)
     if diff is None or diff <= 90:
         return 0
-    return 1 if diff == 180 else 0.5
+    return 1 if diff >= 150 else 0.5
 
 
-def compute_condition(loc_type, shore, wind_dir, wind_speed, tide_status=None):
+def compute_condition(loc_type, shore, wind_dir, wind_speed, current_velocity=None, current_direction=None):
     if loc_type == "Surf":
         diff = angle_diff(compass_to_degrees(shore), compass_to_degrees(wind_dir))
         if diff is None:
@@ -318,13 +323,13 @@ def compute_condition(loc_type, shore, wind_dir, wind_speed, tide_status=None):
         else:
             base = 1
 
-        base = max(1, base - wind_against_tide_penalty(wind_dir, wind_speed, tide_status))
+        base = max(1, base - wind_against_tide_penalty(wind_dir, wind_speed, current_velocity, current_direction))
         return base
 
     return None
 
 
-def explain_condition(loc_type, shore, wind_dir, wind_speed, tide_status):
+def explain_condition(loc_type, shore, wind_dir, wind_speed, current_velocity=None, current_direction=None):
     """Short human-readable reason for the Location Condition score — same
     inputs, same branching as compute_condition above, so the explanation
     can never disagree with the number it's explaining."""
@@ -360,11 +365,11 @@ def explain_condition(loc_type, shore, wind_dir, wind_speed, tide_status):
         else:
             text = f"Very strong wind ({wind_speed:.0f} km/h)"
 
-        penalty = wind_against_tide_penalty(wind_dir, wind_speed, tide_status)
+        penalty = wind_against_tide_penalty(wind_dir, wind_speed, current_velocity, current_direction)
         if penalty == 1:
-            text += " · wind against tide"
+            text += f" · wind against {current_velocity:.1f}km/h current"
         elif penalty == 0.5:
-            text += " · wind partly against tide"
+            text += f" · wind partly against {current_velocity:.1f}km/h current"
 
         return text
 
@@ -560,7 +565,10 @@ def process_location(loc):
     sun_by_date = {s["date"]: s for s in sun_times}
 
     pressure_by_date = daily_averages(get_pressure_forecast(lat, lng))
-    sst_by_date = daily_averages(get_water_temp_forecast(lat, lng))
+    sst_hourly, current_velocity_hourly, current_direction_hourly = get_marine_forecast(lat, lng)
+    sst_by_date = daily_averages(sst_hourly)
+    velocity_by_hour = hourly_lookup(current_velocity_hourly)
+    direction_by_hour = hourly_lookup(current_direction_hourly)
 
     raw_readings = build_readings(weather)
 
@@ -616,13 +624,17 @@ def process_location(loc):
         if this_type:
             running_prev = this_type
 
+        hour_key = row["dateTime"][:13].replace("T", " ")
+        row_current_velocity = velocity_by_hour.get(hour_key)
+        row_current_direction = direction_by_hour.get(hour_key)
+
         row["Condition"] = compute_condition(
             loc_type, shore, row.get("Wind Forecast Dir"), row.get("Wind Forecast (km/h)"),
-            tide_status=row.get("Tide Status"),
+            current_velocity=row_current_velocity, current_direction=row_current_direction,
         )
         row["Condition Reason"] = explain_condition(
             loc_type, shore, row.get("Wind Forecast Dir"), row.get("Wind Forecast (km/h)"),
-            row.get("Tide Status"),
+            current_velocity=row_current_velocity, current_direction=row_current_direction,
         )
         row["Location Name"] = name
         row["Type"] = loc_type
