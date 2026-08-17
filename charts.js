@@ -428,7 +428,7 @@ function bucketRowsHourly(rows) {
   return result.sort((a, b) => a._t - b._t);
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -437,6 +437,17 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   // under the chart (often wrapping to several lines) — shorten them there, since
   // desktop has plenty of room to keep the fuller, more descriptive text.
   const isMobile = typeof window !== "undefined" && window.innerWidth < 900;
+
+  // Each location's own real observed tide range calibrates its own axis
+  // ceiling, rather than one fixed number for every location — Western
+  // Port's ~3m swings and Port Phillip Bay's sub-1m ones would otherwise
+  // either clip the former or make the latter look flat. A modest 15%
+  // margin above the real observed max is purely practical (so the peak
+  // doesn't sit flush against the very top pixel), not an attempt to
+  // cosmetically separate it from other axes sharing the same chart space.
+  // Falls back to a sensible default if this specific location has no
+  // tide data at all (older cached data, or no nearby tide station).
+  const tideAxisMax = tideMaxObserved != null ? Math.round(tideMaxObserved * 1.15 * 100) / 100 : 3.5;
   const L = isMobile
     ? { tempFcst: "Tmp Fcst", tempNow: "Tmp Now", rain: "Rain %", windFcst: "Wind Fcst", windNow: "Wind Now", tide: "Tide" }
     : { tempFcst: "Temp Forecast (°C)", tempNow: "Temp Realtime (°C)", rain: "Rainfall Probability (%)", windFcst: "Wind Forecast (km/h)", windNow: "Wind Realtime (km/h)", tide: "Tide Height (m)" };
@@ -533,7 +544,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
         yTemp: { position: "left", min: -5, max: 40, title: { display: true, text: "Temperature (°C)" } },
         yRain: { display: false, min: -10, max: 100 },
         yWind: { position: "right", min: -5, max: 50, grid: { drawOnChartArea: false }, title: { display: true, text: "Wind (km/h)" } },
-        yTide: { display: false, min: 0, max: 3.5 },
+        yTide: { display: false, min: 0, max: tideAxisMax },
       },
       plugins: {
         legend: {
