@@ -585,6 +585,12 @@ def process_location(loc):
     loc_id = match.get("id") if match else None
     lat = match.get("lat") if match else None
     lng = match.get("lng") if match else None
+    # Attach to the SAME dict object referenced in main()'s locations list, so
+    # it flows through into output["locations"] without changing this
+    # function's return signature — needed for the Live page to match GPS
+    # coordinates against each location without a separate lookup step.
+    loc["lat"] = lat
+    loc["lng"] = lng
 
     weather = get_weather(loc_id) if loc_id else {}
     sun_times = extract_sun_times(weather)
