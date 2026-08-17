@@ -21,6 +21,7 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 API_KEY = os.environ.get("WILLYWEATHER_API_KEY")
 FORECAST_DAYS = int(os.environ.get("FORECAST_DAYS", "6"))
@@ -749,7 +750,54 @@ def process_location(loc):
             sst_by_date,
         )
 
+    # This location's real observed max tide height (from actual WillyWeather
+    # events in the currently-fetched window, not synthetic/guessed) — used
+    # client-side to give each location its own graph axis ceiling, instead
+    # of one fixed number for every location regardless of how different
+    # Western Port's ~3m tidal swings are from Port Phillip Bay's sub-1m
+    # ones. Attached to the SAME dict object referenced in main()'s
+    # locations list, same mechanism as lat/lng above.
+    real_tide_heights = [h for (_, h) in real_tide_events]
+    loc["tideMaxObserved"] = round(max(real_tide_heights), 2) if real_tide_heights else None
+
     return rows, sun_times
+
+
+def load_previous_output():
+    """The previous run's output, if any — read BEFORE we overwrite it, so
+    we can carry a rolling window of real historical rows forward across
+    runs. Returns None on any error (missing file, corrupt JSON) rather
+    than failing the whole fetch over a history feature."""
+    if not os.path.exists(OUTPUT_PATH):
+        return None
+    try:
+        with open(OUTPUT_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:  # noqa: BLE001 - missing history shouldn't break a fresh fetch
+        return None
+
+
+def keep_recent_history(old_rows, hours_to_keep=30):
+    """From a previous run's rows for one location, keep just the last N
+    hours before now — genuine past data (what was actually forecast at
+    the time it was fetched), not synthetic. This is what lets the Live
+    page's "hours ago" side of its window show something real: WillyWeather
+    itself has no way to fetch yesterday's forecast directly, but every
+    scheduled run already legitimately fetched what's now "the past" before
+    it aged out of the forward-looking window — we just need to not throw
+    it away. Keeping a bit more than 24h (30) gives headroom against
+    clock/DST edge cases at the boundary."""
+    now_local = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None)
+    cutoff = now_local - timedelta(hours=hours_to_keep)
+    kept = []
+    for row in old_rows:
+        try:
+            row_dt = datetime.fromisoformat(row["dateTime"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        if cutoff <= row_dt < now_local:
+            kept.append(row)
+    return kept
 
 
 def main():
@@ -760,12 +808,27 @@ def main():
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         locations = json.load(f)
 
+    previous_output = load_previous_output()
+    previous_rows_by_location = {}
+    if previous_output:
+        for row in previous_output.get("rows", []):
+            previous_rows_by_location.setdefault(row.get("Location Name"), []).append(row)
+
     all_rows = []
     sun_times_by_location = {}
     for loc in locations:
         print(f"Fetching {loc['name']}...")
         try:
             rows, sun_times = process_location(loc)
+
+            # Prepend real history carried from previous runs, skipping any
+            # timestamp the fresh fetch already covers (the fresh version is
+            # more complete/accurate for anything it actually has).
+            history_rows = keep_recent_history(previous_rows_by_location.get(loc["name"], []))
+            fresh_datetimes = {r["dateTime"] for r in rows}
+            history_rows = [r for r in history_rows if r["dateTime"] not in fresh_datetimes]
+
+            all_rows.extend(history_rows)
             all_rows.extend(rows)
             sun_times_by_location[loc["name"]] = sun_times
         except Exception as e:  # noqa: BLE001 - one bad location shouldn't kill the whole run
