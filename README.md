@@ -106,6 +106,18 @@ To adjust: change the `cron:` line, e.g. `0 */6 * * *` for every 6 hours, or
 runs in UTC, not Melbourne time). [crontab.guru](https://crontab.guru) is a
 handy way to build/check a cron expression.
 
+## Tide height between the real high/low points
+
+WillyWeather only gives us the actual tide events (a handful of high/low
+readings a day, at whatever specific times the tide turns), not a value
+for every hour. The gaps between them are filled in with a cosine curve —
+the same math behind the traditional "Rule of Twelfths" navigation
+technique, which models a tide's real behaviour (slow near the peaks,
+fastest in the middle) rather than a straight line between two points.
+This is a visual smoothing between real readings, not a claim of real
+precision at those specific in-between hours — it never extrapolates
+*beyond* the first/last real event we have, only fills gaps between them.
+
 ## The two condition scores
 
 The site tracks two separate 1–5 scores per location, per hour:
