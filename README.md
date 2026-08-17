@@ -125,12 +125,38 @@ deliberately leaves out moon-phase/solunar-period scoring — the one
 peer-reviewed-adjacent study we found that directly tested it found no
 correlation with actual catch rate, so we didn't build on it.
 
+## The Live page
+
+`live.html` is meant for while you're actually out on the water. On load it
+asks your phone for GPS location, matches it against whichever of your
+tracked locations is physically closest, and shows that location's graph —
+but zoomed to just **24 hours before now through 24 hours ahead**, rather
+than the full forecast window the other pages show. A solid vertical line
+marks the current moment on every graph on the site (not just this page),
+and a dashed line marks 15 km/h — the wind speed you've said is your kayak
+threshold.
+
+If GPS is denied, unavailable, or just picks the wrong spot (accuracy near
+a boundary between two close-together locations, or you're testing this
+from somewhere else entirely), a manual location picker is always available
+underneath as a fallback — no dependency on GPS actually working to use the
+page.
+
+This needs each location's coordinates, which come from the same
+WillyWeather search lookup already used for the weather/tide fetch — no new
+API calls, and nothing added to `config/locations.json` itself (coordinates
+only flow into the generated `data/conditions.json`, so your own location
+list stays exactly as you edit it).
+
 ## Files in this project
 
-- `index.html` — Good Conditions (the site's home page), `conditions.html` — the
-  per-location table/graph view, `locations.html` — the locations editor, `style.css`,
-  `app.js`, `goodconditions.js`, `locationsadmin.js`, `charts.js` (shared charting code
-  used by both `app.js` and `goodconditions.js`) — the website itself (no build step, no dependencies)
+- `live.html`/`live.js` — the Live page (GPS-matched to your nearest tracked
+  location, shows a 24-hours-back/24-hours-forward graph), `index.html` —
+  Trip Planner (the site's home page), `conditions.html` — the per-location
+  table/graph view, `locations.html` — the locations editor, `style.css`,
+  `app.js`, `goodconditions.js`, `locationsadmin.js`, `charts.js` (shared
+  charting code used by `app.js`, `goodconditions.js`, and `live.js`) — the
+  website itself (no build step, no dependencies)
 - `scripts/fetch_conditions.py` — fetches from WillyWeather, writes `data/conditions.json`
   (pure Python standard library only, no `pip install` needed)
 - `config/locations.json` — your tracked locations

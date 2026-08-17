@@ -85,26 +85,6 @@ function populateLocationPicker() {
   }
 }
 
-function lastNonNullAtOrBefore(rows, field, now) {
-  let best = null;
-  for (const r of rows) {
-    if (r[field] == null) continue;
-    const t = new Date(r.dateTime);
-    if (t <= now && (!best || t > new Date(best.dateTime))) best = r;
-  }
-  return best;
-}
-
-function nearestRowWithField(rows, field, now) {
-  let best = null, bestDiff = Infinity;
-  for (const r of rows) {
-    if (r[field] == null) continue;
-    const diff = Math.abs(new Date(r.dateTime) - now);
-    if (diff < bestDiff) { bestDiff = diff; best = r; }
-  }
-  return best;
-}
-
 function renderLocation(name) {
   const loc = state.data.locations.find((l) => l.name === name);
   const rows = state.rowsByLocation[name] || [];
