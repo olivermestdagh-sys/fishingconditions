@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-17T21:57:08.606331+00:00",
+  "generatedAt": "2026-08-17T22:09:07.336141+00:00",
   "forecastDays": 6,
   "locations": [
     {
@@ -11,7 +11,9 @@
       "prep": "00:30",
       "packUp": "00:30",
       "paddleOut": "00:10",
-      "paddleBack": "00:10"
+      "paddleBack": "00:10",
+      "lat": -38.3884,
+      "lng": 145.1245
     },
     {
       "name": "Corinella Boat Ramp, VIC",
@@ -22,7 +24,9 @@
       "prep": "00:30",
       "packUp": "00:30",
       "paddleOut": "00:20",
-      "paddleBack": "00:20"
+      "paddleBack": "00:20",
+      "lat": -38.4079,
+      "lng": 145.4234
     },
     {
       "name": "Coronet Bay, VIC 3984",
@@ -33,7 +37,9 @@
       "prep": "00:30",
       "packUp": "00:30",
       "paddleOut": "00:10",
-      "paddleBack": "00:10"
+      "paddleBack": "00:10",
+      "lat": -38.4348,
+      "lng": 145.4426
     },
     {
       "name": "Flinders Pier, VIC",
@@ -44,7 +50,9 @@
       "prep": "00:30",
       "packUp": "00:40",
       "paddleOut": "00:20",
-      "paddleBack": "00:20"
+      "paddleBack": "00:20",
+      "lat": -38.4758,
+      "lng": 145.0286
     },
     {
       "name": "Gunnamatta Beach, VIC",
@@ -55,7 +63,9 @@
       "prep": "00:10",
       "packUp": "00:20",
       "paddleOut": "00:20",
-      "paddleBack": "00:20"
+      "paddleBack": "00:20",
+      "lat": -38.457,
+      "lng": 144.8687
     },
     {
       "name": "Hastings Jetty, VIC",
@@ -66,7 +76,9 @@
       "prep": "00:30",
       "packUp": "00:30",
       "paddleOut": "01:00",
-      "paddleBack": "01:00"
+      "paddleBack": "01:00",
+      "lat": -38.3082,
+      "lng": 145.1991
     },
     {
       "name": "Kilcunda, VIC 3995",
@@ -77,7 +89,9 @@
       "prep": "00:10",
       "packUp": "00:10",
       "paddleOut": "00:25",
-      "paddleBack": "00:25"
+      "paddleBack": "00:25",
+      "lat": -38.5492,
+      "lng": 145.4754
     },
     {
       "name": "Lang Lang Boat Ramp, VIC",
@@ -88,7 +102,9 @@
       "prep": "00:30",
       "packUp": "00:30",
       "paddleOut": "00:10",
-      "paddleBack": "00:10"
+      "paddleBack": "00:10",
+      "lat": -38.3052,
+      "lng": 145.5214
     },
     {
       "name": "Mornington Pier, VIC",
@@ -99,7 +115,9 @@
       "prep": "00:30",
       "packUp": "00:30",
       "paddleOut": "00:15",
-      "paddleBack": "00:15"
+      "paddleBack": "00:15",
+      "lat": -38.2117,
+      "lng": 145.0349
     },
     {
       "name": "Patterson River Entrance, VIC",
@@ -110,7 +128,9 @@
       "prep": "00:30",
       "packUp": "00:30",
       "paddleOut": "00:20",
-      "paddleBack": "00:20"
+      "paddleBack": "00:20",
+      "lat": -38.0734,
+      "lng": 145.1197
     },
     {
       "name": "Rosebud Pier, VIC",
@@ -121,7 +141,9 @@
       "prep": "00:30",
       "packUp": "00:40",
       "paddleOut": "00:15",
-      "paddleBack": "00:15"
+      "paddleBack": "00:15",
+      "lat": -38.3503,
+      "lng": 144.9073
     },
     {
       "name": "Safety Beach Boat Ramp, VIC",
@@ -132,7 +154,9 @@
       "prep": "00:30",
       "packUp": "00:40",
       "paddleOut": "00:20",
-      "paddleBack": "00:20"
+      "paddleBack": "00:20",
+      "lat": -38.3131,
+      "lng": 144.9911
     },
     {
       "name": "Sorrento Pier, VIC",
@@ -143,7 +167,9 @@
       "prep": "00:30",
       "packUp": "00:40",
       "paddleOut": "00:15",
-      "paddleBack": "00:15"
+      "paddleBack": "00:15",
+      "lat": -38.3357,
+      "lng": 144.7459
     },
     {
       "name": "Stony Point Boat Ramp, VIC",
@@ -154,7 +180,9 @@
       "prep": "00:30",
       "packUp": "00:30",
       "paddleOut": "00:15",
-      "paddleBack": "00:15"
+      "paddleBack": "00:15",
+      "lat": -38.3744,
+      "lng": 145.2224
     },
     {
       "name": "Warneet Boat Ramp, VIC",
@@ -165,7 +193,9 @@
       "prep": "00:30",
       "packUp": "00:30",
       "paddleOut": "01:00",
-      "paddleBack": "01:00"
+      "paddleBack": "01:00",
+      "lat": -38.2275,
+      "lng": 145.3066
     },
     {
       "name": "Williamstown Beach, VIC",
@@ -176,7 +206,9 @@
       "prep": "00:30",
       "packUp": "00:40",
       "paddleOut": "00:15",
-      "paddleBack": "00:15"
+      "paddleBack": "00:15",
+      "lat": -37.8674,
+      "lng": 144.8916
     },
     {
       "name": "Mallacoota Inlet, VIC",
@@ -187,7 +219,9 @@
       "prep": "00:20",
       "packUp": "00:20",
       "paddleOut": "00:10",
-      "paddleBack": "00:10"
+      "paddleBack": "00:10",
+      "lat": -37.5624,
+      "lng": 149.7671
     }
   ],
   "rows": [
@@ -1017,6 +1051,23 @@
     },
     {
       "dateTime": "2026-08-18T07:40:00",
+      "Temp Realtime (C)": 7.6,
+      "Wind Realtime (km/h)": 3.7,
+      "Wind Realtime Dir": "NNE",
+      "Tide Status": "Outgoing",
+      "Condition": null,
+      "Condition Reason": "Insufficient wind data",
+      "Location Name": "Balnarring Beach, VIC 3926",
+      "Type": "Kayak",
+      "Shore": "NW",
+      "Matched Name": "Balnarring Beach",
+      "Region": "Mornington Peninsula",
+      "State": "VIC",
+      "Fishing Condition": 5.0,
+      "Fishing Condition Reason": "Strong tide, tide moving, high pressure, near dawn/dusk, water warming"
+    },
+    {
+      "dateTime": "2026-08-18T07:50:00",
       "Temp Realtime (C)": 7.6,
       "Wind Realtime (km/h)": 3.7,
       "Wind Realtime Dir": "NNE",
@@ -4561,6 +4612,23 @@
       "Fishing Condition Reason": "Strong tide, tide moving, high pressure, near dawn/dusk, water warming"
     },
     {
+      "dateTime": "2026-08-18T07:50:00",
+      "Temp Realtime (C)": 10.6,
+      "Wind Realtime (km/h)": 3.7,
+      "Wind Realtime Dir": "NE",
+      "Tide Status": "Outgoing",
+      "Condition": null,
+      "Condition Reason": "Insufficient wind data",
+      "Location Name": "Corinella Boat Ramp, VIC",
+      "Type": "Kayak",
+      "Shore": "E",
+      "Matched Name": "Corinella Boat Ramp",
+      "Region": "Gippsland",
+      "State": "VIC",
+      "Fishing Condition": 5.0,
+      "Fishing Condition Reason": "Strong tide, tide moving, high pressure, near dawn/dusk, water warming"
+    },
+    {
       "dateTime": "2026-08-18T08:00:00",
       "Temp Forecast (C)": 8.8,
       "Wind Forecast (km/h)": 9.7,
@@ -8062,6 +8130,23 @@
       "Temp Realtime (C)": 10.5,
       "Wind Realtime (km/h)": 9.3,
       "Wind Realtime Dir": "ENE",
+      "Tide Status": "Outgoing",
+      "Condition": null,
+      "Condition Reason": "Insufficient wind data",
+      "Location Name": "Coronet Bay, VIC 3984",
+      "Type": "Kayak",
+      "Shore": "E",
+      "Matched Name": "Coronet Bay",
+      "Region": "Gippsland",
+      "State": "VIC",
+      "Fishing Condition": 5.0,
+      "Fishing Condition Reason": "Strong tide, tide moving, high pressure, near dawn/dusk, water warming"
+    },
+    {
+      "dateTime": "2026-08-18T07:50:00",
+      "Temp Realtime (C)": 10.6,
+      "Wind Realtime (km/h)": 3.7,
+      "Wind Realtime Dir": "NE",
       "Tide Status": "Outgoing",
       "Condition": null,
       "Condition Reason": "Insufficient wind data",
@@ -11589,10 +11674,30 @@
       "Fishing Condition Reason": "Strong tide, tide moving, high pressure, near dawn/dusk, water warming"
     },
     {
+      "dateTime": "2026-08-18T07:50:00",
+      "Temp Realtime (C)": 7.6,
+      "Wind Realtime (km/h)": 3.7,
+      "Wind Realtime Dir": "NNE",
+      "Tide Status": "Outgoing",
+      "Condition": null,
+      "Condition Reason": "Insufficient wind data",
+      "Location Name": "Flinders Pier, VIC",
+      "Type": "Kayak",
+      "Shore": "W",
+      "Matched Name": "Flinders Pier",
+      "Region": "Mornington Peninsula",
+      "State": "VIC",
+      "Fishing Condition": 5.0,
+      "Fishing Condition Reason": "Strong tide, tide moving, high pressure, near dawn/dusk, water warming"
+    },
+    {
       "dateTime": "2026-08-18T08:00:00",
       "Temp Forecast (C)": 8.7,
       "Wind Forecast (km/h)": 15.5,
       "Wind Forecast Dir": "NE",
+      "Temp Realtime (C)": 8,
+      "Wind Realtime (km/h)": 3.7,
+      "Wind Realtime Dir": "NNE",
       "Tide Status": "Outgoing",
       "Condition": 2,
       "Condition Reason": "Strong wind (16 km/h)",
@@ -15117,10 +15222,30 @@
       "Fishing Condition Reason": "Strong tide, tide moving, high pressure, near dawn/dusk, water warming"
     },
     {
+      "dateTime": "2026-08-18T07:50:00",
+      "Temp Realtime (C)": 7.6,
+      "Wind Realtime (km/h)": 25.9,
+      "Wind Realtime Dir": "NE",
+      "Tide Status": "Outgoing",
+      "Condition": null,
+      "Condition Reason": "Insufficient wind data",
+      "Location Name": "Gunnamatta Beach, VIC",
+      "Type": "Surf",
+      "Shore": "N",
+      "Matched Name": "Gunnamatta Beach",
+      "Region": "Mornington Peninsula",
+      "State": "VIC",
+      "Fishing Condition": 5.0,
+      "Fishing Condition Reason": "Strong tide, tide moving, high pressure, near dawn/dusk, water warming"
+    },
+    {
       "dateTime": "2026-08-18T08:00:00",
       "Temp Forecast (C)": 8.8,
       "Wind Forecast (km/h)": 12.6,
       "Wind Forecast Dir": "NE",
+      "Temp Realtime (C)": 8,
+      "Wind Realtime (km/h)": 25.9,
+      "Wind Realtime Dir": "NE",
       "Tide Status": "Outgoing",
       "Condition": 4,
       "Condition Reason": "Mostly offshore \u2014 good waves",
@@ -18645,10 +18770,30 @@
       "Fishing Condition Reason": "Strong tide, tide moving, high pressure, near dawn/dusk, water warming"
     },
     {
+      "dateTime": "2026-08-18T07:50:00",
+      "Temp Realtime (C)": 7.6,
+      "Wind Realtime (km/h)": 3.7,
+      "Wind Realtime Dir": "NNE",
+      "Tide Status": "Outgoing",
+      "Condition": null,
+      "Condition Reason": "Insufficient wind data",
+      "Location Name": "Hastings Jetty, VIC",
+      "Type": "Kayak",
+      "Shore": "W",
+      "Matched Name": "Hastings Jetty",
+      "Region": "Mornington Peninsula",
+      "State": "VIC",
+      "Fishing Condition": 5.0,
+      "Fishing Condition Reason": "Strong tide, tide moving, high pressure, near dawn/dusk, water warming"
+    },
+    {
       "dateTime": "2026-08-18T08:00:00",
       "Temp Forecast (C)": 8.5,
       "Wind Forecast (km/h)": 9.7,
       "Wind Forecast Dir": "ENE",
+      "Temp Realtime (C)": 8,
+      "Wind Realtime (km/h)": 3.7,
+      "Wind Realtime Dir": "NNE",
       "Tide Status": "Outgoing",
       "Condition": 4,
       "Condition Reason": "Light wind (10 km/h)",
@@ -22159,10 +22304,30 @@
       "Fishing Condition Reason": "Strong tide, tide moving, high pressure, near dawn/dusk, water warming"
     },
     {
+      "dateTime": "2026-08-18T07:50:00",
+      "Temp Realtime (C)": 10.6,
+      "Wind Realtime (km/h)": 3.7,
+      "Wind Realtime Dir": "NE",
+      "Tide Status": "Outgoing",
+      "Condition": null,
+      "Condition Reason": "Insufficient wind data",
+      "Location Name": "Kilcunda, VIC 3995",
+      "Type": "Surf",
+      "Shore": "N",
+      "Matched Name": "Kilcunda",
+      "Region": "Gippsland",
+      "State": "VIC",
+      "Fishing Condition": 5.0,
+      "Fishing Condition Reason": "Strong tide, tide moving, high pressure, near dawn/dusk, water warming"
+    },
+    {
       "dateTime": "2026-08-18T08:00:00",
       "Temp Forecast (C)": 8.7,
       "Wind Forecast (km/h)": 9.4,
       "Wind Forecast Dir": "ENE",
+      "Temp Realtime (C)": 11,
+      "Wind Realtime (km/h)": 7.4,
+      "Wind Realtime Dir": "NE",
       "Tide Status": "Outgoing",
       "Condition": 2,
       "Condition Reason": "Straight onshore \u2014 blown out",
@@ -25687,10 +25852,30 @@
       "Fishing Condition Reason": "Strong tide, tide moving, high pressure, near dawn/dusk"
     },
     {
+      "dateTime": "2026-08-18T07:50:00",
+      "Temp Realtime (C)": 10.6,
+      "Wind Realtime (km/h)": 3.7,
+      "Wind Realtime Dir": "NE",
+      "Tide Status": "Outgoing",
+      "Condition": null,
+      "Condition Reason": "Insufficient wind data",
+      "Location Name": "Lang Lang Boat Ramp, VIC",
+      "Type": "Kayak",
+      "Shore": "E",
+      "Matched Name": "Lang Lang Boat Ramp",
+      "Region": "Gippsland",
+      "State": "VIC",
+      "Fishing Condition": 5.0,
+      "Fishing Condition Reason": "Strong tide, tide moving, high pressure, near dawn/dusk"
+    },
+    {
       "dateTime": "2026-08-18T08:00:00",
       "Temp Forecast (C)": 7.4,
       "Wind Forecast (km/h)": 13.7,
       "Wind Forecast Dir": "ENE",
+      "Temp Realtime (C)": 11,
+      "Wind Realtime (km/h)": 7.4,
+      "Wind Realtime Dir": "NE",
       "Tide Status": "Outgoing",
       "Condition": 4,
       "Condition Reason": "Moderate wind (14 km/h), from behind/side",
@@ -29202,10 +29387,30 @@
       "Fishing Condition Reason": "Tide moving, high pressure, near dawn/dusk, water warming"
     },
     {
+      "dateTime": "2026-08-18T07:50:00",
+      "Temp Realtime (C)": 9.1,
+      "Wind Realtime (km/h)": 11.1,
+      "Wind Realtime Dir": "E",
+      "Tide Status": "Outgoing",
+      "Condition": null,
+      "Condition Reason": "Insufficient wind data",
+      "Location Name": "Mornington Pier, VIC",
+      "Type": "Kayak",
+      "Shore": "E",
+      "Matched Name": "Mornington Pier",
+      "Region": "Mornington Peninsula",
+      "State": "VIC",
+      "Fishing Condition": 5.0,
+      "Fishing Condition Reason": "Tide moving, high pressure, near dawn/dusk, water warming"
+    },
+    {
       "dateTime": "2026-08-18T08:00:00",
       "Temp Forecast (C)": 7.4,
       "Wind Forecast (km/h)": 13.7,
       "Wind Forecast Dir": "ENE",
+      "Temp Realtime (C)": 9.4,
+      "Wind Realtime (km/h)": 13,
+      "Wind Realtime Dir": "E",
       "Tide Status": "Outgoing",
       "Condition": 4,
       "Condition Reason": "Moderate wind (14 km/h), from behind/side",
@@ -32731,10 +32936,30 @@
       "Fishing Condition Reason": "Tide moving, high pressure, near dawn/dusk, water warming"
     },
     {
+      "dateTime": "2026-08-18T07:50:00",
+      "Temp Realtime (C)": 9.1,
+      "Wind Realtime (km/h)": 11.1,
+      "Wind Realtime Dir": "E",
+      "Tide Status": "Outgoing",
+      "Condition": null,
+      "Condition Reason": "Insufficient wind data",
+      "Location Name": "Patterson River Entrance, VIC",
+      "Type": "Kayak",
+      "Shore": "E",
+      "Matched Name": "Patterson River Entrance",
+      "Region": "Melbourne",
+      "State": "VIC",
+      "Fishing Condition": 5.0,
+      "Fishing Condition Reason": "Tide moving, high pressure, near dawn/dusk, water warming"
+    },
+    {
       "dateTime": "2026-08-18T08:00:00",
       "Temp Forecast (C)": 7.7,
       "Wind Forecast (km/h)": 10.1,
       "Wind Forecast Dir": "E",
+      "Temp Realtime (C)": 9.4,
+      "Wind Realtime (km/h)": 13,
+      "Wind Realtime Dir": "E",
       "Tide Status": "Outgoing",
       "Condition": 4,
       "Condition Reason": "Moderate wind (10 km/h), from behind/side",
@@ -36274,10 +36499,30 @@
       "Fishing Condition Reason": "Weak tide, tide moving, high pressure, near dawn/dusk, water warming"
     },
     {
+      "dateTime": "2026-08-18T07:50:00",
+      "Temp Realtime (C)": 7.6,
+      "Wind Realtime (km/h)": 25.9,
+      "Wind Realtime Dir": "NE",
+      "Tide Status": "Outgoing",
+      "Condition": null,
+      "Condition Reason": "Insufficient wind data",
+      "Location Name": "Rosebud Pier, VIC",
+      "Type": "Kayak",
+      "Shore": "E",
+      "Matched Name": "Rosebud Pier",
+      "Region": "Mornington Peninsula",
+      "State": "VIC",
+      "Fishing Condition": 4.8,
+      "Fishing Condition Reason": "Weak tide, tide moving, high pressure, near dawn/dusk, water warming"
+    },
+    {
       "dateTime": "2026-08-18T08:00:00",
       "Temp Forecast (C)": 8.5,
       "Wind Forecast (km/h)": 18.7,
       "Wind Forecast Dir": "NE",
+      "Temp Realtime (C)": 8,
+      "Wind Realtime (km/h)": 25.9,
+      "Wind Realtime Dir": "NE",
       "Tide Status": "Outgoing",
       "Condition": 2,
       "Condition Reason": "Strong wind (19 km/h)",
@@ -39817,10 +40062,30 @@
       "Fishing Condition Reason": "Weak tide, tide moving, high pressure, near dawn/dusk, water warming"
     },
     {
+      "dateTime": "2026-08-18T07:50:00",
+      "Temp Realtime (C)": 7.6,
+      "Wind Realtime (km/h)": 25.9,
+      "Wind Realtime Dir": "NE",
+      "Tide Status": "Outgoing",
+      "Condition": null,
+      "Condition Reason": "Insufficient wind data",
+      "Location Name": "Safety Beach Boat Ramp, VIC",
+      "Type": "Kayak",
+      "Shore": "E",
+      "Matched Name": "Safety Beach Boat Ramp",
+      "Region": "Mornington Peninsula",
+      "State": "VIC",
+      "Fishing Condition": 4.8,
+      "Fishing Condition Reason": "Weak tide, tide moving, high pressure, near dawn/dusk, water warming"
+    },
+    {
       "dateTime": "2026-08-18T08:00:00",
       "Temp Forecast (C)": 7.4,
       "Wind Forecast (km/h)": 13.7,
       "Wind Forecast Dir": "ENE",
+      "Temp Realtime (C)": 8,
+      "Wind Realtime (km/h)": 25.9,
+      "Wind Realtime Dir": "NE",
       "Tide Status": "Outgoing",
       "Condition": 4,
       "Condition Reason": "Moderate wind (14 km/h), from behind/side",
@@ -43345,10 +43610,30 @@
       "Fishing Condition Reason": "Tide moving, high pressure, near dawn/dusk, water cooling"
     },
     {
+      "dateTime": "2026-08-18T07:50:00",
+      "Temp Realtime (C)": 8.5,
+      "Wind Realtime (km/h)": 25.9,
+      "Wind Realtime Dir": "NE",
+      "Tide Status": "Outgoing",
+      "Condition": null,
+      "Condition Reason": "Insufficient wind data",
+      "Location Name": "Sorrento Pier, VIC",
+      "Type": "Kayak",
+      "Shore": "SW",
+      "Matched Name": "Sorrento Pier",
+      "Region": "Mornington Peninsula",
+      "State": "VIC",
+      "Fishing Condition": 4.7,
+      "Fishing Condition Reason": "Tide moving, high pressure, near dawn/dusk, water cooling"
+    },
+    {
       "dateTime": "2026-08-18T08:00:00",
       "Temp Forecast (C)": 10.2,
       "Wind Forecast (km/h)": 19.1,
       "Wind Forecast Dir": "NE",
+      "Temp Realtime (C)": 8.9,
+      "Wind Realtime (km/h)": 25.9,
+      "Wind Realtime Dir": "NE",
       "Tide Status": "Outgoing",
       "Condition": 2,
       "Condition Reason": "Strong wind (19 km/h)",
@@ -46880,6 +47165,9 @@
       "Temp Forecast (C)": 8.5,
       "Wind Forecast (km/h)": 10.8,
       "Wind Forecast Dir": "NE",
+      "Temp Realtime (C)": 8,
+      "Wind Realtime (km/h)": 3.7,
+      "Wind Realtime Dir": "NNE",
       "Tide Status": "Outgoing",
       "Condition": 3,
       "Condition Reason": "Moderate wind (11 km/h), from ahead",
@@ -50411,6 +50699,9 @@
       "Temp Forecast (C)": 6.7,
       "Wind Forecast (km/h)": 10.1,
       "Wind Forecast Dir": "ENE",
+      "Temp Realtime (C)": 9.4,
+      "Wind Realtime (km/h)": 7.4,
+      "Wind Realtime Dir": "ESE",
       "Tide Status": "Outgoing",
       "Condition": 4,
       "Condition Reason": "Moderate wind (10 km/h), from behind/side",
@@ -53971,6 +54262,9 @@
       "Temp Forecast (C)": 10.7,
       "Wind Forecast (km/h)": 13.3,
       "Wind Forecast Dir": "NE",
+      "Temp Realtime (C)": 8,
+      "Wind Realtime (km/h)": 9.3,
+      "Wind Realtime Dir": "N",
       "Tide Status": "Outgoing",
       "Condition": 4,
       "Condition Reason": "Moderate wind (13 km/h), from behind/side",
@@ -57517,6 +57811,9 @@
       "Temp Forecast (C)": 8.8,
       "Wind Forecast (km/h)": 10.8,
       "Wind Forecast Dir": "NNE",
+      "Temp Realtime (C)": 11.2,
+      "Wind Realtime (km/h)": 7.4,
+      "Wind Realtime Dir": "NNW",
       "Tide Status": "Incoming",
       "Condition": 4,
       "Condition Reason": "Moderate wind (11 km/h), from behind/side",
