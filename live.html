@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Olie's Kayak and Surf Fishing Conditions – Live</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Olie's Kayak and Surf Fishing Conditions</h1>
+  <div id="updated" class="updated">Loading…</div>
+</header>
+
+<nav class="tabnav">
+  <a href="live.html" class="active">Live</a>
+  <a href="index.html">Trip planner</a>
+  <a href="conditions.html">Location</a>
+  <a href="locations.html">Settings</a>
+</nav>
+
+<main>
+  <section class="summary-card" id="gpsStatus">
+    <div class="empty-state">Finding your location…</div>
+  </section>
+
+  <section class="picker-row" id="manualPickerRow" style="display:none;">
+    <label for="manualLocationSelect">Not this spot?</label>
+    <select id="manualLocationSelect"></select>
+  </section>
+
+  <section id="summaryCard" class="summary-card" style="display:none;">
+    <!-- filled by live.js -->
+  </section>
+
+  <section class="chart-section full-width-chart" id="liveChartSection" style="display:none;">
+    <h2>Last 24 hours &rarr; next 24 hours</h2>
+    <canvas id="liveChart" height="280"></canvas>
+  </section>
+
+  <footer class="footnote">
+    Data from <a href="https://www.willyweather.com.au/" target="_blank" rel="noopener">WillyWeather</a>.
+    Refreshed automatically every 30 minutes. Location matched to your device's GPS.
+  </footer>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="charts.js"></script>
+<script src="live.js"></script>
+</body>
+</html>

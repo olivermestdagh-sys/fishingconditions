@@ -183,6 +183,93 @@ function buildConditionStripsPlugin(rows, isMobile) {
   };
 }
 
+function lastNonNullAtOrBefore(rows, field, now) {
+  let best = null;
+  for (const r of rows) {
+    if (r[field] == null) continue;
+    const t = new Date(r.dateTime);
+    if (t <= now && (!best || t > new Date(best.dateTime))) best = r;
+  }
+  return best;
+}
+
+function nearestRowWithField(rows, field, now) {
+  let best = null, bestDiff = Infinity;
+  for (const r of rows) {
+    if (r[field] == null) continue;
+    const diff = Math.abs(new Date(r.dateTime) - now);
+    if (diff < bestDiff) { bestDiff = diff; best = r; }
+  }
+  return best;
+}
+
+// "Now" marker + wind-speed threshold line — a shared overlay on every graph,
+// not just the new Live page. "Now" is expressed in the same "naive local
+// time treated as UTC" encoding as everything else (see parseNaive) — real
+// current time, re-interpreted as if those wall-clock digits were UTC, to
+// match how the data's own timestamps are encoded.
+function nowInNaiveEncoding() {
+  const d = new Date();
+  return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds());
+}
+
+const KAYAK_WIND_THRESHOLD_KMH = 15;
+
+function buildNowAndThresholdPlugin() {
+  return {
+    id: "nowAndThreshold",
+    afterDraw(chart) {
+      const { ctx, chartArea, scales } = chart;
+      if (!chartArea) return;
+      const { top, bottom, left, right } = chartArea;
+
+      // Dotted horizontal line at the 15 km/h kayak wind threshold
+      if (scales.yWind) {
+        const y = scales.yWind.getPixelForValue(KAYAK_WIND_THRESHOLD_KMH);
+        if (y >= top - 0.5 && y <= bottom + 0.5) {
+          ctx.save();
+          ctx.strokeStyle = "#dc2626";
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([6, 4]);
+          ctx.beginPath();
+          ctx.moveTo(left, y);
+          ctx.lineTo(right, y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = "700 9px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillStyle = "#dc2626";
+          ctx.textAlign = "left";
+          ctx.textBaseline = "bottom";
+          ctx.fillText(`${KAYAK_WIND_THRESHOLD_KMH} km/h`, left + 4, y - 2);
+          ctx.restore();
+        }
+      }
+
+      // Solid vertical line at the current moment, only drawn when "now"
+      // actually falls within the chart's plotted time range.
+      if (scales.x) {
+        const nowMs = nowInNaiveEncoding();
+        if (nowMs >= scales.x.min && nowMs <= scales.x.max) {
+          const x = scales.x.getPixelForValue(nowMs);
+          ctx.save();
+          ctx.strokeStyle = "#0f172a";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x, top);
+          ctx.lineTo(x, bottom);
+          ctx.stroke();
+          ctx.font = "700 9px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillStyle = "#0f172a";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          ctx.fillText("Now", x, top + 2);
+          ctx.restore();
+        }
+      }
+    },
+  };
+}
+
 function buildDayBandPlugin(rows, sunTimes, locationName) {
   // Group rows by calendar day, tracking each day's exact start/end timestamp — bands
   // are positioned by real elapsed time (via the linear x-axis), not by row index, so
@@ -425,7 +512,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   const chart = new Chart(canvas, {
     type: "line",
     data: { datasets },
-    plugins: [buildDayBandPlugin(rows, sunTimes, locationName), buildConditionStripsPlugin(rows, isMobile)],
+    plugins: [buildDayBandPlugin(rows, sunTimes, locationName), buildConditionStripsPlugin(rows, isMobile), buildNowAndThresholdPlugin()],
     options: {
       responsive: true,
       spanGaps: true,
