@@ -14,6 +14,7 @@ Environment variables:
 """
 
 import json
+import math
 import os
 import sys
 import time
@@ -316,6 +317,31 @@ def wind_against_tide_severity(wind_dir, wind_speed, current_velocity, current_d
     if direct or large_excess:
         return 0.5, "medium"
     return 0.25, "minor"
+
+
+def interpolate_tide_height(target_ms, events):
+    """Estimates tide height at target_ms from the two nearest REAL tide
+    events bracketing it, using a cosine curve — the mathematical basis of
+    the long-standing "Rule of Twelfths" navigation technique (tide rate
+    rises to a max halfway between high/low, then eases off, not a straight
+    line). Purely a visual fill for the gaps between WillyWeather's actual
+    high/low readings — interpolates between known points, never
+    extrapolates beyond the first/last event we actually have, since a
+    guess outside real bracketing data is a different (much shakier) kind
+    of estimate than one between two known points.
+
+    events: sorted list of (ms, height) tuples — the real events only."""
+    if not events or target_ms < events[0][0] or target_ms > events[-1][0]:
+        return None
+    for i in range(len(events) - 1):
+        t1, h1 = events[i]
+        t2, h2 = events[i + 1]
+        if t1 <= target_ms <= t2:
+            if t2 == t1:
+                return h1
+            fraction = (target_ms - t1) / (t2 - t1)
+            return round(h1 + (h2 - h1) * (1 - math.cos(fraction * math.pi)) / 2, 2)
+    return None
 
 
 def compute_condition(loc_type, shore, wind_dir, wind_speed, current_velocity=None, current_direction=None):
@@ -686,6 +712,27 @@ def process_location(loc):
     for date_str, heights in heights_by_date.items():
         if len(heights) >= 2:
             daily_tide_ranges[date_str] = max(heights) - min(heights)
+
+    # Fill in Tide Height for the hourly rows that don't have a real reading
+    # (WillyWeather only gives us the actual High/Low events, a handful per
+    # day, not a full hourly curve) — purely a visual smoothing between the
+    # real points for a nicer-looking graph, not a claim of real precision
+    # at those specific in-between hours. Only interpolates BETWEEN real
+    # events we actually have; never extrapolates beyond the first/last one.
+    def naive_to_ms(dt):
+        return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+    real_tide_events = sorted(
+        (naive_to_ms(datetime.fromisoformat(row["dateTime"])), row["Tide Height (m)"])
+        for row in rows
+        if row.get("Tide Status") in ("High", "Low") and row.get("Tide Height (m)") is not None
+    )
+    for row in rows:
+        if row.get("Tide Height (m)") is None:
+            row_ms = naive_to_ms(datetime.fromisoformat(row["dateTime"]))
+            interpolated = interpolate_tide_height(row_ms, real_tide_events)
+            if interpolated is not None:
+                row["Tide Height (m)"] = interpolated
 
     for row in rows:
         date_str = row["dateTime"][:10]
