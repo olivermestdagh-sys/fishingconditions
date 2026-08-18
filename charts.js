@@ -514,10 +514,11 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   // Each location's own real observed tide range calibrates its own axis
   // ceiling, rather than one fixed number for every location — Western
   // Port's ~3m swings and Port Phillip Bay's sub-1m ones would otherwise
-  // either clip the former or make the latter look flat. A modest 15%
-  // margin above the real observed max is purely practical (so the peak
-  // doesn't sit flush against the very top pixel), not an attempt to
-  // cosmetically separate it from other axes sharing the same chart space.
+  // either clip the former or make the latter look flat/unreadable. Now
+  // that tide has its own labeled axis (below), this headroom is just
+  // normal chart practice — keeping the peak clear of the very top pixel —
+  // not an attempt to dodge overlapping with a different, hidden axis
+  // (that confusion is gone structurally now, not by tuning a margin).
   // Falls back to a sensible default if this specific location has no
   // tide data at all (older cached data, or no nearby tide station).
   const tideAxisMax = tideMaxObserved != null ? Math.round(tideMaxObserved * 1.15 * 100) / 100 : 3.5;
@@ -620,7 +621,14 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
         yTemp: { position: "left", min: -5, max: 40, title: { display: true, text: "Temperature (°C)" } },
         yRain: { display: false, min: -10, max: 100 },
         yWind: { position: "right", min: -5, max: 50, grid: { drawOnChartArea: false }, title: { display: true, text: "Wind (km/h)" } },
-        yTide: { display: false, min: 0, max: tideAxisMax },
+        yTide: {
+          position: "left",
+          min: 0,
+          max: tideAxisMax,
+          grid: { drawOnChartArea: false }, // avoid a second set of gridlines cluttering the plot
+          title: { display: true, text: "Tide (m)" },
+          ticks: { maxTicksLimit: 5 },
+        },
       },
       plugins: {
         legend: {
