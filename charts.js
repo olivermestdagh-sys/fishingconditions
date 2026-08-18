@@ -270,7 +270,18 @@ function buildNowAndThresholdPlugin() {
   };
 }
 
-function buildDayBandPlugin(rows, sunTimes, locationName) {
+const MOON_PHASE_EMOJI = {
+  "New Moon": "🌑",
+  "Waxing Crescent": "🌒",
+  "First Quarter": "🌓",
+  "Waxing Gibbous": "🌔",
+  "Full Moon": "🌕",
+  "Waning Gibbous": "🌖",
+  "Last Quarter": "🌗",
+  "Waning Crescent": "🌘",
+};
+
+function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases) {
   // Group rows by calendar day, tracking each day's exact start/end timestamp — bands
   // are positioned by real elapsed time (via the linear x-axis), not by row index, so
   // they're pixel-accurate regardless of how densely each day happens to be sampled.
@@ -363,6 +374,17 @@ function buildDayBandPlugin(rows, sunTimes, locationName) {
         }
 
         ctx.fillText(headingText, (xStart + xEnd) / 2, top - 16);
+
+        // Moon phase, one glyph per day, drawn ABOVE the day heading (needs
+        // its own reserved space — see the increased layout.padding.top
+        // where this chart gets built).
+        const moonInfo = moonPhases && moonPhases[g.key];
+        if (moonInfo && MOON_PHASE_EMOJI[moonInfo.phase]) {
+          ctx.font = "16px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          ctx.fillText(MOON_PHASE_EMOJI[moonInfo.phase], (xStart + xEnd) / 2, top - 34);
+        }
       });
       ctx.restore();
     },
@@ -428,7 +450,7 @@ function bucketRowsHourly(rows) {
   return result.sort((a, b) => a._t - b._t);
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -523,11 +545,14 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   const chart = new Chart(canvas, {
     type: "line",
     data: { datasets },
-    plugins: [buildDayBandPlugin(rows, sunTimes, locationName), buildConditionStripsPlugin(rows, isMobile), buildNowAndThresholdPlugin()],
+    plugins: [buildDayBandPlugin(rows, sunTimes, locationName, moonPhases), buildConditionStripsPlugin(rows, isMobile), buildNowAndThresholdPlugin()],
     options: {
       responsive: true,
       spanGaps: true,
-      layout: { padding: { top: 20 } },
+      // Extra top padding reserves space for two stacked elements above the
+      // plot area: the moon phase glyph (drawn higher up) and the day
+      // heading text below it (see buildDayBandPlugin).
+      layout: { padding: { top: 40 } },
       interaction: { mode: "index", intersect: false },
       scales: {
         x: {

@@ -156,6 +156,8 @@ function renderCharts(rows, loc) {
     rows,
     sunTimes,
     existingChart: state.chart,
+    tideMaxObserved: loc ? loc.tideMaxObserved : null,
+    moonPhases: state.data.moonPhases,
   });
 }
 
