@@ -174,6 +174,71 @@ def extract_sun_times(weather):
     return out
 
 
+def get_moon_phases(location_id):
+    """Moon phase is a global astronomical fact, not location-specific like
+    sunrise/sunset — fetched ONCE (using whichever location resolves first)
+    and shared across every graph on the site, rather than repeating this
+    per location like everything else."""
+    url = (
+        f"{BASE_URL}/{API_KEY}/locations/{location_id}/weather.json"
+        f"?forecasts=moonphases&days={FORECAST_DAYS}"
+    )
+    data = http_get_json(url)
+    return data or {}
+
+
+def extract_moon_illumination(weather):
+    """Returns {date_str: percentage_full} from the moonphases forecast."""
+    days = ((weather.get("forecasts", {}) or {}).get("moonphases") or {}).get("days") or []
+    out = {}
+    for day in days:
+        entries = day.get("entries") or []
+        if not entries:
+            continue
+        e = entries[0]
+        date_str = (day.get("dateTime") or "")[:10]
+        if not date_str:
+            continue
+        pct = e.get("percentageFull")
+        if pct is not None:
+            out[date_str] = pct
+    return out
+
+
+def classify_moon_phase(illumination_by_date):
+    """Classifies each date into one of the 8 standard phases, from
+    illumination percentage plus whether it's trending up (waxing) or down
+    (waning) versus the nearest other day in the same fetch. Doesn't rely
+    on WillyWeather naming phases any particular way — just the widely
+    available illumination percentage, which is more robust to not knowing
+    their exact field/label conventions for certain."""
+    dates = sorted(illumination_by_date.keys())
+    result = {}
+    for i, date_str in enumerate(dates):
+        pct = illumination_by_date[date_str]
+        if i + 1 < len(dates):
+            trend_diff = illumination_by_date[dates[i + 1]] - pct
+        elif i > 0:
+            trend_diff = pct - illumination_by_date[dates[i - 1]]
+        else:
+            trend_diff = 0
+        waxing = trend_diff >= 0
+
+        if pct < 2:
+            phase = "New Moon"
+        elif pct > 98:
+            phase = "Full Moon"
+        elif 45 <= pct <= 55:
+            phase = "First Quarter" if waxing else "Last Quarter"
+        elif pct < 45:
+            phase = "Waxing Crescent" if waxing else "Waning Crescent"
+        else:
+            phase = "Waxing Gibbous" if waxing else "Waning Gibbous"
+
+        result[date_str] = {"phase": phase, "illumination": round(pct, 1)}
+    return result
+
+
 def get_numeric_field(entry):
     """Mirrors GetNumericField in the M query: grabs whatever numeric field is
     present on a temperature forecast entry, regardless of its exact name."""
@@ -814,6 +879,20 @@ def main():
         for row in previous_output.get("rows", []):
             previous_rows_by_location.setdefault(row.get("Location Name"), []).append(row)
 
+    # Moon phase is the same for everyone regardless of location — fetched
+    # ONCE, using whichever configured location resolves first, rather than
+    # repeating this for every location like the rest of the weather data.
+    moon_phases = {}
+    if locations:
+        try:
+            first_match = search_location(locations[0]["name"])
+            if first_match and first_match.get("id"):
+                moon_weather = get_moon_phases(first_match["id"])
+                illumination = extract_moon_illumination(moon_weather)
+                moon_phases = classify_moon_phase(illumination)
+        except Exception as e:  # noqa: BLE001 - moon phase is a nice-to-have, not core data
+            print(f"WARNING: failed to fetch moon phases: {e}", file=sys.stderr)
+
     all_rows = []
     sun_times_by_location = {}
     for loc in locations:
@@ -840,6 +919,7 @@ def main():
         "locations": locations,
         "rows": all_rows,
         "sunTimes": sun_times_by_location,
+        "moonPhases": moon_phases,
     }
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
