@@ -428,6 +428,7 @@ function selectWindow(w, cardEl) {
     locationName: w.locationName,
     tideMaxObserved: matchedLoc ? matchedLoc.tideMaxObserved : null,
     moonPhases: moonPhasesData,
+    minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
   });
   renderSchedule();
 

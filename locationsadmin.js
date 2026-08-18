@@ -66,6 +66,7 @@ async function init() {
       name: "", type: "Kayak", shore: "N",
       driveTo: "00:00", driveBack: "00:00", prep: "00:00",
       packUp: "00:00", paddleOut: "00:00", paddleBack: "00:00",
+      minTideHeight: null,
     });
     renderRows();
   });
@@ -146,6 +147,12 @@ function renderRows() {
         `;
         }).join("")}
       </div>
+
+      <label class="loc-edit-label" style="display:block;margin:12px 0 6px;">Minimum tide height for boat ramp access (m) — leave blank if not applicable</label>
+      <input type="number" min="0" step="0.1" inputmode="decimal" data-field="minTideHeight" data-idx="${i}"
+        value="${loc.minTideHeight != null ? loc.minTideHeight : ""}"
+        placeholder="e.g. 1.2"
+        style="width:140px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
     `;
     list.appendChild(row);
   });
@@ -154,7 +161,15 @@ function renderRows() {
     el.addEventListener("input", (e) => {
       const idx = Number(e.target.dataset.idx);
       const field = e.target.dataset.field;
-      locations[idx][field] = e.target.value;
+      if (e.target.type === "number") {
+        // Store a real number (or null if cleared) rather than the raw
+        // string every input's .value naturally is — otherwise this would
+        // save as a quoted string in the JSON, breaking numeric comparisons
+        // downstream (chart threshold-line math, Python min/max logic).
+        locations[idx][field] = e.target.value === "" ? null : parseFloat(e.target.value);
+      } else {
+        locations[idx][field] = e.target.value;
+      }
     });
   });
   list.querySelectorAll("input[data-hmfield]").forEach((el) => {

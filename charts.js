@@ -215,7 +215,39 @@ function nowInNaiveEncoding() {
 
 const KAYAK_WIND_THRESHOLD_KMH = 15;
 
-function buildNowAndThresholdPlugin() {
+/**
+ * Finds every point where the tide curve crosses a given height threshold
+ * (e.g. the minimum depth needed for a boat ramp to be usable), using
+ * linear interpolation between consecutive tide readings to find the exact
+ * crossing time. This is a small approximation — the real curve between
+ * two readings is a cosine (see the server-side tide interpolation), not a
+ * straight line — but with hourly sampling the error is minor, and it
+ * never claims more precision than "roughly this time".
+ */
+function findTideThresholdCrossings(rows, threshold) {
+  const crossings = [];
+  const tideRows = rows
+    .filter((r) => r["Tide Height (m)"] != null)
+    .slice()
+    .sort((a, b) => a._t - b._t);
+
+  for (let i = 0; i < tideRows.length - 1; i++) {
+    const h1 = tideRows[i]["Tide Height (m)"];
+    const h2 = tideRows[i + 1]["Tide Height (m)"];
+    const t1 = tideRows[i]._t;
+    const t2 = tideRows[i + 1]._t;
+    if (h1 === threshold || h2 === threshold || h1 === h2) continue; // avoid degenerate/duplicate crossings
+    const above1 = h1 > threshold;
+    const above2 = h2 > threshold;
+    if (above1 !== above2) {
+      const frac = (threshold - h1) / (h2 - h1);
+      crossings.push({ t: t1 + frac * (t2 - t1), becomingAccessible: above2 });
+    }
+  }
+  return crossings;
+}
+
+function buildNowAndThresholdPlugin(rows, minTideHeight) {
   return {
     id: "nowAndThreshold",
     afterDraw(chart) {
@@ -242,6 +274,54 @@ function buildNowAndThresholdPlugin() {
           ctx.textBaseline = "bottom";
           ctx.fillText(`${KAYAK_WIND_THRESHOLD_KMH} km/h`, left + 4, y - 2);
           ctx.restore();
+        }
+      }
+
+      // Dashed horizontal line at the minimum tide height needed for boat
+      // ramp access, with a marker + time label at every point the real
+      // tide curve actually crosses it.
+      if (scales.yTide && minTideHeight != null) {
+        const y = scales.yTide.getPixelForValue(minTideHeight);
+        if (y >= top - 0.5 && y <= bottom + 0.5) {
+          ctx.save();
+          ctx.strokeStyle = "#0891b2";
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          ctx.moveTo(left, y);
+          ctx.lineTo(right, y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = "700 9px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillStyle = "#0891b2";
+          ctx.textAlign = "left";
+          ctx.textBaseline = "bottom";
+          ctx.fillText(`${minTideHeight}m ramp access`, left + 4, y - 2);
+          ctx.restore();
+
+          if (scales.x) {
+            const crossings = findTideThresholdCrossings(rows, minTideHeight);
+            crossings.forEach((c, idx) => {
+              if (c.t < scales.x.min || c.t > scales.x.max) return;
+              const x = scales.x.getPixelForValue(c.t);
+              ctx.save();
+              ctx.beginPath();
+              ctx.arc(x, y, 3, 0, Math.PI * 2);
+              ctx.fillStyle = "#0891b2";
+              ctx.fill();
+
+              // Alternate labels above/below the line so consecutive
+              // crossings (a full tide cycle can have several) don't
+              // overlap each other.
+              const labelBelow = idx % 2 === 1;
+              ctx.font = "600 9px -apple-system, BlinkMacSystemFont, sans-serif";
+              ctx.fillStyle = "#0891b2";
+              ctx.textAlign = "center";
+              ctx.textBaseline = labelBelow ? "top" : "bottom";
+              ctx.fillText(fmtChartTick(c.t), x, labelBelow ? y + 5 : y - 5);
+              ctx.restore();
+            });
+          }
         }
       }
 
@@ -501,7 +581,7 @@ function bucketRowsHourly(rows) {
   return result.sort((a, b) => a._t - b._t);
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -597,7 +677,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   const chart = new Chart(canvas, {
     type: "line",
     data: { datasets },
-    plugins: [buildDayBandPlugin(rows, sunTimes, locationName, moonPhases), buildConditionStripsPlugin(rows, isMobile), buildNowAndThresholdPlugin()],
+    plugins: [buildDayBandPlugin(rows, sunTimes, locationName, moonPhases), buildConditionStripsPlugin(rows, isMobile), buildNowAndThresholdPlugin(rows, minTideHeight)],
     options: {
       responsive: true,
       spanGaps: true,
