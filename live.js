@@ -121,6 +121,7 @@ function renderForLocation(loc) {
     locationName: loc.name,
     tideMaxObserved: loc.tideMaxObserved,
     moonPhases: liveData.moonPhases,
+    minTideHeight: loc.minTideHeight,
   });
 
   if (windowRows.length === 0) {

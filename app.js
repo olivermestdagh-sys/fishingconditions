@@ -158,6 +158,7 @@ function renderCharts(rows, loc) {
     existingChart: state.chart,
     tideMaxObserved: loc ? loc.tideMaxObserved : null,
     moonPhases: state.data.moonPhases,
+    minTideHeight: loc ? loc.minTideHeight : null,
   });
 }
 
