@@ -85,7 +85,8 @@
     "prep": "00:30",
     "packUp": "00:30",
     "paddleOut": "00:10",
-    "paddleBack": "00:10"
+    "paddleBack": "00:10",
+    "minTideHeight": 2.1
   },
   {
     "name": "Mornington Pier, VIC",
