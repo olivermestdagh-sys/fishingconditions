@@ -5,6 +5,7 @@ const TRIP_TIMES_STORAGE_KEY = "goodConditionsTripTimes";
 let allRows = [];
 let allLocations = [];
 let sunTimesData = {};
+let moonPhasesData = {};
 let selectedLocations = new Set();
 let currentDetailChart = null;
 let selectedCardEl = null;
@@ -159,6 +160,7 @@ async function init() {
     allRows = data.rows.map((r) => ({ ...r, _t: parseNaive(r.dateTime) }));
     allLocations = data.locations || [];
     sunTimesData = data.sunTimes || {};
+    moonPhasesData = data.moonPhases || {};
 
     let saved = null;
     try {
@@ -417,12 +419,15 @@ function selectWindow(w, cardEl) {
 
   placeholder.style.display = "none";
   canvas.style.display = "block";
+  const matchedLoc = allLocations.find((l) => l.name === w.locationName);
   currentDetailChart = renderConditionsChart({
     canvas,
     rows: dayRows,
     sunTimes: sunTimesData[w.locationName] || [],
     existingChart: currentDetailChart,
     locationName: w.locationName,
+    tideMaxObserved: matchedLoc ? matchedLoc.tideMaxObserved : null,
+    moonPhases: moonPhasesData,
   });
   renderSchedule();
 

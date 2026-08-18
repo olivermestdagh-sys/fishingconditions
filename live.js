@@ -119,6 +119,8 @@ function renderForLocation(loc) {
     sunTimes,
     existingChart: liveChart,
     locationName: loc.name,
+    tideMaxObserved: loc.tideMaxObserved,
+    moonPhases: liveData.moonPhases,
   });
 
   if (windowRows.length === 0) {
