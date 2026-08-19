@@ -17,7 +17,9 @@
         "driveTo": "00:00",
         "driveBack": "00:00",
         "setUp": "00:00",
-        "packUp": "00:00"
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
       }
     ]
   },
@@ -75,7 +77,9 @@
         "driveTo": "00:00",
         "driveBack": "00:00",
         "setUp": "00:00",
-        "packUp": "00:00"
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
       }
     ]
   },
@@ -103,7 +107,9 @@
         "driveTo": "00:00",
         "driveBack": "00:00",
         "setUp": "00:00",
-        "packUp": "00:00"
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
       }
     ]
   },
@@ -125,8 +131,10 @@
         "type": "Land based",
         "driveTo": "01:00",
         "driveBack": "01:05",
-        "setUp": "00:00",
-        "packUp": "00:00"
+        "setUp": "00:10",
+        "packUp": "00:15",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
       }
     ]
   },
