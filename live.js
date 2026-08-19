@@ -69,12 +69,13 @@ function renderTypePicker(availableTypes, selectedType, onSelect) {
   }
   section.style.display = "block";
   for (const type of availableTypes) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "loc-chip type-chip" + (type === selectedType ? " active" : "");
-    chip.innerHTML = `${typeIconSvg(type, 16)} <span>${type}</span>`;
-    chip.addEventListener("click", () => onSelect(type));
-    container.appendChild(chip);
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "type-photo-card" + (type === selectedType ? " active" : "");
+    const imgSrc = type === "Kayak" ? "images/type-kayak.jpg" : "images/type-landbased.jpg";
+    card.innerHTML = `<img src="${imgSrc}" alt="${type}" /><span>${type}</span>`;
+    card.addEventListener("click", () => onSelect(type));
+    container.appendChild(card);
   }
 }
 

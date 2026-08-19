@@ -167,11 +167,12 @@ function renderRows() {
       </div>
 
       <label class="loc-edit-label" style="display:block;margin:12px 0 6px;">Usable for</label>
-      <div class="chip-row">
+      <div class="type-photo-row" style="max-width:340px;">
         ${TYPE_OPTIONS.map((type) => `
-          <button type="button" class="loc-chip type-chip${activeTypeNames.includes(type) ? " active" : ""}"
+          <button type="button" class="type-photo-card${activeTypeNames.includes(type) ? " active" : ""}"
             data-toggle-type="${type}" data-idx="${i}">
-            ${typeIconSvg(type, 14)} <span>${type}</span>
+            <img src="${type === "Kayak" ? "images/type-kayak.jpg" : "images/type-landbased.jpg"}" alt="${type}" />
+            <span>${type}</span>
           </button>
         `).join("")}
       </div>
