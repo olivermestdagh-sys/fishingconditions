@@ -497,7 +497,16 @@ function computeWindowsForLocation(locRows, minCondition, minHours) {
 
   const windows = [];
   for (let i = 0; i < n; i++) {
-    const isSegmentStart = AD[i] > 0 && AE[i] >= minHours && (AD[i] === 1 || hourOf(filtered[i]._t) === 0);
+    // A run's total length (AE[i]) is constant across every position within
+    // it — it does NOT mean "hours remaining from here". So detecting a
+    // genuine midnight continuation (there's real time left AFTER midnight,
+    // worth its own next-day card) needs AE[i] - AD[i] > 0 specifically —
+    // hours remaining past this exact point — not just AE[i] itself. Without
+    // this, a run whose very last qualifying hour happens to land exactly on
+    // midnight would spawn a zero-duration "session" on the next day, when
+    // really the run simply ended right as the day began.
+    const isMidnightContinuation = AD[i] > 1 && hourOf(filtered[i]._t) === 0 && AE[i] - AD[i] > 0;
+    const isSegmentStart = AD[i] > 0 && AE[i] >= minHours && (AD[i] === 1 || isMidnightContinuation);
     if (!isSegmentStart) continue;
 
     // The run's TRUE start and end — not clipped to this segment's own day —
