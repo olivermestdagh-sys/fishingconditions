@@ -174,6 +174,21 @@ To adjust: change the `cron:` line, e.g. `0 */6 * * *` for every 6 hours, or
 runs in UTC, not Melbourne time). [crontab.guru](https://crontab.guru) is a
 handy way to build/check a cron expression.
 
+## Filling gaps in wind data
+
+WillyWeather occasionally has no wind reading (speed and/or direction) for
+a specific hour — usually near the far edge of the 6-day forecast window,
+or right at the seam between real observational data and forecast data.
+Rather than leave that hour blank (which used to show "Insufficient wind
+data" wherever the Location Condition tried to explain itself), a missing
+hour is filled with the average of the nearest real reading before and
+after it — a flat average, not a smoothly-changing interpolation, and only
+between two real readings either side, never guessed past the first/last
+one available. Direction is averaged as compass bearings properly (as unit
+vectors, not the raw numbers), so e.g. NNW and NNE average to N, not S —
+naively averaging 337.5° and 22.5° gives 180° (due south), which would be
+exactly backwards.
+
 ## Tide height between the real high/low points
 
 WillyWeather only gives us the actual tide events (a handful of high/low
@@ -185,6 +200,15 @@ fastest in the middle) rather than a straight line between two points.
 This is a visual smoothing between real readings, not a claim of real
 precision at those specific in-between hours — it never extrapolates
 *beyond* the first/last real event we have, only fills gaps between them.
+
+Today specifically sits at the very edge of the 6-day fetch window, so its
+early-morning hours (before the first real tide event of the day) have no
+"previous" real event within that fetch to bracket from — but every
+scheduled run also carries forward real rows from the previous run (see
+"Where the '24 hours before now' data actually comes from" further down),
+so a second pass reaches into that history for yesterday's last real event
+and uses it as the missing bracket. The very first run ever (no history
+yet) still has this small gap; every run after that shouldn't.
 
 Tide has its own labeled axis on the graph (paired with temperature on the
 left, in metres), calibrated to each location's own real observed range
