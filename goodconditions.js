@@ -562,24 +562,6 @@ function average(rows, field, from, to) {
   return vals.reduce((a, b) => a + b, 0) / vals.length;
 }
 
-function tidesInWindow(rows, from, to) {
-  const events = rows
-    .filter((r) => r._t >= from && r._t <= to && (r["Tide Status"] === "High" || r["Tide Status"] === "Low"))
-    .sort((a, b) => a._t - b._t)
-    .map((r) => `${r["Tide Status"]} ${Number(r["Tide Height (m)"]).toFixed(2)}m @ ${fmtNaive(r._t, { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })}`);
-  if (events.length) return events.join(", ");
-
-  // No High/Low event actually falls inside this window — describe the trend instead
-  // (Incoming/Outgoing), taken from whichever row is closest to the window's start.
-  let nearest = null, nearestDiff = Infinity;
-  for (const r of rows) {
-    if (r["Tide Status"] == null) continue;
-    const diff = Math.abs(r._t - from);
-    if (diff < nearestDiff) { nearestDiff = diff; nearest = r; }
-  }
-  return nearest ? nearest["Tide Status"] : "—";
-}
-
 const DAY_COLORS = [
   { bg: "#eaf2fb", accent: "#1f4e78", photoTint: "rgba(234,242,251,0.86)" }, // blue
   { bg: "#fef3e0", accent: "#b45309", photoTint: "rgba(254,243,224,0.86)" }, // amber
@@ -709,7 +691,6 @@ function render() {
         avgTemp: average(locRows, "Temp Forecast (C)", w.from, w.to),
         avgWind: average(locRows, "Wind Forecast (km/h)", w.from, w.to),
         avgRain: average(locRows, "Rainfall Probability (%)", w.from, w.to),
-        tides: tidesInWindow(locRows, w.from, w.to),
       });
     }
   }
@@ -833,7 +814,6 @@ function render() {
               <div class="value">${w.avgRain != null ? Math.round(w.avgRain) + "%" : "–"}</div>
             </div>
           </div>
-          <div class="window-tides">Tides: ${w.tides}</div>
         </div>`;
       }).join("");
 

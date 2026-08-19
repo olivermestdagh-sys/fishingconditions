@@ -357,12 +357,6 @@ tbody tr:nth-child(even) {
   padding: 8px 10px;
 }
 
-.window-tides {
-  font-size: 0.8rem;
-  color: var(--grey-500);
-  margin-top: 10px;
-}
-
 .btn-primary, .btn-secondary {
   font-size: 0.85rem;
   font-weight: 600;
