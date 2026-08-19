@@ -7,19 +7,19 @@
         "type": "Kayak",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "23:00",
+        "packUp": "23:00",
+        "timeToSpot": "00:10",
+        "timeFromSpot": "00:10"
       },
       {
         "type": "Land based",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "20:00",
+        "packUp": "20:00",
+        "timeToSpot": "00:10",
+        "timeFromSpot": "00:10"
       }
     ]
   },
@@ -31,10 +31,10 @@
         "type": "Kayak",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "00:30",
+        "packUp": "00:30",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
       }
     ]
   },
@@ -46,10 +46,10 @@
         "type": "Kayak",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "00:30",
+        "packUp": "00:30",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
       }
     ]
   },
@@ -61,10 +61,10 @@
         "type": "Kayak",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "00:30",
+        "packUp": "00:40",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
       }
     ]
   },
@@ -76,10 +76,10 @@
         "type": "Land based",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "00:05",
+        "packUp": "00:15",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
       }
     ]
   },
@@ -91,10 +91,10 @@
         "type": "Kayak",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "00:30",
+        "packUp": "00:30",
+        "timeToSpot": "01:00",
+        "timeFromSpot": "01:00"
       }
     ]
   },
@@ -106,10 +106,10 @@
         "type": "Land based",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "00:10",
+        "packUp": "00:10",
+        "timeToSpot": "00:30",
+        "timeFromSpot": "00:30"
       }
     ]
   },
@@ -146,10 +146,10 @@
         "type": "Kayak",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "00:30",
+        "packUp": "00:30",
+        "timeToSpot": "00:15",
+        "timeFromSpot": "00:15"
       }
     ]
   },
@@ -161,10 +161,10 @@
         "type": "Kayak",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "00:30",
+        "packUp": "00:30",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
       }
     ]
   },
@@ -176,10 +176,10 @@
         "type": "Kayak",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "00:30",
+        "packUp": "00:40",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
       }
     ]
   },
@@ -191,10 +191,10 @@
         "type": "Kayak",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "00:30",
+        "packUp": "00:40",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
       }
     ]
   },
@@ -206,10 +206,10 @@
         "type": "Kayak",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "00:30",
+        "packUp": "00:40",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
       }
     ]
   },
@@ -221,10 +221,10 @@
         "type": "Kayak",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "00:30",
+        "packUp": "00:30",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
       }
     ]
   },
@@ -236,10 +236,10 @@
         "type": "Kayak",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "00:30",
+        "packUp": "00:30",
+        "timeToSpot": "01:00",
+        "timeFromSpot": "01:00"
       }
     ]
   },
@@ -251,10 +251,10 @@
         "type": "Kayak",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "00:30",
+        "packUp": "00:30",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
       }
     ]
   }
