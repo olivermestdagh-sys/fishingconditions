@@ -397,8 +397,11 @@ function buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime) {
           ctx.font = "700 9px -apple-system, BlinkMacSystemFont, sans-serif";
           ctx.fillStyle = "#b91c1c";
           ctx.textAlign = "center";
-          ctx.textBaseline = "bottom";
-          ctx.fillText("Stop fishing", x, bottom - 2);
+          ctx.textBaseline = "top";
+          // Offset a little below the "Now" label (also anchored at the
+          // top) so the two don't collide when the lines sit close
+          // together horizontally.
+          ctx.fillText("Stop fishing", x, top + 13);
           ctx.restore();
         }
       }
