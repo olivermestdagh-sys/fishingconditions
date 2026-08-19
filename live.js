@@ -1,4 +1,6 @@
 const DATA_URL = "data/conditions.json";
+const SETTINGS_URL = "config/settings.json";
+const TIMINGS_STORAGE_KEY = "liveHomeTimings";
 
 const CONDITION_COLORS = {
   5: "var(--cond-5)",
@@ -12,6 +14,139 @@ let liveData = null;
 let liveChart = null;
 let currentLocationName = null;
 let currentType = null;
+let currentLoc = null;
+let stopFishingTime = null;
+let googleRoutesApiKey = null;
+
+function timeToMinutes(hhmm) {
+  const m = String(hhmm || "").match(/^(\d{1,2}):(\d{1,2})$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function minutesToClock(mins) {
+  const wrapped = ((Math.round(mins) % 1440) + 1440) % 1440;
+  const h = Math.floor(wrapped / 60);
+  const m = wrapped % 60;
+  const period = h < 12 ? "AM" : "PM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+}
+
+/**
+ * Real drive time (minutes) from a set of coordinates to a free-text
+ * address, via Google's Routes API — used here for "fishing location →
+ * home address" (the reverse direction from the Trip Planner's lookup,
+ * which goes GPS → location). The destination is passed as a plain
+ * address string; Routes API geocodes it internally, no separate
+ * geocoding call needed. Returns null (not an exception) on any failure.
+ */
+async function getDriveTimeToAddress(originLat, originLng, address) {
+  if (originLat == null || originLng == null || !address) return null;
+  if (!googleRoutesApiKey) return null;
+  try {
+    const res = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": googleRoutesApiKey,
+        "X-Goog-FieldMask": "routes.duration",
+      },
+      body: JSON.stringify({
+        origin: { location: { latLng: { latitude: originLat, longitude: originLng } } },
+        destination: { address },
+        travelMode: "DRIVE",
+        routingPreference: "TRAFFIC_AWARE",
+      }),
+    });
+    if (!res.ok) throw new Error(`Routes API returned ${res.status}`);
+    const data = await res.json();
+    const durationStr = data.routes && data.routes[0] && data.routes[0].duration;
+    const durationSeconds = durationStr ? parseInt(durationStr, 10) : null;
+    return durationSeconds != null && !Number.isNaN(durationSeconds) ? durationSeconds / 60 : null;
+  } catch (err) {
+    console.error("Drive time to address lookup failed:", err);
+    return null;
+  }
+}
+
+function setTimingsStatus(html, isError) {
+  const el = document.getElementById("timingsStatus");
+  if (!el) return;
+  el.innerHTML = html;
+  el.style.color = isError ? "#dc2626" : "";
+}
+
+/**
+ * Works backward from a "Home By" target to find the latest moment fishing
+ * can continue: Home By − drive time (fishing spot → home address) − pack
+ * up time (from this location's own timing data) − time to get back to the
+ * car (current GPS position → the fishing spot, at a fixed 6 km/h walking/
+ * paddling pace, not a road route). Draws the result as a line on the
+ * graph and shows it as plain text underneath.
+ */
+async function updateTimings() {
+  if (!currentLoc) {
+    setTimingsStatus("Match a location first.", true);
+    return;
+  }
+  const homeByStr = document.getElementById("homeByTime").value;
+  const address = document.getElementById("homeAddress").value.trim();
+  if (!homeByStr || !address) {
+    setTimingsStatus("Enter both a Home By time and a home address.", true);
+    return;
+  }
+  const homeByMinutes = timeToMinutes(homeByStr);
+  if (homeByMinutes == null) {
+    setTimingsStatus("Home By time doesn't look valid.", true);
+    return;
+  }
+
+  localStorage.setItem(TIMINGS_STORAGE_KEY, JSON.stringify({ homeByStr, address }));
+  setTimingsStatus("Calculating…");
+
+  // A fresh GPS read, not the one from page load — position may have
+  // changed since (paddled out, walked down the beach).
+  const currentPosition = await new Promise((resolve) => {
+    if (!navigator.geolocation) { resolve(null); return; }
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  });
+  if (!currentPosition) {
+    setTimingsStatus("Couldn't get your current location — check location access is allowed.", true);
+    return;
+  }
+
+  const driveMinutes = await getDriveTimeToAddress(currentLoc.lat, currentLoc.lng, address);
+  if (driveMinutes == null) {
+    setTimingsStatus("Couldn't calculate drive time — check the address, and that the Routes API key is set up.", true);
+    return;
+  }
+
+  const packUpMinutes = timeToMinutes(currentLoc.packUp) || 0;
+
+  const backToCarKm = distanceKm(currentPosition.lat, currentPosition.lng, currentLoc.lat, currentLoc.lng);
+  const backToCarMinutes = (backToCarKm / 6) * 60; // fixed 6 km/h walking/paddling pace, not a road route
+
+  const totalMinutesNeeded = driveMinutes + packUpMinutes + backToCarMinutes;
+
+  const nowMs = nowInNaiveEncoding();
+  const todayMidnight = Math.floor(nowMs / 86400000) * 86400000;
+  let homeByTimestamp = todayMidnight + homeByMinutes * 60000;
+  if (homeByTimestamp < nowMs) homeByTimestamp += 86400000; // Home By already passed today -> assume tomorrow
+
+  stopFishingTime = homeByTimestamp - totalMinutesNeeded * 60000;
+
+  setTimingsStatus(
+    `Stop fishing by <strong>${minutesToClock((stopFishingTime - todayMidnight) / 60000)}</strong> to be home by ${homeByStr} ` +
+    `— drive ${Math.round(driveMinutes)} min, pack up ${Math.round(packUpMinutes)} min, back to car ${Math.round(backToCarMinutes)} min.`
+  );
+
+  renderForLocation(currentLoc);
+}
 
 // Flat-earth distance is more than accurate enough at these scales (tens of
 // km at most between locations in the same two bays) — no need for a full
@@ -97,6 +232,13 @@ function selectLocationAndType(name, preferredType) {
   renderTypePicker(availableTypes, type, (newType) => selectLocationAndType(name, newType));
 
   const loc = variants.find((v) => v.type === type);
+  currentLoc = loc;
+  // Pack-up time (part of the stop-fishing calculation) differs by type,
+  // and the reference point itself changes on a different location — any
+  // previously calculated line would be stale, so clear it rather than
+  // show a result that no longer matches what's on screen.
+  stopFishingTime = null;
+  setTimingsStatus("");
   renderForLocation(loc);
 }
 
@@ -179,6 +321,7 @@ function renderForLocation(loc) {
     tideMaxObserved: loc.tideMaxObserved,
     moonPhases: liveData.moonPhases,
     minTideHeight: loc.minTideHeight,
+    stopFishingTime,
   });
 
   if (windowRows.length === 0) {
@@ -191,6 +334,31 @@ function setGpsStatus(html) {
 }
 
 async function init() {
+  // Loaded separately from the main data fetch, with its own error handling
+  // — a missing/malformed settings file shouldn't break the rest of the
+  // page, just leave the drive-time feature gracefully unavailable.
+  try {
+    const settingsRes = await fetch(SETTINGS_URL, { cache: "no-store" });
+    if (settingsRes.ok) {
+      const settings = await settingsRes.json();
+      googleRoutesApiKey = settings.googleRoutesApiKey || null;
+    }
+  } catch (err) {
+    console.error("Could not load settings.json:", err);
+  }
+
+  let savedTimings = null;
+  try {
+    savedTimings = JSON.parse(localStorage.getItem(TIMINGS_STORAGE_KEY) || "null");
+  } catch {
+    savedTimings = null;
+  }
+  if (savedTimings) {
+    document.getElementById("homeByTime").value = savedTimings.homeByStr || "";
+    document.getElementById("homeAddress").value = savedTimings.address || "";
+  }
+  document.getElementById("btnUpdateTimings").addEventListener("click", updateTimings);
+
   try {
     const res = await fetch(DATA_URL, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

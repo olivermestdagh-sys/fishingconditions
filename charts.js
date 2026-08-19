@@ -280,7 +280,7 @@ function findTideThresholdCrossings(rows, threshold) {
   return crossings;
 }
 
-function buildNowAndThresholdPlugin(rows, minTideHeight) {
+function buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime) {
   return {
     id: "nowAndThreshold",
     afterDraw(chart) {
@@ -376,6 +376,29 @@ function buildNowAndThresholdPlugin(rows, minTideHeight) {
           ctx.textAlign = "center";
           ctx.textBaseline = "top";
           ctx.fillText("Now", x, top + 2);
+          ctx.restore();
+        }
+
+        // Dashed vertical line at the calculated "must stop fishing by"
+        // time (Live page only — the time worked back from a Home By
+        // target, minus drive time, pack-up time, and the trip back to the
+        // car). Only drawn when actually set and within the plotted range.
+        if (stopFishingTime != null && stopFishingTime >= scales.x.min && stopFishingTime <= scales.x.max) {
+          const x = scales.x.getPixelForValue(stopFishingTime);
+          ctx.save();
+          ctx.strokeStyle = "#b91c1c";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([5, 4]);
+          ctx.beginPath();
+          ctx.moveTo(x, top);
+          ctx.lineTo(x, bottom);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = "700 9px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillStyle = "#b91c1c";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          ctx.fillText("Stop fishing", x, bottom - 2);
           ctx.restore();
         }
       }
@@ -614,7 +637,7 @@ function bucketRowsHourly(rows) {
   return result.sort((a, b) => a._t - b._t);
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -710,7 +733,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   const chart = new Chart(canvas, {
     type: "line",
     data: { datasets },
-    plugins: [buildDayBandPlugin(rows, sunTimes, locationName, moonPhases), buildConditionStripsPlugin(rows, isMobile), buildNowAndThresholdPlugin(rows, minTideHeight)],
+    plugins: [buildDayBandPlugin(rows, sunTimes, locationName, moonPhases), buildConditionStripsPlugin(rows, isMobile), buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime)],
     options: {
       responsive: true,
       spanGaps: true,

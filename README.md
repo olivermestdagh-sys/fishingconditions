@@ -254,6 +254,34 @@ API calls, and nothing added to `config/locations.json` itself (coordinates
 only flow into the generated `data/conditions.json`, so your own location
 list stays exactly as you edit it).
 
+### When to stop fishing
+
+Enter a Home By time and your home address, then **Update timings**, and a
+dashed red line appears on the graph marking the latest moment you can
+realistically keep fishing. Worked out backward from Home By:
+
+```
+Home By − drive time − pack up time − time back to the car = stop fishing by
+```
+
+- **Drive time**: fishing location → your home address, via the same
+  Google Routes API used by the Trip Planner (real traffic-aware driving
+  time) — just the reverse direction, since here you're already at the
+  water and need to get home, not the other way round.
+- **Pack up time**: from that location's own Kayak/Land based timing data
+  (whichever type is currently selected).
+- **Time back to the car**: a fresh GPS read at the moment you press the
+  button, compared against the fishing location's own coordinates, at a
+  fixed 6 km/h — a walking/paddling pace, not a road route, since this
+  leg isn't on roads at all.
+
+If Home By has already passed for today, it's assumed to mean tomorrow.
+Switching location or type clears the calculated line — pack-up time
+differs by type, so a stale result would no longer match what's on
+screen. Needs the same Google Routes API key as the Trip Planner (see
+"Live drive-time lookup" below) — without one, drive time can't be
+calculated and the line won't appear.
+
 ### Where the "24 hours before now" data actually comes from
 
 WillyWeather's forecast only ever looks forward from today — there's no way

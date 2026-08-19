@@ -38,6 +38,23 @@
     <!-- filled by live.js -->
   </section>
 
+  <section class="summary-card" id="timingsSection">
+    <label class="loc-edit-label" style="display:block;margin:0 0 10px;">Work out when to stop fishing</label>
+    <div class="filter-row">
+      <div>
+        <label for="homeByTime">Home By</label>
+        <input type="time" id="homeByTime" />
+      </div>
+      <div>
+        <label for="homeAddress">Home address</label>
+        <input type="text" id="homeAddress" placeholder="e.g. 12 Smith St, Melbourne VIC"
+          style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+      </div>
+    </div>
+    <button id="btnUpdateTimings" class="btn-primary" style="margin-top:12px;">Update timings</button>
+    <p id="timingsStatus" class="footnote" style="margin:10px 0 0;text-align:left;"></p>
+  </section>
+
   <section class="chart-section full-width-chart" id="liveChartSection" style="display:none;">
     <h2>Last 24 hours &rarr; next 24 hours</h2>
     <canvas id="liveChart" height="280"></canvas>
