@@ -468,7 +468,20 @@ function renderTypeChips() {
 function computeWindowsForLocation(locRows, minCondition, minHours) {
   // Only "hourly forecast rows" — where Condition is populated — participate in run detection,
   // matching the Excel calc area's P9 FILTER(Conditions[...], Conditions[Condition]<>"")
-  const filtered = locRows.filter((r) => r.Condition != null).sort((a, b) => a._t - b._t);
+  // Only genuinely hourly-aligned rows participate in run detection — the
+  // whole AD/AE consecutive-hour algorithm below assumes each entry is
+  // exactly one hour after the last. Observational readings can land at
+  // arbitrary sub-hourly timestamps (e.g. :10, :23), and occasionally have
+  // complete enough data to get a real Condition score — when that happens
+  // between two otherwise-consecutive hourly points, it silently breaks the
+  // "exactly one hour apart" check on both sides of it, splitting what
+  // should be one continuous run into pieces despite every actual hourly
+  // reading being perfectly fine. Filtering to minute===0 keeps run
+  // detection on the intended hourly grid; it doesn't discard that reading
+  // anywhere else (charts still show it, bucketed into its hour).
+  const filtered = locRows
+    .filter((r) => r.Condition != null && new Date(r._t).getUTCMinutes() === 0)
+    .sort((a, b) => a._t - b._t);
   const n = filtered.length;
   if (n === 0) return [];
 
