@@ -82,7 +82,7 @@ function windColor(speed) {
 }
 
 // Chart.js has no built-in "arrow" point style (only triangle, circle, etc.), so draw a real
-// arrow — a shaft with an arrowhead, pointing up by default — onto a small offscreen canvas
+// arrowhead — a bold dart/chevron shape, pointing up by default — onto a small offscreen canvas
 // per color, and use that as a custom pointStyle. Chart.js rotates/positions a canvas
 // pointStyle exactly like a built-in one, so dirToArrowRotation's angle math still applies
 // unchanged. Cached per color since there are only a handful of distinct wind-speed colors.
@@ -97,23 +97,15 @@ function makeArrowCanvas(color) {
   const ctx = canvas.getContext("2d");
   const cx = size / 2;
 
-  ctx.strokeStyle = color;
+  // A bold arrowhead/dart shape — the concave notch at the back is what
+  // reads clearly as "an arrowhead" at this size, rather than the thin
+  // needle-with-small-tip look a full shaft+small-triangle combo gives.
   ctx.fillStyle = color;
-  ctx.lineWidth = 1.6;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-
-  // Shaft
-  ctx.beginPath();
-  ctx.moveTo(cx, size - 1);
-  ctx.lineTo(cx, 4);
-  ctx.stroke();
-
-  // Arrowhead
   ctx.beginPath();
   ctx.moveTo(cx, 0);
-  ctx.lineTo(cx - 3.5, 5.5);
-  ctx.lineTo(cx + 3.5, 5.5);
+  ctx.lineTo(cx + 5, 11);
+  ctx.lineTo(cx, 8);
+  ctx.lineTo(cx - 5, 11);
   ctx.closePath();
   ctx.fill();
 
