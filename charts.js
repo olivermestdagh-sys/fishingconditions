@@ -536,6 +536,36 @@ function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases) {
             ctx.fillStyle = NIGHT_BAND_COLOR;
             ctx.fillRect(xSunset, top, xEnd - xSunset, bottom - top);
           }
+
+          // Explicit time labels at the actual sunrise/sunset moment — the
+          // shading already marks the transition visually, but not the
+          // specific time. Placed a little below the "Now"/"Stop fishing"
+          // labels (which sit right at the very top) and well above the
+          // condition strips (anchored to the very bottom), since both of
+          // those are already using their own ends of the chart.
+          ctx.font = "700 8px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillStyle = "#b45309";
+          ctx.textAlign = "center";
+          if (xSunrise != null && xSunrise >= left && xSunrise <= right) {
+            ctx.strokeStyle = "#b45309";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(xSunrise, top + 24);
+            ctx.lineTo(xSunrise, top + 32);
+            ctx.stroke();
+            ctx.textBaseline = "top";
+            ctx.fillText(fmtChartTick(parseNaive(sun.sunrise)), xSunrise, top + 33);
+          }
+          if (xSunset != null && xSunset >= left && xSunset <= right) {
+            ctx.strokeStyle = "#b45309";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(xSunset, top + 24);
+            ctx.lineTo(xSunset, top + 32);
+            ctx.stroke();
+            ctx.textBaseline = "top";
+            ctx.fillText(fmtChartTick(parseNaive(sun.sunset)), xSunset, top + 33);
+          }
         }
 
         ctx.fillStyle = "#1f4e78";
