@@ -506,7 +506,13 @@ function computeWindowsForLocation(locRows, minCondition, minHours) {
     // midnight would spawn a zero-duration "session" on the next day, when
     // really the run simply ended right as the day began.
     const isMidnightContinuation = AD[i] > 1 && hourOf(filtered[i]._t) === 0 && AE[i] - AD[i] > 0;
-    const isSegmentStart = AD[i] > 0 && AE[i] >= minHours && (AD[i] === 1 || isMidnightContinuation);
+    // AE[i] counts qualifying HOURLY DATA POINTS, not clock-hours of
+    // duration — a run of 3 points (e.g. 16:00, 17:00, 18:00) only spans 2
+    // clock hours. The minimum-hours filter is meant to match what's
+    // actually displayed (a genuine clock-duration threshold), so it checks
+    // AE[i]-1 here, not AE[i] itself — otherwise a "min 3 hours" setting
+    // would let a 2-hour session through, since it has 3 qualifying points.
+    const isSegmentStart = AD[i] > 0 && AE[i] - 1 >= minHours && (AD[i] === 1 || isMidnightContinuation);
     if (!isSegmentStart) continue;
 
     // The run's TRUE start and end — not clipped to this segment's own day —
