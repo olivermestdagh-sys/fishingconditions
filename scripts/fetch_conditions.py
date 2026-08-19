@@ -385,6 +385,15 @@ def wind_against_tide_severity(wind_dir, wind_speed, current_velocity, current_d
     return 0.25, "minor"
 
 
+def naive_to_ms(dt):
+    """Converts a naive (no timezone) datetime — where the digits represent
+    local wall-clock time, same convention used everywhere in this file —
+    into a millisecond value, by treating those digits as if they were UTC.
+    Module-level (not a local closure) so both process_location() and
+    main()'s history-aware interpolation pass can share it."""
+    return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+
 def interpolate_tide_height(target_ms, events):
     """Estimates tide height at target_ms from the two nearest REAL tide
     events bracketing it, using a cosine curve — the mathematical basis of
@@ -783,9 +792,8 @@ def process_location(loc):
     # real points for a nicer-looking graph, not a claim of real precision
     # at those specific in-between hours. Only interpolates BETWEEN real
     # events we actually have; never extrapolates beyond the first/last one.
-    def naive_to_ms(dt):
-        return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
-
+    # (A second pass happens later in main(), using history rows too, for
+    # gaps this pass can't reach — see there for why.)
     real_tide_events = sorted(
         (naive_to_ms(datetime.fromisoformat(row["dateTime"])), row["Tide Height (m)"])
         for row in base_rows
@@ -941,6 +949,29 @@ def main():
                 history_rows = keep_recent_history(previous_rows_by_key.get(key, []))
                 fresh_datetimes = {r["dateTime"] for r in fresh_rows}
                 history_rows = [r for r in history_rows if r["dateTime"] not in fresh_datetimes]
+
+                # Second tide-height interpolation pass: the fresh fetch's
+                # own interpolation (done earlier, inside process_location())
+                # can only see its OWN 6-day window — it has no visibility
+                # into what came before it, so today (still the very edge of
+                # that window) can be missing tide height for the hours
+                # before its first real event of the day. History now
+                # carries forward real events from previous runs, so use the
+                # FULL (history + fresh) set of real events as brackets for
+                # anything still missing — this is what actually lets
+                # today's early-morning hours fill in using yesterday's last
+                # real tide reading, rather than staying blank.
+                real_tide_events_merged = sorted(
+                    (naive_to_ms(datetime.fromisoformat(r["dateTime"])), r["Tide Height (m)"])
+                    for r in (history_rows + fresh_rows)
+                    if r.get("Tide Status") in ("High", "Low") and r.get("Tide Height (m)") is not None
+                )
+                for row in fresh_rows:
+                    if row.get("Tide Height (m)") is None:
+                        row_ms = naive_to_ms(datetime.fromisoformat(row["dateTime"]))
+                        interpolated = interpolate_tide_height(row_ms, real_tide_events_merged)
+                        if interpolated is not None:
+                            row["Tide Height (m)"] = interpolated
 
                 all_rows.extend(history_rows)
                 all_rows.extend(fresh_rows)
