@@ -1,5 +1,6 @@
 const DATA_URL = "data/conditions.json";
 const LOC_FILTER_STORAGE_KEY = "goodConditionsSelectedLocations";
+const TYPE_FILTER_STORAGE_KEY = "goodConditionsSelectedTypes";
 const TRIP_TIMES_STORAGE_KEY = "goodConditionsTripTimes";
 
 let allRows = [];
@@ -7,6 +8,7 @@ let allLocations = [];
 let sunTimesData = {};
 let moonPhasesData = {};
 let selectedLocations = new Set();
+let selectedTypes = new Set(["Kayak", "Land based"]);
 let currentDetailChart = null;
 let selectedCardEl = null;
 let currentSelectedWindow = null;
@@ -70,18 +72,18 @@ function computeSchedule(loc, launchStr, homeByStr) {
   const homeBy = timeToMinutes(homeByStr);
   if (launch == null || homeBy == null || !loc) return null;
 
-  const prep = timeToMinutes(loc.prep) || 0;
+  const setUp = timeToMinutes(loc.setUp) || 0;
   const driveTo = timeToMinutes(loc.driveTo) || 0;
-  const paddleOut = timeToMinutes(loc.paddleOut) || 0;
+  const timeToSpot = timeToMinutes(loc.timeToSpot) || 0;
   const driveBack = timeToMinutes(loc.driveBack) || 0;
   const packUp = timeToMinutes(loc.packUp) || 0;
-  const paddleBack = timeToMinutes(loc.paddleBack) || 0;
+  const timeFromSpot = timeToMinutes(loc.timeFromSpot) || 0;
 
-  const arrive = launch - prep;
+  const arrive = launch - setUp;
   const leaveHome = arrive - driveTo;
-  const fishAt = launch + paddleOut;
+  const fishAt = launch + timeToSpot;
   const driveHome = homeBy - driveBack;
-  const headBack = driveHome - packUp - paddleBack;
+  const headBack = driveHome - packUp - timeFromSpot;
   const fishingTimeMins = headBack - fishAt;
 
   return {
@@ -110,7 +112,7 @@ function renderSchedule() {
     return;
   }
 
-  const loc = allLocations.find((l) => l.name === currentSelectedWindow.locationName);
+  const loc = allLocations.find((l) => l.name === currentSelectedWindow.locationName && l.type === currentSelectedWindow.type);
   const launchStr = document.getElementById("launchTime").value;
   const homeByStr = document.getElementById("homeBy").value;
   const schedule = computeSchedule(loc, launchStr, homeByStr);
@@ -177,6 +179,18 @@ async function init() {
       selectedLocations = new Set(allNames);
     }
 
+    let savedTypes = null;
+    try {
+      savedTypes = JSON.parse(localStorage.getItem(TYPE_FILTER_STORAGE_KEY) || "null");
+    } catch {
+      savedTypes = null;
+    }
+    if (Array.isArray(savedTypes) && savedTypes.length) {
+      selectedTypes = new Set(savedTypes);
+    } else {
+      selectedTypes = new Set(["Kayak", "Land based"]);
+    }
+
     if (!data.generatedAt) {
       document.getElementById("updated").textContent = "Not updated yet — waiting on the first scheduled run";
     } else {
@@ -190,6 +204,7 @@ async function init() {
   }
 
   renderLocationChips();
+  renderTypeChips();
   document.getElementById("btnLocAll").addEventListener("click", () => {
     selectedLocations = new Set(allLocations.map((l) => l.name));
     persistSelectedLocations();
@@ -247,7 +262,13 @@ function persistSelectedLocations() {
 function renderLocationChips() {
   const container = document.getElementById("locationChips");
   container.innerHTML = "";
+  // A location's name is no longer unique on its own (Kayak and Land based
+  // entries share the same name) — dedupe so this filter shows one chip
+  // per physical spot, not one per (name, type) combination.
+  const seenNames = new Set();
   for (const loc of allLocations) {
+    if (seenNames.has(loc.name)) continue;
+    seenNames.add(loc.name);
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "loc-chip" + (selectedLocations.has(loc.name) ? " active" : "");
@@ -259,6 +280,33 @@ function renderLocationChips() {
         selectedLocations.add(loc.name);
       }
       persistSelectedLocations();
+      chip.classList.toggle("active");
+      render();
+    });
+    container.appendChild(chip);
+  }
+}
+
+function persistSelectedTypes() {
+  localStorage.setItem(TYPE_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedTypes)));
+}
+
+function renderTypeChips() {
+  const container = document.getElementById("typeChips");
+  if (!container) return;
+  container.innerHTML = "";
+  for (const type of ["Kayak", "Land based"]) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "loc-chip type-chip" + (selectedTypes.has(type) ? " active" : "");
+    chip.innerHTML = `${typeIconSvg(type, 14)} <span>${type}</span>`;
+    chip.addEventListener("click", () => {
+      if (selectedTypes.has(type)) {
+        selectedTypes.delete(type);
+      } else {
+        selectedTypes.add(type);
+      }
+      persistSelectedTypes();
       chip.classList.toggle("active");
       render();
     });
@@ -419,7 +467,7 @@ function selectWindow(w, cardEl) {
 
   placeholder.style.display = "none";
   canvas.style.display = "block";
-  const matchedLoc = allLocations.find((l) => l.name === w.locationName);
+  const matchedLoc = allLocations.find((l) => l.name === w.locationName && l.type === w.type);
   currentDetailChart = renderConditionsChart({
     canvas,
     rows: dayRows,
@@ -450,8 +498,14 @@ function render() {
 
   const byLocation = {};
   for (const r of allRows) {
-    const key = r["Location Name"];
-    if (!selectedLocations.has(key)) continue;
+    const name = r["Location Name"];
+    const type = r["Type"];
+    if (!selectedLocations.has(name)) continue;
+    if (!selectedTypes.has(type)) continue;
+    // Keyed by (name, type) — the same physical location can now have both
+    // a Kayak and a Land based entry, each with its own Condition scores
+    // and its own qualifying windows, so they must not be mixed together.
+    const key = `${name}::${type}`;
     (byLocation[key] || (byLocation[key] = [])).push(r);
   }
 
@@ -518,14 +572,16 @@ function render() {
     heading.style.borderBottomColor = colors.accent;
     dayGroup.appendChild(heading);
 
-    // If the same location has more than one qualifying session today (e.g.
-    // a morning window and a separate evening window), combine them into ONE
-    // card listing every session, rather than showing duplicate cards for
-    // the same spot.
+    // If the same (location, type) has more than one qualifying session
+    // today (e.g. a morning window and a separate evening window), combine
+    // them into ONE card listing every session. Keyed by location+type, not
+    // location alone — a Kayak session and a Land based session at the same
+    // spot on the same day are shown as SEPARATE cards, never merged.
     const byLocationThisDay = new Map();
     for (const w of byDay.get(dayKey)) {
-      if (!byLocationThisDay.has(w.locationName)) byLocationThisDay.set(w.locationName, []);
-      byLocationThisDay.get(w.locationName).push(w);
+      const key = `${w.locationName}::${w.type}`;
+      if (!byLocationThisDay.has(key)) byLocationThisDay.set(key, []);
+      byLocationThisDay.get(key).push(w);
     }
 
     for (const [, sessions] of byLocationThisDay) {
@@ -575,8 +631,13 @@ function render() {
       }).join("");
 
       card.innerHTML = `
-        <div class="window-loc">${first.locationName}</div>
-        <div class="window-sub" style="margin-bottom:8px;">${first.type || "–"} · shore ${first.shore || "–"}</div>
+        <div class="window-card-header">
+          <div>
+            <div class="window-loc">${first.locationName}</div>
+            <div class="window-sub" style="margin-bottom:8px;">${first.type || "–"} · shore ${first.shore || "–"}</div>
+          </div>
+          <div class="type-icon-badge" title="${first.type || ""}">${typeIconSvg(first.type, 18)}</div>
+        </div>
         ${sessionsHtml}
       `;
 

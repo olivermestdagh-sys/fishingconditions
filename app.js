@@ -13,6 +13,13 @@ const CONDITION_COLORS = {
 
 let state = { data: null, rowsByLocation: {}, chart: null };
 
+// A location's NAME is no longer unique on its own — the same physical
+// spot can have both a Kayak and a Land based entry. Everywhere a single
+// location needs to be looked up, use this combined key instead.
+function locationKey(name, type) {
+  return `${name}::${type}`;
+}
+
 async function init() {
   try {
     const res = await fetch(DATA_URL, { cache: "no-store" });
@@ -34,7 +41,7 @@ async function init() {
   });
 
   const saved = localStorage.getItem("selectedLocation");
-  const first = state.data.locations[0]?.name;
+  const first = state.data.locations[0] ? locationKey(state.data.locations[0].name, state.data.locations[0].type) : null;
   const initial = saved && state.rowsByLocation[saved] ? saved : first;
   if (initial) {
     document.getElementById("locationSelect").value = initial;
@@ -46,7 +53,7 @@ function groupRowsByLocation() {
   state.rowsByLocation = {};
   for (const row of state.data.rows) {
     row._t = parseNaive(row.dateTime);
-    const key = row["Location Name"];
+    const key = locationKey(row["Location Name"], row["Type"]);
     if (!state.rowsByLocation[key]) state.rowsByLocation[key] = [];
     state.rowsByLocation[key].push(row);
   }
@@ -67,7 +74,9 @@ function renderUpdatedBanner() {
 function populateLocationPicker() {
   const select = document.getElementById("locationSelect");
   select.innerHTML = "";
-  const groups = { Kayak: [], Surf: [] };
+  // Explicit key order guarantees Kayak entries list before Land based
+  // ones, regardless of what order locations happen to appear in the data.
+  const groups = { Kayak: [], "Land based": [] };
   for (const loc of state.data.locations) {
     (groups[loc.type] || (groups[loc.type] = [])).push(loc);
   }
@@ -77,7 +86,7 @@ function populateLocationPicker() {
     optgroup.label = type;
     for (const loc of locs) {
       const opt = document.createElement("option");
-      opt.value = loc.name;
+      opt.value = locationKey(loc.name, loc.type);
       opt.textContent = loc.name;
       optgroup.appendChild(opt);
     }
@@ -85,9 +94,9 @@ function populateLocationPicker() {
   }
 }
 
-function renderLocation(name) {
-  const loc = state.data.locations.find((l) => l.name === name);
-  const rows = state.rowsByLocation[name] || [];
+function renderLocation(key) {
+  const loc = state.data.locations.find((l) => locationKey(l.name, l.type) === key);
+  const rows = state.rowsByLocation[key] || [];
   const now = new Date();
 
   renderSummary(loc, rows, now);
