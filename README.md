@@ -78,8 +78,6 @@ file → pencil icon to edit → commit):
   "types": [
     {
       "type": "Kayak",
-      "driveTo": "01:00",
-      "driveBack": "01:05",
       "setUp": "00:30",
       "packUp": "00:30",
       "timeToSpot": "00:10",
@@ -88,10 +86,10 @@ file → pencil icon to edit → commit):
     },
     {
       "type": "Land based",
-      "driveTo": "01:00",
-      "driveBack": "01:05",
       "setUp": "00:00",
-      "packUp": "00:00"
+      "packUp": "00:00",
+      "timeToSpot": "00:15",
+      "timeFromSpot": "00:15"
     }
   ]
 }
@@ -106,13 +104,46 @@ GPS point either way); everything inside each `types[]` entry — timings,
 formula that used to be called "Surf" — genuinely the same scoring, just
 relabeled; Kayak's formula (wind speed/direction plus the wind-against-current
 penalty) is a different calculation and doesn't apply to Land based at all.
+Both types have Time to Spot/Time From Spot — paddling for Kayak, walking
+from the carpark to the actual spot for Land based.
 
 The timing fields are `HH:MM` durations — how long each part of a trip
-takes — and **do** feed into the Trip Planner's schedule calculator once
-you set a Launch Time/Home By. Kayak has two extra fields Land based
-doesn't (`timeToSpot`/`timeFromSpot` — paddling time — since Land based
-has no equivalent "getting to the fishing spot" step separate from set up).
+takes — and **feed into** the Trip Planner's schedule calculator once you
+set a Launch Time/Home By. Drive time isn't one of these fields any more —
+see "Live drive-time lookup" below for how that's now calculated instead.
 Changes take effect on the next scheduled or manual run.
+
+## Live drive-time lookup
+
+The Trip Planner calculates drive time live, via Google's Routes API,
+rather than using a fixed value stored per location — the same spot might
+be a short drive from home but a much longer one when travelling from
+somewhere else. This needs:
+
+1. **Your device's current GPS position** — requested the same way the
+   Live page does, with a manual fallback if it's denied.
+2. **A Google Routes API key**, entered on the **Settings** page under "API
+   Keys" (not pasted into any code file — it's stored in its own
+   `config/settings.json`, separate from the site's actual code, so it
+   survives untouched whenever `goodconditions.js` gets updated). To get a
+   key: [console.cloud.google.com](https://console.cloud.google.com/) →
+   create a project → **enable billing** (required even for free-tier
+   usage — see the note below) → enable **Routes API** specifically (not
+   the older "Directions API") → Credentials → Create credentials → API
+   key → restrict it to your GitHub Pages domain and to just the Routes
+   API before using it in production.
+
+**On the billing requirement**: Google mandates a card on file to use any
+Maps Platform API, even entirely within the free tier — this is a Google
+policy, not something this site's usage would actually cost you at
+personal scale. If that's not something you want to set up, drive-time
+fields will just show as unavailable — Arrive/Launch/Fish at/Home by still
+calculate fine without it, since only Leave Home/Head Back/Drive Home
+specifically depend on drive time.
+
+Both types (Kayak and Land based) have `timeToSpot`/`timeFromSpot` fields
+— paddling time for Kayak, walking-from-the-carpark time for Land based —
+which still work exactly as before, unrelated to the live drive-time piece.
 
 ## Changing the update frequency — and what it costs
 
@@ -262,6 +293,9 @@ this restriction — nothing extra is drawn.
 - `scripts/fetch_conditions.py` — fetches from WillyWeather, writes `data/conditions.json`
   (pure Python standard library only, no `pip install` needed)
 - `config/locations.json` — your tracked locations
+- `config/settings.json` — API keys used client-side (currently just the
+  Google Routes API key) — kept separate from the site's code so it's
+  never overwritten by a code update; edit it from the Settings page
 - `.github/workflows/update.yml` — the schedule that runs the fetch script
 - `data/conditions.json` — the generated data file (starts empty; gets
   overwritten automatically by the workflow)
