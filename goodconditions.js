@@ -500,22 +500,28 @@ function computeWindowsForLocation(locRows, minCondition, minHours) {
     const isSegmentStart = AD[i] > 0 && AE[i] >= minHours && (AD[i] === 1 || hourOf(filtered[i]._t) === 0);
     if (!isSegmentStart) continue;
 
-    const runStartDate = dateOnly(filtered[i]._t - (AD[i] - 1) * 3600 * 1000);
-    const runEndDate = dateOnly(filtered[i]._t + (AE[i] - AD[i]) * 3600 * 1000);
-    const spansMultipleDays = runStartDate !== runEndDate;
-
+    // The run's TRUE start and end — not clipped to this segment's own day —
+    // used for the displayed time range and the stats/tide summary on the
+    // card, so a session spanning midnight shows the SAME full span and
+    // matching figures on every day-card it appears on, rather than a
+    // different partial range (and partial averages) per day.
+    const trueFrom = filtered[i]._t - (AD[i] - 1) * 3600 * 1000;
     const naturalEnd = filtered[i]._t + (AE[i] - AD[i]) * 3600 * 1000;
-    const endOfDay = dateOnly(filtered[i]._t) + 23 * 3600 * 1000; // matches Excel's INT(date)+23/24
-    const segmentEnd = Math.min(naturalEnd, endOfDay);
 
-    const hoursLabel = (AE[i] - 1) + (spansMultipleDays ? "*" : "");
+    const hoursLabel = AE[i] - 1;
 
     windows.push({
       locationName: filtered[i]["Location Name"],
       type: filtered[i]["Type"],
       shore: filtered[i]["Shore"],
-      from: filtered[i]._t,
-      to: segmentEnd,
+      // This segment's OWN day — i.e. which day-heading this particular
+      // card sits under, and which day's full chart opens on click. Kept
+      // separate from from/to (the session's true full span) specifically
+      // so a midnight-continuation segment still shows up under ITS OWN
+      // day, not silently regrouped under the day the session first began.
+      dayAnchor: filtered[i]._t,
+      from: trueFrom,
+      to: naturalEnd,
       hoursLabel,
     });
   }
@@ -598,7 +604,10 @@ function selectWindow(w, cardEl) {
 
   // Full calendar day for this location — not just the qualifying window's hour
   // span — so the graph shows the whole day's context around the good window.
-  const dayStart = dateOnly(w.from);
+  // Uses dayAnchor (this card's OWN day), not from (the session's true
+  // start, which for a midnight-continuation card would be the PREVIOUS
+  // day) — clicking the card grouped under "Friday" should open Friday.
+  const dayStart = dateOnly(w.dayAnchor);
   const dayRows = allRows
     .filter((r) => r["Location Name"] === w.locationName && dateOnly(r._t) === dayStart)
     .sort((a, b) => a._t - b._t);
@@ -678,7 +687,7 @@ function render() {
   }
 
   // SORT by {From, Location Name} ascending, matching the Excel SORT({4,1},{1,1})
-  results.sort((a, b) => a.from - b.from || a.locationName.localeCompare(b.locationName));
+  results.sort((a, b) => a.dayAnchor - b.dayAnchor || a.locationName.localeCompare(b.locationName));
 
   // Don't show sessions that have already finished — no point suggesting a
   // trip window that's already in the past.
@@ -700,11 +709,12 @@ function render() {
   emptyState.style.display = "none";
   container.style.display = "block";
 
-  // Group by calendar day of "From" — each window's from/to is already clipped to
-  // a single day by computeWindowsForLocation, so this grouping is always clean.
+  // Group by dayAnchor — this card's OWN day — not by from, which is now
+  // the session's true full span and could be an earlier day than this
+  // particular segment for a midnight-continuation card.
   const byDay = new Map();
   for (const w of results) {
-    const dayKey = dateOnly(w.from);
+    const dayKey = dateOnly(w.dayAnchor);
     if (!byDay.has(dayKey)) byDay.set(dayKey, []);
     byDay.get(dayKey).push(w);
   }
@@ -751,7 +761,17 @@ function render() {
       card.style.borderLeft = `4px solid ${colors.accent}`;
 
       const sessionsHtml = sessions.map((w, idx) => {
-        const timeRange = `${fmtNaive(w.from, { hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(w.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+        // Same-day sessions show a plain "18:00–23:00" range. A session
+        // spanning midnight shows the SAME full true span on every day-card
+        // it appears on, so each time needs its own weekday label too —
+        // otherwise "18:00–02:00" looks like it runs backward, and a card
+        // grouped under Friday showing a range that starts Thursday needs
+        // that made explicit.
+        const spansDays = dateOnly(w.from) !== dateOnly(w.to);
+        const timeOpts = { hour: "2-digit", minute: "2-digit", hour12: false };
+        const fromLabel = fmtNaive(w.from, timeOpts) + (spansDays ? ` ${fmtNaive(w.from, { weekday: "short" })}` : "");
+        const toLabel = fmtNaive(w.to, timeOpts) + (spansDays ? ` ${fmtNaive(w.to, { weekday: "short" })}` : "");
+        const timeRange = `${fromLabel} – ${toLabel}`;
         return `
         <div class="session-block" data-session-idx="${idx}">
           <div class="window-card-top">
