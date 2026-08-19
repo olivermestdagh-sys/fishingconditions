@@ -769,3 +769,44 @@ main.wide {
   color: var(--blue-700);
   margin-bottom: 8px;
 }
+
+.type-photo-row {
+  display: flex;
+  gap: 12px;
+  margin: 10px 0;
+}
+
+.type-photo-card {
+  flex: 1;
+  border: 3px solid transparent;
+  border-radius: 12px;
+  padding: 0;
+  background: var(--white);
+  cursor: pointer;
+  overflow: hidden;
+  text-align: center;
+  transition: border-color 0.15s ease, transform 0.1s ease;
+}
+
+.type-photo-card img {
+  width: 100%;
+  height: 70px;
+  object-fit: cover;
+  display: block;
+}
+
+.type-photo-card span {
+  display: block;
+  padding: 6px 4px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--grey-500);
+}
+
+.type-photo-card.active {
+  border-color: var(--blue-700);
+}
+
+.type-photo-card.active span {
+  color: var(--blue-700);
+}
