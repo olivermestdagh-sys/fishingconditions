@@ -394,6 +394,79 @@ def naive_to_ms(dt):
     return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
 
 
+def fill_wind_gaps(rows):
+    """Fills missing wind speed/direction by averaging the nearest REAL
+    reading before and after the gap — a simple average of the two nearest
+    known points, not a time-weighted interpolation (matching what was
+    asked for: "use the prior and next values to compute an average").
+    Like tide interpolation, only fills gaps BETWEEN two real readings —
+    never invents a value past the first/last real one, since a guess
+    beyond real bracketing data is a shakier kind of estimate than one
+    between two known points.
+
+    A multi-hour gap gets the SAME flat average throughout, not a
+    progressively-changing value — every missing hour in one gap uses the
+    SAME pair of real bracketing readings, deliberately computed from a
+    snapshot of the ORIGINAL data before any fills are written back. Filling
+    in place while scanning would let an early fill get treated as "real"
+    by the next gap hour, silently turning this into a lopsided cascade
+    that depends on scan direction rather than a clean, predictable average.
+
+    Direction needs circular averaging, not a plain numeric mean — naively
+    averaging 350° and 10° gives 180° (due south, wrong), when the real
+    answer is roughly 0° (due north). Averaging as unit vectors and taking
+    the angle of the resulting vector handles the wraparound correctly.
+    Mutates rows in place (all at once, after every fill value is computed).
+    """
+    n = len(rows)
+    original_speed = [r.get("Wind Forecast (km/h)") for r in rows]
+    original_dir = [r.get("Wind Forecast Dir") for r in rows]
+
+    def nearest_real(values, i, step):
+        j = i
+        while 0 <= j < n:
+            if values[j] is not None:
+                return j
+            j += step
+        return None
+
+    speed_fills = {}
+    for i in range(n):
+        if original_speed[i] is None:
+            prev_idx = nearest_real(original_speed, i - 1, -1)
+            next_idx = nearest_real(original_speed, i + 1, 1)
+            if prev_idx is not None and next_idx is not None:
+                speed_fills[i] = round((original_speed[prev_idx] + original_speed[next_idx]) / 2, 1)
+
+    dir_fills = {}
+    for i in range(n):
+        if original_dir[i] is None:
+            prev_idx = nearest_real(original_dir, i - 1, -1)
+            next_idx = nearest_real(original_dir, i + 1, 1)
+            if prev_idx is not None and next_idx is not None:
+                deg1 = compass_to_degrees(original_dir[prev_idx])
+                deg2 = compass_to_degrees(original_dir[next_idx])
+                if deg1 is not None and deg2 is not None:
+                    rad1, rad2 = math.radians(deg1), math.radians(deg2)
+                    avg_x = (math.cos(rad1) + math.cos(rad2)) / 2
+                    avg_y = (math.sin(rad1) + math.sin(rad2)) / 2
+                    avg_deg = math.degrees(math.atan2(avg_y, avg_x)) % 360
+                    dir_fills[i] = degrees_to_compass(avg_deg)
+
+    for i, value in speed_fills.items():
+        rows[i]["Wind Forecast (km/h)"] = value
+    for i, value in dir_fills.items():
+        rows[i]["Wind Forecast Dir"] = value
+
+
+def degrees_to_compass(deg):
+    """Nearest of the 16 compass points to a given degree value — the
+    reverse of COMPASS_DEGREES/compass_to_degrees."""
+    names = list(COMPASS_DEGREES.keys())
+    closest = min(names, key=lambda name: min(abs(COMPASS_DEGREES[name] - deg), 360 - abs(COMPASS_DEGREES[name] - deg)))
+    return closest
+
+
 def interpolate_tide_height(target_ms, events):
     """Estimates tide height at target_ms from the two nearest REAL tide
     events bracketing it, using a cosine curve — the mathematical basis of
@@ -726,6 +799,12 @@ def process_location(loc):
         rec[series] = value
 
     base_rows = sorted(by_dt.values(), key=lambda r: r["dateTime"])
+
+    # Fill wind gaps (both speed and direction) before anything downstream
+    # reads them — Condition scoring for every type depends on wind, so this
+    # needs to happen before the per-type scoring loop further down, same as
+    # tide height needing to be filled before Fishing Condition reads it.
+    fill_wind_gaps(base_rows)
 
     # Tide Status: Low/High from the tide event's own type; everything else is
     # Incoming/Outgoing based on the nearest known tide event before/after it.
