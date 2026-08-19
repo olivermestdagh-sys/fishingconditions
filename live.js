@@ -142,7 +142,7 @@ async function updateTimings() {
 
   setTimingsStatus(
     `Stop fishing by <strong>${minutesToClock((stopFishingTime - todayMidnight) / 60000)}</strong> to be home by ${homeByStr} ` +
-    `— drive ${Math.round(driveMinutes)} min, pack up ${Math.round(packUpMinutes)} min, back to car ${Math.round(backToCarMinutes)} min.`
+    `— back to car ${Math.round(backToCarMinutes)} min, pack up ${Math.round(packUpMinutes)} min, drive ${Math.round(driveMinutes)} min.`
   );
 
   renderForLocation(currentLoc);
