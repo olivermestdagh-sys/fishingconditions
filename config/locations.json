@@ -1,190 +1,253 @@
 [
   {
     "name": "Balnarring Beach, VIC 3926",
-    "type": "Kayak",
     "shore": "NW",
-    "driveTo": "01:00",
-    "driveBack": "01:10",
-    "prep": "00:30",
-    "packUp": "00:30",
-    "paddleOut": "00:10",
-    "paddleBack": "00:10"
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      },
+      {
+        "type": "Land based",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00"
+      }
+    ]
   },
   {
     "name": "Corinella Boat Ramp, VIC",
-    "type": "Kayak",
     "shore": "E",
-    "driveTo": "01:10",
-    "driveBack": "01:20",
-    "prep": "00:30",
-    "packUp": "00:30",
-    "paddleOut": "00:20",
-    "paddleBack": "00:20"
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
   },
   {
     "name": "Coronet Bay, VIC 3984",
-    "type": "Kayak",
     "shore": "E",
-    "driveTo": "01:10",
-    "driveBack": "01:20",
-    "prep": "00:30",
-    "packUp": "00:30",
-    "paddleOut": "00:10",
-    "paddleBack": "00:10"
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
   },
   {
     "name": "Flinders Pier, VIC",
-    "type": "Kayak",
     "shore": "W",
-    "driveTo": "01:10",
-    "driveBack": "01:20",
-    "prep": "00:30",
-    "packUp": "00:40",
-    "paddleOut": "00:20",
-    "paddleBack": "00:20"
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
   },
   {
     "name": "Gunnamatta Beach, VIC",
-    "type": "Surf",
     "shore": "N",
-    "driveTo": "01:05",
-    "driveBack": "01:15",
-    "prep": "00:10",
-    "packUp": "00:20",
-    "paddleOut": "00:20",
-    "paddleBack": "00:20"
+    "types": [
+      {
+        "type": "Land based",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00"
+      }
+    ]
   },
   {
     "name": "Hastings Jetty, VIC",
-    "type": "Kayak",
     "shore": "W",
-    "driveTo": "00:50",
-    "driveBack": "01:00",
-    "prep": "00:30",
-    "packUp": "00:30",
-    "paddleOut": "01:00",
-    "paddleBack": "01:00"
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
   },
   {
     "name": "Kilcunda, VIC 3995",
-    "type": "Surf",
     "shore": "N",
-    "driveTo": "01:20",
-    "driveBack": "01:30",
-    "prep": "00:10",
-    "packUp": "00:10",
-    "paddleOut": "00:25",
-    "paddleBack": "00:25"
+    "types": [
+      {
+        "type": "Land based",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00"
+      }
+    ]
   },
   {
     "name": "Lang Lang Boat Ramp, VIC",
-    "type": "Kayak",
     "shore": "E",
-    "driveTo": "01:00",
-    "driveBack": "01:05",
-    "prep": "00:30",
-    "packUp": "00:30",
-    "paddleOut": "00:10",
-    "paddleBack": "00:10",
-    "minTideHeight": 2.1
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "01:00",
+        "driveBack": "01:05",
+        "setUp": "00:30",
+        "packUp": "00:30",
+        "timeToSpot": "00:10",
+        "timeFromSpot": "00:10",
+        "minTideHeight": 2.1
+      },
+      {
+        "type": "Land based",
+        "driveTo": "01:00",
+        "driveBack": "01:05",
+        "setUp": "00:00",
+        "packUp": "00:00"
+      }
+    ]
   },
   {
     "name": "Mornington Pier, VIC",
-    "type": "Kayak",
     "shore": "E",
-    "driveTo": "01:00",
-    "driveBack": "01:10",
-    "prep": "00:30",
-    "packUp": "00:30",
-    "paddleOut": "00:15",
-    "paddleBack": "00:15"
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
   },
   {
     "name": "Patterson River Entrance, VIC",
-    "type": "Kayak",
     "shore": "E",
-    "driveTo": "00:35",
-    "driveBack": "00:40",
-    "prep": "00:30",
-    "packUp": "00:30",
-    "paddleOut": "00:20",
-    "paddleBack": "00:20"
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
   },
   {
     "name": "Rosebud Pier, VIC",
-    "type": "Kayak",
     "shore": "E",
-    "driveTo": "01:05",
-    "driveBack": "01:15",
-    "prep": "00:30",
-    "packUp": "00:40",
-    "paddleOut": "00:15",
-    "paddleBack": "00:15"
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
   },
   {
     "name": "Safety Beach Boat Ramp, VIC",
-    "type": "Kayak",
     "shore": "E",
-    "driveTo": "01:05",
-    "driveBack": "01:15",
-    "prep": "00:30",
-    "packUp": "00:40",
-    "paddleOut": "00:20",
-    "paddleBack": "00:20"
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
   },
   {
     "name": "Sorrento Pier, VIC",
-    "type": "Kayak",
     "shore": "SW",
-    "driveTo": "01:15",
-    "driveBack": "01:25",
-    "prep": "00:30",
-    "packUp": "00:40",
-    "paddleOut": "00:15",
-    "paddleBack": "00:15"
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
   },
   {
     "name": "Stony Point Boat Ramp, VIC",
-    "type": "Kayak",
     "shore": "W",
-    "driveTo": "01:00",
-    "driveBack": "01:10",
-    "prep": "00:30",
-    "packUp": "00:30",
-    "paddleOut": "00:15",
-    "paddleBack": "00:15"
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
   },
   {
     "name": "Warneet Boat Ramp, VIC",
-    "type": "Kayak",
     "shore": "N",
-    "driveTo": "00:45",
-    "driveBack": "00:55",
-    "prep": "00:30",
-    "packUp": "00:30",
-    "paddleOut": "01:00",
-    "paddleBack": "01:00"
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
   },
   {
     "name": "Williamstown Beach, VIC",
-    "type": "Kayak",
     "shore": "N",
-    "driveTo": "00:55",
-    "driveBack": "00:59",
-    "prep": "00:30",
-    "packUp": "00:40",
-    "paddleOut": "00:15",
-    "paddleBack": "00:15"
-  },
-  {
-    "name": "Mallacoota Inlet, VIC",
-    "type": "Kayak",
-    "shore": "N",
-    "driveTo": "00:05",
-    "driveBack": "00:05",
-    "prep": "00:20",
-    "packUp": "00:20",
-    "paddleOut": "00:10",
-    "paddleBack": "00:10"
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
   }
 ]
