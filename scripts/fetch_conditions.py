@@ -411,7 +411,7 @@ def interpolate_tide_height(target_ms, events):
 
 
 def compute_condition(loc_type, shore, wind_dir, wind_speed, current_velocity=None, current_direction=None):
-    if loc_type == "Surf":
+    if loc_type == "Land based":
         diff = angle_diff(compass_to_degrees(shore), compass_to_degrees(wind_dir))
         if diff is None:
             return None
@@ -453,7 +453,7 @@ def explain_condition(loc_type, shore, wind_dir, wind_speed, current_velocity=No
     """Short human-readable reason for the Location Condition score — same
     inputs, same branching as compute_condition above, so the explanation
     can never disagree with the number it's explaining."""
-    if loc_type == "Surf":
+    if loc_type == "Land based":
         diff = angle_diff(compass_to_degrees(shore), compass_to_degrees(wind_dir))
         if diff is None:
             return "Insufficient wind data"
@@ -666,9 +666,19 @@ def explain_fishing_condition(date_str, tide_status, daily_tide_ranges, pressure
 
 
 def process_location(loc):
+    """Fetches weather/tide/current data ONCE for this physical location —
+    shared across every type variant it has, since it's the same GPS point
+    and the same real tide events regardless of activity — then computes
+    Condition separately for EACH type variant (Kayak's wind+current
+    scoring is a different formula from Land based's wave-angle scoring).
+    Fishing Condition doesn't depend on type or shore at all, so it's
+    computed once and shared across every type's rows.
+
+    Returns: rows_by_type ({type_name: rows_list}), sun_times
+    """
     name = loc["name"]
-    loc_type = loc.get("type")
     shore = loc.get("shore")
+    types = loc.get("types") or []
 
     match = search_location(name)
     matched_name = match.get("name") if match else None
@@ -706,19 +716,20 @@ def process_location(loc):
         rec = by_dt.setdefault(key, {"dateTime": key})
         rec[series] = value
 
-    rows = sorted(by_dt.values(), key=lambda r: r["dateTime"])
+    base_rows = sorted(by_dt.values(), key=lambda r: r["dateTime"])
 
     # Tide Status: Low/High from the tide event's own type; everything else is
     # Incoming/Outgoing based on the nearest known tide event before/after it.
-    prev_type, next_type_by_idx = None, [None] * len(rows)
+    # Shared across types — the physical tide doesn't care what you're doing.
+    next_type_by_idx = [None] * len(base_rows)
     running_next = None
-    for i in range(len(rows) - 1, -1, -1):
-        if rows[i].get("Tide Type"):
-            running_next = rows[i]["Tide Type"]
-        next_type_by_idx[i] = running_next if not rows[i].get("Tide Type") else rows[i]["Tide Type"]
+    for i in range(len(base_rows) - 1, -1, -1):
+        if base_rows[i].get("Tide Type"):
+            running_next = base_rows[i]["Tide Type"]
+        next_type_by_idx[i] = running_next if not base_rows[i].get("Tide Type") else base_rows[i]["Tide Type"]
 
     running_prev = None
-    for i, row in enumerate(rows):
+    for i, row in enumerate(base_rows):
         this_type = row.get("Tide Type")
         prev_for_row = running_prev
         next_for_row = next_type_by_idx[i]
@@ -744,34 +755,21 @@ def process_location(loc):
 
         row["Tide Status"] = status
         row.pop("Tide Type", None)
-
         if this_type:
             running_prev = this_type
 
-        hour_key = row["dateTime"][:13].replace("T", " ")
-        row_current_velocity = velocity_by_hour.get(hour_key)
-        row_current_direction = direction_by_hour.get(hour_key)
-
-        row["Condition"] = compute_condition(
-            loc_type, shore, row.get("Wind Forecast Dir"), row.get("Wind Forecast (km/h)"),
-            current_velocity=row_current_velocity, current_direction=row_current_direction,
-        )
-        row["Condition Reason"] = explain_condition(
-            loc_type, shore, row.get("Wind Forecast Dir"), row.get("Wind Forecast (km/h)"),
-            current_velocity=row_current_velocity, current_direction=row_current_direction,
-        )
         row["Location Name"] = name
-        row["Type"] = loc_type
         row["Shore"] = shore
         row["Matched Name"] = matched_name
         row["Region"] = region
         row["State"] = state
 
     # Fishing Condition needs each day's tide RANGE, which needs every row's
-    # Tide Status already resolved (the loop just above) — hence a second pass.
+    # Tide Status already resolved (the loop just above) — hence a second
+    # pass. Shared across types (doesn't depend on type or shore at all).
     daily_tide_ranges = {}
     heights_by_date = {}
-    for row in rows:
+    for row in base_rows:
         if row.get("Tide Status") in ("High", "Low") and row.get("Tide Height (m)") is not None:
             date_str = row["dateTime"][:10]
             heights_by_date.setdefault(date_str, []).append(row["Tide Height (m)"])
@@ -790,17 +788,17 @@ def process_location(loc):
 
     real_tide_events = sorted(
         (naive_to_ms(datetime.fromisoformat(row["dateTime"])), row["Tide Height (m)"])
-        for row in rows
+        for row in base_rows
         if row.get("Tide Status") in ("High", "Low") and row.get("Tide Height (m)") is not None
     )
-    for row in rows:
+    for row in base_rows:
         if row.get("Tide Height (m)") is None:
             row_ms = naive_to_ms(datetime.fromisoformat(row["dateTime"]))
             interpolated = interpolate_tide_height(row_ms, real_tide_events)
             if interpolated is not None:
                 row["Tide Height (m)"] = interpolated
 
-    for row in rows:
+    for row in base_rows:
         date_str = row["dateTime"][:10]
         dt = datetime.fromisoformat(row["dateTime"])
         sun = sun_by_date.get(date_str, {})
@@ -820,12 +818,37 @@ def process_location(loc):
     # client-side to give each location its own graph axis ceiling, instead
     # of one fixed number for every location regardless of how different
     # Western Port's ~3m tidal swings are from Port Phillip Bay's sub-1m
-    # ones. Attached to the SAME dict object referenced in main()'s
-    # locations list, same mechanism as lat/lng above.
+    # ones. Shared across types (same physical tide). Attached to the SAME
+    # dict object referenced in main()'s locations list, same mechanism as
+    # lat/lng above.
     real_tide_heights = [h for (_, h) in real_tide_events]
     loc["tideMaxObserved"] = round(max(real_tide_heights), 2) if real_tide_heights else None
 
-    return rows, sun_times
+    # Condition IS type-specific (Kayak's wind+current formula vs Land
+    # based's wave-angle formula) — each type gets its own copy of the
+    # shared rows, tagged with which type it represents.
+    rows_by_type = {}
+    for type_config in types:
+        type_name = type_config.get("type")
+        type_rows = []
+        for row in base_rows:
+            row_copy = dict(row)
+            hour_key = row["dateTime"][:13].replace("T", " ")
+            row_current_velocity = velocity_by_hour.get(hour_key)
+            row_current_direction = direction_by_hour.get(hour_key)
+            row_copy["Condition"] = compute_condition(
+                type_name, shore, row.get("Wind Forecast Dir"), row.get("Wind Forecast (km/h)"),
+                current_velocity=row_current_velocity, current_direction=row_current_direction,
+            )
+            row_copy["Condition Reason"] = explain_condition(
+                type_name, shore, row.get("Wind Forecast Dir"), row.get("Wind Forecast (km/h)"),
+                current_velocity=row_current_velocity, current_direction=row_current_direction,
+            )
+            row_copy["Type"] = type_name
+            type_rows.append(row_copy)
+        rows_by_type[type_name] = type_rows
+
+    return rows_by_type, sun_times
 
 
 def load_previous_output():
@@ -874,10 +897,14 @@ def main():
         locations = json.load(f)
 
     previous_output = load_previous_output()
-    previous_rows_by_location = {}
+    previous_rows_by_key = {}
     if previous_output:
         for row in previous_output.get("rows", []):
-            previous_rows_by_location.setdefault(row.get("Location Name"), []).append(row)
+            # Keyed by (name, type) now, not just name — Kayak and Land
+            # based rows for the same physical location have different
+            # Condition scores and must not get merged together.
+            key = (row.get("Location Name"), row.get("Type"))
+            previous_rows_by_key.setdefault(key, []).append(row)
 
     # Moon phase is the same for everyone regardless of location — fetched
     # ONCE, using whichever configured location resolves first, rather than
@@ -894,29 +921,51 @@ def main():
             print(f"WARNING: failed to fetch moon phases: {e}", file=sys.stderr)
 
     all_rows = []
+    output_locations = []
     sun_times_by_location = {}
     for loc in locations:
         print(f"Fetching {loc['name']}...")
         try:
-            rows, sun_times = process_location(loc)
-
-            # Prepend real history carried from previous runs, skipping any
-            # timestamp the fresh fetch already covers (the fresh version is
-            # more complete/accurate for anything it actually has).
-            history_rows = keep_recent_history(previous_rows_by_location.get(loc["name"], []))
-            fresh_datetimes = {r["dateTime"] for r in rows}
-            history_rows = [r for r in history_rows if r["dateTime"] not in fresh_datetimes]
-
-            all_rows.extend(history_rows)
-            all_rows.extend(rows)
+            rows_by_type, sun_times = process_location(loc)
             sun_times_by_location[loc["name"]] = sun_times
+
+            for type_config in loc.get("types") or []:
+                type_name = type_config.get("type")
+                fresh_rows = rows_by_type.get(type_name, [])
+
+                # Prepend real history carried from previous runs for THIS
+                # specific (location, type) pair, skipping any timestamp the
+                # fresh fetch already covers (the fresh version is more
+                # complete/accurate for anything it actually has).
+                key = (loc["name"], type_name)
+                history_rows = keep_recent_history(previous_rows_by_key.get(key, []))
+                fresh_datetimes = {r["dateTime"] for r in fresh_rows}
+                history_rows = [r for r in history_rows if r["dateTime"] not in fresh_datetimes]
+
+                all_rows.extend(history_rows)
+                all_rows.extend(fresh_rows)
+
+                # Flatten into one output location entry per (location, type)
+                # pair — the frontend expects a flat list of {name, type,
+                # shore, ...} objects, same shape as before this location
+                # could have multiple types. Shared physical fields (shore,
+                # lat/lng, real tide range) come from the location itself;
+                # this type's own timings/settings are spread in after.
+                output_locations.append({
+                    "name": loc["name"],
+                    "shore": loc.get("shore"),
+                    "lat": loc.get("lat"),
+                    "lng": loc.get("lng"),
+                    "tideMaxObserved": loc.get("tideMaxObserved"),
+                    **type_config,
+                })
         except Exception as e:  # noqa: BLE001 - one bad location shouldn't kill the whole run
             print(f"WARNING: failed to process {loc['name']}: {e}", file=sys.stderr)
 
     output = {
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "forecastDays": FORECAST_DAYS,
-        "locations": locations,
+        "locations": output_locations,
         "rows": all_rows,
         "sunTimes": sun_times_by_location,
         "moonPhases": moon_phases,
