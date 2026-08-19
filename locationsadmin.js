@@ -6,20 +6,25 @@ const WORKFLOW_FILE = "update.yml";
 /**
  * Same icon shapes as charts.js's typeIconSvg — duplicated here rather than
  * loading the whole chart-rendering file just for two small icons, since
- * this page has nothing else to do with charts.
+ * this page has nothing else to do with charts. Keep both copies in sync
+ * if either one changes.
  */
 function typeIconSvg(type, size) {
   size = size || 16;
   if (type === "Kayak") {
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M2 13 Q7 8 12 8 Q17 8 22 13 Q17 16 12 16 Q7 16 2 13 Z" />
-      <line x1="6" y1="6" x2="18" y2="20" />
+    return `<svg viewBox="0 0 32 24" width="${size}" height="${size}">
+      <path d="M2 16 Q9 12.5 16 12.5 Q23 12.5 30 16 Q23 19 16 19 Q9 19 2 16 Z" fill="#f97316" stroke="#c2410c" stroke-width="0.8"/>
+      <line x1="17" y1="14" x2="27" y2="3" stroke="#78350f" stroke-width="1.6" stroke-linecap="round"/>
+      <line x1="15" y1="15" x2="5" y2="4" stroke="#78350f" stroke-width="1.6" stroke-linecap="round"/>
     </svg>`;
   }
-  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-    <line x1="9" y1="21" x2="9" y2="13" stroke-width="3" />
-    <line x1="8" y1="14" x2="20" y2="3" />
-    <line x1="18" y1="3.5" x2="20.5" y2="6" stroke-width="1.2" />
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}">
+    <path d="M1 20 L9 20" stroke="#a8a29e" stroke-width="2" stroke-linecap="round"/>
+    <path d="M13 20 Q16 18.5 19 20 Q21 21 23 20" fill="none" stroke="#38bdf8" stroke-width="1.3" stroke-linecap="round"/>
+    <rect x="7.3" y="14" width="1.4" height="6.5" rx="0.6" fill="#57534e"/>
+    <line x1="8" y1="15" x2="20" y2="4" stroke="#92400e" stroke-width="1.2" stroke-linecap="round"/>
+    <circle cx="10.3" cy="12.6" r="1" fill="#44403c"/>
+    <path d="M20 4 Q19 10 17.5 19" stroke="#0ea5e9" stroke-width="0.6" fill="none" stroke-dasharray="0.5 1"/>
   </svg>`;
 }
 

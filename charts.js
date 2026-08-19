@@ -29,21 +29,32 @@ function fmtChartTick(ms) {
  * Small self-contained SVG icon for a location type — used on window
  * cards, the location dropdown, and the Live page's type picker. Hand-drawn
  * shapes, no external image assets, consistent with everything else on
- * this site being self-contained.
+ * this site being self-contained. Colored (not just currentColor outlines)
+ * for better differentiation at a glance. Tested directly in the browser
+ * at real render sizes (14–32px) — kept deliberately simple at small
+ * sizes, since more detail (a full cockpit + paddle + reels on the kayak)
+ * blurred into an indistinct blob below ~24px in testing.
  */
 function typeIconSvg(type, size) {
   size = size || 16;
   if (type === "Kayak") {
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M2 13 Q7 8 12 8 Q17 8 22 13 Q17 16 12 16 Q7 16 2 13 Z" />
-      <line x1="6" y1="6" x2="18" y2="20" />
+    // Elongated hull + two rods angled outward from distinct mounting
+    // points, reading as a fishing kayak rather than a plain kayak.
+    return `<svg viewBox="0 0 32 24" width="${size}" height="${size}">
+      <path d="M2 16 Q9 12.5 16 12.5 Q23 12.5 30 16 Q23 19 16 19 Q9 19 2 16 Z" fill="#f97316" stroke="#c2410c" stroke-width="0.8"/>
+      <line x1="17" y1="14" x2="27" y2="3" stroke="#78350f" stroke-width="1.6" stroke-linecap="round"/>
+      <line x1="15" y1="15" x2="5" y2="4" stroke="#78350f" stroke-width="1.6" stroke-linecap="round"/>
     </svg>`;
   }
-  // Land based: a fishing rod at an angle in a rod holder
-  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-    <line x1="9" y1="21" x2="9" y2="13" stroke-width="3" />
-    <line x1="8" y1="14" x2="20" y2="3" />
-    <line x1="18" y1="3.5" x2="20.5" y2="6" stroke-width="1.2" />
+  // Land based: a rod holder planted in the ground, a rod at an angle,
+  // reel, and the line arcing out to the water.
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}">
+    <path d="M1 20 L9 20" stroke="#a8a29e" stroke-width="2" stroke-linecap="round"/>
+    <path d="M13 20 Q16 18.5 19 20 Q21 21 23 20" fill="none" stroke="#38bdf8" stroke-width="1.3" stroke-linecap="round"/>
+    <rect x="7.3" y="14" width="1.4" height="6.5" rx="0.6" fill="#57534e"/>
+    <line x1="8" y1="15" x2="20" y2="4" stroke="#92400e" stroke-width="1.2" stroke-linecap="round"/>
+    <circle cx="10.3" cy="12.6" r="1" fill="#44403c"/>
+    <path d="M20 4 Q19 10 17.5 19" stroke="#0ea5e9" stroke-width="0.6" fill="none" stroke-dasharray="0.5 1"/>
   </svg>`;
 }
 
