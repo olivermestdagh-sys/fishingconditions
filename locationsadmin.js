@@ -1,6 +1,5 @@
 const GITHUB_API = "https://api.github.com";
 const FILE_PATH = "config/locations.json";
-const SETTINGS_FILE_PATH = "config/settings.json";
 const BRANCH = "main";
 const WORKFLOW_FILE = "update.yml";
 
@@ -55,8 +54,6 @@ function defaultTypeConfig(type) {
 
 let locations = [];
 let currentSha = null;
-let settings = {};
-let settingsSha = null;
 
 function utf8ToBase64(str) {
   return btoa(unescape(encodeURIComponent(str)));
@@ -108,11 +105,8 @@ async function init() {
   });
   document.getElementById("btnSave").addEventListener("click", () => onSave(false));
   document.getElementById("btnSaveAndRefresh").addEventListener("click", () => onSave(true));
-  const btnSaveSettings = document.getElementById("btnSaveSettings");
-  if (btnSaveSettings) btnSaveSettings.addEventListener("click", onSaveSettings);
 
   await loadLocations();
-  await loadSettings();
 }
 
 async function loadLocations() {
@@ -141,87 +135,6 @@ async function loadLocations() {
   }
   document.getElementById("locationsSection").style.display = "block";
   renderRows();
-}
-
-async function loadSettings() {
-  const conn = getConnection();
-  try {
-    if (conn && conn.owner && conn.repo && conn.token) {
-      const res = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${SETTINGS_FILE_PATH}?ref=${BRANCH}`, {
-        headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
-      });
-      if (!res.ok) throw new Error(`GitHub returned ${res.status}`);
-      const json = await res.json();
-      settingsSha = json.sha;
-      const decoded = decodeURIComponent(escape(atob(json.content.replace(/\n/g, ""))));
-      settings = JSON.parse(decoded);
-    } else {
-      // No connection yet — fall back to the public static file, read-only until connected
-      const res = await fetch("config/settings.json", { cache: "no-store" });
-      settings = await res.json();
-    }
-  } catch (err) {
-    console.error(err);
-    settings = {};
-  }
-  const keyInput = document.getElementById("googleRoutesApiKeyInput");
-  if (keyInput) keyInput.value = settings.googleRoutesApiKey || "";
-}
-
-async function onSaveSettings() {
-  const conn = getConnection();
-  if (!conn) {
-    setSettingsSaveStatus("Connect to GitHub first (above) before saving.", true);
-    return;
-  }
-
-  settings.googleRoutesApiKey = document.getElementById("googleRoutesApiKeyInput").value.trim();
-
-  setSettingsSaveStatus("Saving…");
-  try {
-    // Re-fetch the current sha immediately before writing, same reasoning
-    // as onSave() below — in case the file changed elsewhere since we
-    // loaded it.
-    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${SETTINGS_FILE_PATH}?ref=${BRANCH}`, {
-      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
-    });
-    if (!getRes.ok) throw new Error(`Could not read current file (${getRes.status})`);
-    const getJson = await getRes.json();
-    settingsSha = getJson.sha;
-
-    const content = JSON.stringify(settings, null, 2) + "\n";
-    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${SETTINGS_FILE_PATH}`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${conn.token}`,
-        Accept: "application/vnd.github+json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        message: "Update settings via site",
-        content: utf8ToBase64(content),
-        sha: settingsSha,
-        branch: BRANCH,
-      }),
-    });
-    if (!putRes.ok) {
-      const errBody = await putRes.json().catch(() => ({}));
-      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
-    }
-    const putJson = await putRes.json();
-    settingsSha = putJson.content.sha;
-    setSettingsSaveStatus("Saved to GitHub. Takes effect next time the Trip Planner page loads.");
-  } catch (err) {
-    console.error(err);
-    setSettingsSaveStatus("Save failed: " + err.message, true);
-  }
-}
-
-function setSettingsSaveStatus(text, isError) {
-  const el = document.getElementById("settingsSaveStatus");
-  if (!el) return;
-  el.textContent = text;
-  el.style.color = isError ? "#dc2626" : "#16a34a";
 }
 
 function renderRows() {
@@ -292,11 +205,13 @@ function renderTypeSection(loc, typeConfig, locIdx, typeIdx) {
         }).join("")}
       </div>
 
+      ${typeConfig.type === "Kayak" ? `
       <label class="loc-edit-label" style="display:block;margin:12px 0 6px;">Minimum tide height for access (m) — leave blank if not applicable</label>
       <input type="number" min="0" step="0.1" inputmode="decimal" data-typefield="minTideHeight" data-idx="${locIdx}" data-typeidx="${typeIdx}"
         value="${typeConfig.minTideHeight != null ? typeConfig.minTideHeight : ""}"
         placeholder="e.g. 1.2"
         style="width:140px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+      ` : ""}
     </div>
   `;
 }
@@ -375,7 +290,6 @@ function onConnect() {
   }
   localStorage.setItem("ghConnection", JSON.stringify({ owner, repo, token }));
   loadLocations();
-  loadSettings();
 }
 
 function onDisconnect() {
@@ -384,9 +298,7 @@ function onDisconnect() {
   document.getElementById("ghRepo").value = "";
   document.getElementById("ghToken").value = "";
   currentSha = null;
-  settingsSha = null;
   loadLocations();
-  loadSettings();
 }
 
 function validateLocations() {

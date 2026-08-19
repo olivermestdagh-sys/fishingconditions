@@ -122,11 +122,14 @@ somewhere else. This needs:
 
 1. **Your device's current GPS position** — requested the same way the
    Live page does, with a manual fallback if it's denied.
-2. **A Google Routes API key**, entered on the **Settings** page under "API
-   Keys" (not pasted into any code file — it's stored in its own
-   `config/settings.json`, separate from the site's actual code, so it
-   survives untouched whenever `goodconditions.js` gets updated). To get a
-   key: [console.cloud.google.com](https://console.cloud.google.com/) →
+2. **A Google Routes API key**, kept in its own `config/settings.json` —
+   separate from the site's actual code, so it survives untouched whenever
+   `goodconditions.js` gets updated. Edit that file directly on GitHub
+   (there's no Settings-page form for it) with:
+   ```json
+   { "googleRoutesApiKey": "your-key-here" }
+   ```
+   To get a key: [console.cloud.google.com](https://console.cloud.google.com/) →
    create a project → **enable billing** (required even for free-tier
    usage — see the note below) → enable **Routes API** specifically (not
    the older "Directions API") → Credentials → Create credentials → API
@@ -269,12 +272,13 @@ until they age out of the ~30-hour window.
 ## Boat ramp access height
 
 Some locations (Lang Lang's ramp is the original example) are only usable
-above a certain tide height. Set **Minimum tide height for boat ramp
-access** on that location's Settings card and every graph for it shows a
-dashed horizontal line at that height, plus a marker and time at every
-point the real tide curve actually crosses it — rising through it and
-falling back through it are both marked, and a full tide cycle can cross
-twice each way. Crossing times use linear interpolation between
+above a certain tide height. Set **Minimum tide height for access** on
+that location's **Kayak** timings (only Kayak has this field — Land based
+doesn't need it, since you're not launching a boat) and every graph for it
+shows a dashed horizontal line at that height, plus a marker and time at
+every point the real tide curve actually crosses it — rising through it
+and falling back through it are both marked, and a full tide cycle can
+cross twice each way. Crossing times use linear interpolation between
 consecutive tide readings — the real curve between two readings is a
 cosine, not a straight line (see tide interpolation above), so this is a
 close approximation rather than exact to the second, but with hourly
