@@ -3,16 +3,54 @@ const FILE_PATH = "config/locations.json";
 const BRANCH = "main";
 const WORKFLOW_FILE = "update.yml";
 
-const TYPE_OPTIONS = ["Kayak", "Surf"];
+/**
+ * Same icon shapes as charts.js's typeIconSvg — duplicated here rather than
+ * loading the whole chart-rendering file just for two small icons, since
+ * this page has nothing else to do with charts.
+ */
+function typeIconSvg(type, size) {
+  size = size || 16;
+  if (type === "Kayak") {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 13 Q7 8 12 8 Q17 8 22 13 Q17 16 12 16 Q7 16 2 13 Z" />
+      <line x1="6" y1="6" x2="18" y2="20" />
+    </svg>`;
+  }
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="9" y1="21" x2="9" y2="13" stroke-width="3" />
+    <line x1="8" y1="14" x2="20" y2="3" />
+    <line x1="18" y1="3.5" x2="20.5" y2="6" stroke-width="1.2" />
+  </svg>`;
+}
+
+const TYPE_OPTIONS = ["Kayak", "Land based"];
 const SHORE_OPTIONS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
-const TIME_FIELDS = [
-  { key: "driveTo", label: "Drive to" },
-  { key: "driveBack", label: "Drive back" },
-  { key: "prep", label: "Prep" },
-  { key: "packUp", label: "Pack up" },
-  { key: "paddleOut", label: "Paddle out" },
-  { key: "paddleBack", label: "Paddle back" },
-];
+
+// Which timing fields apply to each type — Kayak has "getting to/from the
+// actual fishing spot" as a distinct step (paddling), which doesn't apply
+// to Land based (you're already standing where you're fishing once set up).
+const TYPE_TIME_FIELDS = {
+  Kayak: [
+    { key: "driveTo", label: "Drive to" },
+    { key: "driveBack", label: "Drive back" },
+    { key: "setUp", label: "Set up" },
+    { key: "packUp", label: "Pack up" },
+    { key: "timeToSpot", label: "Time to Spot" },
+    { key: "timeFromSpot", label: "Time From Spot" },
+  ],
+  "Land based": [
+    { key: "driveTo", label: "Drive to" },
+    { key: "driveBack", label: "Drive back" },
+    { key: "setUp", label: "Set up" },
+    { key: "packUp", label: "Pack up" },
+  ],
+};
+
+function defaultTypeConfig(type) {
+  const config = { type };
+  for (const f of TYPE_TIME_FIELDS[type]) config[f.key] = "00:00";
+  return config;
+}
 
 let locations = [];
 let currentSha = null;
@@ -62,12 +100,7 @@ async function init() {
   document.getElementById("btnConnect").addEventListener("click", onConnect);
   document.getElementById("btnDisconnect").addEventListener("click", onDisconnect);
   document.getElementById("btnAddRow").addEventListener("click", () => {
-    locations.push({
-      name: "", type: "Kayak", shore: "N",
-      driveTo: "00:00", driveBack: "00:00", prep: "00:00",
-      packUp: "00:00", paddleOut: "00:00", paddleBack: "00:00",
-      minTideHeight: null,
-    });
+    locations.push({ name: "", shore: "N", types: [defaultTypeConfig("Kayak")] });
     renderRows();
   });
   document.getElementById("btnSave").addEventListener("click", () => onSave(false));
@@ -108,6 +141,9 @@ function renderRows() {
   const list = document.getElementById("locationsList");
   list.innerHTML = "";
   locations.forEach((loc, i) => {
+    if (!loc.types) loc.types = [];
+    const activeTypeNames = loc.types.map((t) => t.type);
+
     const row = document.createElement("div");
     row.className = "window-card loc-edit-card";
     row.innerHTML = `
@@ -116,78 +152,127 @@ function renderRows() {
           <label class="loc-edit-label">Location name</label>
           <input type="text" data-field="name" data-idx="${i}" value="${(loc.name || "").replace(/"/g, "&quot;")}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
         </div>
-        <div style="min-width:110px;">
-          <label class="loc-edit-label">Type</label>
-          <select data-field="type" data-idx="${i}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);">
-            ${TYPE_OPTIONS.map((t) => `<option value="${t}" ${loc.type === t ? "selected" : ""}>${t}</option>`).join("")}
-          </select>
-        </div>
         <div style="min-width:100px;">
           <label class="loc-edit-label">Shore faces</label>
           <select data-field="shore" data-idx="${i}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);">
             ${SHORE_OPTIONS.map((s) => `<option value="${s}" ${loc.shore === s ? "selected" : ""}>${s}</option>`).join("")}
           </select>
         </div>
-        <button data-remove="${i}" class="btn-secondary" style="height:38px;">Remove</button>
+        <button data-remove-loc="${i}" class="btn-secondary" style="height:38px;">Remove location</button>
       </div>
 
-      <label class="loc-edit-label" style="display:block;margin:12px 0 6px;">Timings (duration, hours : minutes)</label>
+      <label class="loc-edit-label" style="display:block;margin:12px 0 6px;">Usable for</label>
+      <div class="chip-row">
+        ${TYPE_OPTIONS.map((type) => `
+          <button type="button" class="loc-chip type-chip${activeTypeNames.includes(type) ? " active" : ""}"
+            data-toggle-type="${type}" data-idx="${i}">
+            ${typeIconSvg(type, 14)} <span>${type}</span>
+          </button>
+        `).join("")}
+      </div>
+
+      <div class="loc-type-sections">
+        ${loc.types.map((typeConfig, typeIdx) => renderTypeSection(loc, typeConfig, i, typeIdx)).join("")}
+      </div>
+    `;
+    list.appendChild(row);
+  });
+
+  wireRowListeners(list);
+}
+
+function renderTypeSection(loc, typeConfig, locIdx, typeIdx) {
+  const fields = TYPE_TIME_FIELDS[typeConfig.type] || [];
+  return `
+    <div class="loc-type-section">
+      <div class="loc-type-section-header">
+        ${typeIconSvg(typeConfig.type, 15)}
+        <label class="loc-edit-label" style="margin:0;">${typeConfig.type} timings (duration, hours : minutes)</label>
+      </div>
       <div class="loc-time-grid">
-        ${TIME_FIELDS.map((f) => {
-          const { h, m } = parseHM(loc[f.key]);
+        ${fields.map((f) => {
+          const { h, m } = parseHM(typeConfig[f.key]);
           return `
           <div>
             <label class="loc-edit-label">${f.label}</label>
             <div class="hm-pair">
-              <input type="number" min="0" max="23" step="1" inputmode="numeric" data-hmfield="${f.key}" data-hmpart="h" data-idx="${i}" value="${h}" aria-label="${f.label} hours" />
+              <input type="number" min="0" max="23" step="1" inputmode="numeric" data-hmfield="${f.key}" data-hmpart="h" data-idx="${locIdx}" data-typeidx="${typeIdx}" value="${h}" aria-label="${f.label} hours" />
               <span class="hm-sep">:</span>
-              <input type="number" min="0" max="59" step="1" inputmode="numeric" data-hmfield="${f.key}" data-hmpart="m" data-idx="${i}" value="${String(m).padStart(2, "0")}" aria-label="${f.label} minutes" />
+              <input type="number" min="0" max="59" step="1" inputmode="numeric" data-hmfield="${f.key}" data-hmpart="m" data-idx="${locIdx}" data-typeidx="${typeIdx}" value="${String(m).padStart(2, "0")}" aria-label="${f.label} minutes" />
             </div>
           </div>
         `;
         }).join("")}
       </div>
 
-      <label class="loc-edit-label" style="display:block;margin:12px 0 6px;">Minimum tide height for boat ramp access (m) — leave blank if not applicable</label>
-      <input type="number" min="0" step="0.1" inputmode="decimal" data-field="minTideHeight" data-idx="${i}"
-        value="${loc.minTideHeight != null ? loc.minTideHeight : ""}"
+      <label class="loc-edit-label" style="display:block;margin:12px 0 6px;">Minimum tide height for access (m) — leave blank if not applicable</label>
+      <input type="number" min="0" step="0.1" inputmode="decimal" data-typefield="minTideHeight" data-idx="${locIdx}" data-typeidx="${typeIdx}"
+        value="${typeConfig.minTideHeight != null ? typeConfig.minTideHeight : ""}"
         placeholder="e.g. 1.2"
         style="width:140px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
-    `;
-    list.appendChild(row);
-  });
+    </div>
+  `;
+}
 
+function wireRowListeners(list) {
   list.querySelectorAll("input[data-field], select[data-field]").forEach((el) => {
     el.addEventListener("input", (e) => {
       const idx = Number(e.target.dataset.idx);
       const field = e.target.dataset.field;
-      if (e.target.type === "number") {
-        // Store a real number (or null if cleared) rather than the raw
-        // string every input's .value naturally is — otherwise this would
-        // save as a quoted string in the JSON, breaking numeric comparisons
-        // downstream (chart threshold-line math, Python min/max logic).
-        locations[idx][field] = e.target.value === "" ? null : parseFloat(e.target.value);
-      } else {
-        locations[idx][field] = e.target.value;
-      }
+      locations[idx][field] = e.target.value;
     });
   });
+
+  list.querySelectorAll("input[data-typefield]").forEach((el) => {
+    el.addEventListener("input", (e) => {
+      const idx = Number(e.target.dataset.idx);
+      const typeIdx = Number(e.target.dataset.typeidx);
+      const field = e.target.dataset.typefield;
+      // Store a real number (or null if cleared) rather than the raw
+      // string every input's .value naturally is — otherwise this would
+      // save as a quoted string in the JSON, breaking numeric comparisons
+      // downstream (chart threshold-line math, Python min/max logic).
+      locations[idx].types[typeIdx][field] = e.target.value === "" ? null : parseFloat(e.target.value);
+    });
+  });
+
   list.querySelectorAll("input[data-hmfield]").forEach((el) => {
     el.addEventListener("input", (e) => {
       const idx = Number(e.target.dataset.idx);
+      const typeIdx = Number(e.target.dataset.typeidx);
       const field = e.target.dataset.hmfield;
       const part = e.target.dataset.hmpart;
-      const current = parseHM(locations[idx][field]);
+      const typeConfig = locations[idx].types[typeIdx];
+      const current = parseHM(typeConfig[field]);
       const raw = Math.max(0, Math.floor(Number(e.target.value) || 0));
       if (part === "h") current.h = Math.min(23, raw);
       else current.m = Math.min(59, raw);
-      locations[idx][field] = formatHM(current.h, current.m);
+      typeConfig[field] = formatHM(current.h, current.m);
     });
   });
-  list.querySelectorAll("button[data-remove]").forEach((btn) => {
+
+  list.querySelectorAll("button[data-remove-loc]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
-      const idx = Number(e.target.dataset.remove);
+      const idx = Number(e.currentTarget.dataset.removeLoc);
       locations.splice(idx, 1);
+      renderRows();
+    });
+  });
+
+  list.querySelectorAll("button[data-toggle-type]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const idx = Number(e.currentTarget.dataset.idx);
+      const type = e.currentTarget.dataset.toggleType;
+      const loc = locations[idx];
+      const existingIdx = loc.types.findIndex((t) => t.type === type);
+      if (existingIdx >= 0) {
+        // Don't allow removing the LAST type — a location needs at least
+        // one, otherwise it has no timings/scoring at all.
+        if (loc.types.length <= 1) return;
+        loc.types.splice(existingIdx, 1);
+      } else {
+        loc.types.push(defaultTypeConfig(type));
+      }
       renderRows();
     });
   });
@@ -217,8 +302,11 @@ function onDisconnect() {
 function validateLocations() {
   for (const loc of locations) {
     if (!loc.name || !loc.name.trim()) return "Every location needs a name";
-    if (!TYPE_OPTIONS.includes(loc.type)) return `"${loc.name}" needs a valid Type`;
     if (!SHORE_OPTIONS.includes(loc.shore)) return `"${loc.name}" needs a valid Shore`;
+    if (!loc.types || loc.types.length === 0) return `"${loc.name}" needs at least one type (Kayak or Land based)`;
+    for (const t of loc.types) {
+      if (!TYPE_OPTIONS.includes(t.type)) return `"${loc.name}" has an invalid type`;
+    }
   }
   return null;
 }
@@ -235,11 +323,14 @@ async function onSave(alsoRefresh) {
     return;
   }
 
-  // Native time inputs return "" if left untouched/cleared — normalize to "00:00"
-  // so every saved location always has a valid HH:MM value for all six fields.
+  // Native time inputs return "" if left untouched/cleared — normalize to
+  // "00:00" so every saved type variant always has a valid HH:MM value for
+  // all of its applicable fields.
   for (const loc of locations) {
-    for (const f of TIME_FIELDS) {
-      if (!loc[f.key]) loc[f.key] = "00:00";
+    for (const t of loc.types) {
+      for (const f of TYPE_TIME_FIELDS[t.type] || []) {
+        if (!t[f.key]) t[f.key] = "00:00";
+      }
     }
   }
 

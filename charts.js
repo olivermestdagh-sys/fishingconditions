@@ -25,6 +25,28 @@ function fmtChartTick(ms) {
   return new Intl.DateTimeFormat([], { timeZone: "UTC", hour: "2-digit", minute: "2-digit" }).format(new Date(ms));
 }
 
+/**
+ * Small self-contained SVG icon for a location type — used on window
+ * cards, the location dropdown, and the Live page's type picker. Hand-drawn
+ * shapes, no external image assets, consistent with everything else on
+ * this site being self-contained.
+ */
+function typeIconSvg(type, size) {
+  size = size || 16;
+  if (type === "Kayak") {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 13 Q7 8 12 8 Q17 8 22 13 Q17 16 12 16 Q7 16 2 13 Z" />
+      <line x1="6" y1="6" x2="18" y2="20" />
+    </svg>`;
+  }
+  // Land based: a fishing rod at an angle in a rod holder
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="9" y1="21" x2="9" y2="13" stroke-width="3" />
+    <line x1="8" y1="14" x2="20" y2="3" />
+    <line x1="18" y1="3.5" x2="20.5" y2="6" stroke-width="1.2" />
+  </svg>`;
+}
+
 const COMPASS_DEGREES = {
   N: 0, NNE: 22.5, NE: 45, ENE: 67.5, E: 90, ESE: 112.5, SE: 135, SSE: 157.5,
   S: 180, SSW: 202.5, SW: 225, WSW: 247.5, W: 270, WNW: 292.5, NW: 315, NNW: 337.5,

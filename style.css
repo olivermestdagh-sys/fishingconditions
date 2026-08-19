@@ -555,6 +555,16 @@ main.wide {
   color: var(--white);
 }
 
+.type-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.type-chip svg {
+  flex-shrink: 0;
+}
+
 .loc-edit-label {
   display: block;
   font-size: 0.72rem;
@@ -725,4 +735,37 @@ main.wide {
 
 .filters-content.collapsed {
   display: none;
+}
+
+.window-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.type-icon-badge {
+  flex-shrink: 0;
+  color: var(--blue-700);
+  opacity: 0.7;
+  margin-left: 8px;
+}
+
+.loc-type-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.loc-type-section {
+  border-top: 1px solid var(--grey-200);
+  padding-top: 12px;
+}
+
+.loc-type-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--blue-700);
+  margin-bottom: 8px;
 }

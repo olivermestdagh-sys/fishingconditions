@@ -10,6 +10,8 @@ const CONDITION_COLORS = {
 
 let liveData = null;
 let liveChart = null;
+let currentLocationName = null;
+let currentType = null;
 
 // Flat-earth distance is more than accurate enough at these scales (tens of
 // km at most between locations in the same two bays) — no need for a full
@@ -21,9 +23,18 @@ function distanceKm(lat1, lng1, lat2, lng2) {
 }
 
 function findNearestLocation(locations, lat, lng) {
-  let best = null, bestDist = Infinity;
+  // The same physical spot can now appear multiple times (once per type),
+  // all sharing the same lat/lng — dedupe to unique NAMES first, so a
+  // GPS match resolves to one physical place, not an arbitrary type.
+  const seenNames = new Set();
+  const uniqueLocations = [];
   for (const loc of locations) {
-    if (loc.lat == null || loc.lng == null) continue;
+    if (loc.lat == null || loc.lng == null || seenNames.has(loc.name)) continue;
+    seenNames.add(loc.name);
+    uniqueLocations.push(loc);
+  }
+  let best = null, bestDist = Infinity;
+  for (const loc of uniqueLocations) {
     const d = distanceKm(lat, lng, loc.lat, loc.lng);
     if (d < bestDist) { bestDist = d; best = loc; }
   }
@@ -33,7 +44,10 @@ function findNearestLocation(locations, lat, lng) {
 function populateManualPicker(locations, onSelect) {
   const select = document.getElementById("manualLocationSelect");
   select.innerHTML = "";
+  const seenNames = new Set();
   for (const loc of locations) {
+    if (seenNames.has(loc.name)) continue;
+    seenNames.add(loc.name);
     const opt = document.createElement("option");
     opt.value = loc.name;
     opt.textContent = loc.name;
@@ -41,6 +55,48 @@ function populateManualPicker(locations, onSelect) {
   }
   select.addEventListener("change", () => onSelect(select.value));
   document.getElementById("manualPickerRow").style.display = "block";
+}
+
+function renderTypePicker(availableTypes, selectedType, onSelect) {
+  const section = document.getElementById("typePickerSection");
+  const container = document.getElementById("typePicker");
+  container.innerHTML = "";
+  // Only worth showing a picker at all when there's actually a choice —
+  // a location with just one type doesn't need a toggle for it.
+  if (availableTypes.length <= 1) {
+    section.style.display = "none";
+    return;
+  }
+  section.style.display = "block";
+  for (const type of availableTypes) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "loc-chip type-chip" + (type === selectedType ? " active" : "");
+    chip.innerHTML = `${typeIconSvg(type, 16)} <span>${type}</span>`;
+    chip.addEventListener("click", () => onSelect(type));
+    container.appendChild(chip);
+  }
+}
+
+// Selects a physical location by name, resolving which type variant to
+// actually show — defaults to Kayak when available (per the site owner's
+// stated preference), falling back to whichever type IS available for
+// locations that don't have a Kayak option at all.
+function selectLocationAndType(name, preferredType) {
+  const variants = (liveData.locations || []).filter((l) => l.name === name);
+  if (variants.length === 0) return;
+  const availableTypes = variants.map((v) => v.type);
+  const type = availableTypes.includes(preferredType)
+    ? preferredType
+    : (availableTypes.includes("Kayak") ? "Kayak" : availableTypes[0]);
+
+  currentLocationName = name;
+  currentType = type;
+
+  renderTypePicker(availableTypes, type, (newType) => selectLocationAndType(name, newType));
+
+  const loc = variants.find((v) => v.type === type);
+  renderForLocation(loc);
 }
 
 function renderSummary(loc, rows, now) {
@@ -100,7 +156,7 @@ function renderSummary(loc, rows, now) {
 
 function renderForLocation(loc) {
   const rows = (liveData.rows || [])
-    .filter((r) => r["Location Name"] === loc.name)
+    .filter((r) => r["Location Name"] === loc.name && r["Type"] === loc.type)
     .map((r) => ({ ...r, _t: parseNaive(r.dateTime) }))
     .sort((a, b) => a._t - b._t);
 
@@ -150,11 +206,8 @@ async function init() {
 
   const locations = liveData.locations || [];
   populateManualPicker(locations, (name) => {
-    const loc = locations.find((l) => l.name === name);
-    if (loc) {
-      setGpsStatus(`<div class="summary-sub">Showing: <strong>${loc.name}</strong> (manually selected)</div>`);
-      renderForLocation(loc);
-    }
+    setGpsStatus(`<div class="summary-sub">Showing: <strong>${name}</strong> (manually selected)</div>`);
+    selectLocationAndType(name, "Kayak");
   });
 
   if (!navigator.geolocation) {
@@ -171,7 +224,7 @@ async function init() {
         return;
       }
       setGpsStatus(`<div class="summary-sub">Matched to: <strong>${match.location.name}</strong> (${match.distanceKm.toFixed(1)}km away)</div>`);
-      renderForLocation(match.location);
+      selectLocationAndType(match.location.name, "Kayak");
     },
     (err) => {
       setGpsStatus(`<div class="empty-state">Couldn't get your location (${err.message}). Pick a spot manually below.</div>`);

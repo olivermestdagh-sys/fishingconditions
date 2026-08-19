@@ -39,6 +39,16 @@ The Open-Meteo calls need no key or secret at all — nothing to set up for them
    - Name: `WILLYWEATHER_API_KEY`
    - Value: your WillyWeather API key
 
+   Your key also needs specific forecast types **enabled** on the
+   WillyWeather side (each one is a separate on/off permission on your API
+   key, not automatic) — check **Search**, **Forecasts → Temperature,
+   Wind, Tides, Rainfall Probability, Sun, Moon Phases**, and
+   **Observational Graphs → Temperature, Wind** are all switched on. If any
+   one of these isn't enabled, that specific piece of data just quietly
+   doesn't appear (no error shown) rather than breaking anything else — so
+   a missing moon phase, missing tide line, etc. is often this, not a code
+   problem.
+
 4. **Turn on GitHub Pages**:
    Repo → Settings → Pages → Source: "Deploy from a branch" → Branch: `main`,
    folder `/ (root)` → Save.
@@ -55,29 +65,53 @@ That's it — from here it updates itself on the schedule below.
 
 ## Changing which locations are tracked
 
-Easiest way: use the **Locations** tab on the site itself (see "Editing locations
-from the site itself" below). Or edit `config/locations.json` directly on GitHub
-(click the file → pencil icon to edit → commit):
+Easiest way: use the **Settings** tab on the site itself (see "Editing locations
+from the site itself" below) — it now supports toggling which types (Kayak,
+Land based) a location is usable for, with the timings for each shown
+separately. Or edit `config/locations.json` directly on GitHub (click the
+file → pencil icon to edit → commit):
 
 ```json
 {
-  "name": "Flinders Pier, VIC",
-  "type": "Kayak",
-  "shore": "W",
-  "driveTo": "00:45",
-  "driveBack": "00:45",
-  "prep": "00:15",
-  "packUp": "00:15",
-  "paddleOut": "00:20",
-  "paddleBack": "00:20"
+  "name": "Lang Lang Boat Ramp, VIC",
+  "shore": "E",
+  "types": [
+    {
+      "type": "Kayak",
+      "driveTo": "01:00",
+      "driveBack": "01:05",
+      "setUp": "00:30",
+      "packUp": "00:30",
+      "timeToSpot": "00:10",
+      "timeFromSpot": "00:10",
+      "minTideHeight": 2.1
+    },
+    {
+      "type": "Land based",
+      "driveTo": "01:00",
+      "driveBack": "01:05",
+      "setUp": "00:00",
+      "packUp": "00:00"
+    }
+  ]
 }
 ```
 
-`type` must be exactly `"Kayak"` or `"Surf"` for the Condition scoring to work.
-The six timing fields (`driveTo`, `driveBack`, `prep`, `packUp`, `paddleOut`,
-`paddleBack`) are `HH:MM` durations — how long each part of a trip to that spot
-takes. They're not currently used in any calculation on the site, just stored
-per location for your own reference (and for anything built on top of them later).
+A single physical location can have **multiple types** — the same boat ramp
+might work for both kayak launching and shore fishing, each scored and
+timed independently. `name`/`shore`/coordinates are shared (it's the same
+GPS point either way); everything inside each `types[]` entry — timings,
+`minTideHeight` — is specific to that one activity. `type` must be exactly
+`"Kayak"` or `"Land based"`. Land based reuses the same wind/shore-angle
+formula that used to be called "Surf" — genuinely the same scoring, just
+relabeled; Kayak's formula (wind speed/direction plus the wind-against-current
+penalty) is a different calculation and doesn't apply to Land based at all.
+
+The timing fields are `HH:MM` durations — how long each part of a trip
+takes — and **do** feed into the Trip Planner's schedule calculator once
+you set a Launch Time/Home By. Kayak has two extra fields Land based
+doesn't (`timeToSpot`/`timeFromSpot` — paddling time — since Land based
+has no equivalent "getting to the fishing spot" step separate from set up).
 Changes take effect on the next scheduled or manual run.
 
 ## Changing the update frequency — and what it costs
@@ -118,6 +152,32 @@ This is a visual smoothing between real readings, not a claim of real
 precision at those specific in-between hours — it never extrapolates
 *beyond* the first/last real event we have, only fills gaps between them.
 
+Tide has its own labeled axis on the graph (paired with temperature on the
+left, in metres), calibrated to each location's own real observed range
+rather than a single fixed scale — Western Port's ~3m swings and Port
+Phillip Bay's sub-1m ones would otherwise either clip the former or make
+the latter unreadable.
+
+## Moon phase
+
+A moon icon is drawn above the date heading at the top of every day on
+every graph. It's custom-drawn to the *exact* real illumination percentage
+WillyWeather gives us (0–100%), not snapped to one of 8 fixed pictures —
+the terminator curve (the light/dark boundary) is the actual correct
+geometry for that percentage, verified mathematically (the illuminated
+area matches the target percentage to within ~0.04% across the full
+range, checked with the shoelace formula before this was wired into the
+real drawing code). Moon phase is a global astronomical fact, not
+location-specific like sunrise/sunset — it's fetched once per run (using
+whichever configured location resolves first) and shared across every
+location's graph, rather than repeating the fetch per location.
+
+Waxing/waning (which side is lit) is inferred from whether the day's
+illumination is trending up or down versus the nearest other day in the
+same fetch — this doesn't depend on WillyWeather using any particular
+phase-naming convention, just the widely-available illumination
+percentage.
+
 ## The two condition scores
 
 The site tracks two separate 1–5 scores per location, per hour:
@@ -126,9 +186,9 @@ The site tracks two separate 1–5 scores per location, per hour:
   Wind speed and direction for Kayak locations (plus a graduated
   minor/medium/major penalty when wind piles onto an opposing tidal
   current — real ocean current data, not a fixed guess), wind-vs-shore
-  direction for Surf.
+  direction for Land based.
 - **Fishing Condition** — are the fish likely to be active? Same formula
-  everywhere regardless of Kayak/Surf, built from tide strength, tide stage,
+  everywhere regardless of type, built from tide strength, tide stage,
   barometric pressure, light (dawn/dusk), and sea surface temperature trend.
 
 Both are plotted on the Conditions graph and shown as separate badges on
@@ -159,6 +219,36 @@ WillyWeather search lookup already used for the weather/tide fetch — no new
 API calls, and nothing added to `config/locations.json` itself (coordinates
 only flow into the generated `data/conditions.json`, so your own location
 list stays exactly as you edit it).
+
+### Where the "24 hours before now" data actually comes from
+
+WillyWeather's forecast only ever looks forward from today — there's no way
+to ask it for yesterday directly. So each scheduled run reads its own
+*previous* output **before** overwriting it, keeps roughly the last 30
+hours of real rows per location (genuine past forecasts, not anything
+synthetic), and merges that history in ahead of the fresh forward-looking
+fetch — de-duplicating in favour of the fresh data anywhere the two
+overlap. Over time this naturally builds a real rolling window without
+needing any new API or provider. One honest trade-off: a history row
+reflects whichever scoring formula was live when it was originally
+fetched, not necessarily the current one — if Location/Fishing Condition's
+formula changes, older carried-forward rows won't retroactively update
+until they age out of the ~30-hour window.
+
+## Boat ramp access height
+
+Some locations (Lang Lang's ramp is the original example) are only usable
+above a certain tide height. Set **Minimum tide height for boat ramp
+access** on that location's Settings card and every graph for it shows a
+dashed horizontal line at that height, plus a marker and time at every
+point the real tide curve actually crosses it — rising through it and
+falling back through it are both marked, and a full tide cycle can cross
+twice each way. Crossing times use linear interpolation between
+consecutive tide readings — the real curve between two readings is a
+cosine, not a straight line (see tide interpolation above), so this is a
+close approximation rather than exact to the second, but with hourly
+sampling the error is small. Leave the field blank for locations without
+this restriction — nothing extra is drawn.
 
 ## Files in this project
 
