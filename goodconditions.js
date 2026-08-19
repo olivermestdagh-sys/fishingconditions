@@ -547,13 +547,13 @@ function tidesInWindow(rows, from, to) {
 }
 
 const DAY_COLORS = [
-  { bg: "#eaf2fb", accent: "#1f4e78" }, // blue
-  { bg: "#fef3e0", accent: "#b45309" }, // amber
-  { bg: "#e8f7ee", accent: "#15803d" }, // green
-  { bg: "#f3e8fd", accent: "#7c3aed" }, // purple
-  { bg: "#fde8ec", accent: "#be123c" }, // rose
-  { bg: "#e0f6f8", accent: "#0e7490" }, // cyan
-  { bg: "#fdf6e3", accent: "#a16207" }, // olive
+  { bg: "#eaf2fb", accent: "#1f4e78", photoTint: "rgba(234,242,251,0.86)" }, // blue
+  { bg: "#fef3e0", accent: "#b45309", photoTint: "rgba(254,243,224,0.86)" }, // amber
+  { bg: "#e8f7ee", accent: "#15803d", photoTint: "rgba(232,247,238,0.86)" }, // green
+  { bg: "#f3e8fd", accent: "#7c3aed", photoTint: "rgba(243,232,253,0.86)" }, // purple
+  { bg: "#fde8ec", accent: "#be123c", photoTint: "rgba(253,232,236,0.86)" }, // rose
+  { bg: "#e0f6f8", accent: "#0e7490", photoTint: "rgba(224,246,248,0.86)" }, // cyan
+  { bg: "#fdf6e3", accent: "#a16207", photoTint: "rgba(253,246,227,0.86)" }, // olive
 ];
 
 const CONDITION_COLORS = {
@@ -739,7 +739,15 @@ function render() {
       const first = sessions[0];
       const card = document.createElement("div");
       card.className = "window-card";
-      card.style.background = colors.bg;
+      // Photo background (real photos of the actual activity, layered under
+      // a tinted wash of that day's colour) replaces the old flat pastel
+      // background + small corner icon — the whole tile now conveys type,
+      // not just a badge in the corner.
+      const photoUrl = first.type === "Kayak" ? "images/type-kayak.jpg" : "images/type-landbased.jpg";
+      card.style.backgroundImage = `linear-gradient(${colors.photoTint}, ${colors.photoTint}), url(${photoUrl})`;
+      card.style.backgroundSize = "cover";
+      card.style.backgroundPosition = "center";
+      card.style.backgroundRepeat = "no-repeat";
       card.style.borderLeft = `4px solid ${colors.accent}`;
 
       const sessionsHtml = sessions.map((w, idx) => {
@@ -787,7 +795,6 @@ function render() {
             <div class="window-loc">${first.locationName}</div>
             <div class="window-sub" style="margin-bottom:8px;">${first.type || "–"} · shore ${first.shore || "–"}</div>
           </div>
-          <div class="type-icon-badge" title="${first.type || ""}">${typeIconSvg(first.type, 18)}</div>
         </div>
         ${sessionsHtml}
       `;
