@@ -1,5 +1,6 @@
 const GITHUB_API = "https://api.github.com";
 const FILE_PATH = "config/locations.json";
+const SETTINGS_FILE_PATH = "config/settings.json";
 const BRANCH = "main";
 const WORKFLOW_FILE = "update.yml";
 
@@ -26,23 +27,23 @@ function typeIconSvg(type, size) {
 const TYPE_OPTIONS = ["Kayak", "Land based"];
 const SHORE_OPTIONS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
 
-// Which timing fields apply to each type — Kayak has "getting to/from the
-// actual fishing spot" as a distinct step (paddling), which doesn't apply
-// to Land based (you're already standing where you're fishing once set up).
+// Which timing fields apply to each type. Drive time is no longer a static
+// setting here at all — the Trip Planner calculates it live from the
+// device's current location. Both types have a "getting to/from the actual
+// spot" step now — paddling for Kayak, walking from the carpark for Land
+// based (a real case: walking along the beach to a specific spot).
 const TYPE_TIME_FIELDS = {
   Kayak: [
-    { key: "driveTo", label: "Drive to" },
-    { key: "driveBack", label: "Drive back" },
     { key: "setUp", label: "Set up" },
     { key: "packUp", label: "Pack up" },
     { key: "timeToSpot", label: "Time to Spot" },
     { key: "timeFromSpot", label: "Time From Spot" },
   ],
   "Land based": [
-    { key: "driveTo", label: "Drive to" },
-    { key: "driveBack", label: "Drive back" },
     { key: "setUp", label: "Set up" },
     { key: "packUp", label: "Pack up" },
+    { key: "timeToSpot", label: "Time to Spot" },
+    { key: "timeFromSpot", label: "Time From Spot" },
   ],
 };
 
@@ -54,6 +55,8 @@ function defaultTypeConfig(type) {
 
 let locations = [];
 let currentSha = null;
+let settings = {};
+let settingsSha = null;
 
 function utf8ToBase64(str) {
   return btoa(unescape(encodeURIComponent(str)));
@@ -105,8 +108,11 @@ async function init() {
   });
   document.getElementById("btnSave").addEventListener("click", () => onSave(false));
   document.getElementById("btnSaveAndRefresh").addEventListener("click", () => onSave(true));
+  const btnSaveSettings = document.getElementById("btnSaveSettings");
+  if (btnSaveSettings) btnSaveSettings.addEventListener("click", onSaveSettings);
 
   await loadLocations();
+  await loadSettings();
 }
 
 async function loadLocations() {
@@ -135,6 +141,87 @@ async function loadLocations() {
   }
   document.getElementById("locationsSection").style.display = "block";
   renderRows();
+}
+
+async function loadSettings() {
+  const conn = getConnection();
+  try {
+    if (conn && conn.owner && conn.repo && conn.token) {
+      const res = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${SETTINGS_FILE_PATH}?ref=${BRANCH}`, {
+        headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+      });
+      if (!res.ok) throw new Error(`GitHub returned ${res.status}`);
+      const json = await res.json();
+      settingsSha = json.sha;
+      const decoded = decodeURIComponent(escape(atob(json.content.replace(/\n/g, ""))));
+      settings = JSON.parse(decoded);
+    } else {
+      // No connection yet — fall back to the public static file, read-only until connected
+      const res = await fetch("config/settings.json", { cache: "no-store" });
+      settings = await res.json();
+    }
+  } catch (err) {
+    console.error(err);
+    settings = {};
+  }
+  const keyInput = document.getElementById("googleRoutesApiKeyInput");
+  if (keyInput) keyInput.value = settings.googleRoutesApiKey || "";
+}
+
+async function onSaveSettings() {
+  const conn = getConnection();
+  if (!conn) {
+    setSettingsSaveStatus("Connect to GitHub first (above) before saving.", true);
+    return;
+  }
+
+  settings.googleRoutesApiKey = document.getElementById("googleRoutesApiKeyInput").value.trim();
+
+  setSettingsSaveStatus("Saving…");
+  try {
+    // Re-fetch the current sha immediately before writing, same reasoning
+    // as onSave() below — in case the file changed elsewhere since we
+    // loaded it.
+    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${SETTINGS_FILE_PATH}?ref=${BRANCH}`, {
+      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+    });
+    if (!getRes.ok) throw new Error(`Could not read current file (${getRes.status})`);
+    const getJson = await getRes.json();
+    settingsSha = getJson.sha;
+
+    const content = JSON.stringify(settings, null, 2) + "\n";
+    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${SETTINGS_FILE_PATH}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${conn.token}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: "Update settings via site",
+        content: utf8ToBase64(content),
+        sha: settingsSha,
+        branch: BRANCH,
+      }),
+    });
+    if (!putRes.ok) {
+      const errBody = await putRes.json().catch(() => ({}));
+      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
+    }
+    const putJson = await putRes.json();
+    settingsSha = putJson.content.sha;
+    setSettingsSaveStatus("Saved to GitHub. Takes effect next time the Trip Planner page loads.");
+  } catch (err) {
+    console.error(err);
+    setSettingsSaveStatus("Save failed: " + err.message, true);
+  }
+}
+
+function setSettingsSaveStatus(text, isError) {
+  const el = document.getElementById("settingsSaveStatus");
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = isError ? "#dc2626" : "#16a34a";
 }
 
 function renderRows() {
@@ -288,6 +375,7 @@ function onConnect() {
   }
   localStorage.setItem("ghConnection", JSON.stringify({ owner, repo, token }));
   loadLocations();
+  loadSettings();
 }
 
 function onDisconnect() {
@@ -296,7 +384,9 @@ function onDisconnect() {
   document.getElementById("ghRepo").value = "";
   document.getElementById("ghToken").value = "";
   currentSha = null;
+  settingsSha = null;
   loadLocations();
+  loadSettings();
 }
 
 function validateLocations() {
