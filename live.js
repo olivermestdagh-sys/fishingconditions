@@ -16,7 +16,31 @@ let currentLocationName = null;
 let currentType = null;
 let currentLoc = null;
 let stopFishingTime = null;
+let lastChartParams = null;
+let modalChart = null;
 let googleRoutesApiKey = null;
+
+function openChartModal() {
+  if (!lastChartParams) return;
+  const overlay = document.getElementById("chartModalOverlay");
+  overlay.style.display = "flex";
+  modalChart = renderConditionsChart({
+    canvas: document.getElementById("liveChartModal"),
+    rows: lastChartParams.rows,
+    sunTimes: lastChartParams.sunTimes,
+    existingChart: modalChart,
+    locationName: lastChartParams.locationName,
+    tideMaxObserved: lastChartParams.tideMaxObserved,
+    moonPhases: liveData.moonPhases,
+    minTideHeight: lastChartParams.minTideHeight,
+    stopFishingTime: lastChartParams.stopFishingTime,
+    compact: false,
+  });
+}
+
+function closeChartModal() {
+  document.getElementById("chartModalOverlay").style.display = "none";
+}
 
 function timeToMinutes(hhmm) {
   const m = String(hhmm || "").match(/^(\d{1,2}):(\d{1,2})$/);
@@ -322,7 +346,13 @@ function renderForLocation(loc) {
     moonPhases: liveData.moonPhases,
     minTideHeight: loc.minTideHeight,
     stopFishingTime,
+    compact: true,
   });
+  // The full chart (with axes) only gets built when the modal actually
+  // opens — no point maintaining a second live Chart.js instance the whole
+  // time when it might never be viewed. Stash what it'll need to re-render
+  // itself on demand.
+  lastChartParams = { rows: windowRows, sunTimes, locationName: loc.name, tideMaxObserved: loc.tideMaxObserved, minTideHeight: loc.minTideHeight, stopFishingTime };
 
   if (windowRows.length === 0) {
     document.getElementById("liveChartSection").style.display = "none";
@@ -358,6 +388,8 @@ async function init() {
     document.getElementById("homeAddress").value = savedTimings.address || "";
   }
   document.getElementById("btnUpdateTimings").addEventListener("click", updateTimings);
+  document.getElementById("liveChart").addEventListener("click", openChartModal);
+  document.getElementById("btnCloseChartModal").addEventListener("click", closeChartModal);
 
   try {
     const res = await fetch(DATA_URL, { cache: "no-store" });
