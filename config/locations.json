@@ -7,8 +7,8 @@
         "type": "Kayak",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "23:00",
-        "packUp": "23:00",
+        "setUp": "00:30",
+        "packUp": "00:30",
         "timeToSpot": "00:10",
         "timeFromSpot": "00:10"
       },
@@ -16,8 +16,8 @@
         "type": "Land based",
         "driveTo": "00:00",
         "driveBack": "00:00",
-        "setUp": "20:00",
-        "packUp": "20:00",
+        "setUp": "00:20",
+        "packUp": "00:20",
         "timeToSpot": "00:10",
         "timeFromSpot": "00:10"
       }
