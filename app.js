@@ -12,6 +12,8 @@ const CONDITION_COLORS = {
 // buildDayBandPlugin, and renderConditionsChart all come from charts.js (loaded before this file).
 
 let state = { data: null, rowsByLocation: {}, chart: null };
+let lastChartParams = null;
+let modalChart = null;
 
 // A location's NAME is no longer unique on its own — the same physical
 // spot can have both a Kayak and a Land based entry. Everywhere a single
@@ -39,6 +41,8 @@ async function init() {
     localStorage.setItem("selectedLocation", e.target.value);
     renderLocation(e.target.value);
   });
+  document.getElementById("conditionsChart").addEventListener("click", openChartModal);
+  document.getElementById("btnCloseChartModal").addEventListener("click", closeChartModal);
 
   const saved = localStorage.getItem("selectedLocation");
   const first = state.data.locations[0] ? locationKey(state.data.locations[0].name, state.data.locations[0].type) : null;
@@ -168,7 +172,33 @@ function renderCharts(rows, loc) {
     tideMaxObserved: loc ? loc.tideMaxObserved : null,
     moonPhases: state.data.moonPhases,
     minTideHeight: loc ? loc.minTideHeight : null,
+    compact: true,
   });
+  // The full chart (with axes) only gets built when the modal actually
+  // opens — no point maintaining a second live Chart.js instance the whole
+  // time when it might never be viewed. Stash what it'll need to re-render
+  // itself on demand.
+  lastChartParams = { rows, sunTimes, tideMaxObserved: loc ? loc.tideMaxObserved : null, minTideHeight: loc ? loc.minTideHeight : null };
+}
+
+function openChartModal() {
+  if (!lastChartParams) return;
+  const overlay = document.getElementById("chartModalOverlay");
+  overlay.style.display = "flex";
+  modalChart = renderConditionsChart({
+    canvas: document.getElementById("conditionsChartModal"),
+    rows: lastChartParams.rows,
+    sunTimes: lastChartParams.sunTimes,
+    existingChart: modalChart,
+    tideMaxObserved: lastChartParams.tideMaxObserved,
+    moonPhases: state.data.moonPhases,
+    minTideHeight: lastChartParams.minTideHeight,
+    compact: false,
+  });
+}
+
+function closeChartModal() {
+  document.getElementById("chartModalOverlay").style.display = "none";
 }
 
 init();
