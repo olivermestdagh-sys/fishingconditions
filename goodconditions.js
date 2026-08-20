@@ -99,6 +99,8 @@ async function getDriveTimeMinutes(destLat, destLng) {
 }
 
 let currentDetailChart = null;
+let lastDetailChartParams = null;
+let modalChart = null;
 let selectedCardEl = null;
 let currentSelectedWindow = null;
 
@@ -291,6 +293,27 @@ async function renderSchedule() {
   });
 }
 
+function openChartModal() {
+  if (!lastDetailChartParams) return;
+  const overlay = document.getElementById("chartModalOverlay");
+  overlay.style.display = "flex";
+  modalChart = renderConditionsChart({
+    canvas: document.getElementById("detailChartModal"),
+    rows: lastDetailChartParams.rows,
+    sunTimes: lastDetailChartParams.sunTimes,
+    existingChart: modalChart,
+    locationName: lastDetailChartParams.locationName,
+    tideMaxObserved: lastDetailChartParams.tideMaxObserved,
+    moonPhases: moonPhasesData,
+    minTideHeight: lastDetailChartParams.minTideHeight,
+    compact: false,
+  });
+}
+
+function closeChartModal() {
+  document.getElementById("chartModalOverlay").style.display = "none";
+}
+
 async function init() {
   // Loaded separately from the main data fetch, with its own error handling
   // — a missing/malformed settings file shouldn't break the rest of the
@@ -402,6 +425,8 @@ async function init() {
 
   document.getElementById("minCondition").addEventListener("input", render);
   document.getElementById("minHours").addEventListener("input", render);
+  document.getElementById("detailChart").addEventListener("click", openChartModal);
+  document.getElementById("btnCloseChartModal").addEventListener("click", closeChartModal);
   render();
   requestAnimationFrame(updateStickyOffset);
 }
@@ -624,11 +649,14 @@ function selectWindow(w, cardEl) {
 
   const placeholder = document.getElementById("detailPlaceholder");
   const canvas = document.getElementById("detailChart");
+  const hint = document.getElementById("detailChartHint");
 
   if (dayRows.length === 0) {
     placeholder.textContent = "No data available for that day.";
     placeholder.style.display = "block";
     canvas.style.display = "none";
+    hint.style.display = "none";
+    lastDetailChartParams = null;
     if (currentDetailChart) { currentDetailChart.destroy(); currentDetailChart = null; }
     renderSchedule();
     requestAnimationFrame(updateStickyOffset);
@@ -637,6 +665,7 @@ function selectWindow(w, cardEl) {
 
   placeholder.style.display = "none";
   canvas.style.display = "block";
+  hint.style.display = "block";
   const matchedLoc = allLocations.find((l) => l.name === w.locationName && l.type === w.type);
   currentDetailChart = renderConditionsChart({
     canvas,
@@ -647,7 +676,19 @@ function selectWindow(w, cardEl) {
     tideMaxObserved: matchedLoc ? matchedLoc.tideMaxObserved : null,
     moonPhases: moonPhasesData,
     minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
+    compact: true,
   });
+  // The full chart (with axes) only gets built when the modal actually
+  // opens — no point maintaining a second live Chart.js instance the whole
+  // time when it might never be viewed. Stash what it'll need to re-render
+  // itself on demand.
+  lastDetailChartParams = {
+    rows: dayRows,
+    sunTimes: sunTimesData[w.locationName] || [],
+    locationName: w.locationName,
+    tideMaxObserved: matchedLoc ? matchedLoc.tideMaxObserved : null,
+    minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
+  };
   renderSchedule();
 
   // Safety net: force Chart.js to re-measure after the browser has actually committed the
