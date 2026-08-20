@@ -57,8 +57,16 @@
 
   <section class="chart-section full-width-chart" id="liveChartSection" style="display:none;">
     <h2>Last 24 hours &rarr; next 24 hours</h2>
-    <canvas id="liveChart" height="280"></canvas>
+    <canvas id="liveChart" height="220"></canvas>
+    <p class="footnote" style="margin:4px 0 0;text-align:center;">Tap the graph for a bigger view</p>
   </section>
+
+  <div id="chartModalOverlay" class="chart-modal-overlay" style="display:none;">
+    <button id="btnCloseChartModal" class="chart-modal-close" aria-label="Close">&times;</button>
+    <div class="chart-modal-inner">
+      <canvas id="liveChartModal"></canvas>
+    </div>
+  </div>
 
   <footer class="footnote">
     Data from <a href="https://www.willyweather.com.au/" target="_blank" rel="noopener">WillyWeather</a>.

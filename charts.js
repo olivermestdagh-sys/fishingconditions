@@ -153,6 +153,34 @@ function conditionStripColor(value) {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+/**
+ * Compact "°C" / "km/h" unit labels at the top corners of the plot area,
+ * replacing Chart.js's built-in rotated axis titles — those reserve a full
+ * extra margin column on the left/right no matter how short the text is,
+ * which on a narrow phone screen is real plotting space lost to a label a
+ * couple of characters could convey just as well. Drawn just inside the
+ * chart area's top corners instead, costing no extra margin at all.
+ */
+function buildAxisUnitLabelsPlugin() {
+  return {
+    id: "axisUnitLabels",
+    afterDraw(chart) {
+      const { ctx, chartArea } = chart;
+      if (!chartArea) return;
+      const { top, left, right } = chartArea;
+      ctx.save();
+      ctx.font = "600 9px -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.fillStyle = "#6b7280";
+      ctx.textBaseline = "top";
+      ctx.textAlign = "left";
+      ctx.fillText("°C", left + 3, top + 2);
+      ctx.textAlign = "right";
+      ctx.fillText("km/h", right - 3, top + 2);
+      ctx.restore();
+    },
+  };
+}
+
 function buildConditionStripsPlugin(rows, isMobile) {
   const stripHeight = isMobile ? 11 : 14;
   const rowGap = isMobile ? 2 : 3;
@@ -662,7 +690,7 @@ function bucketRowsHourly(rows) {
   return result.sort((a, b) => a._t - b._t);
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -758,7 +786,13 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   const chart = new Chart(canvas, {
     type: "line",
     data: { datasets },
-    plugins: [buildDayBandPlugin(rows, sunTimes, locationName, moonPhases), buildConditionStripsPlugin(rows, isMobile), buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime)],
+    plugins: [
+      buildDayBandPlugin(rows, sunTimes, locationName, moonPhases),
+      buildConditionStripsPlugin(rows, isMobile),
+      buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime),
+      // Skipped in compact mode — nothing to label when there are no axes.
+      ...(compact ? [] : [buildAxisUnitLabelsPlugin()]),
+    ],
     options: {
       responsive: true,
       spanGaps: true,
@@ -772,6 +806,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
           type: "linear",
           min: minT,
           max: maxT,
+          display: !compact,
           ticks: { maxTicksLimit: 10, callback: (value) => fmtChartTick(value) },
           grid: { color: "rgba(0,0,0,0.05)" },
         },
@@ -779,16 +814,23 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
         // purpose — it compresses real data into the upper 60-70% of the
         // chart, leaving genuine clear space at the bottom for the condition
         // strips rather than the strips having to overlap low readings.
-        yTemp: { position: "left", min: -5, max: 40, title: { display: true, text: "Temperature (°C)" } },
+        // No axis title here (display:false) — a rotated Chart.js title
+        // reserves a full extra margin column on the left/right regardless
+        // of how short the text is. A compact "°C"/"km/h" label is drawn
+        // directly at the top of each axis instead, by buildAxisUnitLabelsPlugin
+        // below, using space already reserved for the day heading rather
+        // than adding new margin.
+        yTemp: { position: "left", min: -5, max: 40, display: !compact, title: { display: false } },
         yRain: { display: false, min: -10, max: 100 },
-        yWind: { position: "right", min: -5, max: 50, grid: { drawOnChartArea: false }, title: { display: true, text: "Wind (km/h)" } },
+        yWind: { position: "right", min: -5, max: 50, display: !compact, grid: { drawOnChartArea: false }, title: { display: false } },
         yTide: {
+          // Always hidden — the filled tide shape on the chart already
+          // conveys high/low visually; a numeric axis for it isn't needed,
+          // and hiding it keeps that side of the chart clear for temperature.
+          display: false,
           position: "left",
           min: 0,
           max: tideAxisMax,
-          grid: { drawOnChartArea: false }, // avoid a second set of gridlines cluttering the plot
-          title: { display: true, text: "Tide (m)" },
-          ticks: { maxTicksLimit: 5 },
         },
       },
       plugins: {
@@ -832,19 +874,24 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   });
 
   // Tap the graph to show/hide the legend — cursor:pointer signals it's clickable.
-  // Attach only once per canvas element (guarded via dataset), since the canvas
-  // persists in the DOM across repeated calls even as the Chart.js instance itself
-  // gets destroyed/recreated on every render — Chart.getChart() always looks up
-  // whichever instance is *currently* attached, so a stale closure isn't a risk.
-  canvas.style.cursor = "pointer";
-  if (!canvas.dataset.legendToggleAttached) {
-    canvas.dataset.legendToggleAttached = "true";
-    canvas.addEventListener("click", () => {
-      const current = Chart.getChart(canvas);
-      if (!current) return;
-      current.options.plugins.legend.display = !current.options.plugins.legend.display;
-      current.update();
-    });
+  // Only wired up outside compact mode — a compact chart's own click is reserved
+  // for opening the full view instead (see live.js), and a toggleable legend
+  // doesn't fit a deliberately minimal view anyway. Attach only once per canvas
+  // element (guarded via dataset), since the canvas persists in the DOM across
+  // repeated calls even as the Chart.js instance itself gets destroyed/recreated
+  // on every render — Chart.getChart() always looks up whichever instance is
+  // *currently* attached, so a stale closure isn't a risk.
+  if (!compact) {
+    canvas.style.cursor = "pointer";
+    if (!canvas.dataset.legendToggleAttached) {
+      canvas.dataset.legendToggleAttached = "true";
+      canvas.addEventListener("click", () => {
+        const current = Chart.getChart(canvas);
+        if (!current) return;
+        current.options.plugins.legend.display = !current.options.plugins.legend.display;
+        current.update();
+      });
+    }
   }
 
   return chart;
