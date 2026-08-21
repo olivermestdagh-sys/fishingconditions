@@ -3,6 +3,7 @@ const SETTINGS_URL = "config/settings.json";
 const LOC_FILTER_STORAGE_KEY = "goodConditionsSelectedLocations";
 const TYPE_FILTER_STORAGE_KEY = "goodConditionsSelectedTypes";
 const TRIP_TIMES_STORAGE_KEY = "goodConditionsTripTimes";
+const THRESHOLDS_STORAGE_KEY = "goodConditionsThresholds";
 
 // Loaded from config/settings.json at page load (see init()) — kept in a
 // SEPARATE file from the rest of the site's code specifically so it never
@@ -208,6 +209,12 @@ function persistTripTimes() {
   const launch = document.getElementById("launchTime").value;
   const homeBy = document.getElementById("homeBy").value;
   localStorage.setItem(TRIP_TIMES_STORAGE_KEY, JSON.stringify({ launch, homeBy }));
+}
+
+function persistThresholds() {
+  const minCondition = document.getElementById("minCondition").value;
+  const minHours = document.getElementById("minHours").value;
+  localStorage.setItem(THRESHOLDS_STORAGE_KEY, JSON.stringify({ minCondition, minHours }));
 }
 
 let scheduleRenderToken = 0;
@@ -423,8 +430,24 @@ async function init() {
     renderSchedule();
   });
 
-  document.getElementById("minCondition").addEventListener("input", render);
-  document.getElementById("minHours").addEventListener("input", render);
+  let savedThresholds = null;
+  try {
+    savedThresholds = JSON.parse(localStorage.getItem(THRESHOLDS_STORAGE_KEY) || "null");
+  } catch {
+    savedThresholds = null;
+  }
+  if (savedThresholds) {
+    if (savedThresholds.minCondition != null) document.getElementById("minCondition").value = savedThresholds.minCondition;
+    if (savedThresholds.minHours != null) document.getElementById("minHours").value = savedThresholds.minHours;
+  }
+  document.getElementById("minCondition").addEventListener("input", () => {
+    persistThresholds();
+    render();
+  });
+  document.getElementById("minHours").addEventListener("input", () => {
+    persistThresholds();
+    render();
+  });
   document.getElementById("detailChart").addEventListener("click", openChartModal);
   document.getElementById("btnCloseChartModal").addEventListener("click", closeChartModal);
   render();
@@ -743,6 +766,17 @@ function render() {
   // trip window that's already in the past.
   const nowLocal = new Date();
   results = results.filter((w) => naiveMsToLocalDate(w.to) >= nowLocal);
+
+  // A session spanning many days (e.g. several days of good conditions in a
+  // row) gets a card for EVERY day it touches, each showing the same full
+  // true range — so a card anchored to a day that's already over is always
+  // a pure duplicate of the still-current card anchored to today (or a
+  // later day), never the only place that session's full range is shown.
+  // Drop those past-anchored duplicates, rather than leaving a session that
+  // started days ago sitting at the top of today's list under a heading
+  // for a day that's already gone.
+  const todayStart = dateOnly(nowInNaiveEncoding());
+  results = results.filter((w) => dateOnly(w.dayAnchor) >= todayStart);
 
   const container = document.getElementById("windowsContainer");
   const emptyState = document.getElementById("emptyState");
