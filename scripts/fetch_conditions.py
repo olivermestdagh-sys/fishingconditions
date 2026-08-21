@@ -330,6 +330,31 @@ def angle_diff(a, b):
     return 360 - raw if raw > 180 else raw
 
 
+def land_based_wind_tier(shore, wind_dir):
+    """Classifies wind-vs-shore angle into one of 5 tiers (0=straight
+    offshore ... 4=straight onshore/blown out) — the single shared
+    calculation behind both compute_condition's score and
+    explain_condition's text for Land based locations, so they can never
+    disagree with each other.
+
+    The 16-point compass produces angle differences in steps of 22.5°, not
+    just clean 45° multiples — a wind reading from any of the 8
+    "intermediate" points (NNE, ENE, ESE, SSE, SSW, WSW, WNW, NNW) relative
+    to shore is never an exact 0/45/90/135/180 difference. Using
+    math.ceil(diff / 45) rounds every such in-between reading into the
+    WORSE of its two neighbouring tiers — e.g. a 22.5° difference (nearly
+    offshore) rounds up to tier 1, not down to tier 0 — a deliberately
+    conservative, consistent tie-break rather than leaving it to whatever
+    exact-equality branch happened to catch it (or didn't).
+    Returns None if shore/wind_dir data is insufficient.
+    """
+    diff = angle_diff(compass_to_degrees(shore), compass_to_degrees(wind_dir))
+    if diff is None:
+        return None
+    return min(4, math.ceil(diff / 45))
+
+
+
 def wind_against_tide_severity(wind_dir, wind_speed, current_velocity, current_direction):
     """How much wind is piling onto an opposing current, and how bad it is —
     a real, documented phenomenon (wave-action conservation: an opposing
@@ -494,18 +519,10 @@ def interpolate_tide_height(target_ms, events):
 
 def compute_condition(loc_type, shore, wind_dir, wind_speed, current_velocity=None, current_direction=None):
     if loc_type == "Land based":
-        diff = angle_diff(compass_to_degrees(shore), compass_to_degrees(wind_dir))
-        if diff is None:
+        tier = land_based_wind_tier(shore, wind_dir)
+        if tier is None:
             return None
-        if diff == 0:
-            return 5
-        if diff == 90:
-            return 3
-        if diff == 180:
-            return 1
-        if diff == 45:
-            return 4
-        return 2
+        return 5 - tier
 
     if loc_type == "Kayak":
         if wind_speed is None:
@@ -532,22 +549,22 @@ def compute_condition(loc_type, shore, wind_dir, wind_speed, current_velocity=No
 
 
 def explain_condition(loc_type, shore, wind_dir, wind_speed, current_velocity=None, current_direction=None):
-    """Short human-readable reason for the Location Condition score — same
-    inputs, same branching as compute_condition above, so the explanation
-    can never disagree with the number it's explaining."""
+    """Short human-readable reason for the Location Condition score — uses
+    the exact same land_based_wind_tier() calculation compute_condition
+    does, so the explanation can never disagree with the number it's
+    explaining (previously these were two separate exact-equality checks
+    that could — and did — silently fall out of sync with each other)."""
     if loc_type == "Land based":
-        diff = angle_diff(compass_to_degrees(shore), compass_to_degrees(wind_dir))
-        if diff is None:
+        tier = land_based_wind_tier(shore, wind_dir)
+        if tier is None:
             return "Insufficient wind data"
-        if diff == 0:
-            return "Straight offshore — clean waves"
-        if diff == 45:
-            return "Mostly offshore — good waves"
-        if diff == 90:
-            return "Cross-shore wind"
-        if diff == 135:
-            return "Mostly onshore — messy surf"
-        return "Straight onshore — blown out"
+        return [
+            "Straight offshore — clean waves",
+            "Mostly offshore — good waves",
+            "Cross-shore wind",
+            "Mostly onshore — messy surf",
+            "Straight onshore — blown out",
+        ][tier]
 
     if loc_type == "Kayak":
         if wind_speed is None:
