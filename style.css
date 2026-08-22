@@ -1008,12 +1008,20 @@ main.wide {
   border-bottom: 1px solid var(--grey-100);
 }
 
+.week-header-day-tint {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 0;
+}
+
 .week-day-boundary {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 1px;
   background: var(--grey-200);
+  z-index: 1;
 }
 
 .week-day-label {
