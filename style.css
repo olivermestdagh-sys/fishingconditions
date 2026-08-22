@@ -1182,3 +1182,15 @@ main.wide {
   width: 100% !important;
   height: 100% !important;
 }
+
+.week-full-bleed {
+  /* Breaks out of main.wide's centered 1100px column + 12px side padding —
+     stretches to the actual browser viewport edges, since a Gantt-style
+     timeline benefits from every pixel of width it can get, unlike the
+     rest of the page's content. */
+  width: 100vw;
+  max-width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  border-radius: 0;
+}
