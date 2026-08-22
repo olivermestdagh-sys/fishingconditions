@@ -858,9 +858,16 @@ main.wide {
 }
 
 .week-chart-modal-inner canvas {
-  width: 100% !important;
+  /* Deliberately NOT stretched to fill the modal's own width/height —
+     "not full-screen" doesn't mean "stretched to fill whatever frame it's
+     in" either. A natural, contained size (matching how Trip Planner's own
+     inline chart is sized: a fixed height, width capped at a reasonable
+     max) reads much better than an artificially blown-up chart. */
+  width: 100%;
+  max-width: 700px;
   height: 260px !important;
   flex-shrink: 0;
+  align-self: center;
 }
 
 #weekScheduleContainer {
@@ -989,7 +996,7 @@ main.wide {
 .week-lane {
   position: relative;
   z-index: 1;
-  min-height: 210px;
+  min-height: 150px;
   border-bottom: 1px solid var(--grey-100);
 }
 
@@ -1060,6 +1067,13 @@ main.wide {
   flex-direction: column;
   width: max-content;
   max-width: 100%;
+}
+
+.week-tile-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
 }
 
 .week-tile .window-loc {
