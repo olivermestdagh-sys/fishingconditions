@@ -45,6 +45,21 @@
       "Min consecutive hours" is a genuine clock-duration minimum — matches the session lengths below.
     </p>
 
+    <label class="loc-edit-label" style="display:block;margin:14px 0 6px;">Trip times</label>
+    <div class="filter-row">
+      <div>
+        <label for="launchTime">Launch Time</label>
+        <input type="time" id="launchTime" />
+      </div>
+      <div>
+        <label for="homeBy">Home By</label>
+        <input type="time" id="homeBy" />
+      </div>
+    </div>
+    <p class="footnote" style="margin:8px 0 0;text-align:left;">
+      Set these to see fishing/drive time worked out when you tap a session below — shared with the Trip Planner page.
+    </p>
+
     <div class="loc-filter-header">
       <label>Locations</label>
       <div class="loc-filter-actions">
@@ -59,20 +74,21 @@
     </div>
   </section>
 
-  <section class="summary-card" style="padding:0;overflow:hidden;">
+  <section class="summary-card" style="padding:0;overflow:hidden;position:relative;">
     <div id="weekEmptyState" class="empty-state" style="display:none;padding:20px;">No sessions meet the criteria.</div>
     <div id="weekTimelineScroll" class="week-timeline-scroll">
       <div id="weekTimelineInner" class="week-timeline-inner"></div>
     </div>
     <p class="footnote" style="margin:6px 10px 10px;text-align:left;">Scroll sideways for the rest of the week. Tap a tile for details.</p>
-  </section>
 
-  <div id="chartModalOverlay" class="chart-modal-overlay" style="display:none;">
-    <button id="btnCloseChartModal" class="chart-modal-close" aria-label="Close">&times;</button>
-    <div class="chart-modal-inner">
-      <canvas id="weekChartModal"></canvas>
+    <div id="chartModalOverlay" class="week-chart-modal-overlay" style="display:none;">
+      <button id="btnCloseChartModal" class="chart-modal-close" aria-label="Close">&times;</button>
+      <div class="week-chart-modal-inner">
+        <canvas id="weekChartModal"></canvas>
+        <div id="weekScheduleContainer"></div>
+      </div>
     </div>
-  </div>
+  </section>
 
   <footer class="footnote">
     Data from <a href="https://www.willyweather.com.au/" target="_blank" rel="noopener">WillyWeather</a>.

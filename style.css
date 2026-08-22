@@ -834,6 +834,40 @@ main.wide {
   height: 100% !important;
 }
 
+/* Week Ahead's own version of the chart modal — contained within the
+   timeline control's own section (position:absolute relative to that
+   section, which is position:relative) rather than a full-screen
+   position:fixed takeover. Also has room for the trip schedule
+   (fishing/drive time) below the chart, not just the chart alone. */
+.week-chart-modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--white);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+}
+
+.week-chart-modal-inner {
+  flex: 1;
+  min-height: 0;
+  padding: 44px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.week-chart-modal-inner canvas {
+  width: 100% !important;
+  height: 260px !important;
+  flex-shrink: 0;
+}
+
+#weekScheduleContainer {
+  flex-shrink: 0;
+  padding: 0 4px;
+}
+
 /* Week Ahead: horizontal Gantt-style timeline */
 
 .week-timeline-scroll {
@@ -994,14 +1028,38 @@ main.wide {
   border: 1px solid rgba(15, 23, 42, 0.12);
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.14);
   cursor: pointer;
+  text-align: left;
+  /* Deliberately NOT overflow:hidden here — that would break the sticky
+     content below, since position:sticky needs an unclipped containing
+     block to slide freely within. The photo background's own rounded-
+     corner clipping lives on the separate .week-tile-bg layer instead. */
+}
+
+.week-tile-bg {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  overflow: hidden;
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
+}
+
+.week-tile-content {
+  /* Sticky WITHIN the tile's own bounds — bounded by .week-tile (its
+     containing block, since that's position:absolute), not free to drift
+     past either edge of it. Scrolling the timeline right pins this to the
+     visible left edge; once the tile's own right edge would pass that
+     point, it's constrained there and starts scrolling away with the rest
+     of the tile, exactly matching what a mostly-off-screen tile should do. */
+  position: sticky;
+  left: 0;
+  right: 0;
   padding: 10px 12px;
-  overflow: hidden;
-  text-align: left;
   display: flex;
   flex-direction: column;
+  width: max-content;
+  max-width: 100%;
 }
 
 .week-tile .window-loc {

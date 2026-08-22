@@ -12,7 +12,7 @@ let currentLoc = null;
 let stopFishingTime = null;
 let lastChartParams = null;
 let modalChart = null;
-let googleRoutesApiKey = null;
+// googleRoutesApiKey comes from charts.js (loaded before this file).
 
 function openChartModal() {
   if (!lastChartParams) return;

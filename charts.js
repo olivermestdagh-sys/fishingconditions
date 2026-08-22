@@ -1123,3 +1123,172 @@ function renderTypeChips(selectedTypes, onChange) {
     container.appendChild(chip);
   }
 }
+
+// ============================================================================
+// Shared trip-schedule infrastructure — moved here from goodconditions.js so
+// Week Ahead can offer the same "fishing time / drive time" calculation Trip
+// Planner does, from the same Launch Time / Home By settings (shared
+// localStorage key below) and the same live GPS + Google Routes lookup.
+// ============================================================================
+
+const TRIP_TIMES_STORAGE_KEY = "goodConditionsTripTimes";
+
+// Loaded from config/settings.json at page load, in each page's own init()
+// — kept in a SEPARATE file from the rest of the site's code specifically
+// so it never gets overwritten when any of these scripts are updated. Set
+// via the Settings page, not by hand-editing any file.
+let googleRoutesApiKey = null;
+
+// Drive time is calculated live from the device's current GPS position to
+// each location, rather than a fixed value set per location — the same
+// spot might be a short drive from home but a long one when travelling.
+let currentGpsPosition = null;
+let gpsRequestPromise = null;
+const driveTimeCache = {};
+
+function requestGpsPosition() {
+  // Only ever ask the browser once per page load — cached in a shared
+  // promise so multiple simultaneous callers all wait on the same request
+  // rather than triggering repeat permission prompts.
+  if (gpsRequestPromise) return gpsRequestPromise;
+  gpsRequestPromise = new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      resolve(null);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => resolve({ lat: position.coords.latitude, lng: position.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 300000 }
+    );
+  });
+  return gpsRequestPromise;
+}
+
+/**
+ * Real drive time (minutes) from the device's current GPS position to a
+ * destination, via Google's Routes API (computeRoutes, traffic-aware) — a
+ * genuine live routing lookup, not a fixed guess. Returns null (not an
+ * exception) for any failure — no key configured, GPS denied, network
+ * error — so callers can show a graceful "unavailable" state rather than
+ * crashing. Caches per destination so revisiting the same location/session
+ * doesn't repeat the request. Relies on a page-level googleRoutesApiKey
+ * variable, set by each page's own init() after loading config/settings.json.
+ */
+async function getDriveTimeMinutes(destLat, destLng) {
+  if (destLat == null || destLng == null) return null;
+  if (!googleRoutesApiKey) return null;
+
+  if (!currentGpsPosition) {
+    currentGpsPosition = await requestGpsPosition();
+  }
+  if (!currentGpsPosition) return null;
+
+  const cacheKey = `${destLat},${destLng}`;
+  if (cacheKey in driveTimeCache) return driveTimeCache[cacheKey];
+
+  try {
+    const res = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": googleRoutesApiKey,
+        // Routes API requires explicitly asking for the fields you want —
+        // unlike most REST APIs, it won't return them by default.
+        "X-Goog-FieldMask": "routes.duration",
+      },
+      body: JSON.stringify({
+        origin: { location: { latLng: { latitude: currentGpsPosition.lat, longitude: currentGpsPosition.lng } } },
+        destination: { location: { latLng: { latitude: destLat, longitude: destLng } } },
+        travelMode: "DRIVE",
+        routingPreference: "TRAFFIC_AWARE",
+      }),
+    });
+    if (!res.ok) throw new Error(`Routes API returned ${res.status}`);
+    const data = await res.json();
+    // Duration comes back as a string like "7812s", not a plain number —
+    // parseInt stops at the first non-digit character, giving just the
+    // numeric seconds count.
+    const durationStr = data.routes && data.routes[0] && data.routes[0].duration;
+    const durationSeconds = durationStr ? parseInt(durationStr, 10) : null;
+    const minutes = durationSeconds != null && !Number.isNaN(durationSeconds) ? Math.round(durationSeconds / 60) : null;
+    driveTimeCache[cacheKey] = minutes;
+    return minutes;
+  } catch (err) {
+    console.error("Drive time lookup failed:", err);
+    driveTimeCache[cacheKey] = null;
+    return null;
+  }
+}
+
+// Time-of-day / duration arithmetic, all working in minutes-since-midnight.
+// Intermediate results are kept unwrapped (can go negative or past 1440) so a
+// chain of subtractions that crosses midnight still produces a sensible answer —
+// wrapping only happens at the point a value is displayed as a clock time.
+function timeToMinutes(hhmm) {
+  const m = String(hhmm || "").match(/^(\d{1,2}):(\d{1,2})$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function minutesToClock(mins) {
+  const wrapped = ((Math.round(mins) % 1440) + 1440) % 1440;
+  const h = Math.floor(wrapped / 60);
+  const m = wrapped % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function minutesToDuration(mins) {
+  const rounded = Math.round(mins);
+  const sign = rounded < 0 ? "-" : "";
+  const abs = Math.abs(rounded);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  return `${sign}${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function computeSchedule(loc, launchStr, homeByStr, driveMinutes) {
+  const launch = timeToMinutes(launchStr);
+  const homeBy = timeToMinutes(homeByStr);
+  if (launch == null || homeBy == null || !loc) return null;
+
+  const setUp = timeToMinutes(loc.setUp) || 0;
+  const timeToSpot = timeToMinutes(loc.timeToSpot) || 0;
+  const packUp = timeToMinutes(loc.packUp) || 0;
+  const timeFromSpot = timeToMinutes(loc.timeFromSpot) || 0;
+
+  const arrive = launch - setUp;
+  const fishAt = launch + timeToSpot;
+
+  // Drive time comes from a live routing lookup now, not a stored field —
+  // it can genuinely be unavailable (GPS denied, no token configured, a
+  // failed request). Rather than fail the whole schedule, still show the
+  // parts that don't depend on it.
+  if (driveMinutes == null) {
+    return {
+      arrive: minutesToClock(arrive),
+      launch: minutesToClock(launch),
+      fishAt: minutesToClock(fishAt),
+      homeBy: minutesToClock(homeBy),
+      driveTimeUnavailable: true,
+    };
+  }
+
+  const leaveHome = arrive - driveMinutes;
+  const driveHome = homeBy - driveMinutes;
+  const headBack = driveHome - packUp - timeFromSpot;
+  const fishingTimeMins = headBack - fishAt;
+
+  return {
+    leaveHome: minutesToClock(leaveHome),
+    arrive: minutesToClock(arrive),
+    launch: minutesToClock(launch),
+    fishAt: minutesToClock(fishAt),
+    headBack: minutesToClock(headBack),
+    driveHome: minutesToClock(driveHome),
+    homeBy: minutesToClock(homeBy),
+    fishingTime: minutesToDuration(fishingTimeMins),
+    fishingTimeNegative: fishingTimeMins < 0,
+    driveMinutes,
+  };
+}
