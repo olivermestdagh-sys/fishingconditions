@@ -2,13 +2,7 @@ const DATA_URL = "data/conditions.json";
 const SETTINGS_URL = "config/settings.json";
 const TIMINGS_STORAGE_KEY = "liveHomeTimings";
 
-const CONDITION_COLORS = {
-  5: "var(--cond-5)",
-  4: "var(--cond-4)",
-  3: "var(--cond-3)",
-  2: "var(--cond-2)",
-  1: "var(--cond-1)",
-};
+// CONDITION_COLORS comes from charts.js (loaded before this file).
 
 let liveData = null;
 let liveChart = null;

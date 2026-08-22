@@ -871,12 +871,90 @@ main.wide {
 }
 
 .week-header-track {
-  height: 34px;
-  min-height: 34px;
+  height: 84px;
+  min-height: 84px;
   border-bottom: 1px solid var(--grey-100);
+  /* Sticky within .week-timeline-scroll's own vertical scroll — stays
+     pinned at the top as you scroll down through lanes, while still
+     scrolling horizontally with the rest of the content since sticky only
+     pins the axis given (top), not left/right. Needs an opaque background,
+     or lanes scrolling underneath would show through it. */
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--white);
+}
+
+.week-hour-tick {
+  position: absolute;
+  top: 30px;
+  width: 1px;
+  height: 6px;
+  background: var(--grey-200);
+}
+
+.week-hour-label {
+  position: absolute;
+  top: 37px;
+  transform: translateX(-50%);
+  font-size: 0.6rem;
+  color: var(--grey-400, #9ca3af);
+  white-space: nowrap;
+}
+
+.week-moon-icon {
+  position: absolute;
+  top: 2px;
+}
+
+.week-sun-marker {
+  /* Deliberately a separate vertical band below the hour ticks/labels —
+     sunrise/sunset frequently land close to (without exactly matching) a
+     3-hourly tick, so sharing the same band risked the two colliding. */
+  position: absolute;
+  top: 52px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.week-sun-tick {
+  width: 1px;
+  height: 8px;
+  background: #b45309;
+}
+
+.week-sun-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #b45309;
+  white-space: nowrap;
+}
+
+.week-lanes-wrap {
+  position: relative;
+}
+
+.week-shading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.week-shade-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
 }
 
 .week-lane {
+  position: relative;
+  z-index: 1;
   min-height: 210px;
   border-bottom: 1px solid var(--grey-100);
 }
