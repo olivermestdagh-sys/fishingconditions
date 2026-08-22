@@ -224,17 +224,33 @@ function renderWeekView() {
     }
 
     for (const t of rowTiles) {
-      const leftPx = ((t.from - timelineStart) / 3600000) * PIXELS_PER_HOUR;
-      const widthPx = Math.max(4, ((t.to - t.from) / 3600000) * PIXELS_PER_HOUR);
+      // A session that began before today (its true start, per the shared
+      // full-time-range logic) but is still ongoing needs its VISUAL left
+      // edge clamped to the timeline's own start — otherwise this computes
+      // a negative left offset and the tile bleeds off the track, straight
+      // into the sticky label column. The displayed text still shows the
+      // true start/end times regardless; only the positioning is clamped.
+      const clampedFrom = Math.max(t.from, timelineStart);
+      const leftPx = ((clampedFrom - timelineStart) / 3600000) * PIXELS_PER_HOUR;
+      const widthPx = Math.max(4, ((t.to - clampedFrom) / 3600000) * PIXELS_PER_HOUR);
       const tile = document.createElement("button");
       tile.type = "button";
       tile.className = "week-tile";
       tile.style.left = leftPx + "px";
       tile.style.width = widthPx + "px";
       tile.style.background = conditionColor(t.avgCondition);
-      tile.title = `${locationName} (${type}) — ${fmtNaive(t.from, { hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(t.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
-      if (widthPx > 46) {
-        tile.textContent = `${fmtNaive(t.from, { hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(t.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+      const timeLabel = `${fmtNaive(t.from, { hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(t.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+      tile.title = `${locationName} (${type}) — ${timeLabel}`;
+      // Wide enough for the time range alone; wider still and the key
+      // stats fit too — narrower tiles just show as a plain colour block,
+      // still fully clickable, rather than cramming in truncated text.
+      if (widthPx > 100) {
+        tile.innerHTML = `
+          <div class="week-tile-time">${timeLabel} · ${t.hoursLabel}h</div>
+          <div class="week-tile-stats">${t.avgTemp != null ? t.avgTemp.toFixed(1) + "°" : "–"} · ${t.avgWind != null ? Math.round(t.avgWind) + " km/h" : "–"} · ${t.avgRain != null ? Math.round(t.avgRain) + "% rain" : "–"}</div>
+        `;
+      } else if (widthPx > 46) {
+        tile.innerHTML = `<div class="week-tile-time">${timeLabel}</div>`;
       }
       tile.addEventListener("click", () => selectTile(t));
       track.appendChild(tile);

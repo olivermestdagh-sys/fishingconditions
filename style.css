@@ -833,3 +833,134 @@ main.wide {
   width: 100% !important;
   height: 100% !important;
 }
+
+/* Week Ahead: horizontal Gantt-style timeline */
+
+.week-timeline-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.week-timeline-inner {
+  display: inline-block;
+  min-width: 100%;
+}
+
+.week-header-row,
+.week-row {
+  display: flex;
+  align-items: stretch;
+}
+
+.week-row {
+  border-top: 1px solid var(--grey-100);
+  background: var(--white);
+}
+
+.week-row:nth-child(even) {
+  background: var(--grey-50, #f9fafb);
+}
+
+.week-label {
+  flex-shrink: 0;
+  width: 150px;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: inherit;
+  padding: 10px 12px;
+  border-right: 1px solid var(--grey-200);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.week-label-header {
+  height: 34px;
+}
+
+.week-label-name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--grey-700, #1f2937);
+  line-height: 1.2;
+}
+
+.week-label-type {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  color: var(--grey-500);
+  margin-top: 2px;
+}
+
+.week-track {
+  position: relative;
+  flex-shrink: 0;
+  min-height: 92px;
+}
+
+.week-header-track {
+  height: 34px;
+  min-height: 34px;
+}
+
+.week-day-boundary {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--grey-200);
+}
+
+.week-day-label {
+  position: absolute;
+  top: 4px;
+  padding-left: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--grey-500);
+  white-space: nowrap;
+}
+
+.week-now-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #0f172a;
+  z-index: 2;
+}
+
+.week-tile {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+  cursor: pointer;
+  color: rgba(15, 23, 42, 0.88);
+  padding: 8px 10px;
+  overflow: hidden;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.week-tile-time {
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.week-tile-stats {
+  font-size: 0.68rem;
+  font-weight: 500;
+  white-space: nowrap;
+  opacity: 0.85;
+}
