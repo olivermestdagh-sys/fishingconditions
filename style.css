@@ -912,8 +912,8 @@ main.wide {
 }
 
 .week-header-track {
-  height: 84px;
-  min-height: 84px;
+  height: 32px;
+  min-height: 32px;
   border-bottom: 1px solid var(--grey-100);
   /* Sticky within .week-timeline-scroll's own vertical scroll — stays
      pinned at the top as you scroll down through lanes, while still
@@ -928,15 +928,15 @@ main.wide {
 
 .week-hour-tick {
   position: absolute;
-  top: 30px;
+  top: 0;
   width: 1px;
-  height: 6px;
+  height: 5px;
   background: var(--grey-200);
 }
 
 .week-hour-label {
   position: absolute;
-  top: 37px;
+  top: 6px;
   transform: translateX(-50%);
   font-size: 0.6rem;
   color: var(--grey-400, #9ca3af);
@@ -945,15 +945,15 @@ main.wide {
 
 .week-moon-icon {
   position: absolute;
-  top: 2px;
+  top: 8px;
 }
 
 .week-sun-marker {
-  /* Deliberately a separate vertical band below the hour ticks/labels —
-     sunrise/sunset frequently land close to (without exactly matching) a
-     3-hourly tick, so sharing the same band risked the two colliding. */
+  /* Same single line as the day label/hour ticks — the hour-tick loop
+     skips any tick that would land close enough to collide with one of
+     these, so both can safely share this one row. */
   position: absolute;
-  top: 52px;
+  top: 0;
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
@@ -962,7 +962,7 @@ main.wide {
 
 .week-sun-tick {
   width: 1px;
-  height: 8px;
+  height: 5px;
   background: #b45309;
 }
 
@@ -1010,7 +1010,7 @@ main.wide {
 
 .week-day-label {
   position: absolute;
-  top: 4px;
+  top: 8px;
   padding-left: 4px;
   font-size: 0.7rem;
   font-weight: 600;
@@ -1117,4 +1117,21 @@ main.wide {
 .week-tile-stats {
   margin-top: auto;
   gap: 6px;
+}
+
+.week-hover-preview {
+  position: fixed;
+  z-index: 30;
+  background: var(--white);
+  border-radius: 10px;
+  border: 1px solid var(--grey-200);
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.22);
+  padding: 30px 10px 8px;
+  pointer-events: none;
+  width: 420px;
+}
+
+.week-hover-preview canvas {
+  width: 100% !important;
+  height: 140px !important;
 }

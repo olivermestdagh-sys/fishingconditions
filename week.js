@@ -12,6 +12,15 @@ let selectedLocations = new Set();
 let selectedTypes = new Set(["Kayak", "Land based"]);
 let currentTile = null;
 let modalChart = null;
+let previewChart = null;
+let hoverShowTimer = null;
+
+// Hover-capable devices (desktop, trackpad) get a small floating preview on
+// hover instead — lets you see the graph while still seeing every other
+// session, since it doesn't cover the timeline the way the full modal does.
+// Touch-only devices don't have a real hover state at all, so they keep the
+// tap-to-open modal instead.
+const supportsHover = typeof window.matchMedia === "function" && window.matchMedia("(hover: hover)").matches;
 
 async function init() {
   // Loaded separately from the main data fetch, with its own error handling
@@ -247,6 +256,7 @@ function renderWeekView() {
   for (let dayMs = timelineStart; dayMs <= timelineEnd; dayMs += 86400000) {
     const leftPx = ((dayMs - timelineStart) / 3600000) * PIXELS_PER_HOUR;
     const dayEndPx = Math.min(totalTrackWidth, leftPx + 24 * PIXELS_PER_HOUR);
+    const dateKey = new Date(dayMs).toISOString().slice(0, 10);
 
     const boundary = document.createElement("div");
     boundary.className = "week-day-boundary";
@@ -259,11 +269,53 @@ function renderWeekView() {
     label.textContent = fmtNaive(dayMs, { weekday: "short", day: "numeric", month: "short" });
     headerTrack.appendChild(label);
 
-    // Hour marks every 3 hours through the day — small ticks + labels,
-    // distinct from (and secondary to) the sunrise/sunset markers below.
+    // Moon phase sits right after the date label (not centred in the day's
+    // span) — reuses the exact same drawMoonIcon() canvas-drawing routine
+    // the main charts use, on a small dedicated canvas, rather than
+    // re-implementing that geometry as SVG/DOM.
+    const moonInfo = moonPhasesData[dateKey];
+    const skipPositions = [];
+    if (moonInfo && moonInfo.illumination != null) {
+      const moonX = leftPx + 90;
+      skipPositions.push(moonX);
+      const moonCanvas = document.createElement("canvas");
+      moonCanvas.className = "week-moon-icon";
+      moonCanvas.width = 14;
+      moonCanvas.height = 14;
+      moonCanvas.style.left = moonX + "px";
+      const mctx = moonCanvas.getContext("2d");
+      const waxing = moonInfo.phase ? !moonInfo.phase.startsWith("Waning") : true;
+      drawMoonIcon(mctx, 7, 7, 6, moonInfo.illumination, waxing);
+      headerTrack.appendChild(moonCanvas);
+    }
+
+    // Sunrise/sunset — explicit markers at their real times. Collected
+    // first (before the generic hour ticks below) so the hour-tick loop
+    // can skip anything that would land too close to one of these (or the
+    // moon icon above) and collide, now that everything lives on the same
+    // single line.
+    const sun = sunByDate.get(dateKey);
+    if (sun) {
+      if (sun.sunrise != null) {
+        const x = leftPx + ((parseNaive(sun.sunrise) - dayMs) / 3600000) * PIXELS_PER_HOUR;
+        skipPositions.push(x);
+        headerTrack.appendChild(buildSunMarker(x, fmtChartTick(parseNaive(sun.sunrise))));
+      }
+      if (sun.sunset != null) {
+        const x = leftPx + ((parseNaive(sun.sunset) - dayMs) / 3600000) * PIXELS_PER_HOUR;
+        skipPositions.push(x);
+        headerTrack.appendChild(buildSunMarker(x, fmtChartTick(parseNaive(sun.sunset))));
+      }
+    }
+
+    // Hour marks every 3 hours through the day — skipped wherever one
+    // would land close enough to the moon icon or a sunrise/sunset marker
+    // to collide with it, since those take precedence over a generic tick.
+    const MIN_GAP_PX = 34;
     for (let h = 3; h < 24; h += 3) {
       const hourLeftPx = leftPx + h * PIXELS_PER_HOUR;
       if (hourLeftPx > dayEndPx) break;
+      if (skipPositions.some((sx) => Math.abs(sx - hourLeftPx) < MIN_GAP_PX)) continue;
       const tick = document.createElement("div");
       tick.className = "week-hour-tick";
       tick.style.left = hourLeftPx + "px";
@@ -273,38 +325,6 @@ function renderWeekView() {
       hourLabel.style.left = hourLeftPx + "px";
       hourLabel.textContent = String(h).padStart(2, "0") + ":00";
       headerTrack.appendChild(hourLabel);
-    }
-
-    // Moon phase, one icon per day — reuses the exact same drawMoonIcon()
-    // canvas-drawing routine the main charts use, on a small dedicated
-    // canvas, rather than re-implementing that geometry as SVG/DOM.
-    const dateKey = new Date(dayMs).toISOString().slice(0, 10);
-    const moonInfo = moonPhasesData[dateKey];
-    if (moonInfo && moonInfo.illumination != null) {
-      const moonCanvas = document.createElement("canvas");
-      moonCanvas.className = "week-moon-icon";
-      moonCanvas.width = 16;
-      moonCanvas.height = 16;
-      moonCanvas.style.left = (leftPx + dayEndPx) / 2 - 8 + "px";
-      const mctx = moonCanvas.getContext("2d");
-      const waxing = moonInfo.phase ? !moonInfo.phase.startsWith("Waning") : true;
-      drawMoonIcon(mctx, 8, 8, 7, moonInfo.illumination, waxing);
-      headerTrack.appendChild(moonCanvas);
-    }
-
-    // Sunrise/sunset — explicit markers at their real times, distinct from
-    // (and independent of) the generic 3-hourly tick grid above, since
-    // sunrise/sunset rarely land exactly on one of those ticks.
-    const sun = sunByDate.get(dateKey);
-    if (sun) {
-      if (sun.sunrise != null) {
-        const x = leftPx + ((parseNaive(sun.sunrise) - dayMs) / 3600000) * PIXELS_PER_HOUR;
-        headerTrack.appendChild(buildSunMarker(x, fmtChartTick(parseNaive(sun.sunrise))));
-      }
-      if (sun.sunset != null) {
-        const x = leftPx + ((parseNaive(sun.sunset) - dayMs) / 3600000) * PIXELS_PER_HOUR;
-        headerTrack.appendChild(buildSunMarker(x, fmtChartTick(parseNaive(sun.sunset))));
-      }
     }
   }
 
@@ -473,35 +493,122 @@ function buildTileElement(t) {
   `;
   tile.appendChild(content);
 
-  tile.addEventListener("click", () => selectTile(t));
-  tile.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectTile(t); }
-  });
+  if (supportsHover) {
+    tile.addEventListener("mouseenter", () => {
+      clearTimeout(hoverShowTimer);
+      hoverShowTimer = setTimeout(() => showHoverPreview(t, tile), 250);
+    });
+    tile.addEventListener("mouseleave", () => {
+      clearTimeout(hoverShowTimer);
+      hideHoverPreview();
+    });
+  } else {
+    tile.addEventListener("click", () => selectTile(t));
+    tile.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectTile(t); }
+    });
+  }
   return tile;
 }
 
 /**
- * Tapping a tile opens the same full-day chart modal Trip Planner uses when
- * you tap a session card — same underlying data (that location's whole
- * calendar day, not just the qualifying window's own hour span, so the
- * graph shows the good stretch in its full daily context), same compact:
- * false full-axes rendering.
+ * Small floating chart preview shown on hover (desktop only — see
+ * supportsHover above) — deliberately NOT the full modal, so every other
+ * session tile stays visible while you're looking at this one's graph.
+ * Positioned near the hovered tile, flipped above/below/left/right as
+ * needed to stay on screen.
  */
+function showHoverPreview(t, tileEl) {
+  const dayRows = computeGraphRows(t);
+  if (dayRows.length === 0) return;
+
+  const matchedLoc = allLocations.find((l) => l.name === t.locationName && l.type === t.type);
+  const preview = document.getElementById("weekHoverPreview");
+
+  const tileRect = tileEl.getBoundingClientRect();
+  const previewWidth = 420;
+  const previewHeight = 190;
+  let left = tileRect.left;
+  let top = tileRect.bottom + 8;
+  if (top + previewHeight > window.innerHeight) top = tileRect.top - previewHeight - 8;
+  if (left + previewWidth > window.innerWidth) left = window.innerWidth - previewWidth - 10;
+  if (left < 10) left = 10;
+  if (top < 10) top = 10;
+  preview.style.left = left + "px";
+  preview.style.top = top + "px";
+  preview.style.display = "block";
+
+  previewChart = renderConditionsChart({
+    canvas: document.getElementById("weekPreviewChart"),
+    rows: dayRows,
+    sunTimes: sunTimesData[t.locationName] || [],
+    existingChart: previewChart,
+    locationName: t.locationName,
+    tideMaxObserved: matchedLoc ? matchedLoc.tideMaxObserved : null,
+    moonPhases: moonPhasesData,
+    minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
+    compact: true,
+  });
+}
+
+function hideHoverPreview() {
+  document.getElementById("weekHoverPreview").style.display = "none";
+}
+
 let weekScheduleRenderToken = 0;
+
+/**
+ * Works out which stretch of rows a session's graph should cover — NOT
+ * just that calendar day (which is what Trip Planner shows, since there
+ * you've picked a specific day's card) — here we've picked a specific
+ * SESSION, which can run for many hours or even days, so the graph needs
+ * to span the session's own full duration, anchored to a meaningful
+ * day/night boundary rather than an arbitrary clock time:
+ *   - session starts in daylight -> start the graph at the PRIOR sunset
+ *     (the previous evening's, since today's own sunset hasn't happened
+ *     yet if the session is starting during the day)
+ *   - session starts at night -> start the graph at the PRIOR sunrise
+ *     (today's, if the session starts in the evening after today's
+ *     sunrise already happened; yesterday's, if it's starting in the
+ *     pre-dawn hours before today's sunrise)
+ * Falls back to the session's own start time if sun data isn't available
+ * for that day, rather than guessing.
+ */
+function computeGraphRows(t) {
+  const sunTimesForLocation = sunTimesData[t.locationName] || [];
+  const sunByDate = new Map(sunTimesForLocation.map((s) => [s.date, s]));
+
+  const startDateKey = new Date(t.from).toISOString().slice(0, 10);
+  const sun = sunByDate.get(startDateKey);
+
+  let graphStart = t.from;
+  if (sun && sun.sunrise != null && sun.sunset != null) {
+    const sunriseMs = parseNaive(sun.sunrise);
+    const sunsetMs = parseNaive(sun.sunset);
+    const isDaytime = t.from >= sunriseMs && t.from < sunsetMs;
+
+    if (isDaytime) {
+      const prevDateKey = new Date(t.from - 86400000).toISOString().slice(0, 10);
+      const prevSun = sunByDate.get(prevDateKey);
+      graphStart = prevSun && prevSun.sunset != null ? parseNaive(prevSun.sunset) : sunriseMs;
+    } else if (t.from < sunriseMs) {
+      const prevDateKey = new Date(t.from - 86400000).toISOString().slice(0, 10);
+      const prevSun = sunByDate.get(prevDateKey);
+      graphStart = prevSun && prevSun.sunrise != null ? parseNaive(prevSun.sunrise) : sunsetMs;
+    } else {
+      graphStart = sunriseMs;
+    }
+  }
+
+  return allRows
+    .filter((r) => r["Location Name"] === t.locationName && r["Type"] === t.type && r._t >= graphStart && r._t <= t.to)
+    .sort((a, b) => a._t - b._t);
+}
 
 function selectTile(t) {
   currentTile = t;
 
-  // Which day to show: the session's own true start day, unless that's
-  // already in the past (a multi-day session that began before today) —
-  // in which case show today instead, the same clamping principle already
-  // used for the tile's own visual position on the timeline.
-  const nowMs = nowInNaiveEncoding();
-  const dayStart = dateOnly(Math.max(t.from, dateOnly(nowMs)));
-  const dayRows = allRows
-    .filter((r) => r["Location Name"] === t.locationName && r["Type"] === t.type && dateOnly(r._t) === dayStart)
-    .sort((a, b) => a._t - b._t);
-
+  const dayRows = computeGraphRows(t);
   if (dayRows.length === 0) return;
 
   const matchedLoc = allLocations.find((l) => l.name === t.locationName && l.type === t.type);
