@@ -439,17 +439,21 @@ function buildTileElement(t) {
   const content = document.createElement("div");
   content.className = "week-tile-content";
   content.innerHTML = `
-    <div class="window-loc">${t.locationName}</div>
-    <div class="window-sub">${t.type} · shore ${t.shore || "–"}</div>
-    <div class="window-sub" style="margin:4px 0 8px;">${timeLabel} · ${t.hoursLabel}h</div>
-    <div class="badge-stack">
-      <div class="badge-item">
-        <div class="condition-badge" style="background:${conditionColor(t.avgCondition)}">${t.avgCondition != null ? t.avgCondition.toFixed(1) : "–"}</div>
-        <div class="badge-label">Location</div>
+    <div class="week-tile-header">
+      <div>
+        <div class="window-loc">${t.locationName}</div>
+        <div class="window-sub">${t.type} · shore ${t.shore || "–"}</div>
+        <div class="window-sub">${timeLabel} · ${t.hoursLabel}h</div>
       </div>
-      <div class="badge-item">
-        <div class="condition-badge" style="background:${conditionColor(t.avgFishingCondition)}">${t.avgFishingCondition != null ? t.avgFishingCondition.toFixed(1) : "–"}</div>
-        <div class="badge-label">Fishing</div>
+      <div class="badge-stack">
+        <div class="badge-item">
+          <div class="condition-badge" style="background:${conditionColor(t.avgCondition)}">${t.avgCondition != null ? t.avgCondition.toFixed(1) : "–"}</div>
+          <div class="badge-label">Location</div>
+        </div>
+        <div class="badge-item">
+          <div class="condition-badge" style="background:${conditionColor(t.avgFishingCondition)}">${t.avgFishingCondition != null ? t.avgFishingCondition.toFixed(1) : "–"}</div>
+          <div class="badge-label">Fishing</div>
+        </div>
       </div>
     </div>
     <div class="stat-grid week-tile-stats">
