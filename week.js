@@ -554,7 +554,7 @@ function buildTileElement(t) {
  * open and interactive (see pinHoverPreview) instead of it closing the
  * moment the mouse moves away.
  */
-function renderPreviewContent(t, tileEl, compact) {
+function renderPreviewContent(t, tileEl) {
   const dayRows = computeGraphRows(t);
   if (dayRows.length === 0) return false;
 
@@ -593,7 +593,7 @@ function renderPreviewContent(t, tileEl, compact) {
     tideMaxObserved: matchedLoc ? matchedLoc.tideMaxObserved : null,
     moonPhases: moonPhasesData,
     minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
-    compact,
+    compact: false, // full axes on both hover and pinned — no stripped-down "quick glance" version
   });
 
   renderWeekSchedule(matchedLoc, "weekPreviewScheduleContainer").then(() => {
@@ -607,7 +607,7 @@ function renderPreviewContent(t, tileEl, compact) {
 
 function showHoverPreview(t, tileEl) {
   if (previewPinned) return; // a different session is deliberately pinned open — a stray hover shouldn't replace it
-  renderPreviewContent(t, tileEl, true); // compact — a quick glance, not a detailed view yet
+  renderPreviewContent(t, tileEl); // full axes, same as pinned — hover shows the proper graph, not a stripped-down version
 }
 
 /**
@@ -617,12 +617,9 @@ function showHoverPreview(t, tileEl) {
  * button appears, and it no longer closes just because the mouse moved
  * away. Clicking a DIFFERENT tile while one is pinned switches the pin to
  * that new session instead of requiring an explicit close first.
- * Re-rendered with full axes (compact:false), same as the modal — pinning
- * promotes this from a quick glance into a deliberate, detailed view, so
- * it should look like one.
  */
 function pinHoverPreview(t, tileEl) {
-  if (!renderPreviewContent(t, tileEl, false)) return;
+  if (!renderPreviewContent(t, tileEl)) return;
   previewPinned = true;
   document.getElementById("weekHoverPreview").classList.add("pinned");
 }
