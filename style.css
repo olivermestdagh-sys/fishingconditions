@@ -1141,6 +1141,21 @@ main.wide {
   overflow-y: auto;
 }
 
+.week-preview-close {
+  display: none;
+}
+
+.week-hover-preview.pinned {
+  /* Pinned via a tile click — stays open regardless of mouse position, and
+     becomes genuinely interactive (the schedule's own "tap for times"
+     toggle needs real clicks to work, which pointer-events:none blocks). */
+  pointer-events: auto;
+}
+
+.week-hover-preview.pinned .week-preview-close {
+  display: block;
+}
+
 .week-hover-preview-chart-wrap {
   position: relative;
   width: 100%;
