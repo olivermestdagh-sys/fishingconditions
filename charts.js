@@ -619,7 +619,23 @@ function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases) {
           ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
         }
 
-        ctx.fillText(headingText, (xStart + xEnd) / 2, top - 16);
+        // Shrinking has a floor (7px) — for a long location name on a
+        // narrow first/last day-band (routine now that Week Ahead's graphs
+        // start at a sunset/sunrise boundary, often leaving only a few
+        // hours of that first day on screen), the text can still be wider
+        // than the band even at the smallest allowed size. Centering it on
+        // the band's own midpoint in that case pushes it straight past the
+        // chart's edge, where the canvas silently clips it — invisible
+        // rather than just imperfectly placed. Clamping the draw position
+        // to the chart's actual left/right bounds keeps it fully visible
+        // (very rare cosmetic trade-off: it can nudge toward a neighbouring
+        // label) rather than partially or entirely disappearing.
+        let drawX = (xStart + xEnd) / 2;
+        const halfTextWidth = ctx.measureText(headingText).width / 2;
+        if (drawX - halfTextWidth < left) drawX = left + halfTextWidth;
+        if (drawX + halfTextWidth > right) drawX = right - halfTextWidth;
+
+        ctx.fillText(headingText, drawX, top - 16);
 
         // Moon phase, one icon per day, drawn ABOVE the day heading (needs
         // its own reserved space — see the increased layout.padding.top
