@@ -587,7 +587,16 @@ function renderPreviewContent(t, tileEl, compact) {
     compact,
   });
 
-  renderWeekSchedule(matchedLoc, "weekPreviewScheduleContainer");
+  renderWeekSchedule(matchedLoc, "weekPreviewScheduleContainer").then(() => {
+    // The schedule's own drive-time lookup is async and can finish well
+    // after the chart already rendered/sized itself. If that later content
+    // pushes the preview's total height past its max-height, a scrollbar
+    // appears retroactively — eating into the width Chart.js already
+    // measured and locked in, which is what "chopped off at the edges"
+    // actually was. Resizing again now, once everything has settled,
+    // catches that.
+    if (previewChart) previewChart.resize();
+  });
   return true;
 }
 
@@ -695,7 +704,13 @@ function selectTile(t) {
     compact: false,
   });
 
-  renderWeekSchedule(matchedLoc, "weekScheduleContainer");
+  renderWeekSchedule(matchedLoc, "weekScheduleContainer").then(() => {
+    // Same reasoning as the hover preview's version of this fix — the
+    // schedule's async drive-time lookup can finish after the chart has
+    // already sized itself, and if that later content changes whether a
+    // scrollbar is needed, the chart's own measured width can go stale.
+    if (modalChart) modalChart.resize();
+  });
 }
 
 /**
