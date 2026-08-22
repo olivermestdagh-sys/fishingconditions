@@ -5,9 +5,12 @@ const LANE_GAP = 10; // minimum pixel gap required between two tiles sharing a l
 
 let allRows = [];
 let allLocations = [];
+let sunTimesData = {};
+let moonPhasesData = {};
 let selectedLocations = new Set();
 let selectedTypes = new Set(["Kayak", "Land based"]);
 let currentTile = null;
+let modalChart = null;
 
 async function init() {
   try {
@@ -16,6 +19,8 @@ async function init() {
     const data = await res.json();
     allRows = data.rows.map((r) => ({ ...r, _t: parseNaive(r.dateTime) }));
     allLocations = data.locations || [];
+    sunTimesData = data.sunTimes || {};
+    moonPhasesData = data.moonPhases || {};
     if (data.generatedAt) {
       const dt = new Date(data.generatedAt);
       document.getElementById("updated").textContent = `Updated ${dt.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
@@ -97,6 +102,7 @@ async function init() {
     persistThresholds();
     renderWeekView();
   });
+  document.getElementById("btnCloseChartModal").addEventListener("click", closeChartModal);
 
   renderWeekView();
 }
@@ -304,34 +310,46 @@ function buildTileElement(t) {
   return tile;
 }
 
+/**
+ * Tapping a tile opens the same full-day chart modal Trip Planner uses when
+ * you tap a session card — same underlying data (that location's whole
+ * calendar day, not just the qualifying window's own hour span, so the
+ * graph shows the good stretch in its full daily context), same compact:
+ * false full-axes rendering.
+ */
 function selectTile(t) {
   currentTile = t;
-  const panel = document.getElementById("weekDetailPanel");
-  panel.style.display = "block";
-  const timeRange = `${fmtNaive(t.from, { hour: "2-digit", minute: "2-digit", hour12: false })} – ${fmtNaive(t.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
-  panel.innerHTML = `
-    <div class="window-card-header">
-      <div>
-        <div class="window-loc">${t.locationName}</div>
-        <div class="window-sub" style="margin-bottom:8px;">${t.type} · shore ${t.shore || "–"}</div>
-      </div>
-    </div>
-    <div class="window-sub" style="margin-bottom:8px;">${timeRange} · ${t.hoursLabel}h</div>
-    <div class="stat-grid">
-      <div class="stat">
-        <div class="label">Avg Temp</div>
-        <div class="value">${t.avgTemp != null ? t.avgTemp.toFixed(1) + "°" : "–"}</div>
-      </div>
-      <div class="stat">
-        <div class="label">Avg Wind</div>
-        <div class="value">${t.avgWind != null ? Math.round(t.avgWind) + " km/h" : "–"}</div>
-      </div>
-      <div class="stat">
-        <div class="label">Avg Rain</div>
-        <div class="value">${t.avgRain != null ? Math.round(t.avgRain) + "%" : "–"}</div>
-      </div>
-    </div>
-  `;
+
+  // Which day to show: the session's own true start day, unless that's
+  // already in the past (a multi-day session that began before today) —
+  // in which case show today instead, the same clamping principle already
+  // used for the tile's own visual position on the timeline.
+  const nowMs = nowInNaiveEncoding();
+  const dayStart = dateOnly(Math.max(t.from, dateOnly(nowMs)));
+  const dayRows = allRows
+    .filter((r) => r["Location Name"] === t.locationName && r["Type"] === t.type && dateOnly(r._t) === dayStart)
+    .sort((a, b) => a._t - b._t);
+
+  if (dayRows.length === 0) return;
+
+  const matchedLoc = allLocations.find((l) => l.name === t.locationName && l.type === t.type);
+  const overlay = document.getElementById("chartModalOverlay");
+  overlay.style.display = "flex";
+  modalChart = renderConditionsChart({
+    canvas: document.getElementById("weekChartModal"),
+    rows: dayRows,
+    sunTimes: sunTimesData[t.locationName] || [],
+    existingChart: modalChart,
+    locationName: t.locationName,
+    tideMaxObserved: matchedLoc ? matchedLoc.tideMaxObserved : null,
+    moonPhases: moonPhasesData,
+    minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
+    compact: false,
+  });
+}
+
+function closeChartModal() {
+  document.getElementById("chartModalOverlay").style.display = "none";
 }
 
 init();

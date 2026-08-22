@@ -838,8 +838,27 @@ main.wide {
 
 .week-timeline-scroll {
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  max-height: 65vh;
+  /* Keep both scrollbars visibly present at all times, not just on hover/
+     scroll (which some platforms, notably macOS, do by default) — the whole
+     point is never needing to hunt for them. */
+  scrollbar-width: auto;
+}
+
+.week-timeline-scroll::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.week-timeline-scroll::-webkit-scrollbar-track {
+  background: var(--grey-100);
+}
+
+.week-timeline-scroll::-webkit-scrollbar-thumb {
+  background: var(--grey-300, #cbd5e1);
+  border-radius: 6px;
 }
 
 .week-timeline-inner {
