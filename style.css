@@ -858,14 +858,22 @@ main.wide {
 }
 
 .week-chart-modal-inner canvas {
-  /* Deliberately NOT stretched to fill the modal's own width/height —
-     "not full-screen" doesn't mean "stretched to fill whatever frame it's
-     in" either. A natural, contained size (matching how Trip Planner's own
-     inline chart is sized: a fixed height, width capped at a reasonable
-     max) reads much better than an artificially blown-up chart. */
+  /* Chart.js's own responsive:true logic expects a sized, position:relative
+     wrapper with the canvas filling it (see .week-chart-modal-chart-wrap
+     below) — forcing the canvas's own size directly, rather than its
+     wrapper's, fights with that and causes stretched/clipped rendering. */
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.week-chart-modal-chart-wrap {
+  position: relative;
   width: 100%;
   max-width: 700px;
-  height: 260px !important;
+  height: 260px;
   flex-shrink: 0;
   align-self: center;
 }
@@ -1133,7 +1141,21 @@ main.wide {
   overflow-y: auto;
 }
 
-.week-hover-preview canvas {
+.week-hover-preview-chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 220px;
+}
+
+.week-hover-preview-chart-wrap canvas {
+  /* Chart.js's own responsive:true logic expects exactly this pattern — a
+     sized, position:relative wrapper with the canvas filling it — and
+     manages the canvas's actual width/height itself from there. Forcing
+     the canvas's own size directly (rather than its wrapper's) is what
+     was fighting with that and causing the stretched, clipped rendering. */
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100% !important;
-  height: 220px !important;
+  height: 100% !important;
 }

@@ -84,14 +84,18 @@
     <div id="chartModalOverlay" class="week-chart-modal-overlay" style="display:none;">
       <button id="btnCloseChartModal" class="chart-modal-close" aria-label="Close">&times;</button>
       <div class="week-chart-modal-inner">
-        <canvas id="weekChartModal" height="220"></canvas>
+        <div class="week-chart-modal-chart-wrap">
+          <canvas id="weekChartModal"></canvas>
+        </div>
         <div id="weekScheduleContainer"></div>
       </div>
     </div>
   </section>
 
   <div id="weekHoverPreview" class="week-hover-preview" style="display:none;">
-    <canvas id="weekPreviewChart" height="220"></canvas>
+    <div class="week-hover-preview-chart-wrap">
+      <canvas id="weekPreviewChart"></canvas>
+    </div>
     <div id="weekPreviewScheduleContainer"></div>
   </div>
 
