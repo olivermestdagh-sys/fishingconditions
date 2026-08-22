@@ -554,7 +554,7 @@ function buildTileElement(t) {
  * open and interactive (see pinHoverPreview) instead of it closing the
  * moment the mouse moves away.
  */
-async function renderPreviewContent(t, tileEl, compact) {
+function renderPreviewContent(t, tileEl, compact) {
   const dayRows = computeGraphRows(t);
   if (dayRows.length === 0) return false;
 
@@ -573,19 +573,17 @@ async function renderPreviewContent(t, tileEl, compact) {
   preview.style.left = left + "px";
   preview.style.top = top + "px";
   preview.style.display = "block";
+  void preview.offsetHeight; // force a reflow before Chart.js measures the now-visible container, or it can measure a stale (zero/hidden) size
 
-  // Schedule renders FIRST and is fully awaited — including its own async
-  // drive-time lookup — before the chart is created at all, not just
-  // resized afterward. The schedule's content can change the preview's
-  // total height (and therefore whether a scrollbar appears, which eats
-  // into the chart's available width) well after it starts loading; if the
-  // chart were created before that settles, it locks in a size that can go
-  // stale a moment later. Rendering the chart only once the layout is
-  // truly in its final state avoids the mismatch entirely, rather than
-  // trying to correct for it after the fact.
-  await renderWeekSchedule(matchedLoc, "weekPreviewScheduleContainer");
-  void preview.offsetHeight; // force a reflow now that the schedule content just changed the layout
-
+  // The chart renders immediately, synchronously — it must NOT wait on the
+  // schedule below, whose drive-time lookup depends on GPS and a network
+  // call and can legitimately take many seconds (or effectively hang
+  // without location permission granted). Gating the graph itself behind
+  // that would mean it simply doesn't appear for a long time, which is a
+  // worse problem than the one this used to work around — that was
+  // actually a real bug in the chart's own heading-text sizing (now fixed
+  // directly in charts.js), not a container-timing issue that needed the
+  // chart delayed to work around.
   previewChart = renderConditionsChart({
     canvas: document.getElementById("weekPreviewChart"),
     rows: dayRows,
@@ -598,6 +596,12 @@ async function renderPreviewContent(t, tileEl, compact) {
     compact,
   });
 
+  renderWeekSchedule(matchedLoc, "weekPreviewScheduleContainer").then(() => {
+    // Safety net, not the primary fix: if the schedule's later-arriving
+    // content does change the preview's height enough to add/remove a
+    // scrollbar, this catches any resulting width change.
+    if (previewChart) previewChart.resize();
+  });
   return true;
 }
 
@@ -617,8 +621,8 @@ function showHoverPreview(t, tileEl) {
  * promotes this from a quick glance into a deliberate, detailed view, so
  * it should look like one.
  */
-async function pinHoverPreview(t, tileEl) {
-  if (!(await renderPreviewContent(t, tileEl, false))) return;
+function pinHoverPreview(t, tileEl) {
+  if (!renderPreviewContent(t, tileEl, false)) return;
   previewPinned = true;
   document.getElementById("weekHoverPreview").classList.add("pinned");
 }
@@ -683,7 +687,7 @@ function computeGraphRows(t) {
     .sort((a, b) => a._t - b._t);
 }
 
-async function selectTile(t) {
+function selectTile(t) {
   currentTile = t;
 
   const dayRows = computeGraphRows(t);
@@ -692,16 +696,16 @@ async function selectTile(t) {
   const matchedLoc = allLocations.find((l) => l.name === t.locationName && l.type === t.type);
   const overlay = document.getElementById("chartModalOverlay");
   overlay.style.display = "flex";
+  void overlay.offsetHeight; // force a reflow before Chart.js measures the now-visible container, or it can measure a stale (zero/hidden) size
 
-  // Schedule renders first and is fully awaited (including its own async
-  // drive-time lookup) before the chart is created — same reasoning as the
-  // hover preview's version of this: the schedule's content can change the
-  // modal's layout well after it starts loading, so creating the chart
-  // only once that's truly settled avoids it locking in a size that goes
-  // stale a moment later.
-  await renderWeekSchedule(matchedLoc, "weekScheduleContainer");
-  void overlay.offsetHeight; // force a reflow now that the schedule content just changed the layout
-
+  // Renders immediately — must not wait on the schedule below, whose
+  // drive-time lookup depends on GPS and a network call and can
+  // legitimately take a long time (or hang without location permission
+  // granted). See the matching comment in renderPreviewContent for why
+  // that was tried and reverted: gating the graph on that lookup made it
+  // simply not appear for a long time, which is worse than the sizing
+  // issue it was meant to prevent — one that turned out to be a real bug
+  // in the chart's own heading-text handling, fixed directly in charts.js.
   modalChart = renderConditionsChart({
     canvas: document.getElementById("weekChartModal"),
     rows: dayRows,
@@ -712,6 +716,10 @@ async function selectTile(t) {
     moonPhases: moonPhasesData,
     minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
     compact: false,
+  });
+
+  renderWeekSchedule(matchedLoc, "weekScheduleContainer").then(() => {
+    if (modalChart) modalChart.resize();
   });
 }
 
