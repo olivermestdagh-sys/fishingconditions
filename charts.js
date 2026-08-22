@@ -864,6 +864,17 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
             padding: isMobile ? 6 : 10,
             font: { size: isMobile ? 8 : 10 },
           },
+          // Preserves Chart.js's own default behavior (toggling that
+          // dataset's visibility) while flagging that this click was a
+          // genuine legend-item click — relying on Chart.js's own hit-
+          // testing here, rather than reimplementing "was this click
+          // inside the legend's drawn area" by hand. The canvas-level
+          // "tap to show/hide the whole legend" handler below checks this
+          // flag so it doesn't also fire for the same click.
+          onClick: (e, legendItem, legend) => {
+            Chart.defaults.plugins.legend.onClick.call(legend, e, legendItem, legend);
+            canvas.dataset.legendItemJustClicked = "true";
+          },
         },
         tooltip: {
           callbacks: {
@@ -907,6 +918,15 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
     if (!canvas.dataset.legendToggleAttached) {
       canvas.dataset.legendToggleAttached = "true";
       canvas.addEventListener("click", () => {
+        // A genuine legend-item click already ran through Chart.js's own
+        // legend.onClick above (toggling that dataset's visibility) —
+        // don't also collapse the whole legend for that same click, or
+        // clicking any legend item immediately hides the legend it just
+        // acted on, making it impossible to toggle a second item.
+        if (canvas.dataset.legendItemJustClicked === "true") {
+          canvas.dataset.legendItemJustClicked = "false";
+          return;
+        }
         const current = Chart.getChart(canvas);
         if (!current) return;
         current.options.plugins.legend.display = !current.options.plugins.legend.display;
