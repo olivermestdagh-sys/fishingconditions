@@ -554,7 +554,7 @@ function buildTileElement(t) {
  * open and interactive (see pinHoverPreview) instead of it closing the
  * moment the mouse moves away.
  */
-function renderPreviewContent(t, tileEl, compact) {
+async function renderPreviewContent(t, tileEl, compact) {
   const dayRows = computeGraphRows(t);
   if (dayRows.length === 0) return false;
 
@@ -573,7 +573,18 @@ function renderPreviewContent(t, tileEl, compact) {
   preview.style.left = left + "px";
   preview.style.top = top + "px";
   preview.style.display = "block";
-  void preview.offsetHeight; // force a reflow before Chart.js measures the now-visible container, or it can measure a stale (zero/hidden) size
+
+  // Schedule renders FIRST and is fully awaited — including its own async
+  // drive-time lookup — before the chart is created at all, not just
+  // resized afterward. The schedule's content can change the preview's
+  // total height (and therefore whether a scrollbar appears, which eats
+  // into the chart's available width) well after it starts loading; if the
+  // chart were created before that settles, it locks in a size that can go
+  // stale a moment later. Rendering the chart only once the layout is
+  // truly in its final state avoids the mismatch entirely, rather than
+  // trying to correct for it after the fact.
+  await renderWeekSchedule(matchedLoc, "weekPreviewScheduleContainer");
+  void preview.offsetHeight; // force a reflow now that the schedule content just changed the layout
 
   previewChart = renderConditionsChart({
     canvas: document.getElementById("weekPreviewChart"),
@@ -587,16 +598,6 @@ function renderPreviewContent(t, tileEl, compact) {
     compact,
   });
 
-  renderWeekSchedule(matchedLoc, "weekPreviewScheduleContainer").then(() => {
-    // The schedule's own drive-time lookup is async and can finish well
-    // after the chart already rendered/sized itself. If that later content
-    // pushes the preview's total height past its max-height, a scrollbar
-    // appears retroactively — eating into the width Chart.js already
-    // measured and locked in, which is what "chopped off at the edges"
-    // actually was. Resizing again now, once everything has settled,
-    // catches that.
-    if (previewChart) previewChart.resize();
-  });
   return true;
 }
 
@@ -616,8 +617,8 @@ function showHoverPreview(t, tileEl) {
  * promotes this from a quick glance into a deliberate, detailed view, so
  * it should look like one.
  */
-function pinHoverPreview(t, tileEl) {
-  if (!renderPreviewContent(t, tileEl, false)) return;
+async function pinHoverPreview(t, tileEl) {
+  if (!(await renderPreviewContent(t, tileEl, false))) return;
   previewPinned = true;
   document.getElementById("weekHoverPreview").classList.add("pinned");
 }
@@ -682,7 +683,7 @@ function computeGraphRows(t) {
     .sort((a, b) => a._t - b._t);
 }
 
-function selectTile(t) {
+async function selectTile(t) {
   currentTile = t;
 
   const dayRows = computeGraphRows(t);
@@ -691,7 +692,16 @@ function selectTile(t) {
   const matchedLoc = allLocations.find((l) => l.name === t.locationName && l.type === t.type);
   const overlay = document.getElementById("chartModalOverlay");
   overlay.style.display = "flex";
-  void overlay.offsetHeight; // force a reflow before Chart.js measures the now-visible container, or it can measure a stale (zero/hidden) size
+
+  // Schedule renders first and is fully awaited (including its own async
+  // drive-time lookup) before the chart is created — same reasoning as the
+  // hover preview's version of this: the schedule's content can change the
+  // modal's layout well after it starts loading, so creating the chart
+  // only once that's truly settled avoids it locking in a size that goes
+  // stale a moment later.
+  await renderWeekSchedule(matchedLoc, "weekScheduleContainer");
+  void overlay.offsetHeight; // force a reflow now that the schedule content just changed the layout
+
   modalChart = renderConditionsChart({
     canvas: document.getElementById("weekChartModal"),
     rows: dayRows,
@@ -702,14 +712,6 @@ function selectTile(t) {
     moonPhases: moonPhasesData,
     minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
     compact: false,
-  });
-
-  renderWeekSchedule(matchedLoc, "weekScheduleContainer").then(() => {
-    // Same reasoning as the hover preview's version of this fix — the
-    // schedule's async drive-time lookup can finish after the chart has
-    // already sized itself, and if that later content changes whether a
-    // scrollbar is needed, the chart's own measured width can go stale.
-    if (modalChart) modalChart.resize();
   });
 }
 
