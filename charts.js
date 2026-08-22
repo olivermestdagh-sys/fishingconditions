@@ -600,7 +600,12 @@ function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases) {
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
 
-        const headingText = locationName ? `${locationName} — ${formatDayHeading(g.key)}` : formatDayHeading(g.key);
+        // Location name only on the FIRST day this chart spans — repeating
+        // it for every day looks redundant once a chart covers several
+        // days (which happens often now that Week Ahead's graphs span
+        // sunset-to-sunrise ranges, sometimes several days for a long
+        // session) — the date alone is enough context for the later days.
+        const headingText = locationName && gi === 0 ? `${locationName} — ${formatDayHeading(g.key)}` : formatDayHeading(g.key);
 
         // Shrink the font until the text actually fits this band's width, rather
         // than risk it overflowing onto a second line or running off the edge —

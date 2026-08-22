@@ -537,6 +537,7 @@ function showHoverPreview(t, tileEl) {
   preview.style.left = left + "px";
   preview.style.top = top + "px";
   preview.style.display = "block";
+  void preview.offsetHeight; // force a reflow before Chart.js measures the now-visible container, or it can measure a stale (zero/hidden) size
 
   previewChart = renderConditionsChart({
     canvas: document.getElementById("weekPreviewChart"),
@@ -616,6 +617,7 @@ function selectTile(t) {
   const matchedLoc = allLocations.find((l) => l.name === t.locationName && l.type === t.type);
   const overlay = document.getElementById("chartModalOverlay");
   overlay.style.display = "flex";
+  void overlay.offsetHeight; // force a reflow before Chart.js measures the now-visible container, or it can measure a stale (zero/hidden) size
   modalChart = renderConditionsChart({
     canvas: document.getElementById("weekChartModal"),
     rows: dayRows,
