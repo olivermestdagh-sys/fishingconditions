@@ -14,6 +14,7 @@ let currentTile = null;
 let modalChart = null;
 let previewChart = null;
 let hoverShowTimer = null;
+let previewPinned = false;
 
 // Hover-capable devices (desktop, trackpad) get a small floating preview on
 // hover instead — lets you see the graph while still seeing every other
@@ -147,6 +148,16 @@ async function init() {
     renderWeekView();
   });
   document.getElementById("btnCloseChartModal").addEventListener("click", closeChartModal);
+  document.getElementById("btnClosePreview").addEventListener("click", unpinHoverPreview);
+  // Click anywhere outside a PINNED preview (and not on a tile, which has
+  // its own click handling) closes it — standard "click outside" popover
+  // behaviour, so there's always a way out besides the close button.
+  document.addEventListener("click", (e) => {
+    if (!previewPinned) return;
+    const preview = document.getElementById("weekHoverPreview");
+    if (preview.contains(e.target) || e.target.closest(".week-tile")) return;
+    unpinHoverPreview();
+  });
 
   renderWeekView();
 }
@@ -500,8 +511,9 @@ function buildTileElement(t) {
     });
     tile.addEventListener("mouseleave", () => {
       clearTimeout(hoverShowTimer);
-      hideHoverPreview();
+      if (!previewPinned) hideHoverPreview();
     });
+    tile.addEventListener("click", () => pinHoverPreview(t, tile));
   } else {
     tile.addEventListener("click", () => selectTile(t));
     tile.addEventListener("keydown", (e) => {
@@ -516,11 +528,13 @@ function buildTileElement(t) {
  * supportsHover above) — deliberately NOT the full modal, so every other
  * session tile stays visible while you're looking at this one's graph.
  * Positioned near the hovered tile, flipped above/below/left/right as
- * needed to stay on screen.
+ * needed to stay on screen. Clicking the tile "pins" this same preview
+ * open and interactive (see pinHoverPreview) instead of it closing the
+ * moment the mouse moves away.
  */
-function showHoverPreview(t, tileEl) {
+function renderPreviewContent(t, tileEl) {
   const dayRows = computeGraphRows(t);
-  if (dayRows.length === 0) return;
+  if (dayRows.length === 0) return false;
 
   const matchedLoc = allLocations.find((l) => l.name === t.locationName && l.type === t.type);
   const preview = document.getElementById("weekHoverPreview");
@@ -552,6 +566,32 @@ function showHoverPreview(t, tileEl) {
   });
 
   renderWeekSchedule(matchedLoc, "weekPreviewScheduleContainer");
+  return true;
+}
+
+function showHoverPreview(t, tileEl) {
+  if (previewPinned) return; // a different session is deliberately pinned open — a stray hover shouldn't replace it
+  renderPreviewContent(t, tileEl);
+}
+
+/**
+ * Clicking a tile while its preview is showing (or even without hovering
+ * first, on a slower click) pins that same preview open and interactive —
+ * pointer-events re-enabled (see .week-hover-preview.pinned), a close
+ * button appears, and it no longer closes just because the mouse moved
+ * away. Clicking a DIFFERENT tile while one is pinned switches the pin to
+ * that new session instead of requiring an explicit close first.
+ */
+function pinHoverPreview(t, tileEl) {
+  if (!renderPreviewContent(t, tileEl)) return;
+  previewPinned = true;
+  document.getElementById("weekHoverPreview").classList.add("pinned");
+}
+
+function unpinHoverPreview() {
+  previewPinned = false;
+  document.getElementById("weekHoverPreview").classList.remove("pinned");
+  hideHoverPreview();
 }
 
 function hideHoverPreview() {
