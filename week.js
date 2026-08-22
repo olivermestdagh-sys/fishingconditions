@@ -526,14 +526,14 @@ function showHoverPreview(t, tileEl) {
   const preview = document.getElementById("weekHoverPreview");
 
   const tileRect = tileEl.getBoundingClientRect();
-  const previewWidth = 420;
-  const previewHeight = 190;
+  const previewWidth = 560;
+  const previewHeight = 460;
   let left = tileRect.left;
   let top = tileRect.bottom + 8;
   if (top + previewHeight > window.innerHeight) top = tileRect.top - previewHeight - 8;
+  if (top < 10) top = 10; // taller preview than the viewport itself — pin to the top rather than go negative
   if (left + previewWidth > window.innerWidth) left = window.innerWidth - previewWidth - 10;
   if (left < 10) left = 10;
-  if (top < 10) top = 10;
   preview.style.left = left + "px";
   preview.style.top = top + "px";
   preview.style.display = "block";
@@ -549,6 +549,8 @@ function showHoverPreview(t, tileEl) {
     minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
     compact: true,
   });
+
+  renderWeekSchedule(matchedLoc, "weekPreviewScheduleContainer");
 }
 
 function hideHoverPreview() {
@@ -626,7 +628,7 @@ function selectTile(t) {
     compact: false,
   });
 
-  renderWeekSchedule(matchedLoc);
+  renderWeekSchedule(matchedLoc, "weekScheduleContainer");
 }
 
 /**
@@ -635,8 +637,16 @@ function selectTile(t) {
  * Launch Time / Home By inputs (shared localStorage key, so a value set on
  * either page carries over to the other).
  */
-async function renderWeekSchedule(loc) {
-  const container = document.getElementById("weekScheduleContainer");
+/**
+ * Fishing time / drive time, worked out exactly the way the Trip Planner
+ * does — same computeSchedule()/getDriveTimeMinutes() from charts.js, same
+ * Launch Time / Home By inputs (shared localStorage key, so a value set on
+ * either page carries over to the other). Shared between the modal and the
+ * hover preview (different containerId per caller) — both show the same
+ * schedule info, not just the modal.
+ */
+async function renderWeekSchedule(loc, containerId) {
+  const container = document.getElementById(containerId);
   const myToken = ++weekScheduleRenderToken;
 
   const launchStr = document.getElementById("launchTime").value;
@@ -655,7 +665,7 @@ async function renderWeekSchedule(loc) {
 
   const driveMinutes = await getDriveTimeMinutes(loc.lat, loc.lng);
 
-  if (myToken !== weekScheduleRenderToken) return; // a newer tile was tapped meanwhile — discard this stale result
+  if (myToken !== weekScheduleRenderToken) return; // a newer tile was tapped/hovered meanwhile — discard this stale result
 
   const schedule = computeSchedule(loc, launchStr, homeByStr, driveMinutes);
 
@@ -663,6 +673,10 @@ async function renderWeekSchedule(loc) {
     container.innerHTML = "";
     return;
   }
+
+  const toggleId = containerId + "FishingTimeToggle";
+  const wrapId = containerId + "TimelineWrap";
+  const hintId = containerId + "ToggleHint";
 
   if (schedule.driveTimeUnavailable) {
     container.innerHTML = `
@@ -679,12 +693,12 @@ async function renderWeekSchedule(loc) {
 
   container.innerHTML = `
     <label class="loc-edit-label" style="display:block;margin:16px 0 8px;">Trip schedule — ${loc.name}</label>
-    <div class="schedule-fishing-time ${schedule.fishingTimeNegative ? "negative" : ""}" id="weekFishingTimeToggle" role="button" tabindex="0">
+    <div class="schedule-fishing-time ${schedule.fishingTimeNegative ? "negative" : ""}" id="${toggleId}" role="button" tabindex="0">
       Fishing time: <strong>${schedule.fishingTime}</strong>
-      <span class="schedule-toggle-hint" id="weekScheduleToggleHint">▸ tap for times</span>
+      <span class="schedule-toggle-hint" id="${hintId}">▸ tap for times</span>
       ${schedule.fishingTimeNegative ? "<br>times don't add up, check Launch Time / Home By against this location's timings" : ""}
     </div>
-    <div class="schedule-timeline collapsed" id="weekScheduleTimelineWrap">
+    <div class="schedule-timeline collapsed" id="${wrapId}">
       <div class="schedule-step"><span class="schedule-time">${schedule.leaveHome}</span><span class="schedule-label">Leave Home</span></div>
       <div class="schedule-step"><span class="schedule-time">${schedule.arrive}</span><span class="schedule-label">Arrive</span></div>
       <div class="schedule-step"><span class="schedule-time">${schedule.launch}</span><span class="schedule-label">Launch</span></div>
@@ -696,9 +710,9 @@ async function renderWeekSchedule(loc) {
     <p class="footnote" style="margin:8px 0 0;text-align:left;">Drive time: ~${schedule.driveMinutes} min each way, from your current location.</p>
   `;
 
-  const toggle = document.getElementById("weekFishingTimeToggle");
-  const wrap = document.getElementById("weekScheduleTimelineWrap");
-  const hint = document.getElementById("weekScheduleToggleHint");
+  const toggle = document.getElementById(toggleId);
+  const wrap = document.getElementById(wrapId);
+  const hint = document.getElementById(hintId);
   const toggleFn = () => {
     const nowCollapsed = wrap.classList.toggle("collapsed");
     hint.textContent = nowCollapsed ? "▸ tap for times" : "▾ hide times";
