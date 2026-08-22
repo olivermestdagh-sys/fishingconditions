@@ -1,15 +1,8 @@
 const DATA_URL = "data/conditions.json";
 
-const CONDITION_COLORS = {
-  5: "var(--cond-5)",
-  4: "var(--cond-4)",
-  3: "var(--cond-3)",
-  2: "var(--cond-2)",
-  1: "var(--cond-1)",
-};
-
 // parseNaive, dayKeyOf, formatDayHeading, dirToArrowRotation, windColor, fmtChartTick,
-// buildDayBandPlugin, and renderConditionsChart all come from charts.js (loaded before this file).
+// buildDayBandPlugin, renderConditionsChart, and CONDITION_COLORS all come from
+// charts.js (loaded before this file).
 
 let state = { data: null, rowsByLocation: {}, chart: null };
 let lastChartParams = null;

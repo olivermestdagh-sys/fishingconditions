@@ -12,12 +12,16 @@ const WORKFLOW_FILE = "update.yml";
 function typeIconSvg(type, size) {
   size = size || 16;
   if (type === "Kayak") {
+    // Elongated hull + two rods angled outward from distinct mounting
+    // points, reading as a fishing kayak rather than a plain kayak.
     return `<svg viewBox="0 0 32 24" width="${size}" height="${size}">
       <path d="M2 16 Q9 12.5 16 12.5 Q23 12.5 30 16 Q23 19 16 19 Q9 19 2 16 Z" fill="#f97316" stroke="#c2410c" stroke-width="0.8"/>
       <line x1="17" y1="14" x2="27" y2="3" stroke="#78350f" stroke-width="1.6" stroke-linecap="round"/>
       <line x1="15" y1="15" x2="5" y2="4" stroke="#78350f" stroke-width="1.6" stroke-linecap="round"/>
     </svg>`;
   }
+  // Land based: a rod holder planted in the ground, a rod at an angle,
+  // reel, and the line arcing out to the water.
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}">
     <path d="M1 20 L9 20" stroke="#a8a29e" stroke-width="2" stroke-linecap="round"/>
     <path d="M13 20 Q16 18.5 19 20 Q21 21 23 20" fill="none" stroke="#38bdf8" stroke-width="1.3" stroke-linecap="round"/>

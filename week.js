@@ -194,22 +194,85 @@ function renderWeekView() {
 
   inner.innerHTML = "";
 
-  // Header: day-boundary gridlines + date labels, plus a "Now" marker.
+  // Sun times aren't per-location on this shared timeline — pick any one
+  // location's data as representative (Victorian locations are close
+  // enough together that sunrise/sunset times barely differ day to day),
+  // rather than trying to show a different day/night pattern per lane.
+  const sunTimesEntry = Object.values(sunTimesData).find((arr) => arr && arr.length) || [];
+  const sunByDate = new Map(sunTimesEntry.map((s) => [s.date, s]));
+
+  // Header: day-boundary gridlines, date labels, moon phase per day, hour
+  // marks, and sunrise/sunset markers — sticky so the date stays visible
+  // at the top of the box regardless of how far down you've scrolled
+  // through the lanes below.
   const headerTrack = document.createElement("div");
   headerTrack.className = "week-track week-header-track";
   headerTrack.style.width = totalTrackWidth + "px";
+
   for (let dayMs = timelineStart; dayMs <= timelineEnd; dayMs += 86400000) {
     const leftPx = ((dayMs - timelineStart) / 3600000) * PIXELS_PER_HOUR;
+    const dayEndPx = Math.min(totalTrackWidth, leftPx + 24 * PIXELS_PER_HOUR);
+
     const boundary = document.createElement("div");
     boundary.className = "week-day-boundary";
     boundary.style.left = leftPx + "px";
     headerTrack.appendChild(boundary);
+
     const label = document.createElement("div");
     label.className = "week-day-label";
     label.style.left = leftPx + "px";
     label.textContent = fmtNaive(dayMs, { weekday: "short", day: "numeric", month: "short" });
     headerTrack.appendChild(label);
+
+    // Hour marks every 3 hours through the day — small ticks + labels,
+    // distinct from (and secondary to) the sunrise/sunset markers below.
+    for (let h = 3; h < 24; h += 3) {
+      const hourLeftPx = leftPx + h * PIXELS_PER_HOUR;
+      if (hourLeftPx > dayEndPx) break;
+      const tick = document.createElement("div");
+      tick.className = "week-hour-tick";
+      tick.style.left = hourLeftPx + "px";
+      headerTrack.appendChild(tick);
+      const hourLabel = document.createElement("div");
+      hourLabel.className = "week-hour-label";
+      hourLabel.style.left = hourLeftPx + "px";
+      hourLabel.textContent = String(h).padStart(2, "0") + ":00";
+      headerTrack.appendChild(hourLabel);
+    }
+
+    // Moon phase, one icon per day — reuses the exact same drawMoonIcon()
+    // canvas-drawing routine the main charts use, on a small dedicated
+    // canvas, rather than re-implementing that geometry as SVG/DOM.
+    const dateKey = new Date(dayMs).toISOString().slice(0, 10);
+    const moonInfo = moonPhasesData[dateKey];
+    if (moonInfo && moonInfo.illumination != null) {
+      const moonCanvas = document.createElement("canvas");
+      moonCanvas.className = "week-moon-icon";
+      moonCanvas.width = 16;
+      moonCanvas.height = 16;
+      moonCanvas.style.left = (leftPx + dayEndPx) / 2 - 8 + "px";
+      const mctx = moonCanvas.getContext("2d");
+      const waxing = moonInfo.phase ? !moonInfo.phase.startsWith("Waning") : true;
+      drawMoonIcon(mctx, 8, 8, 7, moonInfo.illumination, waxing);
+      headerTrack.appendChild(moonCanvas);
+    }
+
+    // Sunrise/sunset — explicit markers at their real times, distinct from
+    // (and independent of) the generic 3-hourly tick grid above, since
+    // sunrise/sunset rarely land exactly on one of those ticks.
+    const sun = sunByDate.get(dateKey);
+    if (sun) {
+      if (sun.sunrise != null) {
+        const x = leftPx + ((parseNaive(sun.sunrise) - dayMs) / 3600000) * PIXELS_PER_HOUR;
+        headerTrack.appendChild(buildSunMarker(x, fmtChartTick(parseNaive(sun.sunrise))));
+      }
+      if (sun.sunset != null) {
+        const x = leftPx + ((parseNaive(sun.sunset) - dayMs) / 3600000) * PIXELS_PER_HOUR;
+        headerTrack.appendChild(buildSunMarker(x, fmtChartTick(parseNaive(sun.sunset))));
+      }
+    }
   }
+
   const nowLeftPx = ((nowMs - timelineStart) / 3600000) * PIXELS_PER_HOUR;
   if (nowLeftPx >= 0 && nowLeftPx <= totalTrackWidth) {
     const nowLine = document.createElement("div");
@@ -218,6 +281,40 @@ function renderWeekView() {
     headerTrack.appendChild(nowLine);
   }
   inner.appendChild(headerTrack);
+
+  // Lanes sit inside their own wrapper so a single shading overlay — night
+  // and twilight bands, matching the main charts' own colours — can be
+  // drawn ONCE behind all of them, rather than duplicated per lane.
+  const lanesWrap = document.createElement("div");
+  lanesWrap.className = "week-lanes-wrap";
+  lanesWrap.style.width = totalTrackWidth + "px";
+
+  const shading = document.createElement("div");
+  shading.className = "week-shading-overlay";
+  for (let dayMs = timelineStart; dayMs <= timelineEnd; dayMs += 86400000) {
+    const leftPx = ((dayMs - timelineStart) / 3600000) * PIXELS_PER_HOUR;
+    const dayEndPx = Math.min(totalTrackWidth, leftPx + 24 * PIXELS_PER_HOUR);
+    const sun = sunByDate.get(dayKeyOf(new Date(dayMs).toISOString()));
+    if (!sun) continue;
+    const xFirstLight = sun.firstLight != null ? leftPx + ((parseNaive(sun.firstLight) - dayMs) / 3600000) * PIXELS_PER_HOUR : null;
+    const xSunrise = sun.sunrise != null ? leftPx + ((parseNaive(sun.sunrise) - dayMs) / 3600000) * PIXELS_PER_HOUR : null;
+    const xSunset = sun.sunset != null ? leftPx + ((parseNaive(sun.sunset) - dayMs) / 3600000) * PIXELS_PER_HOUR : null;
+    const xLastLight = sun.lastLight != null ? leftPx + ((parseNaive(sun.lastLight) - dayMs) / 3600000) * PIXELS_PER_HOUR : null;
+
+    if (xFirstLight != null) {
+      shading.appendChild(buildShadeBand(leftPx, xFirstLight, NIGHT_BAND_COLOR));
+      if (xSunrise != null) shading.appendChild(buildShadeBand(xFirstLight, xSunrise, TWILIGHT_BAND_COLOR));
+    } else if (xSunrise != null) {
+      shading.appendChild(buildShadeBand(leftPx, xSunrise, NIGHT_BAND_COLOR));
+    }
+    if (xLastLight != null) {
+      if (xSunset != null) shading.appendChild(buildShadeBand(xSunset, xLastLight, TWILIGHT_BAND_COLOR));
+      shading.appendChild(buildShadeBand(xLastLight, dayEndPx, NIGHT_BAND_COLOR));
+    } else if (xSunset != null) {
+      shading.appendChild(buildShadeBand(xSunset, dayEndPx, NIGHT_BAND_COLOR));
+    }
+  }
+  lanesWrap.appendChild(shading);
 
   // One lane per row of non-overlapping tiles — NOT one row per location.
   // A lane can (and usually will) contain tiles from several different
@@ -236,8 +333,26 @@ function renderWeekView() {
     for (const t of lane) {
       laneEl.appendChild(buildTileElement(t));
     }
-    inner.appendChild(laneEl);
+    lanesWrap.appendChild(laneEl);
   }
+  inner.appendChild(lanesWrap);
+}
+
+function buildShadeBand(xStart, xEnd, color) {
+  const band = document.createElement("div");
+  band.className = "week-shade-band";
+  band.style.left = xStart + "px";
+  band.style.width = Math.max(0, xEnd - xStart) + "px";
+  band.style.background = color;
+  return band;
+}
+
+function buildSunMarker(x, timeLabel) {
+  const wrap = document.createElement("div");
+  wrap.className = "week-sun-marker";
+  wrap.style.left = x + "px";
+  wrap.innerHTML = `<div class="week-sun-tick"></div><div class="week-sun-label">${timeLabel}</div>`;
+  return wrap;
 }
 
 /**
