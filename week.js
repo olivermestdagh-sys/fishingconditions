@@ -264,10 +264,21 @@ function renderWeekView() {
   headerTrack.className = "week-track week-header-track";
   headerTrack.style.width = totalTrackWidth + "px";
 
-  for (let dayMs = timelineStart; dayMs <= timelineEnd; dayMs += 86400000) {
+  for (let dayMs = timelineStart, dayIdx = 0; dayMs <= timelineEnd; dayMs += 86400000, dayIdx++) {
     const leftPx = ((dayMs - timelineStart) / 3600000) * PIXELS_PER_HOUR;
     const dayEndPx = Math.min(totalTrackWidth, leftPx + 24 * PIXELS_PER_HOUR);
     const dateKey = new Date(dayMs).toISOString().slice(0, 10);
+
+    // Same alternating day tint as the lanes below, applied here too so
+    // the header visually connects to its own column beneath it, not just
+    // to the lanes on their own.
+    const dayColor = DAY_COLORS[dayIdx % DAY_COLORS.length];
+    const dayTint = document.createElement("div");
+    dayTint.className = "week-header-day-tint";
+    dayTint.style.left = leftPx + "px";
+    dayTint.style.width = dayEndPx - leftPx + "px";
+    dayTint.style.background = dayColor.bg;
+    headerTrack.appendChild(dayTint);
 
     const boundary = document.createElement("div");
     boundary.className = "week-day-boundary";
@@ -357,9 +368,20 @@ function renderWeekView() {
 
   const shading = document.createElement("div");
   shading.className = "week-shading-overlay";
-  for (let dayMs = timelineStart; dayMs <= timelineEnd; dayMs += 86400000) {
+  let dayIndex = 0;
+  for (let dayMs = timelineStart; dayMs <= timelineEnd; dayMs += 86400000, dayIndex++) {
     const leftPx = ((dayMs - timelineStart) / 3600000) * PIXELS_PER_HOUR;
     const dayEndPx = Math.min(totalTrackWidth, leftPx + 24 * PIXELS_PER_HOUR);
+
+    // Alternating day tint, same palette Trip Planner uses for its own
+    // day-grouped cards — appended first so it sits behind the night/
+    // twilight shading below (plain DOM order controls stacking here,
+    // there's no z-index fight to worry about). Added for every day
+    // regardless of whether sun data is available for it, unlike the
+    // night/twilight bands below which need real sunrise/sunset times.
+    const dayColor = DAY_COLORS[dayIndex % DAY_COLORS.length];
+    shading.appendChild(buildShadeBand(leftPx, dayEndPx, dayColor.bg));
+
     const sun = sunByDate.get(dayKeyOf(new Date(dayMs).toISOString()));
     if (!sun) continue;
     const xFirstLight = sun.firstLight != null ? leftPx + ((parseNaive(sun.firstLight) - dayMs) / 3600000) * PIXELS_PER_HOUR : null;
