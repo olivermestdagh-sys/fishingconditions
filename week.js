@@ -1,4 +1,5 @@
 const DATA_URL = "data/conditions.json";
+const SETTINGS_URL = "config/settings.json";
 const PIXELS_PER_HOUR = 32;
 const MIN_TILE_WIDTH = 240;
 const LANE_GAP = 10; // minimum pixel gap required between two tiles sharing a lane
@@ -13,6 +14,19 @@ let currentTile = null;
 let modalChart = null;
 
 async function init() {
+  // Loaded separately from the main data fetch, with its own error handling
+  // — a missing/malformed settings file shouldn't break the rest of the
+  // page, just leave the drive-time feature gracefully unavailable.
+  try {
+    const settingsRes = await fetch(SETTINGS_URL, { cache: "no-store" });
+    if (settingsRes.ok) {
+      const settings = await settingsRes.json();
+      googleRoutesApiKey = settings.googleRoutesApiKey || null;
+    }
+  } catch (err) {
+    console.error("Could not load settings.json:", err);
+  }
+
   try {
     const res = await fetch(DATA_URL, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -79,6 +93,27 @@ async function init() {
     if (savedThresholds.minCondition != null) document.getElementById("minCondition").value = savedThresholds.minCondition;
     if (savedThresholds.minHours != null) document.getElementById("minHours").value = savedThresholds.minHours;
   }
+
+  // Launch Time / Home By are shared with the Trip Planner (same
+  // localStorage key) — used here only to work out fishing/drive time when
+  // a tile's chart is opened, not to filter which sessions show.
+  let savedTripTimes = null;
+  try {
+    savedTripTimes = JSON.parse(localStorage.getItem(TRIP_TIMES_STORAGE_KEY) || "null");
+  } catch {
+    savedTripTimes = null;
+  }
+  if (savedTripTimes) {
+    document.getElementById("launchTime").value = savedTripTimes.launch || "";
+    document.getElementById("homeBy").value = savedTripTimes.homeBy || "";
+  }
+  const persistTripTimes = () => {
+    const launch = document.getElementById("launchTime").value;
+    const homeBy = document.getElementById("homeBy").value;
+    localStorage.setItem(TRIP_TIMES_STORAGE_KEY, JSON.stringify({ launch, homeBy }));
+  };
+  document.getElementById("launchTime").addEventListener("input", persistTripTimes);
+  document.getElementById("homeBy").addEventListener("input", persistTripTimes);
 
   renderLocationChips(allLocations, selectedLocations, renderWeekView);
   renderTypeChips(selectedTypes, renderWeekView);
@@ -385,11 +420,25 @@ function buildTileElement(t) {
   tile.className = "week-tile";
   tile.style.left = t.leftPx + "px";
   tile.style.width = t.widthPx + "px";
-  tile.style.backgroundImage = `linear-gradient(rgba(255,255,255,0.88), rgba(255,255,255,0.88)), url(${photoUrl})`;
   tile.title = `${t.locationName} (${t.type}) — ${timeLabel}`;
   tile.setAttribute("role", "button");
   tile.setAttribute("tabindex", "0");
-  tile.innerHTML = `
+
+  const bg = document.createElement("div");
+  bg.className = "week-tile-bg";
+  bg.style.backgroundImage = `linear-gradient(rgba(255,255,255,0.88), rgba(255,255,255,0.88)), url(${photoUrl})`;
+  tile.appendChild(bg);
+
+  // Content lives in its own inner wrapper, sticky within the tile's own
+  // bounds — as you scroll the timeline horizontally, this stays pinned to
+  // the visible left edge for as long as any part of the tile is still on
+  // screen, and only scrolls away once the tile itself has fully scrolled
+  // past. Native position:sticky nested inside an absolutely-positioned
+  // parent does exactly this: it's bounded by that parent's own width, not
+  // free to drift past either edge of the tile.
+  const content = document.createElement("div");
+  content.className = "week-tile-content";
+  content.innerHTML = `
     <div class="window-loc">${t.locationName}</div>
     <div class="window-sub">${t.type} · shore ${t.shore || "–"}</div>
     <div class="window-sub" style="margin:4px 0 8px;">${timeLabel} · ${t.hoursLabel}h</div>
@@ -418,6 +467,8 @@ function buildTileElement(t) {
       </div>
     </div>
   `;
+  tile.appendChild(content);
+
   tile.addEventListener("click", () => selectTile(t));
   tile.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectTile(t); }
@@ -432,6 +483,8 @@ function buildTileElement(t) {
  * graph shows the good stretch in its full daily context), same compact:
  * false full-axes rendering.
  */
+let weekScheduleRenderToken = 0;
+
 function selectTile(t) {
   currentTile = t;
 
@@ -460,6 +513,88 @@ function selectTile(t) {
     moonPhases: moonPhasesData,
     minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
     compact: false,
+  });
+
+  renderWeekSchedule(matchedLoc);
+}
+
+/**
+ * Fishing time / drive time, worked out exactly the way the Trip Planner
+ * does — same computeSchedule()/getDriveTimeMinutes() from charts.js, same
+ * Launch Time / Home By inputs (shared localStorage key, so a value set on
+ * either page carries over to the other).
+ */
+async function renderWeekSchedule(loc) {
+  const container = document.getElementById("weekScheduleContainer");
+  const myToken = ++weekScheduleRenderToken;
+
+  const launchStr = document.getElementById("launchTime").value;
+  const homeByStr = document.getElementById("homeBy").value;
+
+  if (!launchStr || !homeByStr) {
+    container.innerHTML = `<p class="footnote" style="margin:14px 0 0;text-align:left;">Set Launch Time and Home By in Thresholds &amp; filters above to see fishing/drive time for this session.</p>`;
+    return;
+  }
+  if (!loc) {
+    container.innerHTML = "";
+    return;
+  }
+
+  container.innerHTML = `<p class="footnote" style="margin:14px 0 0;text-align:left;">Calculating drive time…</p>`;
+
+  const driveMinutes = await getDriveTimeMinutes(loc.lat, loc.lng);
+
+  if (myToken !== weekScheduleRenderToken) return; // a newer tile was tapped meanwhile — discard this stale result
+
+  const schedule = computeSchedule(loc, launchStr, homeByStr, driveMinutes);
+
+  if (!schedule) {
+    container.innerHTML = "";
+    return;
+  }
+
+  if (schedule.driveTimeUnavailable) {
+    container.innerHTML = `
+      <label class="loc-edit-label" style="display:block;margin:16px 0 8px;">Trip schedule — ${loc.name}</label>
+      <p class="footnote" style="margin:0;text-align:left;">
+        Drive time isn't available right now (location access denied, or the
+        drive-time lookup isn't set up yet), so Leave Home / Head Back / Drive
+        Home can't be calculated. What we do know: Arrive ${schedule.arrive},
+        Launch ${schedule.launch}, Fish at ${schedule.fishAt}, Home by ${schedule.homeBy}.
+      </p>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <label class="loc-edit-label" style="display:block;margin:16px 0 8px;">Trip schedule — ${loc.name}</label>
+    <div class="schedule-fishing-time ${schedule.fishingTimeNegative ? "negative" : ""}" id="weekFishingTimeToggle" role="button" tabindex="0">
+      Fishing time: <strong>${schedule.fishingTime}</strong>
+      <span class="schedule-toggle-hint" id="weekScheduleToggleHint">▸ tap for times</span>
+      ${schedule.fishingTimeNegative ? "<br>times don't add up, check Launch Time / Home By against this location's timings" : ""}
+    </div>
+    <div class="schedule-timeline collapsed" id="weekScheduleTimelineWrap">
+      <div class="schedule-step"><span class="schedule-time">${schedule.leaveHome}</span><span class="schedule-label">Leave Home</span></div>
+      <div class="schedule-step"><span class="schedule-time">${schedule.arrive}</span><span class="schedule-label">Arrive</span></div>
+      <div class="schedule-step"><span class="schedule-time">${schedule.launch}</span><span class="schedule-label">Launch</span></div>
+      <div class="schedule-step"><span class="schedule-time">${schedule.fishAt}</span><span class="schedule-label">Fish at</span></div>
+      <div class="schedule-step"><span class="schedule-time">${schedule.headBack}</span><span class="schedule-label">Head Back</span></div>
+      <div class="schedule-step"><span class="schedule-time">${schedule.driveHome}</span><span class="schedule-label">Drive Home</span></div>
+      <div class="schedule-step"><span class="schedule-time">${schedule.homeBy}</span><span class="schedule-label">Home By</span></div>
+    </div>
+    <p class="footnote" style="margin:8px 0 0;text-align:left;">Drive time: ~${schedule.driveMinutes} min each way, from your current location.</p>
+  `;
+
+  const toggle = document.getElementById("weekFishingTimeToggle");
+  const wrap = document.getElementById("weekScheduleTimelineWrap");
+  const hint = document.getElementById("weekScheduleToggleHint");
+  const toggleFn = () => {
+    const nowCollapsed = wrap.classList.toggle("collapsed");
+    hint.textContent = nowCollapsed ? "▸ tap for times" : "▾ hide times";
+  };
+  toggle.addEventListener("click", toggleFn);
+  toggle.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFn(); }
   });
 }
 
