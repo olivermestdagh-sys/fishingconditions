@@ -1126,12 +1126,14 @@ main.wide {
   border-radius: 10px;
   border: 1px solid var(--grey-200);
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.22);
-  padding: 30px 10px 8px;
+  padding: 30px 14px 12px;
   pointer-events: none;
-  width: 420px;
+  width: 560px;
+  max-height: 460px;
+  overflow-y: auto;
 }
 
 .week-hover-preview canvas {
   width: 100% !important;
-  height: 140px !important;
+  height: 220px !important;
 }
