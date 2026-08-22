@@ -896,3 +896,230 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
 
   return chart;
 }
+
+// ============================================================================
+// Shared "qualifying session window" logic — moved here from goodconditions.js
+// so both the Trip Planner and Week Ahead pages can compute the same
+// sessions from the same threshold/filter settings, without duplicating a
+// substantial, easy-to-drift piece of logic across two files.
+// ============================================================================
+
+const LOC_FILTER_STORAGE_KEY = "goodConditionsSelectedLocations";
+const TYPE_FILTER_STORAGE_KEY = "goodConditionsSelectedTypes";
+const THRESHOLDS_STORAGE_KEY = "goodConditionsThresholds";
+
+function fmtNaive(ms, opts) {
+  const d = new Date(ms);
+  return new Intl.DateTimeFormat([], { timeZone: "UTC", ...opts }).format(d);
+}
+
+function hourOf(ms) {
+  return new Date(ms).getUTCHours();
+}
+
+function dateOnly(ms) {
+  const d = new Date(ms);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+// Session timestamps (w.from/w.to) use the same "naive local time treated as
+// UTC" convention as everything else in this app (see parseNaive above) —
+// they're NOT real UTC instants. To compare one against the browser's
+// actual current time, re-interpret those same wall-clock digits as the
+// browser's own local time instead (matching the same assumption app.js
+// already relies on: the viewer's browser is in the same timezone the data
+// represents, i.e. Melbourne).
+function naiveMsToLocalDate(ms) {
+  const d = new Date(ms);
+  return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds());
+}
+
+function computeWindowsForLocation(locRows, minCondition, minHours) {
+  // Only "hourly forecast rows" — where Condition is populated — participate in run detection,
+  // matching the Excel calc area's P9 FILTER(Conditions[...], Conditions[Condition]<>"")
+  // Only genuinely hourly-aligned rows participate in run detection — the
+  // whole AD/AE consecutive-hour algorithm below assumes each entry is
+  // exactly one hour after the last. Observational readings can land at
+  // arbitrary sub-hourly timestamps (e.g. :10, :23), and occasionally have
+  // complete enough data to get a real Condition score — when that happens
+  // between two otherwise-consecutive hourly points, it silently breaks the
+  // "exactly one hour apart" check on both sides of it, splitting what
+  // should be one continuous run into pieces despite every actual hourly
+  // reading being perfectly fine. Filtering to minute===0 keeps run
+  // detection on the intended hourly grid; it doesn't discard that reading
+  // anywhere else (charts still show it, bucketed into its hour).
+  const filtered = locRows
+    .filter((r) => r.Condition != null && new Date(r._t).getUTCMinutes() === 0)
+    .sort((a, b) => a._t - b._t);
+  const n = filtered.length;
+  if (n === 0) return [];
+
+  const AD = new Array(n).fill(0); // Run Hrs: consecutive qualifying-hour counter
+  for (let i = 0; i < n; i++) {
+    const cond = filtered[i].Condition;
+    if (cond < minCondition) {
+      AD[i] = 0;
+      continue;
+    }
+    const prev = i > 0 ? filtered[i - 1] : null;
+    const isConsecutiveHour = prev && filtered[i]._t - prev._t === 3600 * 1000;
+    AD[i] = isConsecutiveHour && AD[i - 1] > 0 ? AD[i - 1] + 1 : 1;
+  }
+
+  const AE = new Array(n).fill(0); // Window Hrs: backward-filled final run length
+  for (let i = n - 1; i >= 0; i--) {
+    if (AD[i] === 0) {
+      AE[i] = 0;
+    } else if (i + 1 < n && AD[i + 1] === AD[i] + 1) {
+      AE[i] = AE[i + 1];
+    } else {
+      AE[i] = AD[i];
+    }
+  }
+
+  const windows = [];
+  for (let i = 0; i < n; i++) {
+    // A run's total length (AE[i]) is constant across every position within
+    // it — it does NOT mean "hours remaining from here". So detecting a
+    // genuine midnight continuation (there's real time left AFTER midnight,
+    // worth its own next-day card) needs AE[i] - AD[i] > 0 specifically —
+    // hours remaining past this exact point — not just AE[i] itself. Without
+    // this, a run whose very last qualifying hour happens to land exactly on
+    // midnight would spawn a zero-duration "session" on the next day, when
+    // really the run simply ended right as the day began.
+    const isMidnightContinuation = AD[i] > 1 && hourOf(filtered[i]._t) === 0 && AE[i] - AD[i] > 0;
+    // AE[i] counts qualifying HOURLY DATA POINTS, not clock-hours of
+    // duration — a run of 3 points (e.g. 16:00, 17:00, 18:00) only spans 2
+    // clock hours. The minimum-hours filter is meant to match what's
+    // actually displayed (a genuine clock-duration threshold), so it checks
+    // AE[i]-1 here, not AE[i] itself — otherwise a "min 3 hours" setting
+    // would let a 2-hour session through, since it has 3 qualifying points.
+    const isSegmentStart = AD[i] > 0 && AE[i] - 1 >= minHours && (AD[i] === 1 || isMidnightContinuation);
+    if (!isSegmentStart) continue;
+
+    // The run's TRUE start and end — not clipped to this segment's own day —
+    // used for the displayed time range and the stats/tide summary on the
+    // card, so a session spanning midnight shows the SAME full span and
+    // matching figures on every day-card it appears on, rather than a
+    // different partial range (and partial averages) per day.
+    const trueFrom = filtered[i]._t - (AD[i] - 1) * 3600 * 1000;
+    const naturalEnd = filtered[i]._t + (AE[i] - AD[i]) * 3600 * 1000;
+
+    const hoursLabel = AE[i] - 1;
+
+    windows.push({
+      locationName: filtered[i]["Location Name"],
+      type: filtered[i]["Type"],
+      shore: filtered[i]["Shore"],
+      // This segment's OWN day — i.e. which day-heading this particular
+      // card sits under, and which day's full chart opens on click. Kept
+      // separate from from/to (the session's true full span) specifically
+      // so a midnight-continuation segment still shows up under ITS OWN
+      // day, not silently regrouped under the day the session first began.
+      dayAnchor: filtered[i]._t,
+      from: trueFrom,
+      to: naturalEnd,
+      hoursLabel,
+    });
+  }
+  return windows;
+}
+
+function average(rows, field, from, to) {
+  const vals = rows.filter((r) => r._t >= from && r._t <= to && r[field] != null).map((r) => r[field]);
+  if (vals.length === 0) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+const DAY_COLORS = [
+  { bg: "#eaf2fb", accent: "#1f4e78", photoTint: "rgba(234,242,251,0.86)" }, // blue
+  { bg: "#fef3e0", accent: "#b45309", photoTint: "rgba(254,243,224,0.86)" }, // amber
+  { bg: "#e8f7ee", accent: "#15803d", photoTint: "rgba(232,247,238,0.86)" }, // green
+  { bg: "#f3e8fd", accent: "#7c3aed", photoTint: "rgba(243,232,253,0.86)" }, // purple
+  { bg: "#fde8ec", accent: "#be123c", photoTint: "rgba(253,232,236,0.86)" }, // rose
+  { bg: "#e0f6f8", accent: "#0e7490", photoTint: "rgba(224,246,248,0.86)" }, // cyan
+  { bg: "#fdf6e3", accent: "#a16207", photoTint: "rgba(253,246,227,0.86)" }, // olive
+];
+
+const CONDITION_COLORS = {
+  5: "var(--cond-5)",
+  4: "var(--cond-4)",
+  3: "var(--cond-3)",
+  2: "var(--cond-2)",
+  1: "var(--cond-1)",
+};
+
+function conditionColor(avgValue) {
+  if (avgValue == null) return "var(--cond-none)";
+  const rounded = Math.min(5, Math.max(1, Math.round(avgValue)));
+  return CONDITION_COLORS[rounded] || "var(--cond-none)";
+}
+
+function persistSelectedLocations(selectedLocations) {
+  localStorage.setItem(LOC_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedLocations)));
+}
+
+function persistSelectedTypes(selectedTypes) {
+  localStorage.setItem(TYPE_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedTypes)));
+}
+
+function persistThresholds() {
+  const minCondition = document.getElementById("minCondition").value;
+  const minHours = document.getElementById("minHours").value;
+  localStorage.setItem(THRESHOLDS_STORAGE_KEY, JSON.stringify({ minCondition, minHours }));
+}
+
+// onChange is called after the toggle (with no arguments) so each page can
+// supply its own "re-render everything that depends on this filter" logic —
+// Trip Planner's render() and Week Ahead's own render function are quite
+// different, so this can't hardcode a call to either one.
+function renderLocationChips(allLocations, selectedLocations, onChange) {
+  const container = document.getElementById("locationChips");
+  container.innerHTML = "";
+  // A location's name is no longer unique on its own (Kayak and Land based
+  // entries share the same name) — dedupe so this filter shows one chip
+  // per physical spot, not one per (name, type) combination.
+  const seenNames = new Set();
+  for (const loc of allLocations) {
+    if (seenNames.has(loc.name)) continue;
+    seenNames.add(loc.name);
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "loc-chip" + (selectedLocations.has(loc.name) ? " active" : "");
+    chip.textContent = loc.name;
+    chip.addEventListener("click", () => {
+      if (selectedLocations.has(loc.name)) {
+        selectedLocations.delete(loc.name);
+      } else {
+        selectedLocations.add(loc.name);
+      }
+      persistSelectedLocations(selectedLocations);
+      chip.classList.toggle("active");
+      onChange();
+    });
+    container.appendChild(chip);
+  }
+}
+
+function renderTypeChips(selectedTypes, onChange) {
+  const container = document.getElementById("typeChips");
+  if (!container) return;
+  container.innerHTML = "";
+  for (const type of ["Kayak", "Land based"]) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "loc-chip type-chip" + (selectedTypes.has(type) ? " active" : "");
+    chip.innerHTML = `${typeIconSvg(type, 14)} <span>${type}</span>`;
+    chip.addEventListener("click", () => {
+      if (selectedTypes.has(type)) {
+        selectedTypes.delete(type);
+      } else {
+        selectedTypes.add(type);
+      }
+      persistSelectedTypes(selectedTypes);
+      chip.classList.toggle("active");
+      onChange();
+    });
+    container.appendChild(chip);
+  }
+}

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Olie's Kayak and Surf Fishing Conditions – Week Ahead</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Olie's Kayak and Surf Fishing Conditions</h1>
+  <div id="updated" class="updated">Loading…</div>
+</header>
+
+<nav class="tabnav">
+  <a href="live.html">Live</a>
+  <a href="index.html">Trip planner</a>
+  <a href="week.html" class="active">Week ahead</a>
+  <a href="conditions.html">Location</a>
+  <a href="locations.html">Settings</a>
+</nav>
+
+<main class="wide">
+  <section class="summary-card gc-filters">
+    <div class="filters-toggle" id="filtersToggle" role="button" tabindex="0">
+      <label class="loc-edit-label" style="margin:0;">Thresholds &amp; filters</label>
+      <span class="schedule-toggle-hint" id="filtersToggleHint">▸ tap to show</span>
+    </div>
+    <div class="filters-content collapsed" id="filtersContent">
+    <p class="footnote" style="margin:0 0 12px;text-align:left;">
+      Every hourly forecast row that sits inside a run of consecutive hours meeting the thresholds below (evaluated per location).
+    </p>
+    <div class="filter-row">
+      <div>
+        <label for="minCondition">Min Condition rating</label>
+        <input type="number" id="minCondition" min="1" max="5" value="3" />
+      </div>
+      <div>
+        <label for="minHours">Min consecutive hours</label>
+        <input type="number" id="minHours" min="1" max="24" value="3" />
+      </div>
+    </div>
+    <p class="footnote" style="margin:8px 0 0;text-align:left;">
+      "Min consecutive hours" is a genuine clock-duration minimum — matches the session lengths below.
+    </p>
+
+    <div class="loc-filter-header">
+      <label>Locations</label>
+      <div class="loc-filter-actions">
+        <button type="button" id="btnLocAll" class="chip-action">All</button>
+        <button type="button" id="btnLocNone" class="chip-action">None</button>
+      </div>
+    </div>
+    <div id="locationChips" class="chip-row"></div>
+
+    <label style="display:block;margin:14px 0 6px;">Type</label>
+    <div id="typeChips" class="chip-row"></div>
+    </div>
+  </section>
+
+  <section class="summary-card" style="padding:0;overflow:hidden;">
+    <div id="weekEmptyState" class="empty-state" style="display:none;padding:20px;">No sessions meet the criteria.</div>
+    <div id="weekTimelineScroll" class="week-timeline-scroll">
+      <div id="weekTimelineInner" class="week-timeline-inner"></div>
+    </div>
+    <p class="footnote" style="margin:6px 10px 10px;text-align:left;">Scroll sideways for the rest of the week. Tap a tile for details.</p>
+  </section>
+
+  <section class="summary-card" id="weekDetailPanel" style="display:none;">
+    <!-- filled in by week.js when a tile is tapped -->
+  </section>
+
+  <footer class="footnote">
+    Data from <a href="https://www.willyweather.com.au/" target="_blank" rel="noopener">WillyWeather</a>.
+  </footer>
+</main>
+
+<script src="charts.js"></script>
+<script src="week.js"></script>
+</body>
+</html>
