@@ -269,6 +269,25 @@ tbody tr:nth-child(even) {
   flex-wrap: wrap;
 }
 
+.thresholds-row {
+  /* Min Condition and Min Consecutive Hours stay side by side regardless
+     of screen width — unlike a generic .filter-row, this one deliberately
+     never wraps, so it doesn't stack even on narrow phones. */
+  flex-wrap: nowrap;
+}
+
+.thresholds-and-times-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 32px;
+  align-items: flex-start;
+}
+
+.thresholds-and-times-wrap > div {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
 .filter-row > div {
   display: flex;
   flex-direction: column;
