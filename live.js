@@ -54,10 +54,10 @@ function minutesToClock(mins) {
 /**
  * Real drive time (minutes) from a set of coordinates to a free-text
  * address, via Google's Routes API — used here for "fishing location →
- * home address" (the reverse direction from the Trip Planner's lookup,
- * which goes GPS → location). The destination is passed as a plain
- * address string; Routes API geocodes it internally, no separate
- * geocoding call needed. Returns null (not an exception) on any failure.
+ * home address" (the reverse direction from charts.js's own
+ * getDriveTimeMinutes(), which goes GPS → location). The destination is
+ * passed as a plain address string; Routes API geocodes it internally, no
+ * separate geocoding call needed. Returns null (not an exception) on any failure.
  */
 async function getDriveTimeToAddress(originLat, originLng, address) {
   if (originLat == null || originLng == null || !address) return null;

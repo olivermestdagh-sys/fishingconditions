@@ -1,6 +1,7 @@
-// Shared between conditions.html (app.js) and index.html/Good Conditions (goodconditions.js) —
-// one implementation of the combined temp/wind/rain/tide chart with day/night banding,
-// so both pages render it identically and bug fixes only need to happen once.
+// Shared between conditions.html (app.js), live.html (live.js), and index.html
+// (week.js) — one implementation of the combined temp/wind/rain/tide chart
+// with day/night banding, so every page renders it identically and bug
+// fixes only need to happen once.
 
 function parseNaive(iso) {
   // Parse "YYYY-MM-DDTHH:MM:SS" (or with a space) into a timezone-neutral ms value,
@@ -939,10 +940,9 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
 }
 
 // ============================================================================
-// Shared "qualifying session window" logic — moved here from goodconditions.js
-// so both the Trip Planner and Week Ahead pages can compute the same
-// sessions from the same threshold/filter settings, without duplicating a
-// substantial, easy-to-drift piece of logic across two files.
+// Shared "qualifying session window" logic — used by week.js (Week Ahead)
+// to compute sessions from the site-wide threshold/filter settings, kept
+// here rather than duplicated so bug fixes only need to happen once.
 // ============================================================================
 
 const LOC_FILTER_STORAGE_KEY = "goodConditionsSelectedLocations";
@@ -1110,10 +1110,9 @@ function persistThresholds() {
   localStorage.setItem(THRESHOLDS_STORAGE_KEY, JSON.stringify({ minCondition, minHours }));
 }
 
-// onChange is called after the toggle (with no arguments) so each page can
-// supply its own "re-render everything that depends on this filter" logic —
-// Trip Planner's render() and Week Ahead's own render function are quite
-// different, so this can't hardcode a call to either one.
+// onChange is called after the toggle (with no arguments) so each caller
+// can supply its own "re-render everything that depends on this filter"
+// logic, rather than this function hardcoding a specific one.
 function renderLocationChips(allLocations, selectedLocations, onChange) {
   const container = document.getElementById("locationChips");
   container.innerHTML = "";
@@ -1166,10 +1165,11 @@ function renderTypeChips(selectedTypes, onChange) {
 }
 
 // ============================================================================
-// Shared trip-schedule infrastructure — moved here from goodconditions.js so
-// Week Ahead can offer the same "fishing time / drive time" calculation Trip
-// Planner does, from the same Launch Time / Home By settings (shared
-// localStorage key below) and the same live GPS + Google Routes lookup.
+// Shared trip-schedule infrastructure — lets Week Ahead offer the same
+// "fishing time / drive time" calculation for a session, from the same
+// Launch Time / Home By settings and the same live GPS + Google Routes
+// lookup. (The storage key name below predates this file's current
+// structure — kept as-is so anyone's already-saved times aren't reset.)
 // ============================================================================
 
 const TRIP_TIMES_STORAGE_KEY = "goodConditionsTripTimes";
