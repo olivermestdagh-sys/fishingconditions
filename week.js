@@ -24,6 +24,42 @@ let dayLabelsForStickyScroll = []; // rebuilt each render() — see the horizont
 // tap-to-open modal instead.
 const supportsHover = typeof window.matchMedia === "function" && window.matchMedia("(hover: hover)").matches;
 
+/**
+ * Turns a hidden number input into a stepper: a circular badge (styled
+ * like the Location/Fishing rating circles on session tiles) showing the
+ * current value, with +/− buttons either side. For Min Condition, the
+ * badge is colored via conditionColor() — the exact same function that
+ * colors those tile badges — so a "3.0" here looks like a "3.0" would
+ * anywhere else on the page. Min consecutive hours isn't a 1-5 condition
+ * rating, so colorFn is null there — same badge shape, fixed neutral color
+ * (see .rating-stepper-badge-neutral), purely for visual consistency.
+ */
+function wireThresholdStepper(id, step, min, max, colorFn) {
+  const input = document.getElementById(id);
+  const badge = document.getElementById(id + "Badge");
+  const upBtn = document.getElementById(id + "Up");
+  const downBtn = document.getElementById(id + "Down");
+
+  function updateDisplay() {
+    const value = Number(input.value);
+    badge.textContent = value.toFixed(1);
+    if (colorFn) badge.style.background = colorFn(value);
+    downBtn.disabled = value <= min;
+    upBtn.disabled = value >= max;
+  }
+
+  function changeBy(delta) {
+    input.value = Math.min(max, Math.max(min, Number(input.value) + delta));
+    updateDisplay();
+    persistThresholds();
+    renderWeekView();
+  }
+
+  downBtn.addEventListener("click", () => changeBy(-step));
+  upBtn.addEventListener("click", () => changeBy(step));
+  updateDisplay();
+}
+
 async function init() {
   // Loaded separately from the main data fetch, with its own error handling
   // — a missing/malformed settings file shouldn't break the rest of the
@@ -138,14 +174,8 @@ async function init() {
     renderLocationChips(allLocations, selectedLocations, renderWeekView);
     renderWeekView();
   });
-  document.getElementById("minCondition").addEventListener("input", () => {
-    persistThresholds();
-    renderWeekView();
-  });
-  document.getElementById("minHours").addEventListener("input", () => {
-    persistThresholds();
-    renderWeekView();
-  });
+  wireThresholdStepper("minCondition", 1, 1, 5, conditionColor);
+  wireThresholdStepper("minHours", 1, 1, 24, null);
   document.getElementById("btnCloseChartModal").addEventListener("click", closeChartModal);
   document.getElementById("btnClosePreview").addEventListener("click", unpinHoverPreview);
   // Click anywhere outside a PINNED preview (and not on a tile, which has

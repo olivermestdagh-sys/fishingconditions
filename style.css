@@ -283,6 +283,55 @@ tbody tr:nth-child(even) {
   letter-spacing: 0.03em;
 }
 
+.rating-stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rating-stepper-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--grey-200);
+  background: var(--white);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--grey-500);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.rating-stepper-btn:hover {
+  background: var(--grey-100);
+}
+
+.rating-stepper-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: var(--white);
+}
+
+.rating-stepper-badge {
+  /* .condition-badge is a circle sized for a single-line value already —
+     just needs a fixed width here so digit-count changes (e.g. 3.0 -> 24.0)
+     don't visibly resize the circle itself. */
+  width: 52px;
+  min-width: 52px;
+  height: 52px;
+  font-size: 1rem;
+}
+
+.rating-stepper-badge-neutral {
+  /* Min consecutive hours isn't a 1-5 condition rating, so it doesn't get
+     conditionColor()'s red-to-green scale — a fixed neutral color instead,
+     same badge shape purely for visual consistency with the one next to it. */
+  background: var(--blue-900) !important;
+}
+
 .day-group {
   margin-bottom: 18px;
 }
