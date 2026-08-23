@@ -15,6 +15,7 @@ let modalChart = null;
 let previewChart = null;
 let hoverShowTimer = null;
 let previewPinned = false;
+let dayLabelsForStickyScroll = []; // rebuilt each render() — see the horizontal-sticky scroll handler below
 
 // Hover-capable devices (desktop, trackpad) get a small floating preview on
 // hover instead — lets you see the graph while still seeing every other
@@ -159,6 +160,8 @@ async function init() {
     unpinHoverPreview();
   });
 
+  document.getElementById("weekTimelineScroll").addEventListener("scroll", updateStickyDayLabels);
+
   renderWeekView();
 }
 
@@ -213,6 +216,7 @@ function renderWeekView() {
   const emptyState = document.getElementById("weekEmptyState");
   const scrollWrap = document.getElementById("weekTimelineScroll");
   const inner = document.getElementById("weekTimelineInner");
+  dayLabelsForStickyScroll = [];
 
   if (tiles.length === 0) {
     emptyState.style.display = "block";
@@ -288,8 +292,11 @@ function renderWeekView() {
     const label = document.createElement("div");
     label.className = "week-day-label";
     label.style.left = leftPx + "px";
+    label.dataset.dayLeft = leftPx;
+    label.dataset.dayEnd = dayEndPx;
     label.textContent = fmtNaive(dayMs, { weekday: "short", day: "numeric", month: "short" });
     headerTrack.appendChild(label);
+    dayLabelsForStickyScroll.push(label);
 
     // Moon phase sits right after the date label (not centred in the day's
     // span) — reuses the exact same drawMoonIcon() canvas-drawing routine
@@ -424,6 +431,7 @@ function renderWeekView() {
     lanesWrap.appendChild(laneEl);
   }
   inner.appendChild(lanesWrap);
+  updateStickyDayLabels(); // position labels correctly right away if the view re-renders while already scrolled
 }
 
 function buildShadeBand(xStart, xEnd, color) {
@@ -450,6 +458,32 @@ function buildSunMarker(x, timeLabel) {
  * algorithm calendar apps use to stack overlapping events into columns,
  * applied here to rows instead since this timeline runs horizontally.
  */
+/**
+ * Manually keeps each day's date label pinned to the visible left edge of
+ * the timeline for as long as any part of that day is still on screen,
+ * then lets it scroll away naturally once its own day has fully passed —
+ * exactly what CSS position:sticky is meant for, but a genuine, confirmed
+ * browser quirk in this specific nested layout (a sticky element inside
+ * another absolutely-positioned wrapper, itself inside the header row)
+ * stopped position:sticky from engaging at all here, for reasons that
+ * held up under direct testing but didn't resolve to a fixable single
+ * cause. This reproduces the same visual behavior directly instead of
+ * relying on it: each label's true (unscrolled) position is clamped to
+ * [its day's own start, its day's own end minus its own width], and the
+ * clamped result naturally scrolls out of view once the scroll position
+ * moves past it — no special-case "un-stick" logic needed for that part.
+ */
+function updateStickyDayLabels() {
+  const scrollLeft = document.getElementById("weekTimelineScroll").scrollLeft;
+  for (const label of dayLabelsForStickyScroll) {
+    const dayLeft = Number(label.dataset.dayLeft);
+    const dayEnd = Number(label.dataset.dayEnd);
+    const maxLeft = Math.max(dayLeft, dayEnd - label.offsetWidth);
+    const desired = Math.min(Math.max(scrollLeft, dayLeft), maxLeft);
+    label.style.transform = `translateX(${desired - dayLeft}px)`;
+  }
+}
+
 function packIntoLanes(positionedTiles) {
   const sorted = [...positionedTiles].sort((a, b) => a.leftPx - b.leftPx);
   const lanes = []; // each lane: { lastRight: px, tiles: [...] }
