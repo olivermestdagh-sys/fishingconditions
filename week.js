@@ -178,7 +178,7 @@ async function init() {
     renderWeekView();
   });
   wireThresholdStepper("minCondition", 0.1, 1, 5, conditionColor);
-  wireThresholdStepper("minHours", 0.1, 1, 24, null);
+  wireThresholdStepper("minHours", 1, 1, 24, null);
   document.getElementById("btnCloseChartModal").addEventListener("click", closeChartModal);
   document.getElementById("btnClosePreview").addEventListener("click", unpinHoverPreview);
   // Click anywhere outside a PINNED preview (and not on a tile, which has
