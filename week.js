@@ -49,7 +49,10 @@ function wireThresholdStepper(id, step, min, max, colorFn) {
   }
 
   function changeBy(delta) {
-    input.value = Math.min(max, Math.max(min, Number(input.value) + delta));
+    // Rounded to 1 decimal place — repeated 0.1 increments would otherwise
+    // drift via ordinary floating-point error (e.g. 1.1 + 0.1 = 1.2000000000000002).
+    const raw = Math.min(max, Math.max(min, Number(input.value) + delta));
+    input.value = Math.round(raw * 10) / 10;
     updateDisplay();
     persistThresholds();
     renderWeekView();
@@ -174,8 +177,8 @@ async function init() {
     renderLocationChips(allLocations, selectedLocations, renderWeekView);
     renderWeekView();
   });
-  wireThresholdStepper("minCondition", 1, 1, 5, conditionColor);
-  wireThresholdStepper("minHours", 1, 1, 24, null);
+  wireThresholdStepper("minCondition", 0.1, 1, 5, conditionColor);
+  wireThresholdStepper("minHours", 0.1, 1, 24, null);
   document.getElementById("btnCloseChartModal").addEventListener("click", closeChartModal);
   document.getElementById("btnClosePreview").addEventListener("click", unpinHoverPreview);
   // Click anywhere outside a PINNED preview (and not on a tile, which has
