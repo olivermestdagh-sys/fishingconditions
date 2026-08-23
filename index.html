@@ -33,11 +33,21 @@
     <div class="filter-row">
       <div>
         <label for="minCondition">Min Condition rating</label>
-        <input type="number" id="minCondition" min="1" max="5" value="3" />
+        <div class="rating-stepper">
+          <button type="button" class="rating-stepper-btn" id="minConditionDown" aria-label="Decrease min condition rating">−</button>
+          <div class="condition-badge rating-stepper-badge" id="minConditionBadge">3.0</div>
+          <button type="button" class="rating-stepper-btn" id="minConditionUp" aria-label="Increase min condition rating">+</button>
+          <input type="hidden" id="minCondition" min="1" max="5" value="3" />
+        </div>
       </div>
       <div>
         <label for="minHours">Min consecutive hours</label>
-        <input type="number" id="minHours" min="1" max="24" value="3" />
+        <div class="rating-stepper">
+          <button type="button" class="rating-stepper-btn" id="minHoursDown" aria-label="Decrease min consecutive hours">−</button>
+          <div class="condition-badge rating-stepper-badge rating-stepper-badge-neutral" id="minHoursBadge">3.0</div>
+          <button type="button" class="rating-stepper-btn" id="minHoursUp" aria-label="Increase min consecutive hours">+</button>
+          <input type="hidden" id="minHours" min="1" max="24" value="3" />
+        </div>
       </div>
     </div>
     <p class="footnote" style="margin:8px 0 0;text-align:left;">
