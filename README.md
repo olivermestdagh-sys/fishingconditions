@@ -108,14 +108,14 @@ Both types have Time to Spot/Time From Spot — paddling for Kayak, walking
 from the carpark to the actual spot for Land based.
 
 The timing fields are `HH:MM` durations — how long each part of a trip
-takes — and **feed into** the Trip Planner's schedule calculator once you
+takes — and **feed into** Week Ahead's schedule calculator once you
 set a Launch Time/Home By. Drive time isn't one of these fields any more —
 see "Live drive-time lookup" below for how that's now calculated instead.
 Changes take effect on the next scheduled or manual run.
 
 ## Live drive-time lookup
 
-The Trip Planner calculates drive time live, via Google's Routes API,
+Week Ahead calculates drive time live, via Google's Routes API,
 rather than using a fixed value stored per location — the same spot might
 be a short drive from home but a much longer one when travelling from
 somewhere else. This needs:
@@ -124,7 +124,7 @@ somewhere else. This needs:
    Live page does, with a manual fallback if it's denied.
 2. **A Google Routes API key**, kept in its own `config/settings.json` —
    separate from the site's actual code, so it survives untouched whenever
-   `goodconditions.js` gets updated. Edit that file directly on GitHub
+   `week.js` gets updated. Edit that file directly on GitHub
    (there's no Settings-page form for it) with:
    ```json
    { "googleRoutesApiKey": "your-key-here" }
@@ -289,7 +289,7 @@ Home By − drive time − pack up time − time back to the car = stop fishing 
 ```
 
 - **Drive time**: fishing location → your home address, via the same
-  Google Routes API used by the Trip Planner (real traffic-aware driving
+  Google Routes API used by Week Ahead (real traffic-aware driving
   time) — just the reverse direction, since here you're already at the
   water and need to get home, not the other way round.
 - **Pack up time**: from that location's own Kayak/Land based timing data
@@ -302,7 +302,7 @@ Home By − drive time − pack up time − time back to the car = stop fishing 
 If Home By has already passed for today, it's assumed to mean tomorrow.
 Switching location or type clears the calculated line — pack-up time
 differs by type, so a stale result would no longer match what's on
-screen. Needs the same Google Routes API key as the Trip Planner (see
+screen. Needs the same Google Routes API key as Week Ahead (see
 "Live drive-time lookup" below) — without one, drive time can't be
 calculated and the line won't appear.
 
@@ -340,11 +340,12 @@ this restriction — nothing extra is drawn.
 ## Files in this project
 
 - `live.html`/`live.js` — the Live page (GPS-matched to your nearest tracked
-  location, shows a 24-hours-back/24-hours-forward graph), `index.html` —
-  Trip Planner (the site's home page), `conditions.html` — the per-location
-  table/graph view, `locations.html` — the locations editor, `style.css`,
-  `app.js`, `goodconditions.js`, `locationsadmin.js`, `charts.js` (shared
-  charting code used by `app.js`, `goodconditions.js`, and `live.js`) — the
+  location, shows a 24-hours-back/24-hours-forward graph), `index.html`/`week.js` —
+  Week Ahead (the site's home page — a horizontal timeline of upcoming
+  sessions across every tracked location), `conditions.html` — the
+  per-location table/graph view, `locations.html` — the locations editor,
+  `style.css`, `app.js`, `locationsadmin.js`, `charts.js` (shared charting
+  code used by `app.js`, `week.js`, and `live.js`) — the
   website itself (no build step, no dependencies)
 - `scripts/fetch_conditions.py` — fetches from WillyWeather, writes `data/conditions.json`
   (pure Python standard library only, no `pip install` needed)

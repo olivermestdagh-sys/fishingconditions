@@ -36,10 +36,10 @@ const TYPE_OPTIONS = ["Kayak", "Land based"];
 const SHORE_OPTIONS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
 
 // Which timing fields apply to each type. Drive time is no longer a static
-// setting here at all — the Trip Planner calculates it live from the
-// device's current location. Both types have a "getting to/from the actual
-// spot" step now — paddling for Kayak, walking from the carpark for Land
-// based (a real case: walking along the beach to a specific spot).
+// setting here at all — Week Ahead calculates it live from the device's
+// current location. Both types have a "getting to/from the actual spot"
+// step now — paddling for Kayak, walking from the carpark for Land based
+// (a real case: walking along the beach to a specific spot).
 const TYPE_TIME_FIELDS = {
   Kayak: [
     { key: "setUp", label: "Set up" },

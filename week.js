@@ -68,11 +68,9 @@ async function init() {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFilters(); }
   });
 
-  // Locations/types filters and Min Condition/Min Hours thresholds are
-  // shared with the Trip Planner (same localStorage keys, via charts.js) —
-  // changing them on one page is reflected on the other, since they're
-  // both fundamentally "find good sessions" tools working from the same
-  // underlying settings.
+  // Locations/types filters and Min Condition/Min Hours thresholds persist
+  // across visits (same localStorage keys, via charts.js), so they don't
+  // reset every time you come back to the page.
   let saved = null;
   try {
     saved = JSON.parse(localStorage.getItem(LOC_FILTER_STORAGE_KEY) || "null");
@@ -105,9 +103,9 @@ async function init() {
     if (savedThresholds.minHours != null) document.getElementById("minHours").value = savedThresholds.minHours;
   }
 
-  // Launch Time / Home By are shared with the Trip Planner (same
-  // localStorage key) — used here only to work out fishing/drive time when
-  // a tile's chart is opened, not to filter which sessions show.
+  // Launch Time / Home By persist across visits (same localStorage key as
+  // ever) — used here only to work out fishing/drive time when a tile's
+  // chart is opened, not to filter which sessions show.
   let savedTripTimes = null;
   try {
     savedTripTimes = JSON.parse(localStorage.getItem(TRIP_TIMES_STORAGE_KEY) || "null");
@@ -167,11 +165,11 @@ async function init() {
 
 /**
  * Groups rows by (location, type), computes qualifying windows for each via
- * the same shared computeWindowsForLocation() the Trip Planner uses, and —
- * unlike Trip Planner, which deliberately shows a card per day a session
- * touches — collapses each session down to ONE tile here, since a Gantt-
- * style timeline shows a session's span directly as its own width rather
- * than needing a separate card per day.
+ * the shared computeWindowsForLocation(), and collapses each session down
+ * to ONE tile — a session spanning several days would otherwise produce a
+ * separate window object per day it touches, but a Gantt-style timeline
+ * shows a session's span directly as its own width, so it only needs
+ * showing once, not once per day.
  */
 function computeWeekTiles() {
   const byLocation = {};
@@ -380,10 +378,10 @@ function renderWeekView() {
     const leftPx = ((dayMs - timelineStart) / 3600000) * PIXELS_PER_HOUR;
     const dayEndPx = Math.min(totalTrackWidth, leftPx + 24 * PIXELS_PER_HOUR);
 
-    // Alternating day tint, same palette Trip Planner uses for its own
-    // day-grouped cards — appended first so it sits behind the night/
-    // twilight shading below (plain DOM order controls stacking here,
-    // there's no z-index fight to worry about). Added for every day
+    // Alternating day tint, from the same palette used elsewhere on the
+    // site for day-grouped content — appended first so it sits behind the
+    // night/twilight shading below (plain DOM order controls stacking
+    // here, there's no z-index fight to worry about). Added for every day
     // regardless of whether sun data is available for it, unlike the
     // night/twilight bands below which need real sunrise/sunset times.
     const dayColor = DAY_COLORS[dayIndex % DAY_COLORS.length];
@@ -672,11 +670,10 @@ let weekScheduleRenderToken = 0;
 
 /**
  * Works out which stretch of rows a session's graph should cover — NOT
- * just that calendar day (which is what Trip Planner shows, since there
- * you've picked a specific day's card) — here we've picked a specific
- * SESSION, which can run for many hours or even days, so the graph needs
- * to span the session's own full duration, anchored to a meaningful
- * day/night boundary rather than an arbitrary clock time:
+ * just that calendar day, but the session's own full duration, since a
+ * session can run for many hours or even span several days. The range is
+ * anchored to a meaningful day/night boundary rather than an arbitrary
+ * clock time:
  *   - session starts in daylight -> start the graph at the PRIOR sunset
  *     (the previous evening's, since today's own sunset hasn't happened
  *     yet if the session is starting during the day)
@@ -755,18 +752,10 @@ function selectTile(t) {
 }
 
 /**
- * Fishing time / drive time, worked out exactly the way the Trip Planner
- * does — same computeSchedule()/getDriveTimeMinutes() from charts.js, same
- * Launch Time / Home By inputs (shared localStorage key, so a value set on
- * either page carries over to the other).
- */
-/**
- * Fishing time / drive time, worked out exactly the way the Trip Planner
- * does — same computeSchedule()/getDriveTimeMinutes() from charts.js, same
- * Launch Time / Home By inputs (shared localStorage key, so a value set on
- * either page carries over to the other). Shared between the modal and the
- * hover preview (different containerId per caller) — both show the same
- * schedule info, not just the modal.
+ * Fishing time / drive time — uses computeSchedule()/getDriveTimeMinutes()
+ * from charts.js, and the Launch Time / Home By inputs above. Shared
+ * between the modal and the hover preview (different containerId per
+ * caller) — both show the same schedule info, not just the modal.
  */
 async function renderWeekSchedule(loc, containerId) {
   const container = document.getElementById(containerId);
