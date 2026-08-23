@@ -340,12 +340,12 @@ function renderForLocation(loc) {
     moonPhases: liveData.moonPhases,
     minTideHeight: loc.minTideHeight,
     stopFishingTime,
-    compact: true,
+    compact: false,
   });
-  // The full chart (with axes) only gets built when the modal actually
-  // opens — no point maintaining a second live Chart.js instance the whole
-  // time when it might never be viewed. Stash what it'll need to re-render
-  // itself on demand.
+  // Full axes shown directly here too now, not just once the modal opens —
+  // no more stripped-down "compact" version anywhere on the site. Tapping
+  // still opens the modal (a bigger view), it's just no longer the only
+  // place axes show up.
   lastChartParams = { rows: windowRows, sunTimes, locationName: loc.name, tideMaxObserved: loc.tideMaxObserved, minTideHeight: loc.minTideHeight, stopFishingTime };
 
   if (windowRows.length === 0) {
