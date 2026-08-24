@@ -627,8 +627,8 @@ function renderPreviewContent(t, tileEl) {
   const preview = document.getElementById("weekHoverPreview");
 
   const tileRect = tileEl.getBoundingClientRect();
-  const previewWidth = 560;
-  const previewHeight = 460;
+  const previewWidth = 840;
+  const previewHeight = 690;
   let left = tileRect.left;
   let top = tileRect.bottom + 8;
   if (top + previewHeight > window.innerHeight) top = tileRect.top - previewHeight - 8;
