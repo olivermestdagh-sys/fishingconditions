@@ -282,6 +282,7 @@
         "timeToSpot": "00:10",
         "timeFromSpot": "00:10"
       }
-    ]
+    ],
+    "tidal": false
   }
 ]
