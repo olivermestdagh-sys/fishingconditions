@@ -743,8 +743,36 @@ function computeGraphRows(t) {
     }
   }
 
+  // Same reasoning, mirrored, for the end of the range — matches the Live
+  // page's own graph: the start reaches back through one full opposite-type
+  // period (day/night) before the session begins, so the end reaches
+  // forward through one full opposite-type period after it finishes, for
+  // balanced context on both sides rather than stopping abruptly the
+  // moment the session itself ends.
+  const endDateKey = new Date(t.to).toISOString().slice(0, 10);
+  const endSun = sunByDate.get(endDateKey);
+
+  let graphEnd = t.to;
+  if (endSun && endSun.sunrise != null && endSun.sunset != null) {
+    const endSunriseMs = parseNaive(endSun.sunrise);
+    const endSunsetMs = parseNaive(endSun.sunset);
+    const endIsDaytime = t.to >= endSunriseMs && t.to < endSunsetMs;
+
+    if (endIsDaytime) {
+      const nextDateKey = new Date(t.to + 86400000).toISOString().slice(0, 10);
+      const nextSun = sunByDate.get(nextDateKey);
+      graphEnd = nextSun && nextSun.sunrise != null ? parseNaive(nextSun.sunrise) : endSunsetMs;
+    } else if (t.to < endSunriseMs) {
+      graphEnd = endSunsetMs;
+    } else {
+      const nextDateKey = new Date(t.to + 86400000).toISOString().slice(0, 10);
+      const nextSun = sunByDate.get(nextDateKey);
+      graphEnd = nextSun && nextSun.sunset != null ? parseNaive(nextSun.sunset) : endSunriseMs;
+    }
+  }
+
   return allRows
-    .filter((r) => r["Location Name"] === t.locationName && r["Type"] === t.type && r._t >= graphStart && r._t <= t.to)
+    .filter((r) => r["Location Name"] === t.locationName && r["Type"] === t.type && r._t >= graphStart && r._t <= graphEnd)
     .sort((a, b) => a._t - b._t);
 }
 
