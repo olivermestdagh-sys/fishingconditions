@@ -270,5 +270,18 @@
         "timeFromSpot": "00:20"
       }
     ]
+  },
+  {
+    "name": "Metung, VIC 3904",
+    "shore": "W",
+    "types": [
+      {
+        "type": "Kayak",
+        "setUp": "00:20",
+        "packUp": "00:20",
+        "timeToSpot": "00:10",
+        "timeFromSpot": "00:10"
+      }
+    ]
   }
 ]
