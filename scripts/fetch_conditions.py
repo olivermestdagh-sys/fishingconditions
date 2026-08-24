@@ -778,6 +778,16 @@ def process_location(loc):
     name = loc["name"]
     shore = loc.get("shore")
     types = loc.get("types") or []
+    # Inland locations (rivers, lakes) have no real tide — rather than
+    # trust the tide/marine-current APIs to correctly return nothing for
+    # an inland coordinate (WillyWeather or Open-Meteo could just as
+    # plausibly snap to the nearest coastal station/grid cell and return
+    # real-looking but meaningless data), this is explicit and absolute:
+    # every tide-derived field gets stripped below for such a location,
+    # regardless of what the APIs actually returned. Defaults to True so
+    # every existing (coastal) location is unaffected without needing to
+    # be individually re-saved through the location editor.
+    location_is_tidal = loc.get("tidal", True)
 
     match = search_location(name)
     matched_name = match.get("name") if match else None
@@ -799,11 +809,21 @@ def process_location(loc):
 
     pressure_by_date = daily_averages(get_pressure_forecast(lat, lng))
     sst_hourly, current_velocity_hourly, current_direction_hourly = get_marine_forecast(lat, lng)
+    if not location_is_tidal:
+        current_velocity_hourly = {}
+        current_direction_hourly = {}
     sst_by_date = daily_averages(sst_hourly)
     velocity_by_hour = hourly_lookup(current_velocity_hourly)
     direction_by_hour = hourly_lookup(current_direction_hourly)
 
     raw_readings = build_readings(weather)
+    if not location_is_tidal:
+        # Filtered at the source, not after the fact — Tide Status below is
+        # DERIVED from these two raw series (a location's actual tide
+        # events), so stripping the derived field afterward wouldn't stick;
+        # the derivation loop would just recompute it from these same
+        # readings and overwrite the strip.
+        raw_readings = [r for r in raw_readings if r[0] not in ("Tide Height (m)", "Tide Type")]
 
     # Pivot: group by normalized DateTime into one record per timestamp
     by_dt = {}
