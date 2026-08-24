@@ -712,7 +712,67 @@ function bucketRowsHourly(rows) {
   return result.sort((a, b) => a._t - b._t);
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact }) {
+// Session-span highlight — Week Ahead specific (sessionFrom/sessionTo are
+// only ever passed there; every other caller leaves them undefined, in
+// which case this draws nothing). The graph itself is deliberately wider
+// than the qualifying session (extended through a full day/night period on
+// each side for context), so this marks which part of that wider view is
+// actually the session: a light tint plus bracketing lines at the exact
+// start/end, both in the site's established "good condition" green so
+// they read as "this is the highlighted part", not as another day/night
+// band or a warning threshold like the other overlay lines on this chart.
+const SESSION_SPAN_COLOR = "#16a34a";
+
+function buildSessionSpanPlugin(sessionFrom, sessionTo) {
+  return {
+    id: "sessionSpan",
+    beforeDraw(chart) {
+      if (sessionFrom == null || sessionTo == null) return;
+      const { ctx, chartArea, scales } = chart;
+      if (!chartArea || !scales.x) return;
+      const { top, bottom } = chartArea;
+      const clampedFrom = Math.max(sessionFrom, scales.x.min);
+      const clampedTo = Math.min(sessionTo, scales.x.max);
+      if (clampedTo <= clampedFrom) return;
+      const xStart = scales.x.getPixelForValue(clampedFrom);
+      const xEnd = scales.x.getPixelForValue(clampedTo);
+      ctx.save();
+      ctx.fillStyle = "rgba(22, 163, 74, 0.14)";
+      ctx.fillRect(xStart, top, xEnd - xStart, bottom - top);
+      ctx.restore();
+    },
+    afterDraw(chart) {
+      if (sessionFrom == null || sessionTo == null) return;
+      const { ctx, chartArea, scales } = chart;
+      if (!chartArea || !scales.x) return;
+      const { top, bottom } = chartArea;
+      [
+        { t: sessionFrom, label: "Session start" },
+        { t: sessionTo, label: "Session end" },
+      ].forEach(({ t, label }) => {
+        if (t < scales.x.min || t > scales.x.max) return;
+        const x = scales.x.getPixelForValue(t);
+        ctx.save();
+        ctx.strokeStyle = SESSION_SPAN_COLOR;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, bottom);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = "700 9px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillStyle = SESSION_SPAN_COLOR;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(label, x, bottom - 2);
+        ctx.restore();
+      });
+    },
+  };
+}
+
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -810,6 +870,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
     data: { datasets },
     plugins: [
       buildDayBandPlugin(rows, sunTimes, locationName, moonPhases),
+      buildSessionSpanPlugin(sessionSpan ? sessionSpan.from : null, sessionSpan ? sessionSpan.to : null),
       buildConditionStripsPlugin(rows, isMobile),
       buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime),
       // Skipped in compact mode — nothing to label when there are no axes.
