@@ -75,6 +75,7 @@ file → pencil icon to edit → commit):
 {
   "name": "Lang Lang Boat Ramp, VIC",
   "shore": "E",
+  "tidal": true,
   "types": [
     {
       "type": "Kayak",
@@ -97,12 +98,19 @@ file → pencil icon to edit → commit):
 
 A single physical location can have **multiple types** — the same boat ramp
 might work for both kayak launching and shore fishing, each scored and
-timed independently. `name`/`shore`/coordinates are shared (it's the same
-GPS point either way); everything inside each `types[]` entry — timings,
-`minTideHeight` — is specific to that one activity. `type` must be exactly
-`"Kayak"` or `"Land based"`. Land based reuses the same wind/shore-angle
-formula that used to be called "Surf" — genuinely the same scoring, just
-relabeled; Kayak's formula (wind speed/direction plus the wind-against-current
+timed independently. `name`/`shore`/`tidal`/coordinates are shared (it's the
+same GPS point either way); everything inside each `types[]` entry —
+timings, `minTideHeight` — is specific to that one activity. `type` must be
+exactly `"Kayak"` or `"Land based"`. `tidal` defaults to `true` if omitted
+(every existing coastal location is unaffected without needing to be
+individually updated) — set it to `false` for an inland river or lake with
+no real tide, and every tide-derived input (tide status/height, tidal
+current, the wind-against-current penalty) is stripped from that
+location's scoring entirely, regardless of what the tide/marine-current
+APIs happen to return for that coordinate. Land based reuses the same
+wind/shore-angle formula that used to be called "Surf" — genuinely the same
+scoring, just relabeled; Kayak's formula (wind speed/direction plus the
+wind-against-current
 penalty) is a different calculation and doesn't apply to Land based at all.
 Both types have Time to Spot/Time From Spot — paddling for Kayak, walking
 from the carpark to the actual spot for Land based.
