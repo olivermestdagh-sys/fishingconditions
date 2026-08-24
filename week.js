@@ -659,6 +659,7 @@ function renderPreviewContent(t, tileEl) {
     moonPhases: moonPhasesData,
     minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
     compact: false, // full axes on both hover and pinned — no stripped-down "quick glance" version
+    sessionSpan: { from: t.from, to: t.to },
   });
 
   renderWeekSchedule(matchedLoc, "weekPreviewScheduleContainer").then(() => {
@@ -805,6 +806,7 @@ function selectTile(t) {
     moonPhases: moonPhasesData,
     minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
     compact: false,
+    sessionSpan: { from: t.from, to: t.to },
   });
 
   renderWeekSchedule(matchedLoc, "weekScheduleContainer").then(() => {
