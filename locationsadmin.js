@@ -167,6 +167,12 @@ function renderRows() {
             ${SHORE_OPTIONS.map((s) => `<option value="${s}" ${loc.shore === s ? "selected" : ""}>${s}</option>`).join("")}
           </select>
         </div>
+        <div style="min-width:140px;display:flex;align-items:flex-end;padding-bottom:8px;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;cursor:pointer;">
+            <input type="checkbox" data-boolfield="tidal" data-idx="${i}" ${loc.tidal === false ? "" : "checked"} />
+            Affected by tides
+          </label>
+        </div>
         <button data-remove-loc="${i}" class="btn-secondary" style="height:38px;">Remove location</button>
       </div>
 
@@ -232,6 +238,14 @@ function wireRowListeners(list) {
       const idx = Number(e.target.dataset.idx);
       const field = e.target.dataset.field;
       locations[idx][field] = e.target.value;
+    });
+  });
+
+  list.querySelectorAll("input[data-boolfield]").forEach((el) => {
+    el.addEventListener("change", (e) => {
+      const idx = Number(e.target.dataset.idx);
+      const field = e.target.dataset.boolfield;
+      locations[idx][field] = e.target.checked;
     });
   });
 
