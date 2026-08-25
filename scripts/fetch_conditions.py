@@ -118,8 +118,9 @@ def normalize_open_meteo_dt(t):
 
 def hourly_lookup(hourly_dict):
     """Given {iso_string: value}, returns {'YYYY-MM-DD HH': value} — for
-    values scored hour by hour (current velocity/direction), unlike
-    pressure/water-temperature which are scored as a daily figure."""
+    values scored/plotted hour by hour (current velocity/direction, water
+    temperature), unlike pressure which is only ever scored as a daily
+    figure."""
     result = {}
     for t, v in hourly_dict.items():
         dt = normalize_open_meteo_dt(t)
@@ -813,6 +814,12 @@ def process_location(loc):
         current_velocity_hourly = {}
         current_direction_hourly = {}
     sst_by_date = daily_averages(sst_hourly)
+    # Per-hour lookup too, not just the daily average used for scoring —
+    # this is what lets the graph draw a real Water Temp line rather than
+    # a single flat value repeated across the whole day. Same "YYYY-MM-DD HH"
+    # keying as the current velocity/direction lookups below, so all three
+    # attach to a row the same way.
+    sst_by_hour = hourly_lookup(sst_hourly)
     velocity_by_hour = hourly_lookup(current_velocity_hourly)
     direction_by_hour = hourly_lookup(current_direction_hourly)
 
@@ -888,6 +895,25 @@ def process_location(loc):
         row["Matched Name"] = matched_name
         row["Region"] = region
         row["State"] = state
+
+        # Sea surface temperature, attached per hourly row (not just the
+        # daily average used for scoring) — this is what the graph plots as
+        # the "Water Temp (°C)" line. Physical, not type-specific, so it's
+        # set once here and shared by every type variant below, same as
+        # Tide Status/Height. Not stripped by the non-tidal flag the way
+        # tide/current data is — sea surface temperature isn't a
+        # TIDE-derived field (it doesn't depend on tidal current at all),
+        # so an inland location with tidal:false still gets whatever the
+        # Marine API resolves for its nearest-sea grid cell. That's usually
+        # sensible for a coastal river mouth; for a genuinely inland spot
+        # far from the coast, Open-Meteo's cell_selection=sea forces it to
+        # snap to *some* sea pixel regardless of distance, so treat this
+        # line as unreliable/ignorable for such a location rather than
+        # meaningful — a known trade-off, not a bug, since there's no clean
+        # way to tell "near-coast inland" from "deep inland" from
+        # coordinates alone.
+        hour_key = row["dateTime"][:13].replace("T", " ")
+        row["Water Temp (C)"] = sst_by_hour.get(hour_key)
 
     # Fishing Condition needs each day's tide RANGE, which needs every row's
     # Tide Status already resolved (the loop just above) — hence a second
