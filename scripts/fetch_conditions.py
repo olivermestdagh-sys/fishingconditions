@@ -118,9 +118,12 @@ def normalize_open_meteo_dt(t):
 
 def hourly_lookup(hourly_dict):
     """Given {iso_string: value}, returns {'YYYY-MM-DD HH': value} — for
-    values scored/plotted hour by hour (current velocity/direction, water
-    temperature), unlike pressure which is only ever scored as a daily
-    figure."""
+    values plotted hour by hour on the graph (current velocity/direction,
+    water temperature, pressure). Pressure and water temperature ALSO get
+    run through daily_averages() below for their own separate purpose
+    (Fishing Condition scoring, which deliberately works at a daily-trend
+    granularity, not hour by hour) — the two functions aren't alternatives,
+    most hourly fields feed both."""
     result = {}
     for t, v in hourly_dict.items():
         dt = normalize_open_meteo_dt(t)
@@ -808,7 +811,13 @@ def process_location(loc):
     sun_times = extract_sun_times(weather)
     sun_by_date = {s["date"]: s for s in sun_times}
 
-    pressure_by_date = daily_averages(get_pressure_forecast(lat, lng))
+    pressure_hourly = get_pressure_forecast(lat, lng)
+    pressure_by_date = daily_averages(pressure_hourly)
+    # Per-hour lookup too, not just the daily average used for scoring — same
+    # reasoning as sst_by_hour just below: this is what lets the graph draw a
+    # real Pressure line rather than a single flat value repeated across the
+    # whole day.
+    pressure_by_hour = hourly_lookup(pressure_hourly)
     sst_hourly, current_velocity_hourly, current_direction_hourly = get_marine_forecast(lat, lng)
     if not location_is_tidal:
         current_velocity_hourly = {}
@@ -914,6 +923,14 @@ def process_location(loc):
         # coordinates alone.
         hour_key = row["dateTime"][:13].replace("T", " ")
         row["Water Temp (C)"] = sst_by_hour.get(hour_key)
+
+        # Barometric pressure, same treatment as water temp just above —
+        # pressure_by_date (the daily average) already feeds the Fishing
+        # Condition score, but that's a single flat number per day. This is
+        # the actual hourly curve, for the graph's Pressure line. Land-based
+        # weather, not tide-derived, so — like water temp — it's unaffected
+        # by the non-tidal flag.
+        row["Pressure (hPa)"] = pressure_by_hour.get(hour_key)
 
     # Fishing Condition needs each day's tide RANGE, which needs every row's
     # Tide Status already resolved (the loop just above) — hence a second
