@@ -290,7 +290,31 @@ function findTideThresholdCrossings(rows, threshold) {
     const h2 = tideRows[i + 1]["Tide Height (m)"];
     const t1 = tideRows[i]._t;
     const t2 = tideRows[i + 1]._t;
-    if (h1 === threshold || h2 === threshold || h1 === h2) continue; // avoid degenerate/duplicate crossings
+    if (h1 === h2) continue; // genuinely flat segment — no crossing possible
+
+    // Server-side tide heights are cosine-interpolated and rounded to 2dp
+    // (see fetch_conditions.py), and ramp thresholds are typically set as
+    // round numbers too (1.8m, 2.1m) — so a reading landing EXACTLY on the
+    // threshold is common, not a rare edge case. h1 === threshold is always
+    // the same reading as the previous iteration's h2, so skip it here to
+    // avoid reporting the same moment twice; it was (or wasn't — see below)
+    // already handled when this reading was h2.
+    if (h1 === threshold) continue;
+
+    if (h2 === threshold) {
+      // This reading itself IS the crossing point. Look one reading further
+      // ahead (if there is one) to tell a genuine crossing from a
+      // touch-and-reverse — the tide kissing the threshold, then heading
+      // back the way it came without ever really crossing it.
+      const h3 = i + 2 < tideRows.length ? tideRows[i + 2]["Tide Height (m)"] : null;
+      const cameFromBelow = h1 < threshold;
+      const continuesPast = h3 == null || (cameFromBelow ? h3 >= threshold : h3 <= threshold);
+      if (continuesPast) {
+        crossings.push({ t: t2, becomingAccessible: cameFromBelow });
+      }
+      continue;
+    }
+
     const above1 = h1 > threshold;
     const above2 = h2 > threshold;
     if (above1 !== above2) {
