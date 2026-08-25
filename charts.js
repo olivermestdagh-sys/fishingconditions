@@ -694,7 +694,7 @@ function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases) {
 const HOURLY_NUMERIC_FIELDS = [
   "Temp Forecast (C)", "Temp Realtime (C)", "Rainfall Probability (%)",
   "Wind Forecast (km/h)", "Wind Realtime (km/h)", "Tide Height (m)",
-  "Water Temp (C)", "Condition", "Fishing Condition",
+  "Water Temp (C)", "Pressure (hPa)", "Condition", "Fishing Condition",
 ];
 
 /**
@@ -818,8 +818,8 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   // tide data at all (older cached data, or no nearby tide station).
   const tideAxisMax = tideMaxObserved != null ? Math.round(tideMaxObserved * 1.15 * 100) / 100 : 3.5;
   const L = isMobile
-    ? { tempFcst: "Tmp Fcst", tempNow: "Tmp Now", rain: "Rain %", windFcst: "Wind Fcst", windNow: "Wind Now", tide: "Tide", waterTemp: "Water °C" }
-    : { tempFcst: "Temp Forecast (°C)", tempNow: "Temp Realtime (°C)", rain: "Rainfall Probability (%)", windFcst: "Wind Forecast (km/h)", windNow: "Wind Realtime (km/h)", tide: "Tide Height (m)", waterTemp: "Water Temp (°C)" };
+    ? { tempFcst: "Tmp Fcst", tempNow: "Tmp Now", rain: "Rain %", windFcst: "Wind Fcst", windNow: "Wind Now", tide: "Tide", waterTemp: "Water °C", pressure: "Pressure" }
+    : { tempFcst: "Temp Forecast (°C)", tempNow: "Temp Realtime (°C)", rain: "Rainfall Probability (%)", windFcst: "Wind Forecast (km/h)", windNow: "Wind Realtime (km/h)", tide: "Tide Height (m)", waterTemp: "Water Temp (°C)", pressure: "Pressure (hPa)" };
 
   const pointsFor = (field) => rows.map((r) => ({ x: r._t, y: r[field] ?? null }));
 
@@ -900,6 +900,23 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       yAxisID: "yTide",
       tension: 0.4,
     },
+    {
+      // Mean sea-level pressure, from Open-Meteo (the same hourly series
+      // whose daily average already feeds the Fishing Condition score's
+      // pressure factor). Its own hidden axis, same treatment as yTide —
+      // hPa has no natural shared axis with anything else on this chart
+      // (not Celsius, not km/h, not a percentage), and a full visible axis
+      // for one supplementary trend line would be more clutter than the
+      // line is worth. Plain black and thin so it reads as a subtle
+      // reference line, not another line competing with wind/rain/tide.
+      label: L.pressure,
+      data: pointsFor("Pressure (hPa)"),
+      borderColor: "#000000",
+      borderWidth: 1,
+      pointRadius: 0,
+      yAxisID: "yPressure",
+      tension: 0.3,
+    },
   ];
 
   const minT = rows[0]._t;
@@ -954,6 +971,18 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
           position: "left",
           min: 0,
           max: tideAxisMax,
+        },
+        yPressure: {
+          // Always hidden, same reasoning as yTide above — the line itself
+          // (a thin black trend) is the point, not a readable number scale.
+          // Fixed 970-1050hPa range (not per-location calibrated, unlike
+          // yTide) — pressure swings are weather-driven, not a property of
+          // the location, so one sensible fixed range covering the real
+          // range Victoria sees suits every location equally well.
+          display: false,
+          position: "left",
+          min: 970,
+          max: 1050,
         },
       },
       plugins: {

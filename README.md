@@ -244,6 +244,22 @@ hourly (see "Where the '24 hours before now' data actually comes from"),
 and carried forward through the same rolling-history mechanism so the
 Live page's "24 hours before now" side has a real line too, not just a gap.
 
+## Barometric pressure on the graph
+
+Mean sea-level pressure (from Open-Meteo, the same hourly series whose
+daily average already feeds the Fishing Condition score's pressure
+factor) is drawn as a thin black line on every Conditions graph. Unlike
+water temperature, pressure doesn't share a unit with anything else
+already on the chart (not Celsius, not km/h, not a percentage), so it
+gets its own axis rather than piggybacking on an existing one — but like
+the tide axis, that axis is hidden. The line's shape is the point, not
+readable hPa numbers, and a visible axis for one supplementary trend line
+would be more clutter than it's worth. The hidden axis uses a fixed
+970–1050hPa range rather than a per-location calibrated one (unlike
+tide's own axis) — pressure swings are driven by the weather passing
+through, not a property of any particular location, so one sensible fixed
+range suits every location equally well.
+
 ## Moon phase
 
 A moon icon is drawn above the date heading at the top of every day on
