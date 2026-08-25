@@ -107,7 +107,11 @@ individually updated) — set it to `false` for an inland river or lake with
 no real tide, and every tide-derived input (tide status/height, tidal
 current, the wind-against-current penalty) is stripped from that
 location's scoring entirely, regardless of what the tide/marine-current
-APIs happen to return for that coordinate. Land based reuses the same
+APIs happen to return for that coordinate. Sea surface temperature (the
+Water Temp graph line, see below) is fetched regardless of `tidal` — it
+isn't a tide-derived field — so treat it as unreliable for a genuinely
+inland location, since Open-Meteo's marine API always snaps to the nearest
+sea grid cell however far away that actually is. Land based reuses the same
 wind/shore-angle formula that used to be called "Surf" — genuinely the same
 scoring, just relabeled; Kayak's formula (wind speed/direction plus the
 wind-against-current
@@ -223,6 +227,22 @@ left, in metres), calibrated to each location's own real observed range
 rather than a single fixed scale — Western Port's ~3m swings and Port
 Phillip Bay's sub-1m ones would otherwise either clip the former or make
 the latter unreadable.
+
+## Water temperature on the graph
+
+Sea surface temperature (from Open-Meteo's Marine API, the same source
+used for the Fishing Condition's water-temp-trend factor) is drawn as a
+thin light blue line on every Conditions graph, sharing the left-hand
+Celsius axis with air temperature rather than getting its own axis — same
+unit, similar real-world range, and a seventh axis would be one too many.
+It's deliberately understated (thin, no point markers) — a line to glance
+at alongside air temperature, not something meant to compete visually with
+the wind/rain/tide lines that actually drive the Location/Fishing
+Condition scores. Like every other hourly field on this site, it's
+averaged down to one value per hour when today's readings are denser than
+hourly (see "Where the '24 hours before now' data actually comes from"),
+and carried forward through the same rolling-history mechanism so the
+Live page's "24 hours before now" side has a real line too, not just a gap.
 
 ## Moon phase
 
