@@ -582,9 +582,12 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
       // Same reasoning as the earlier per-tile version: the date/moon are
       // already shown once in the shared header above every row, so
       // repeating them per row (now potentially many days wide) would
-      // just be clutter.
+      // just be clutter. Same for sunrise/sunset — the header's own
+      // markers are the shared reference point; repeating them inside
+      // each row's chart just adds noise across a now-multi-day-wide graph.
       moonPhases: null,
       showDayHeading: false,
+      showSunTimes: false,
       compact: true,
       sessionSpan: sessions.map((s) => ({ from: s.from, to: s.to })),
       xRange: { min: timelineStart, max: timelineEnd },
