@@ -1,29 +1,30 @@
-// Week Ahead (new) — experimental replacement for week.js, built to try
-// out embedding the real conditions graph directly into each session tile
-// instead of a stat-panel tile that opens a graph on hover/click.
+// Week Ahead (new) — row-per-location layout. Every location passing the
+// Location/Type filters gets its own always-visible conditions graph,
+// spanning the SAME fixed [timelineStart, timelineEnd] range as every
+// other row (unlike the earlier per-session-tile version of this page,
+// where each tile's own width/range depended on that session's own
+// sun-anchored context — the cause of the "long sessions stretch the
+// layout" and "things don't quite line up" problems that version had).
+// Any qualifying session(s) for a location are shaded on top of its
+// always-visible graph via the shared session-span plugin (charts.js),
+// which now supports more than one span per chart — a location can have
+// zero, one, or several separate qualifying windows across the displayed
+// period.
 //
-// Deliberately does NOT have: hover-preview, click-to-open modal, or the
-// sticky-tile-content trick (background-photo split) that week.js/index.html
-// use — none of those apply once the tile's content IS the graph rather
-// than a small stat panel that expands into one elsewhere. Trip schedule
-// (fishing/drive time) is also dropped from this page entirely: it was
-// only ever shown inside the modal/preview this page no longer has.
+// Locations can be pinned (star icon, in both the filter chips and each
+// row's own header) to float to the top of the list, ahead of the
+// unpinned locations below — a lighter-weight alternative to full
+// drag-and-drop reordering. Pin state persists in localStorage, separate
+// from the shared location/type/threshold keys (charts.js), since pinning
+// is specific to this page's layout.
 //
-// Everything about the timeline itself — day/night shading, the sticky
-// date/moon/hour header row, lane packing, PIXELS_PER_HOUR scaling,
-// Location/Type filters, Min Condition/Min Hours thresholds — is carried
-// over unchanged from week.js, since none of that is tile-content-specific.
+// Still deliberately does NOT have: hover-preview, click-to-open modal,
+// the old per-tile sticky-content trick, or trip schedule — none of that
+// applies to an always-visible row-per-location layout either.
 
 const DATA_URL = "data/conditions.json";
 const PIXELS_PER_HOUR = 32;
-// Floor so a tile never collapses to an unreadably narrow sliver — in
-// practice a tile's real width (see computeGraphBounds below) is almost
-// always well over this once it's been extended to the nearest sunrise/
-// sunset boundary on each side, so this only bites in the rare case where
-// a location has no sun-times data at all and the graph falls back to just
-// the session's own (possibly short) span.
-const MIN_TILE_WIDTH = 240;
-const LANE_GAP = 10; // minimum pixel gap required between two tiles sharing a lane
+const SIDEBAR_WIDTH = 220; // px — the frozen left-hand column showing each row's location name/pin/sessions
 
 let allRows = [];
 let allLocations = [];
@@ -31,21 +32,54 @@ let sunTimesData = {};
 let moonPhasesData = {};
 let selectedLocations = new Set();
 let selectedTypes = new Set(["Kayak", "Land based"]);
-let dayLabelsForStickyScroll = []; // rebuilt each render() — see the horizontal-sticky scroll handler below
+let pinnedOrder = []; // location NAMES, in the order they were pinned — oldest pin first
 
-// Chart.js instances currently on screen — one per visible graph tile, torn
-// down and rebuilt every renderWeekView() call (filters/thresholds changing,
-// or the periodic data refresh). Chart.js doesn't garbage-collect an
-// instance just because its canvas got removed from the DOM, so these must
-// be destroyed explicitly or every re-render leaks the previous batch.
-let activeTileCharts = [];
+// Chart.js instances currently on screen — one per visible location row,
+// torn down and rebuilt every renderWeekView() call. Chart.js doesn't
+// garbage-collect an instance just because its canvas left the DOM, so
+// these must be destroyed explicitly or every re-render leaks the last one.
+let activeRowCharts = [];
+
+const PINNED_LOCATIONS_STORAGE_KEY = "goodConditionsPinnedLocationsNew";
+
+function loadPinnedOrder() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PINNED_LOCATIONS_STORAGE_KEY) || "null");
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistPinnedOrder() {
+  localStorage.setItem(PINNED_LOCATIONS_STORAGE_KEY, JSON.stringify(pinnedOrder));
+}
+
+/**
+ * Pinning is keyed by location NAME, not (name, type) — matching how the
+ * existing location filter chips already work (one chip per physical
+ * spot, deduped across its Kayak/Land based entries). Pinning "Corinella
+ * Boat Ramp" floats BOTH its Kayak and Land based rows to the top
+ * together, rather than needing to pin each type separately.
+ */
+function togglePin(name) {
+  const idx = pinnedOrder.indexOf(name);
+  if (idx === -1) {
+    pinnedOrder.push(name);
+  } else {
+    pinnedOrder.splice(idx, 1);
+  }
+  persistPinnedOrder();
+  renderLocationChipsWithPins();
+  renderWeekView();
+}
 
 /**
  * Turns a hidden number input into a stepper: a circular badge (styled
- * like the Location/Fishing rating circles on session tiles) showing the
+ * like the Location/Fishing rating circles on session rows) showing the
  * current value, with +/− buttons either side. For Min Condition, the
  * badge is colored via conditionColor() — the exact same function that
- * colors those tile badges — so a "3.0" here looks like a "3.0" would
+ * colors those row badges — so a "3.0" here looks like a "3.0" would
  * anywhere else on the page. Min consecutive hours isn't a 1-5 condition
  * rating, so colorFn is null there — same badge shape, fixed neutral color
  * (see .rating-stepper-badge-neutral), purely for visual consistency.
@@ -113,7 +147,8 @@ async function init() {
   // Locations/types filters and Min Condition/Min Hours thresholds persist
   // across visits (same localStorage keys as week.js, via charts.js) —
   // shared with the original Week Ahead page on purpose, since they're the
-  // same underlying settings, not a separate copy for this page.
+  // same underlying settings, not a separate copy for this page. Pin
+  // order (below) is its own separate key, specific to this page's layout.
   let saved = null;
   try {
     saved = JSON.parse(localStorage.getItem(LOC_FILTER_STORAGE_KEY) || "null");
@@ -146,162 +181,159 @@ async function init() {
     if (savedThresholds.minHours != null) document.getElementById("minHours").value = savedThresholds.minHours;
   }
 
-  renderLocationChips(allLocations, selectedLocations, renderWeekView);
+  // Drop any pinned name that no longer exists in the data (a location was
+  // renamed/removed in Settings since the last visit) — same defensive
+  // pattern as the saved-locations filter above.
+  pinnedOrder = loadPinnedOrder().filter((n) => allNames.includes(n));
+
+  renderLocationChipsWithPins();
   renderTypeChips(selectedTypes, renderWeekView);
   document.getElementById("btnLocAll").addEventListener("click", () => {
     selectedLocations = new Set(allLocations.map((l) => l.name));
     persistSelectedLocations(selectedLocations);
-    renderLocationChips(allLocations, selectedLocations, renderWeekView);
+    renderLocationChipsWithPins();
     renderWeekView();
   });
   document.getElementById("btnLocNone").addEventListener("click", () => {
     selectedLocations = new Set();
     persistSelectedLocations(selectedLocations);
-    renderLocationChips(allLocations, selectedLocations, renderWeekView);
+    renderLocationChipsWithPins();
     renderWeekView();
   });
 
   wireThresholdStepper("minCondition", 0.1, 1, 5, conditionColor);
   wireThresholdStepper("minHours", 1, 1, 24, null);
 
-  document.getElementById("weekTimelineScroll").addEventListener("scroll", updateStickyDayLabels);
-
   renderWeekView();
 }
 
 /**
- * Groups rows by (location, type), computes qualifying windows for each via
- * the shared computeWindowsForLocation(), and collapses each session down
- * to ONE tile — a session spanning several days would otherwise produce a
- * separate window object per day it touches, but a Gantt-style timeline
- * shows a session's span directly as its own width, so it only needs
- * showing once, not once per day.
+ * Same idea as charts.js's shared renderLocationChips, but with a pin/star
+ * button on each chip too — kept as its own page-local copy rather than
+ * extending the shared function, so week.js (and any other page using the
+ * shared chips) is completely unaffected by this page's pinning feature.
+ * The star and the chip's own select/deselect are separate click targets
+ * (the star calls stopPropagation) so tapping one never triggers the other.
  */
-function computeWeekTiles() {
-  const byLocation = {};
-  for (const r of allRows) {
-    const name = r["Location Name"];
-    const type = r["Type"];
-    if (!selectedLocations.has(name)) continue;
-    if (!selectedTypes.has(type)) continue;
-    const key = `${name}::${type}`;
-    (byLocation[key] || (byLocation[key] = [])).push(r);
-  }
+function renderLocationChipsWithPins() {
+  const container = document.getElementById("locationChips");
+  container.innerHTML = "";
+  const seenNames = new Set();
+  for (const loc of allLocations) {
+    if (seenNames.has(loc.name)) continue;
+    seenNames.add(loc.name);
 
+    const chip = document.createElement("span");
+    chip.className = "loc-chip weeknew-chip" + (selectedLocations.has(loc.name) ? " active" : "");
+
+    const star = document.createElement("button");
+    star.type = "button";
+    star.className = "weeknew-pin-btn" + (pinnedOrder.includes(loc.name) ? " pinned" : "");
+    star.setAttribute("aria-label", pinnedOrder.includes(loc.name) ? `Unpin ${loc.name}` : `Pin ${loc.name} to top`);
+    star.textContent = pinnedOrder.includes(loc.name) ? "★" : "☆";
+    star.addEventListener("click", (e) => {
+      e.stopPropagation();
+      togglePin(loc.name);
+    });
+    chip.appendChild(star);
+
+    const label = document.createElement("button");
+    label.type = "button";
+    label.className = "weeknew-chip-label";
+    label.textContent = loc.name;
+    label.addEventListener("click", () => {
+      if (selectedLocations.has(loc.name)) {
+        selectedLocations.delete(loc.name);
+      } else {
+        selectedLocations.add(loc.name);
+      }
+      persistSelectedLocations(selectedLocations);
+      chip.classList.toggle("active");
+      renderWeekView();
+    });
+    chip.appendChild(label);
+
+    container.appendChild(chip);
+  }
+}
+
+/**
+ * Pinned locations first (in the order they were pinned), then everything
+ * else in their normal default order — which is simply the order
+ * locations already appear in config/locations.json (i.e. whatever order
+ * is already maintained via the Settings page), not a new sort invented
+ * here. Array.prototype.sort is stable, so within each group (pinned /
+ * unpinned) relative order is otherwise preserved.
+ */
+function sortLocationsForDisplay(locationEntries) {
+  const pinned = [];
+  const rest = [];
+  for (const loc of locationEntries) {
+    if (pinnedOrder.includes(loc.name)) pinned.push(loc); else rest.push(loc);
+  }
+  pinned.sort((a, b) => pinnedOrder.indexOf(a.name) - pinnedOrder.indexOf(b.name));
+  return [...pinned, ...rest];
+}
+
+/**
+ * One entry per (location, type) that passes the current filters, each
+ * with its own list of qualifying sessions (zero, one, or several) within
+ * the displayed period — computed the same way as the old Week Ahead page
+ * (computeWindowsForLocation, shared in charts.js), just no longer
+ * collapsed into "one tile per session"; here every session for the same
+ * location lands on that location's single row.
+ */
+function computeLocationRows() {
+  const nowLocal = new Date();
   const minCondition = Number(document.getElementById("minCondition").value) || 1;
   const minHours = Number(document.getElementById("minHours").value) || 1;
-  const nowLocal = new Date();
 
-  const tiles = [];
-  for (const key in byLocation) {
-    const locRows = byLocation[key];
+  const filtered = allLocations.filter((loc) => selectedLocations.has(loc.name) && selectedTypes.has(loc.type));
+  const ordered = sortLocationsForDisplay(filtered);
+
+  return ordered.map((loc) => {
+    const locRows = allRows.filter((r) => r["Location Name"] === loc.name && r["Type"] === loc.type);
     const windows = computeWindowsForLocation(locRows, minCondition, minHours);
     const seenSpans = new Set();
+    const sessions = [];
     for (const w of windows) {
       if (naiveMsToLocalDate(w.to) < nowLocal) continue; // already finished
       const spanKey = `${w.from}::${w.to}`;
       if (seenSpans.has(spanKey)) continue; // same session, different day-anchor duplicate
       seenSpans.add(spanKey);
-      tiles.push({
+      sessions.push({
         ...w,
         avgCondition: average(locRows, "Condition", w.from, w.to),
         avgFishingCondition: average(locRows, "Fishing Condition", w.from, w.to),
       });
     }
-  }
-  return tiles;
+    return { loc, locRows, sessions };
+  });
 }
 
 /**
- * Works out the sun-anchored [graphStart, graphEnd] range a session's graph
- * should cover — NOT just that calendar day, but reaching back/forward
- * through one full opposite-type (day/night) period on each side of the
- * session itself, for context. Split out from the row-filtering step below
- * (computeGraphRows) because renderWeekView needs just these two
- * timestamps up front, to size and position the tile, before any row data
- * or chart rendering is needed.
- *   - session starts in daylight -> start the graph at the PRIOR sunset
- *     (the previous evening's, since today's own sunset hasn't happened
- *     yet if the session is starting during the day)
- *   - session starts at night -> start the graph at the PRIOR sunrise
- *     (today's, if the session starts in the evening after today's
- *     sunrise already happened; yesterday's, if it's starting in the
- *     pre-dawn hours before today's sunrise)
- * Mirrored for the end of the range. Falls back to the session's own
- * start/end time if sun data isn't available for that day, rather than
- * guessing.
+ * Small sunrise/sunset marker (tick + time label) drawn in the shared
+ * timeline header — unchanged from the earlier per-tile version of this
+ * page.
  */
-function computeGraphBounds(t) {
-  const sunTimesForLocation = sunTimesData[t.locationName] || [];
-  const sunByDate = new Map(sunTimesForLocation.map((s) => [s.date, s]));
-
-  const startDateKey = new Date(t.from).toISOString().slice(0, 10);
-  const sun = sunByDate.get(startDateKey);
-
-  let graphStart = t.from;
-  if (sun && sun.sunrise != null && sun.sunset != null) {
-    const sunriseMs = parseNaive(sun.sunrise);
-    const sunsetMs = parseNaive(sun.sunset);
-    const isDaytime = t.from >= sunriseMs && t.from < sunsetMs;
-
-    if (isDaytime) {
-      const prevDateKey = new Date(t.from - 86400000).toISOString().slice(0, 10);
-      const prevSun = sunByDate.get(prevDateKey);
-      graphStart = prevSun && prevSun.sunset != null ? parseNaive(prevSun.sunset) : sunriseMs;
-    } else if (t.from < sunriseMs) {
-      const prevDateKey = new Date(t.from - 86400000).toISOString().slice(0, 10);
-      const prevSun = sunByDate.get(prevDateKey);
-      graphStart = prevSun && prevSun.sunrise != null ? parseNaive(prevSun.sunrise) : sunsetMs;
-    } else {
-      graphStart = sunriseMs;
-    }
-  }
-
-  const endDateKey = new Date(t.to).toISOString().slice(0, 10);
-  const endSun = sunByDate.get(endDateKey);
-
-  let graphEnd = t.to;
-  if (endSun && endSun.sunrise != null && endSun.sunset != null) {
-    const endSunriseMs = parseNaive(endSun.sunrise);
-    const endSunsetMs = parseNaive(endSun.sunset);
-    const endIsDaytime = t.to >= endSunriseMs && t.to < endSunsetMs;
-
-    if (endIsDaytime) {
-      const nextDateKey = new Date(t.to + 86400000).toISOString().slice(0, 10);
-      const nextSun = sunByDate.get(nextDateKey);
-      graphEnd = nextSun && nextSun.sunrise != null ? parseNaive(nextSun.sunrise) : endSunsetMs;
-    } else if (t.to < endSunriseMs) {
-      graphEnd = endSunsetMs;
-    } else {
-      const nextDateKey = new Date(t.to + 86400000).toISOString().slice(0, 10);
-      const nextSun = sunByDate.get(nextDateKey);
-      graphEnd = nextSun && nextSun.sunset != null ? parseNaive(nextSun.sunset) : endSunriseMs;
-    }
-  }
-
-  return { graphStart, graphEnd };
-}
-
-function computeGraphRows(t, graphStart, graphEnd) {
-  return allRows
-    .filter((r) => r["Location Name"] === t.locationName && r["Type"] === t.type && r._t >= graphStart && r._t <= graphEnd)
-    .sort((a, b) => a._t - b._t);
+function buildSunMarker(x, timeLabel) {
+  const wrap = document.createElement("div");
+  wrap.className = "week-sun-marker";
+  wrap.style.left = x + "px";
+  wrap.innerHTML = `<div class="week-sun-tick"></div><div class="week-sun-label">${timeLabel}</div>`;
+  return wrap;
 }
 
 function renderWeekView() {
-  // Torn down up front, not just on empty-state — every path below either
-  // rebuilds a fresh set of tile charts or shows no tiles at all, so the
-  // previous batch is stale either way.
-  for (const c of activeTileCharts) c.destroy();
-  activeTileCharts = [];
+  for (const c of activeRowCharts) c.destroy();
+  activeRowCharts = [];
 
-  const tiles = computeWeekTiles();
+  const locationRows = computeLocationRows();
   const emptyState = document.getElementById("weekEmptyState");
   const scrollWrap = document.getElementById("weekTimelineScroll");
   const inner = document.getElementById("weekTimelineInner");
-  dayLabelsForStickyScroll = [];
 
-  if (tiles.length === 0) {
+  if (locationRows.length === 0) {
     emptyState.style.display = "block";
     scrollWrap.style.display = "none";
     inner.innerHTML = "";
@@ -310,53 +342,43 @@ function renderWeekView() {
   emptyState.style.display = "none";
   scrollWrap.style.display = "block";
 
-  // Timeline spans from the start of today through the latest tile's own
-  // GRAPH end (not just its session end) — a tile's graph reaches past its
-  // session into the following sunrise/sunset, so the track needs to be at
-  // least that wide or the rightmost tile's own context would get clipped.
+  // Every row shares this SAME [timelineStart, timelineEnd] range — this
+  // is what fixes the earlier per-tile version's "long sessions stretch
+  // things" and "doesn't line up" problems: there's no per-row width/range
+  // math left to get subtly wrong, every row (and the header above them)
+  // is exactly the same width. timelineEnd is simply however far the
+  // fetched data actually reaches (data.forecastDays' worth, in practice),
+  // not something computed per-tile.
   const nowMs = nowInNaiveEncoding();
   const timelineStart = dateOnly(nowMs);
-
-  const withBounds = tiles.map((t) => {
-    const { graphStart, graphEnd } = computeGraphBounds(t);
-    return { ...t, graphStart, graphEnd };
-  });
-
-  const timelineEnd = Math.max(...withBounds.map((t) => t.graphEnd));
+  const maxRowT = allRows.length ? Math.max(...allRows.map((r) => r._t)) : timelineStart + 86400000;
+  const timelineEnd = Math.max(timelineStart + 86400000, maxRowT);
   const totalHours = (timelineEnd - timelineStart) / 3600000;
   const totalTrackWidth = Math.max(1, totalHours) * PIXELS_PER_HOUR;
 
-  // Tile position/width come from the GRAPH's own range now, not the
-  // session's — this is what makes the embedded chart line up pixel-for-
-  // pixel with the day/night shading and hour ticks behind it. The chart
-  // itself is locked to this same [clampedGraphStart, graphEnd] range via
-  // its xRange option (see buildGraphTileElement below), at the same
-  // PIXELS_PER_HOUR scale used everywhere else on this timeline.
-  const positioned = withBounds.map((t) => {
-    const clampedGraphStart = Math.max(t.graphStart, timelineStart);
-    const leftPx = ((clampedGraphStart - timelineStart) / 3600000) * PIXELS_PER_HOUR;
-    const naturalWidthPx = ((t.graphEnd - clampedGraphStart) / 3600000) * PIXELS_PER_HOUR;
-    const widthPx = Math.max(MIN_TILE_WIDTH, naturalWidthPx);
-    return { ...t, clampedGraphStart, leftPx, widthPx, rightPx: leftPx + widthPx };
-  });
-
-  const lanes = packIntoLanes(positioned);
-
   inner.innerHTML = "";
+  inner.style.width = SIDEBAR_WIDTH + totalTrackWidth + "px";
 
-  // Sun times aren't per-location on this shared timeline — pick any one
+  // Sun times aren't per-location on the shared header — pick any one
   // location's data as representative (Victorian locations are close
-  // enough together that sunrise/sunset times barely differ day to day),
-  // rather than trying to show a different day/night pattern per lane.
+  // enough together that sunrise/sunset times barely differ day to day).
   const sunTimesEntry = Object.values(sunTimesData).find((arr) => arr && arr.length) || [];
   const sunByDate = new Map(sunTimesEntry.map((s) => [s.date, s]));
 
-  // Header: day-boundary gridlines, date labels, moon phase per day, hour
-  // marks, and sunrise/sunset markers — sticky so the date stays visible
-  // at the top of the box regardless of how far down you've scrolled
-  // through the lanes below. Unchanged from week.js: this is the shared
-  // timeline header, not tile content, so it isn't affected by dropping
-  // the per-tile date/moon/sticky-content logic below.
+  // Header row: a blank spacer the width of the sidebar (nothing to freeze
+  // there — the day/hour ticks scroll horizontally in sync with the chart
+  // columns beneath them, which is exactly what should happen), then the
+  // existing day-boundary/date/moon/hour-tick/sunrise-sunset content,
+  // unchanged from the old per-tile version. Sticky to the top of
+  // weekTimelineScroll's own scroll (position:sticky — see style.css)
+  // regardless of how many location rows you've scrolled past below.
+  const headerRow = document.createElement("div");
+  headerRow.className = "weeknew-header-row";
+
+  const headerSpacer = document.createElement("div");
+  headerSpacer.className = "weeknew-header-spacer";
+  headerRow.appendChild(headerSpacer);
+
   const headerTrack = document.createElement("div");
   headerTrack.className = "week-track week-header-track";
   headerTrack.style.width = totalTrackWidth + "px";
@@ -381,12 +403,9 @@ function renderWeekView() {
 
     const label = document.createElement("div");
     label.className = "week-day-label";
-    label.style.left = leftPx + "px";
-    label.dataset.dayLeft = leftPx;
-    label.dataset.dayEnd = dayEndPx;
+    label.style.left = leftPx + 4 + "px";
     label.textContent = fmtNaive(dayMs, { weekday: "short", day: "numeric", month: "short" });
     headerTrack.appendChild(label);
-    dayLabelsForStickyScroll.push(label);
 
     const moonInfo = moonPhasesData[dateKey];
     const skipPositions = [];
@@ -442,210 +461,113 @@ function renderWeekView() {
     nowLine.style.left = nowLeftPx + "px";
     headerTrack.appendChild(nowLine);
   }
-  inner.appendChild(headerTrack);
 
-  // Lanes sit inside their own wrapper so a single shading overlay — night
-  // and twilight bands, matching the main charts' own colours — can be
-  // drawn ONCE behind all of them, rather than duplicated per lane. Each
-  // graph tile's OWN chart also draws its own day/night shading internally
-  // (unchanged — see charts.js's buildDayBandPlugin), so this is technically
-  // duplicated where a tile sits; harmless since both are semi-transparent
-  // and pixel-aligned, and it keeps the background consistent in any gaps
-  // between/around tiles too.
-  const lanesWrap = document.createElement("div");
-  lanesWrap.className = "week-lanes-wrap";
-  lanesWrap.style.width = totalTrackWidth + "px";
+  headerRow.appendChild(headerTrack);
+  inner.appendChild(headerRow);
 
-  const shading = document.createElement("div");
-  shading.className = "week-shading-overlay";
-  let dayIndex = 0;
-  for (let dayMs = timelineStart; dayMs <= timelineEnd; dayMs += 86400000, dayIndex++) {
-    const leftPx = ((dayMs - timelineStart) / 3600000) * PIXELS_PER_HOUR;
-    const dayEndPx = Math.min(totalTrackWidth, leftPx + 24 * PIXELS_PER_HOUR);
-
-    const dayColor = DAY_COLORS[dayIndex % DAY_COLORS.length];
-    shading.appendChild(buildShadeBand(leftPx, dayEndPx, dayColor.bg));
-
-    const sun = sunByDate.get(dayKeyOf(new Date(dayMs).toISOString()));
-    if (!sun) continue;
-    const xFirstLight = sun.firstLight != null ? leftPx + ((parseNaive(sun.firstLight) - dayMs) / 3600000) * PIXELS_PER_HOUR : null;
-    const xSunrise = sun.sunrise != null ? leftPx + ((parseNaive(sun.sunrise) - dayMs) / 3600000) * PIXELS_PER_HOUR : null;
-    const xSunset = sun.sunset != null ? leftPx + ((parseNaive(sun.sunset) - dayMs) / 3600000) * PIXELS_PER_HOUR : null;
-    const xLastLight = sun.lastLight != null ? leftPx + ((parseNaive(sun.lastLight) - dayMs) / 3600000) * PIXELS_PER_HOUR : null;
-
-    if (xFirstLight != null) {
-      shading.appendChild(buildShadeBand(leftPx, xFirstLight, NIGHT_BAND_COLOR));
-      if (xSunrise != null) shading.appendChild(buildShadeBand(xFirstLight, xSunrise, TWILIGHT_BAND_COLOR));
-    } else if (xSunrise != null) {
-      shading.appendChild(buildShadeBand(leftPx, xSunrise, NIGHT_BAND_COLOR));
-    }
-    if (xLastLight != null) {
-      if (xSunset != null) shading.appendChild(buildShadeBand(xSunset, xLastLight, TWILIGHT_BAND_COLOR));
-      shading.appendChild(buildShadeBand(xLastLight, dayEndPx, NIGHT_BAND_COLOR));
-    } else if (xSunset != null) {
-      shading.appendChild(buildShadeBand(xSunset, dayEndPx, NIGHT_BAND_COLOR));
-    }
-  }
-  lanesWrap.appendChild(shading);
-
-  // One lane per row of non-overlapping tiles — NOT one row per location.
-  for (const lane of lanes) {
-    const laneEl = document.createElement("div");
-    laneEl.className = "week-track weeknew-lane";
-    laneEl.style.width = totalTrackWidth + "px";
-    if (nowLeftPx >= 0 && nowLeftPx <= totalTrackWidth) {
-      const nowLine = document.createElement("div");
-      nowLine.className = "week-now-line";
-      nowLine.style.left = nowLeftPx + "px";
-      laneEl.appendChild(nowLine);
-    }
-    for (const t of lane) {
-      laneEl.appendChild(buildGraphTileElement(t));
-    }
-    lanesWrap.appendChild(laneEl);
-  }
-  inner.appendChild(lanesWrap);
-  updateStickyDayLabels(); // position labels correctly right away if the view re-renders while already scrolled
-}
-
-function buildShadeBand(xStart, xEnd, color) {
-  const band = document.createElement("div");
-  band.className = "week-shade-band";
-  band.style.left = xStart + "px";
-  band.style.width = Math.max(0, xEnd - xStart) + "px";
-  band.style.background = color;
-  return band;
-}
-
-function buildSunMarker(x, timeLabel) {
-  const wrap = document.createElement("div");
-  wrap.className = "week-sun-marker";
-  wrap.style.left = x + "px";
-  wrap.innerHTML = `<div class="week-sun-tick"></div><div class="week-sun-label">${timeLabel}</div>`;
-  return wrap;
-}
-
-/**
- * Greedy interval packing: sorted by left edge, each tile goes into the
- * first lane where it doesn't collide with that lane's last-placed tile
- * (with LANE_GAP of breathing room), or a new lane if none fit — the same
- * algorithm calendar apps use to stack overlapping events into columns,
- * applied here to rows instead since this timeline runs horizontally.
- */
-function packIntoLanes(positionedTiles) {
-  const sorted = [...positionedTiles].sort((a, b) => a.leftPx - b.leftPx);
-  const lanes = []; // each lane: { lastRight: px, tiles: [...] }
-  for (const t of sorted) {
-    let placedLane = lanes.find((lane) => t.leftPx >= lane.lastRight + LANE_GAP);
-    if (!placedLane) {
-      placedLane = { lastRight: -Infinity, tiles: [] };
-      lanes.push(placedLane);
-    }
-    placedLane.tiles.push(t);
-    placedLane.lastRight = t.rightPx;
-  }
-  return lanes.map((lane) => lane.tiles);
-}
-
-/**
- * Manually keeps each day's date label pinned to the visible left edge of
- * the timeline for as long as any part of that day is still on screen,
- * then lets it scroll away naturally once its own day has fully passed —
- * see the matching comment in week.js for the full reasoning (a genuine
- * browser quirk stops plain CSS position:sticky from engaging in this
- * nested layout). Kept as-is here — this is the shared timeline HEADER's
- * own behavior, unrelated to the per-tile sticky-content trick this page
- * deliberately drops (see buildGraphTileElement).
- */
-function updateStickyDayLabels() {
-  const scrollLeft = document.getElementById("weekTimelineScroll").scrollLeft;
-  for (const label of dayLabelsForStickyScroll) {
-    const dayLeft = Number(label.dataset.dayLeft);
-    const dayEnd = Number(label.dataset.dayEnd);
-    const maxLeft = Math.max(dayLeft, dayEnd - label.offsetWidth);
-    const desired = Math.min(Math.max(scrollLeft, dayLeft), maxLeft);
-    label.style.transform = `translateX(${desired - dayLeft}px)`;
+  // One row per location — sidebar (name/pin/sessions, frozen to the left
+  // edge via position:sticky while the chart beside it scrolls) + a chart
+  // spanning the full [timelineStart, timelineEnd] range, identically
+  // sized/positioned on every row.
+  for (const entry of locationRows) {
+    inner.appendChild(buildLocationRowElement(entry, timelineStart, timelineEnd, totalTrackWidth));
   }
 }
 
 /**
- * Builds one session tile as a real conditions graph — replacing the old
- * stat-panel tile (photo background, badges, temp/wind/rain averages) that
- * week.js still uses. A small plain (non-sticky) info row stays at the top
- * for identification — location, type, shore, time range, and the
- * Location/Fishing condition badges, since the chart itself no longer
- * carries a location/date heading (see showDayHeading:false below) — the
- * chart fills the rest of the tile.
- *
- * No hover/click wiring at all: the graph IS the tile's content now, so
- * there's nothing left to reveal on hover or expand on click. No sticky-
- * content trick either — with overflow:hidden safe to use directly here
- * (nothing inside needs to slide independently of the tile), the tile's
- * rounded corners just clip normally.
+ * Builds one location's row: a sticky-left sidebar (name, type/shore, pin
+ * star, and a small chip per qualifying session) plus its always-visible
+ * conditions graph. Every session this location has in the displayed
+ * period is shaded on the SAME chart via sessionSpan (now an array — see
+ * charts.js's buildSessionSpanPlugin), rather than each session getting
+ * its own separate tile/chart the way the earlier version of this page did.
  */
-function buildGraphTileElement(t) {
-  const timeLabel = `${fmtNaive(t.from, { hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(t.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, timelineEnd, totalTrackWidth) {
+  const row = document.createElement("div");
+  row.className = "weeknew-row";
 
-  const tile = document.createElement("div");
-  tile.className = "weeknew-tile";
-  tile.style.left = t.leftPx + "px";
-  tile.style.width = t.widthPx + "px";
-  tile.title = `${t.locationName} (${t.type}) — ${timeLabel}`;
+  const sidebar = document.createElement("div");
+  sidebar.className = "weeknew-row-sidebar";
 
-  const header = document.createElement("div");
-  header.className = "weeknew-tile-header";
-  header.innerHTML = `
-    <div>
-      <div class="window-loc">${t.locationName}</div>
-      <div class="window-sub">${t.type} · shore ${t.shore || "–"}</div>
-      <div class="window-sub">${timeLabel} · ${t.hoursLabel}h</div>
-    </div>
-    <div class="badge-stack">
-      <div class="badge-item">
-        <div class="condition-badge" style="background:${conditionColor(t.avgCondition)}">${t.avgCondition != null ? t.avgCondition.toFixed(1) : "–"}</div>
-        <div class="badge-label">Location</div>
-      </div>
-      <div class="badge-item">
-        <div class="condition-badge" style="background:${conditionColor(t.avgFishingCondition)}">${t.avgFishingCondition != null ? t.avgFishingCondition.toFixed(1) : "–"}</div>
-        <div class="badge-label">Fishing</div>
-      </div>
-    </div>
+  const isPinned = pinnedOrder.includes(loc.name);
+  const star = document.createElement("button");
+  star.type = "button";
+  star.className = "weeknew-pin-btn" + (isPinned ? " pinned" : "");
+  star.setAttribute("aria-label", isPinned ? `Unpin ${loc.name}` : `Pin ${loc.name} to top`);
+  star.textContent = isPinned ? "★" : "☆";
+  star.addEventListener("click", () => togglePin(loc.name));
+
+  const titleWrap = document.createElement("div");
+  titleWrap.className = "weeknew-row-title";
+  titleWrap.innerHTML = `
+    <div class="window-loc">${loc.name}</div>
+    <div class="window-sub">${loc.type} · shore ${loc.shore || "–"}</div>
   `;
-  tile.appendChild(header);
+
+  const titleRow = document.createElement("div");
+  titleRow.className = "weeknew-row-title-line";
+  titleRow.appendChild(star);
+  titleRow.appendChild(titleWrap);
+  sidebar.appendChild(titleRow);
+
+  const sessionsWrap = document.createElement("div");
+  sessionsWrap.className = "weeknew-row-sessions";
+  if (sessions.length === 0) {
+    sessionsWrap.innerHTML = `<p class="footnote weeknew-no-session">No qualifying session in this period.</p>`;
+  } else {
+    for (const s of sessions) {
+      const timeLabel = `${fmtNaive(s.from, { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(s.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+      const chip = document.createElement("div");
+      chip.className = "weeknew-session-chip";
+      chip.innerHTML = `
+        <div class="weeknew-session-time">${timeLabel} · ${s.hoursLabel}h</div>
+        <div class="badge-stack">
+          <div class="badge-item">
+            <div class="condition-badge" style="background:${conditionColor(s.avgCondition)}">${s.avgCondition != null ? s.avgCondition.toFixed(1) : "–"}</div>
+            <div class="badge-label">Location</div>
+          </div>
+          <div class="badge-item">
+            <div class="condition-badge" style="background:${conditionColor(s.avgFishingCondition)}">${s.avgFishingCondition != null ? s.avgFishingCondition.toFixed(1) : "–"}</div>
+            <div class="badge-label">Fishing</div>
+          </div>
+        </div>
+      `;
+      sessionsWrap.appendChild(chip);
+    }
+  }
+  sidebar.appendChild(sessionsWrap);
+  row.appendChild(sidebar);
 
   const chartWrap = document.createElement("div");
-  chartWrap.className = "weeknew-tile-chart-wrap";
+  chartWrap.className = "weeknew-row-chart";
+  chartWrap.style.width = totalTrackWidth + "px";
   const canvas = document.createElement("canvas");
   chartWrap.appendChild(canvas);
-  tile.appendChild(chartWrap);
+  row.appendChild(chartWrap);
 
-  const dayRows = computeGraphRows(t, t.graphStart, t.graphEnd);
-  if (dayRows.length > 0) {
-    const matchedLoc = allLocations.find((l) => l.name === t.locationName && l.type === t.type);
-    const tileChart = renderConditionsChart({
+  const displayRows = locRows.filter((r) => r._t >= timelineStart && r._t <= timelineEnd).sort((a, b) => a._t - b._t);
+  if (displayRows.length > 0) {
+    const rowChart = renderConditionsChart({
       canvas,
-      rows: dayRows,
-      sunTimes: sunTimesData[t.locationName] || [],
+      rows: displayRows,
+      sunTimes: sunTimesData[loc.name] || [],
       existingChart: null,
-      tideMaxObserved: matchedLoc ? matchedLoc.tideMaxObserved : null,
-      minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
-      // Suppressed per this page's brief: the date is already shown in the
-      // shared timeline header above every tile, and the moon phase there
-      // too — repeating both again per day-band inside a several-hundred-
-      // pixel-wide tile chart added nothing but clutter.
+      tideMaxObserved: loc.tideMaxObserved,
+      minTideHeight: loc.minTideHeight,
+      // Same reasoning as the earlier per-tile version: the date/moon are
+      // already shown once in the shared header above every row, so
+      // repeating them per row (now potentially many days wide) would
+      // just be clutter.
       moonPhases: null,
       showDayHeading: false,
-      // No x/y axes — the master timeline's own hour ticks and day
-      // boundaries directly behind this tile already give the time scale;
-      // this chart's xRange below locks it to line up with them exactly.
       compact: true,
-      sessionSpan: { from: t.from, to: t.to },
-      xRange: { min: t.clampedGraphStart, max: t.graphEnd },
+      sessionSpan: sessions.map((s) => ({ from: s.from, to: s.to })),
+      xRange: { min: timelineStart, max: timelineEnd },
     });
-    if (tileChart) activeTileCharts.push(tileChart);
+    if (rowChart) activeRowCharts.push(rowChart);
   }
 
-  return tile;
+  return row;
 }
 
 init();
