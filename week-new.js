@@ -34,11 +34,25 @@ let selectedLocations = new Set();
 let selectedTypes = new Set(["Kayak", "Land based"]);
 let pinnedOrder = []; // location NAMES, in the order they were pinned — oldest pin first
 
-// Chart.js instances currently on screen — one per visible location row,
-// torn down and rebuilt every renderWeekView() call. Chart.js doesn't
-// garbage-collect an instance just because its canvas left the DOM, so
-// these must be destroyed explicitly or every re-render leaks the last one.
+// Chart.js instances currently on screen — one per RENDERED location row
+// (not necessarily every row that exists — see rowVisibilityObserver
+// below). Torn down and rebuilt every renderWeekView() call. Chart.js
+// doesn't garbage-collect an instance just because its canvas left the
+// DOM, so these must be destroyed explicitly or every re-render leaks
+// whatever was already built.
 let activeRowCharts = [];
+
+// Lazily builds a row's chart only once that row actually scrolls into
+// view, instead of building every location's chart upfront — with 14+
+// locations each rendering a several-thousand-pixel-wide, high-resolution
+// canvas, building all of them synchronously on load was measured taking
+// over a second of blocking main-thread work even on a fast desktop, and
+// far longer on mobile (Chart.js scales canvas resolution by
+// devicePixelRatio, typically 2–3 on phones, multiplying that cost
+// several times over). One observer per renderWeekView() call — reset
+// (disconnected) at the start of every render alongside activeRowCharts,
+// since it's watching DOM elements that are about to be thrown away.
+let rowVisibilityObserver = null;
 
 const PINNED_LOCATIONS_STORAGE_KEY = "goodConditionsPinnedLocationsNew";
 
@@ -327,6 +341,7 @@ function buildSunMarker(x, timeLabel) {
 function renderWeekView() {
   for (const c of activeRowCharts) c.destroy();
   activeRowCharts = [];
+  if (rowVisibilityObserver) rowVisibilityObserver.disconnect();
 
   const locationRows = computeLocationRows();
   const emptyState = document.getElementById("weekEmptyState");
@@ -470,29 +485,45 @@ function renderWeekView() {
   // spanning the full [timelineStart, timelineEnd] range, identically
   // sized/positioned on every row.
   //
-  // Built in TWO passes deliberately: first build and attach every row's
-  // DOM (sidebar + empty canvas) to the document, THEN render each row's
-  // chart onto its now-attached canvas. Chart.js's responsive:true sizing
-  // measures the canvas's actual laid-out box — a canvas that's still
-  // detached from the document (as it would be if renderConditionsChart
-  // ran inside the same function that builds the row, before that row is
-  // appended anywhere) measures as zero-size, and Chart.js quietly falls
-  // back to its own default canvas resolution instead. The result isn't a
-  // crash, just a canvas whose internal pixel buffer doesn't match its
-  // CSS-displayed size — exactly the blocky, stretched-looking lines and
-  // condition strips seen on the live page. Forcing a reflow (reading
-  // chartWrap.offsetHeight) between the two passes, same pattern already
-  // used elsewhere in this codebase (see week.js's chart modal), makes
-  // sure the browser has actually computed final layout — including the
-  // flex-stretch height each row's chart column depends on (see
-  // .weeknew-row-chart in style.css) — before Chart.js measures it.
+  // Every row's DOM (sidebar + correctly-sized empty canvas) is built and
+  // attached immediately, so the page's overall scrollable size is right
+  // from the start — but the actual Chart.js chart for each row is only
+  // built once that row scrolls into view (via IntersectionObserver
+  // below), not all 14+ of them upfront. Building every row's chart
+  // eagerly on load measured at over a second of blocking main-thread
+  // work even on a fast desktop, before accounting for a real phone's
+  // slower CPU and Chart.js scaling canvas resolution by devicePixelRatio
+  // (typically 2–3 on mobile, multiplying that cost several times over) —
+  // exactly the kind of load-time cost this avoids by only ever building
+  // charts for rows actually being looked at (plus a little runway just
+  // off-screen — see rootMargin below — so scrolling doesn't reveal a
+  // blank row that pops in a moment later).
   const rowBuilds = locationRows.map((entry) => buildLocationRowElement(entry, timelineStart, timelineEnd, totalTrackWidth));
   for (const { row } of rowBuilds) inner.appendChild(row);
-  for (const { chartWrap, renderChart } of rowBuilds) {
-    void chartWrap.offsetHeight; // force layout before Chart.js measures this row's canvas
-    renderChart();
-  }
+
+  const builtByRow = new Map(rowBuilds.map(({ row, chartWrap, renderChart }) => [row, { chartWrap, renderChart }]));
+  rowVisibilityObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const built = builtByRow.get(entry.target);
+        if (!built) continue;
+        rowVisibilityObserver.unobserve(entry.target); // only ever needs to render once
+        // Force layout before Chart.js measures this row's canvas — same
+        // reasoning as the old all-at-once version (see the removed
+        // comment this replaced): a canvas can measure as zero/stale size
+        // if Chart.js reads it before the browser has actually settled
+        // layout. Cheap insurance, and by this point (an IntersectionObserver
+        // callback) layout has almost certainly already run anyway.
+        void built.chartWrap.offsetHeight;
+        built.renderChart();
+      }
+    },
+    { root: scrollWrap, rootMargin: "400px 0px 400px 0px", threshold: 0 }
+  );
+  for (const { row } of rowBuilds) rowVisibilityObserver.observe(row);
 }
+
 
 /**
  * Builds one location's row: a sticky-left sidebar (name, type/shore, pin
