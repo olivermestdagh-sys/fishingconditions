@@ -761,51 +761,63 @@ function bucketRowsHourly(rows) {
 // band or a warning threshold like the other overlay lines on this chart.
 const SESSION_SPAN_COLOR = "#16a34a";
 
-function buildSessionSpanPlugin(sessionFrom, sessionTo) {
+function buildSessionSpanPlugin(spans) {
+  // Accepts an ARRAY of {from,to} spans now, not just one — a single
+  // location's row can have more than one qualifying session across the
+  // displayed period (Week Ahead's new row-per-location layout), and all
+  // of them need shading on the same chart. Invalid/incomplete spans are
+  // filtered out up front so beforeDraw/afterDraw don't need to re-check
+  // each one every frame.
+  const validSpans = (spans || []).filter((s) => s && s.from != null && s.to != null);
+
   return {
     id: "sessionSpan",
     beforeDraw(chart) {
-      if (sessionFrom == null || sessionTo == null) return;
+      if (validSpans.length === 0) return;
       const { ctx, chartArea, scales } = chart;
       if (!chartArea || !scales.x) return;
       const { top, bottom } = chartArea;
-      const clampedFrom = Math.max(sessionFrom, scales.x.min);
-      const clampedTo = Math.min(sessionTo, scales.x.max);
-      if (clampedTo <= clampedFrom) return;
-      const xStart = scales.x.getPixelForValue(clampedFrom);
-      const xEnd = scales.x.getPixelForValue(clampedTo);
       ctx.save();
       ctx.fillStyle = "rgba(22, 163, 74, 0.14)";
-      ctx.fillRect(xStart, top, xEnd - xStart, bottom - top);
+      for (const { from, to } of validSpans) {
+        const clampedFrom = Math.max(from, scales.x.min);
+        const clampedTo = Math.min(to, scales.x.max);
+        if (clampedTo <= clampedFrom) continue;
+        const xStart = scales.x.getPixelForValue(clampedFrom);
+        const xEnd = scales.x.getPixelForValue(clampedTo);
+        ctx.fillRect(xStart, top, xEnd - xStart, bottom - top);
+      }
       ctx.restore();
     },
     afterDraw(chart) {
-      if (sessionFrom == null || sessionTo == null) return;
+      if (validSpans.length === 0) return;
       const { ctx, chartArea, scales } = chart;
       if (!chartArea || !scales.x) return;
       const { top, bottom } = chartArea;
-      [
-        { t: sessionFrom, label: "Session start" },
-        { t: sessionTo, label: "Session end" },
-      ].forEach(({ t, label }) => {
-        if (t < scales.x.min || t > scales.x.max) return;
-        const x = scales.x.getPixelForValue(t);
-        ctx.save();
-        ctx.strokeStyle = SESSION_SPAN_COLOR;
-        ctx.lineWidth = 2;
-        ctx.setLineDash([3, 3]);
-        ctx.beginPath();
-        ctx.moveTo(x, top);
-        ctx.lineTo(x, bottom);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.font = "700 9px -apple-system, BlinkMacSystemFont, sans-serif";
-        ctx.fillStyle = SESSION_SPAN_COLOR;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "bottom";
-        ctx.fillText(label, x, bottom - 2);
-        ctx.restore();
-      });
+      for (const { from, to } of validSpans) {
+        [
+          { t: from, label: "Session start" },
+          { t: to, label: "Session end" },
+        ].forEach(({ t, label }) => {
+          if (t < scales.x.min || t > scales.x.max) return;
+          const x = scales.x.getPixelForValue(t);
+          ctx.save();
+          ctx.strokeStyle = SESSION_SPAN_COLOR;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath();
+          ctx.moveTo(x, top);
+          ctx.lineTo(x, bottom);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = "700 9px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillStyle = SESSION_SPAN_COLOR;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          ctx.fillText(label, x, bottom - 2);
+          ctx.restore();
+        });
+      }
     },
   };
 }
@@ -943,12 +955,19 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   const minT = xRange ? xRange.min : rows[0]._t;
   const maxT = xRange ? xRange.max : rows[rows.length - 1]._t;
 
+  // sessionSpan may be a single {from,to} object (every existing caller —
+  // app.js, live.js, week.js) or an array of them (Week Ahead's new
+  // row-per-location layout, where one location can have several
+  // qualifying sessions across the displayed period) — normalized to an
+  // array here so buildSessionSpanPlugin only has to handle one shape.
+  const sessionSpanList = sessionSpan == null ? [] : Array.isArray(sessionSpan) ? sessionSpan : [sessionSpan];
+
   const chart = new Chart(canvas, {
     type: "line",
     data: { datasets },
     plugins: [
       buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHeading),
-      buildSessionSpanPlugin(sessionSpan ? sessionSpan.from : null, sessionSpan ? sessionSpan.to : null),
+      buildSessionSpanPlugin(sessionSpanList),
       buildConditionStripsPlugin(rows, isMobile),
       buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime),
       // Skipped in compact mode — nothing to label when there are no axes.
