@@ -1415,3 +1415,57 @@ main.wide {
   margin-right: calc(50% - 50vw);
   border-radius: 0;
 }
+
+/* Week Ahead (new) — force-landscape trick, mobile only. True orientation
+   *locking* (screen.orientation.lock()) requires the page to already be in
+   fullscreen plus a user gesture on both Android and iOS, and iOS Safari
+   doesn't implement the API at all — so it can't fire the instant the page
+   loads the way this needed to. This delivers the same practical result
+   without needing any permission or gesture: whenever the device is
+   actually held in portrait AND the viewport is phone-width, the entire
+   page is rotated 90° via a CSS transform and resized so its own width and
+   height are swapped — it renders using a landscape-shaped layout exactly
+   as if the phone were already turned sideways. The instant the phone IS
+   physically turned to landscape, the real viewport itself becomes
+   landscape-shaped, the (orientation: portrait) query below stops
+   matching on its own, and this transform switches off automatically —
+   the page then displays completely normally, untouched, using its own
+   real (now-landscape) viewport rather than a simulated one.
+
+   Scoped to html.weeknew-force-landscape specifically — a class only
+   week-new.html's own <html> tag carries (see week-new.html) — so this
+   has zero effect on every other page; none of them opted into it. */
+@media screen and (max-width: 900px) and (orientation: portrait) {
+  html.weeknew-force-landscape {
+    overflow-x: hidden;
+  }
+  html.weeknew-force-landscape body {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 100vh;
+    height: 100vw;
+    transform-origin: left top;
+    transform: rotate(-90deg);
+    overflow-x: hidden;
+  }
+
+  /* vw/vh CSS units always resolve against the REAL (still-portrait)
+     viewport — a rotate() transform is a paint-time visual effect, it
+     doesn't redefine what "100vw" means for anything inside it. So every
+     place elsewhere in this file that sizes something with vw/vh, assuming
+     those describe the visible landscape-shaped canvas, needs the exact
+     opposite unit here: real vh now corresponds to the *width* the
+     rotated page actually displays at, and real vw to its *height*. Only
+     two rules on this page depend on vw/vh sizing (below) — everything
+     else is already in px or %, which transforms correctly on their own. */
+  html.weeknew-force-landscape .week-full-bleed {
+    width: 100vh;
+    max-width: 100vh;
+    margin-left: calc(50% - 50vh);
+    margin-right: calc(50% - 50vh);
+  }
+  html.weeknew-force-landscape .week-timeline-scroll {
+    max-height: 65vw;
+  }
+}
