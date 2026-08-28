@@ -469,8 +469,28 @@ function renderWeekView() {
   // edge via position:sticky while the chart beside it scrolls) + a chart
   // spanning the full [timelineStart, timelineEnd] range, identically
   // sized/positioned on every row.
-  for (const entry of locationRows) {
-    inner.appendChild(buildLocationRowElement(entry, timelineStart, timelineEnd, totalTrackWidth));
+  //
+  // Built in TWO passes deliberately: first build and attach every row's
+  // DOM (sidebar + empty canvas) to the document, THEN render each row's
+  // chart onto its now-attached canvas. Chart.js's responsive:true sizing
+  // measures the canvas's actual laid-out box — a canvas that's still
+  // detached from the document (as it would be if renderConditionsChart
+  // ran inside the same function that builds the row, before that row is
+  // appended anywhere) measures as zero-size, and Chart.js quietly falls
+  // back to its own default canvas resolution instead. The result isn't a
+  // crash, just a canvas whose internal pixel buffer doesn't match its
+  // CSS-displayed size — exactly the blocky, stretched-looking lines and
+  // condition strips seen on the live page. Forcing a reflow (reading
+  // chartWrap.offsetHeight) between the two passes, same pattern already
+  // used elsewhere in this codebase (see week.js's chart modal), makes
+  // sure the browser has actually computed final layout — including the
+  // flex-stretch height each row's chart column depends on (see
+  // .weeknew-row-chart in style.css) — before Chart.js measures it.
+  const rowBuilds = locationRows.map((entry) => buildLocationRowElement(entry, timelineStart, timelineEnd, totalTrackWidth));
+  for (const { row } of rowBuilds) inner.appendChild(row);
+  for (const { chartWrap, renderChart } of rowBuilds) {
+    void chartWrap.offsetHeight; // force layout before Chart.js measures this row's canvas
+    renderChart();
   }
 }
 
@@ -546,7 +566,12 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
   row.appendChild(chartWrap);
 
   const displayRows = locRows.filter((r) => r._t >= timelineStart && r._t <= timelineEnd).sort((a, b) => a._t - b._t);
-  if (displayRows.length > 0) {
+
+  // Chart creation is deferred to a returned function, called by
+  // renderWeekView only AFTER this row has been appended to the document
+  // — see the comment above the two-pass loop in renderWeekView for why.
+  const renderChart = () => {
+    if (displayRows.length === 0) return;
     const rowChart = renderConditionsChart({
       canvas,
       rows: displayRows,
@@ -565,9 +590,9 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
       xRange: { min: timelineStart, max: timelineEnd },
     });
     if (rowChart) activeRowCharts.push(rowChart);
-  }
+  };
 
-  return row;
+  return { row, chartWrap, renderChart };
 }
 
 init();
