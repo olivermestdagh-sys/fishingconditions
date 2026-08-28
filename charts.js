@@ -997,7 +997,25 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       // buildDayBandPlugin). Shrunk when both are suppressed (showDayHeading:
       // false, moonPhases: null) so a tile that isn't drawing either doesn't
       // waste vertical space reserving room for them anyway.
-      layout: { padding: { top: showDayHeading || moonPhases ? 40 : 8 } },
+      // autoPadding:false stops Chart.js reserving extra edge margin so
+      // large point markers (the pointRadius:7 wind arrows) never get
+      // clipped when they land exactly at the x-axis's own min/max — which
+      // they do on Week Ahead's row-per-location graphs, since every row's
+      // first/last row of data sits exactly at the displayed range's own
+      // start/end. That auto-reserved margin (Chart.js's default) insets
+      // the chart's own internal time-to-pixel mapping from the canvas's
+      // true edges while the shared timeline header (plain CSS, no such
+      // margin) doesn't — so the two drift apart the further from centre
+      // you look: each row's graph reads a little late at its own start
+      // and a little early at its own end relative to the header's
+      // sunrise/sunset ticks above it. Turning this off makes the chart's
+      // plot area span the canvas edge-to-edge, matching the header's own
+      // unpadded pixel math exactly. Trade-off: the very first/last wind
+      // arrow marker can now sit flush against (and be very slightly
+      // clipped by) the canvas edge instead of being padded clear of it —
+      // a minor cosmetic cost against every row lining up correctly with
+      // the shared header, which matters far more here.
+      layout: { padding: { top: showDayHeading || moonPhases ? 40 : 8 }, autoPadding: false },
       interaction: { mode: "index", intersect: false },
       scales: {
         x: {
