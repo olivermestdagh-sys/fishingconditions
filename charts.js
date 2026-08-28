@@ -193,7 +193,19 @@ function buildConditionStripsPlugin(rows, isMobile) {
     // overlapping whatever data lines happen to be low at that point, rather
     // than reserving separate space below the graph. A semi-opaque backing
     // behind each strip keeps it legible against anything crossing behind it.
-    afterDraw(chart) {
+    //
+    // Hooked to afterDatasetsDraw, NOT afterDraw — the built-in tooltip
+    // plugin also draws in afterDraw, and Chart.js doesn't guarantee our
+    // afterDraw runs before a differently-registered one (registration
+    // order, not the plugin's own `z`, decided that in testing, and global
+    // built-ins like tooltip are registered ahead of any chart-local
+    // plugin regardless of array order or z value). Since the strips are
+    // anchored to a fixed spot at the very bottom of the chart, a tooltip
+    // hovering near there would otherwise get silently painted over —
+    // afterDatasetsDraw is a strictly earlier phase than afterDraw, so this
+    // guarantees the strips are always drawn before (i.e. underneath) the
+    // tooltip, however Chart.js orders same-phase plugins internally.
+    afterDatasetsDraw(chart) {
       const { ctx, chartArea, scales } = chart;
       if (!chartArea) return;
       const xScale = scales.x;
@@ -328,7 +340,13 @@ function findTideThresholdCrossings(rows, threshold) {
 function buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime) {
   return {
     id: "nowAndThreshold",
-    afterDraw(chart) {
+    // afterDatasetsDraw, not afterDraw — same reasoning as
+    // buildConditionStripsPlugin above: these lines/labels span the full
+    // chart height, so drawn in afterDraw they could paint over a tooltip
+    // hovering anywhere near one of them. afterDatasetsDraw guarantees
+    // they're drawn before the tooltip regardless of plugin registration
+    // order.
+    afterDatasetsDraw(chart) {
       const { ctx, chartArea, scales } = chart;
       if (!chartArea) return;
       const { top, bottom, left, right } = chartArea;
@@ -517,7 +535,7 @@ function drawMoonIcon(ctx, cx, cy, r, illuminationPct, waxing) {
   ctx.restore();
 }
 
-function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHeading = true) {
+function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHeading = true, showSunTimes = true) {
   // Group rows by calendar day, tracking each day's exact start/end timestamp — bands
   // are positioned by real elapsed time (via the linear x-axis), not by row index, so
   // they're pixel-accurate regardless of how densely each day happens to be sampled.
@@ -596,28 +614,38 @@ function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHea
           // labels (which sit right at the very top) and well above the
           // condition strips (anchored to the very bottom), since both of
           // those are already using their own ends of the chart.
-          ctx.font = "700 8px -apple-system, BlinkMacSystemFont, sans-serif";
-          ctx.fillStyle = "#b45309";
-          ctx.textAlign = "center";
-          if (xSunrise != null && xSunrise >= left && xSunrise <= right) {
-            ctx.strokeStyle = "#b45309";
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(xSunrise, top + 24);
-            ctx.lineTo(xSunrise, top + 32);
-            ctx.stroke();
-            ctx.textBaseline = "top";
-            ctx.fillText(fmtChartTick(parseNaive(sun.sunrise)), xSunrise, top + 33);
-          }
-          if (xSunset != null && xSunset >= left && xSunset <= right) {
-            ctx.strokeStyle = "#b45309";
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(xSunset, top + 24);
-            ctx.lineTo(xSunset, top + 32);
-            ctx.stroke();
-            ctx.textBaseline = "top";
-            ctx.fillText(fmtChartTick(parseNaive(sun.sunset)), xSunset, top + 33);
+          //
+          // Skippable via showSunTimes=false — added for Week Ahead's
+          // row-per-location graphs (week-new.js), where the shared
+          // timeline header above every row already shows sunrise/sunset
+          // times once; repeating them inside each row's own (now several-
+          // days-wide) chart added visual noise without new information.
+          // Every other caller doesn't pass this, so defaults to true and
+          // renders exactly as before.
+          if (showSunTimes) {
+            ctx.font = "700 8px -apple-system, BlinkMacSystemFont, sans-serif";
+            ctx.fillStyle = "#b45309";
+            ctx.textAlign = "center";
+            if (xSunrise != null && xSunrise >= left && xSunrise <= right) {
+              ctx.strokeStyle = "#b45309";
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(xSunrise, top + 24);
+              ctx.lineTo(xSunrise, top + 32);
+              ctx.stroke();
+              ctx.textBaseline = "top";
+              ctx.fillText(fmtChartTick(parseNaive(sun.sunrise)), xSunrise, top + 33);
+            }
+            if (xSunset != null && xSunset >= left && xSunset <= right) {
+              ctx.strokeStyle = "#b45309";
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(xSunset, top + 24);
+              ctx.lineTo(xSunset, top + 32);
+              ctx.stroke();
+              ctx.textBaseline = "top";
+              ctx.fillText(fmtChartTick(parseNaive(sun.sunset)), xSunset, top + 33);
+            }
           }
         }
 
@@ -789,7 +817,12 @@ function buildSessionSpanPlugin(spans) {
       }
       ctx.restore();
     },
-    afterDraw(chart) {
+    // afterDatasetsDraw, not afterDraw — same reasoning as the other
+    // full-height overlay plugins above: these dashed lines/labels could
+    // otherwise paint over a tooltip hovering nearby. afterDatasetsDraw
+    // guarantees they draw before the tooltip regardless of plugin
+    // registration order.
+    afterDatasetsDraw(chart) {
       if (validSpans.length === 0) return;
       const { ctx, chartArea, scales } = chart;
       if (!chartArea || !scales.x) return;
@@ -822,7 +855,7 @@ function buildSessionSpanPlugin(spans) {
   };
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, showDayHeading = true, xRange }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, showDayHeading = true, showSunTimes = true, xRange }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -966,7 +999,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
     type: "line",
     data: { datasets },
     plugins: [
-      buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHeading),
+      buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHeading, showSunTimes),
       buildSessionSpanPlugin(sessionSpanList),
       buildConditionStripsPlugin(rows, isMobile),
       buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime),
