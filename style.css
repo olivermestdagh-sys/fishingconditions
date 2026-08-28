@@ -1252,6 +1252,89 @@ main.wide {
   height: 100% !important;
 }
 
+/* Week Ahead (new) — graph tiles (week-new.html/week-new.js). Deliberately
+   separate class names from .week-tile/.week-tile-bg/.week-tile-content
+   above rather than reusing them: this page's tiles don't need (or want)
+   the sticky-content trick those rely on, since a Chart.js canvas can't
+   partially "stick" the way DOM text content can — the whole point of that
+   trick doesn't apply once the tile's content IS the graph. Kept as a
+   fully separate set of rules so nothing here can accidentally affect the
+   original Week Ahead page's tiles. */
+.weeknew-lane {
+  position: relative;
+  z-index: 1;
+  /* Taller than .week-lane's 150px — a real conditions graph (temp/wind/
+     rain/tide lines + condition strips) needs meaningfully more vertical
+     room than a stat-panel tile did to stay legible, especially with no
+     x/y axis text to help anchor the eye. */
+  min-height: 340px;
+  border-bottom: 1px solid var(--grey-100);
+}
+
+.weeknew-tile {
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.14);
+  background: var(--white);
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  /* Safe to clip here (unlike .week-tile above) — nothing inside needs to
+     slide independently of the tile now that there's no sticky content. */
+  overflow: hidden;
+}
+
+.weeknew-tile-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--grey-100);
+}
+
+.weeknew-tile .window-loc {
+  font-size: 0.85rem;
+  line-height: 1.2;
+}
+
+.weeknew-tile .badge-stack {
+  gap: 8px;
+}
+
+.weeknew-tile .window-sub {
+  font-size: 0.72rem;
+}
+
+.weeknew-tile .condition-badge {
+  min-width: 30px;
+  height: 30px;
+  font-size: 0.78rem;
+}
+
+.weeknew-tile-chart-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 4px 6px;
+}
+
+.weeknew-tile-chart-wrap canvas {
+  /* Same Chart.js responsive:true pattern used everywhere else on the
+     site — a sized, position:relative wrapper with the canvas absolutely
+     filling it, so Chart.js manages the canvas's actual pixel size itself
+     rather than fighting a directly-set one. */
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+
 .week-full-bleed {
   /* Breaks out of main.wide's centered 1100px column + 12px side padding —
      stretches to the actual browser viewport edges, since a Gantt-style
