@@ -975,6 +975,22 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
     ],
     options: {
       responsive: true,
+      // Chart.js defaults to maintainAspectRatio:true (with its own
+      // built-in default aspectRatio, ~2:1 for line charts) — meaning
+      // WITHOUT this, Chart.js computes the canvas's internal height from
+      // its own aspect ratio instead of the container's actual measured
+      // height, then the CSS width/height:100%!important on the canvas
+      // (every chart-wrap on this site uses that pattern deliberately, to
+      // let CSS fully control the container's size) forces that wrongly-
+      // sized internal raster to fit anyway — invisible when a container's
+      // real aspect ratio happens to be close to 2:1 (most of this site's
+      // chart containers are), but severely distorted (aliased, jagged
+      // lines) on anything far from that, like Week Ahead's row-per-
+      // location graphs (~15:1 — very wide, fixed-height rows). Explicit
+      // false makes Chart.js size the canvas to the container's actual
+      // measured box instead, which is what every container on this site
+      // already assumes is happening.
+      maintainAspectRatio: false,
       spanGaps: true,
       // Extra top padding reserves space for two stacked elements above the
       // plot area: the moon phase glyph and the day heading text (see
