@@ -517,7 +517,7 @@ function drawMoonIcon(ctx, cx, cy, r, illuminationPct, waxing) {
   ctx.restore();
 }
 
-function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases) {
+function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHeading = true) {
   // Group rows by calendar day, tracking each day's exact start/end timestamp — bands
   // are positioned by real elapsed time (via the linear x-axis), not by row index, so
   // they're pixel-accurate regardless of how densely each day happens to be sampled.
@@ -621,51 +621,65 @@ function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases) {
           }
         }
 
-        ctx.fillStyle = "#1f4e78";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
+        // Skippable via showDayHeading=false — added for Week Ahead's
+        // embedded per-tile graphs (week-new.js), where the date (and the
+        // moon phase below) are already shown once in the shared timeline
+        // header above every tile, and again in the tile's own small info
+        // row — repeating both a third time, per day-band, inside a chart
+        // that's often only a few hundred pixels wide, is pure clutter
+        // there. Every other caller (the main Conditions page, Live, the
+        // old Week Ahead modal/preview) doesn't pass this, so defaults to
+        // true and renders exactly as before.
+        if (showDayHeading) {
+          ctx.fillStyle = "#1f4e78";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
 
-        // Location name only on the FIRST day this chart spans — repeating
-        // it for every day looks redundant once a chart covers several
-        // days (which happens often now that Week Ahead's graphs span
-        // sunset-to-sunrise ranges, sometimes several days for a long
-        // session) — the date alone is enough context for the later days.
-        const headingText = locationName && gi === 0 ? `${locationName} — ${formatDayHeading(g.key)}` : formatDayHeading(g.key);
+          // Location name only on the FIRST day this chart spans — repeating
+          // it for every day looks redundant once a chart covers several
+          // days (which happens often now that Week Ahead's graphs span
+          // sunset-to-sunrise ranges, sometimes several days for a long
+          // session) — the date alone is enough context for the later days.
+          const headingText = locationName && gi === 0 ? `${locationName} — ${formatDayHeading(g.key)}` : formatDayHeading(g.key);
 
-        // Shrink the font until the text actually fits this band's width, rather
-        // than risk it overflowing onto a second line or running off the edge —
-        // matters more now that a location name can make this considerably longer,
-        // and needs to hold up on narrow phone screens too.
-        const maxTextWidth = xEnd - xStart - 8;
-        let fontSize = 11;
-        ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
-        while (ctx.measureText(headingText).width > maxTextWidth && fontSize > 7) {
-          fontSize -= 0.5;
+          // Shrink the font until the text actually fits this band's width, rather
+          // than risk it overflowing onto a second line or running off the edge —
+          // matters more now that a location name can make this considerably longer,
+          // and needs to hold up on narrow phone screens too.
+          const maxTextWidth = xEnd - xStart - 8;
+          let fontSize = 11;
           ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+          while (ctx.measureText(headingText).width > maxTextWidth && fontSize > 7) {
+            fontSize -= 0.5;
+            ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+          }
+
+          // Shrinking has a floor (7px) — for a long location name on a
+          // narrow first/last day-band (routine now that Week Ahead's graphs
+          // start at a sunset/sunrise boundary, often leaving only a few
+          // hours of that first day on screen), the text can still be wider
+          // than the band even at the smallest allowed size. Centering it on
+          // the band's own midpoint in that case pushes it straight past the
+          // chart's edge, where the canvas silently clips it — invisible
+          // rather than just imperfectly placed. Clamping the draw position
+          // to the chart's actual left/right bounds keeps it fully visible
+          // (very rare cosmetic trade-off: it can nudge toward a neighbouring
+          // label) rather than partially or entirely disappearing.
+          let drawX = (xStart + xEnd) / 2;
+          const halfTextWidth = ctx.measureText(headingText).width / 2;
+          if (drawX - halfTextWidth < left) drawX = left + halfTextWidth;
+          if (drawX + halfTextWidth > right) drawX = right - halfTextWidth;
+
+          ctx.fillText(headingText, drawX, top - 16);
         }
-
-        // Shrinking has a floor (7px) — for a long location name on a
-        // narrow first/last day-band (routine now that Week Ahead's graphs
-        // start at a sunset/sunrise boundary, often leaving only a few
-        // hours of that first day on screen), the text can still be wider
-        // than the band even at the smallest allowed size. Centering it on
-        // the band's own midpoint in that case pushes it straight past the
-        // chart's edge, where the canvas silently clips it — invisible
-        // rather than just imperfectly placed. Clamping the draw position
-        // to the chart's actual left/right bounds keeps it fully visible
-        // (very rare cosmetic trade-off: it can nudge toward a neighbouring
-        // label) rather than partially or entirely disappearing.
-        let drawX = (xStart + xEnd) / 2;
-        const halfTextWidth = ctx.measureText(headingText).width / 2;
-        if (drawX - halfTextWidth < left) drawX = left + halfTextWidth;
-        if (drawX + halfTextWidth > right) drawX = right - halfTextWidth;
-
-        ctx.fillText(headingText, drawX, top - 16);
 
         // Moon phase, one icon per day, drawn ABOVE the day heading (needs
         // its own reserved space — see the increased layout.padding.top
         // where this chart gets built). Custom-drawn to the exact real
         // illumination percentage, not snapped to one of 8 fixed pictures.
+        // Gated on moonPhases being passed at all (not on showDayHeading) —
+        // callers that want the icon suppressed simply pass moonPhases: null,
+        // same as they always could.
         const moonInfo = moonPhases && moonPhases[g.key];
         if (moonInfo && moonInfo.illumination != null) {
           const waxing = moonInfo.phase ? !moonInfo.phase.startsWith("Waning") : true;
@@ -796,7 +810,7 @@ function buildSessionSpanPlugin(sessionFrom, sessionTo) {
   };
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, showDayHeading = true, xRange }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -919,14 +933,21 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
     },
   ];
 
-  const minT = rows[0]._t;
-  const maxT = rows[rows.length - 1]._t;
+  // xRange lets a caller lock this chart's x-axis to two exact timestamps
+  // rather than the first/last row it happens to have data for — used by
+  // Week Ahead's embedded per-tile graphs (week-new.js) so the chart's own
+  // time-to-pixel scale matches PIXELS_PER_HOUR exactly and lines up with
+  // the shared timeline's day/night shading and hour ticks sitting behind
+  // it. Every other caller doesn't pass this, so falls back to the actual
+  // row range exactly as before.
+  const minT = xRange ? xRange.min : rows[0]._t;
+  const maxT = xRange ? xRange.max : rows[rows.length - 1]._t;
 
   const chart = new Chart(canvas, {
     type: "line",
     data: { datasets },
     plugins: [
-      buildDayBandPlugin(rows, sunTimes, locationName, moonPhases),
+      buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHeading),
       buildSessionSpanPlugin(sessionSpan ? sessionSpan.from : null, sessionSpan ? sessionSpan.to : null),
       buildConditionStripsPlugin(rows, isMobile),
       buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime),
@@ -937,9 +958,11 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       responsive: true,
       spanGaps: true,
       // Extra top padding reserves space for two stacked elements above the
-      // plot area: the moon phase glyph (drawn higher up) and the day
-      // heading text below it (see buildDayBandPlugin).
-      layout: { padding: { top: 40 } },
+      // plot area: the moon phase glyph and the day heading text (see
+      // buildDayBandPlugin). Shrunk when both are suppressed (showDayHeading:
+      // false, moonPhases: null) so a tile that isn't drawing either doesn't
+      // waste vertical space reserving room for them anyway.
+      layout: { padding: { top: showDayHeading || moonPhases ? 40 : 8 } },
       interaction: { mode: "index", intersect: false },
       scales: {
         x: {

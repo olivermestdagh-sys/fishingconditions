@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Olie's Kayak and Surf Fishing Conditions – Week Ahead (new)</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Olie's Kayak and Surf Fishing Conditions</h1>
+  <div id="updated" class="updated">Loading…</div>
+</header>
+
+<nav class="tabnav">
+  <a href="live.html">Live</a>
+  <a href="index.html">Week ahead</a>
+  <a href="week-new.html" class="active">Week ahead (new)</a>
+  <a href="conditions.html">Location</a>
+  <a href="locations.html">Settings</a>
+</nav>
+
+<main class="wide">
+  <section class="summary-card gc-filters">
+    <div class="filters-toggle" id="filtersToggle" role="button" tabindex="0">
+      <label class="loc-edit-label" style="margin:0;">Thresholds &amp; filters</label>
+      <span class="schedule-toggle-hint" id="filtersToggleHint">▸ tap to show</span>
+    </div>
+    <div class="filters-content collapsed" id="filtersContent">
+    <p class="footnote" style="margin:0 0 12px;text-align:left;">
+      Every hourly forecast row that sits inside a run of consecutive hours meeting the thresholds below (evaluated per location).
+    </p>
+    <div class="filter-row thresholds-row">
+      <div>
+        <label for="minCondition">Min Condition rating</label>
+        <div class="rating-stepper">
+          <button type="button" class="rating-stepper-btn" id="minConditionDown" aria-label="Decrease min condition rating">−</button>
+          <div class="condition-badge rating-stepper-badge" id="minConditionBadge">3.0</div>
+          <button type="button" class="rating-stepper-btn" id="minConditionUp" aria-label="Increase min condition rating">+</button>
+          <input type="hidden" id="minCondition" min="1" max="5" value="3" />
+        </div>
+      </div>
+      <div>
+        <label for="minHours">Min consecutive hours</label>
+        <div class="rating-stepper">
+          <button type="button" class="rating-stepper-btn" id="minHoursDown" aria-label="Decrease min consecutive hours">−</button>
+          <div class="condition-badge rating-stepper-badge rating-stepper-badge-neutral" id="minHoursBadge">3.0</div>
+          <button type="button" class="rating-stepper-btn" id="minHoursUp" aria-label="Increase min consecutive hours">+</button>
+          <input type="hidden" id="minHours" min="1" max="24" value="3" />
+        </div>
+      </div>
+    </div>
+    <p class="footnote" style="margin:8px 0 0;text-align:left;">
+      "Min consecutive hours" is a genuine clock-duration minimum — matches the session lengths below.
+    </p>
+
+    <label style="display:block;margin:14px 0 6px;">Type</label>
+    <div id="typeChips" class="chip-row"></div>
+
+    <div class="loc-filter-header" style="margin-top:14px;">
+      <label>Locations</label>
+      <div class="loc-filter-actions">
+        <button type="button" id="btnLocAll" class="chip-action">All</button>
+        <button type="button" id="btnLocNone" class="chip-action">None</button>
+      </div>
+    </div>
+    <div id="locationChips" class="chip-row"></div>
+    </div>
+  </section>
+
+  <section class="summary-card week-full-bleed" style="padding:0;overflow:hidden;position:relative;">
+    <div id="weekEmptyState" class="empty-state" style="display:none;padding:20px;">No sessions meet the criteria.</div>
+    <div id="weekTimelineScroll" class="week-timeline-scroll">
+      <div id="weekTimelineInner" class="week-timeline-inner"></div>
+    </div>
+    <p class="footnote" style="margin:6px 10px 10px;text-align:left;">Scroll sideways for the rest of the week. Each tile is its own conditions graph — no need to tap for details.</p>
+  </section>
+
+  <footer class="footnote">
+    Data from <a href="https://www.willyweather.com.au/" target="_blank" rel="noopener">WillyWeather</a>. Experimental page — see "Week ahead" for the current version.
+  </footer>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="charts.js"></script>
+<script src="week-new.js"></script>
+</body>
+</html>
