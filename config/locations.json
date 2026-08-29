@@ -21,7 +21,8 @@
         "timeToSpot": "00:10",
         "timeFromSpot": "00:10"
       }
-    ]
+    ],
+    "locationGroup": "Western Port"
   },
   {
     "name": "Corinella Boat Ramp, VIC",
@@ -36,7 +37,8 @@
         "timeToSpot": "00:20",
         "timeFromSpot": "00:20"
       }
-    ]
+    ],
+    "locationGroup": "Western Port"
   },
   {
     "name": "Coronet Bay, VIC 3984",
@@ -51,7 +53,8 @@
         "timeToSpot": "00:20",
         "timeFromSpot": "00:20"
       }
-    ]
+    ],
+    "locationGroup": "Western Port"
   },
   {
     "name": "Flinders Pier, VIC",
@@ -66,7 +69,8 @@
         "timeToSpot": "00:20",
         "timeFromSpot": "00:20"
       }
-    ]
+    ],
+    "locationGroup": "Western Port"
   },
   {
     "name": "Gunnamatta Beach, VIC",
