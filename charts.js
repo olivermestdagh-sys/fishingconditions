@@ -855,7 +855,7 @@ function buildSessionSpanPlugin(spans) {
   };
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, showDayHeading = true, showSunTimes = true, xRange }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -1008,6 +1008,18 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
     ],
     options: {
       responsive: true,
+      // Skips Chart.js's own built-in tap/click/hover-triggered tooltip
+      // interaction entirely (an empty events list means nothing native
+      // triggers it) — for callers that want to drive the tooltip
+      // themselves via chart.tooltip.setActiveElements() instead (Week
+      // Ahead's hold-to-show-tooltip behavior — see week-new.js). This
+      // has to happen at chart CONSTRUCTION time: Chart.js reads
+      // options.events once, when it first binds its own internal
+      // listeners, so mutating it after the chart already exists doesn't
+      // reliably take effect. Every other caller doesn't pass this, so
+      // defaults to false and gets Chart.js's normal tap/hover tooltip
+      // behavior exactly as before.
+      ...(disableBuiltinEvents ? { events: [] } : {}),
       // Chart.js defaults to maintainAspectRatio:true (with its own
       // built-in default aspectRatio, ~2:1 for line charts) — meaning
       // WITHOUT this, Chart.js computes the canvas's internal height from
