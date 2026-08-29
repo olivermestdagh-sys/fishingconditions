@@ -43,6 +43,7 @@ let sunTimesData = {};
 let moonPhasesData = {};
 let selectedLocations = new Set();
 let selectedTypes = new Set(["Kayak", "Land based"]);
+let selectedGroups = new Set();
 let pinnedOrder = []; // location NAMES, in the order they were pinned — oldest pin first
 
 // Chart.js instances currently on screen — one per RENDERED location row
@@ -202,6 +203,23 @@ async function init() {
   }
   selectedTypes = Array.isArray(savedTypes) && savedTypes.length ? new Set(savedTypes) : new Set(["Kayak", "Land based"]);
 
+  // Location Group defaults to "everything currently in use" — same
+  // pattern as selectedLocations above — rather than a hardcoded list
+  // like Type's two fixed values, since which groups exist is entirely
+  // data-driven (managed on the Settings page).
+  let savedGroups = null;
+  try {
+    savedGroups = JSON.parse(localStorage.getItem(GROUP_FILTER_STORAGE_KEY) || "null");
+  } catch {
+    savedGroups = null;
+  }
+  const allGroups = Array.from(new Set(allLocations.map((l) => locationGroupOf(l))));
+  if (Array.isArray(savedGroups) && savedGroups.length) {
+    selectedGroups = new Set(savedGroups.filter((g) => allGroups.includes(g)));
+  } else {
+    selectedGroups = new Set(allGroups);
+  }
+
   let savedThresholds = null;
   try {
     savedThresholds = JSON.parse(localStorage.getItem(THRESHOLDS_STORAGE_KEY) || "null");
@@ -220,6 +238,7 @@ async function init() {
 
   renderLocationChipsWithPins();
   renderTypeChips(selectedTypes, renderWeekView);
+  renderGroupChips(allLocations, selectedGroups, renderWeekView);
   document.getElementById("btnLocAll").addEventListener("click", () => {
     selectedLocations = new Set(allLocations.map((l) => l.name));
     persistSelectedLocations(selectedLocations);
@@ -320,7 +339,9 @@ function computeLocationRows() {
   const minCondition = Number(document.getElementById("minCondition").value) || 1;
   const minHours = Number(document.getElementById("minHours").value) || 1;
 
-  const filtered = allLocations.filter((loc) => selectedLocations.has(loc.name) && selectedTypes.has(loc.type));
+  const filtered = allLocations.filter(
+    (loc) => selectedLocations.has(loc.name) && selectedTypes.has(loc.type) && selectedGroups.has(locationGroupOf(loc))
+  );
   const ordered = sortLocationsForDisplay(filtered);
 
   return ordered.map((loc) => {

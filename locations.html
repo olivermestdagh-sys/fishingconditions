@@ -49,6 +49,23 @@
     </div>
   </section>
 
+  <section id="groupsSection" class="summary-card" style="display:none;">
+    <div class="summary-title" style="margin-bottom:6px;">Location Groups</div>
+    <p class="footnote" style="margin:0 0 12px;text-align:left;">
+      The list of Location Group values available to assign below, and to filter by on the Week (sessions) / Week (graphs) pages.
+      Saved separately from the locations list itself.
+    </p>
+    <div id="groupsList" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <input type="text" id="newGroupInput" placeholder="e.g. Port Phillip" style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+      <button id="btnAddGroup" class="btn-secondary">+ Add group</button>
+    </div>
+    <div style="margin-top:14px;">
+      <button id="btnSaveGroups" class="btn-primary">Save groups</button>
+    </div>
+    <div id="groupsSaveStatus" style="margin-top:10px;font-size:0.85rem;"></div>
+  </section>
+
   <section id="locationsSection" class="table-section" style="display:none;">
     <h2>Locations</h2>
     <p class="footnote" style="margin:0 0 12px;text-align:left;">

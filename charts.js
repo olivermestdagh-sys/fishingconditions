@@ -1288,7 +1288,18 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
 
 const LOC_FILTER_STORAGE_KEY = "goodConditionsSelectedLocations";
 const TYPE_FILTER_STORAGE_KEY = "goodConditionsSelectedTypes";
+const GROUP_FILTER_STORAGE_KEY = "goodConditionsSelectedGroups";
 const THRESHOLDS_STORAGE_KEY = "goodConditionsThresholds";
+
+// Locations without a Location Group assigned yet (or before this field
+// existed at all) still need to be filterable/visible rather than
+// silently disappearing — grouped under this pseudo-value alongside
+// whatever real group names exist, both here and in renderGroupChips.
+const UNGROUPED_LABEL = "Ungrouped";
+
+function locationGroupOf(loc) {
+  return loc.locationGroup && loc.locationGroup.trim() ? loc.locationGroup : UNGROUPED_LABEL;
+}
 
 function fmtNaive(ms, opts) {
   const d = new Date(ms);
@@ -1457,6 +1468,10 @@ function persistSelectedTypes(selectedTypes) {
   localStorage.setItem(TYPE_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedTypes)));
 }
 
+function persistSelectedGroups(selectedGroups) {
+  localStorage.setItem(GROUP_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedGroups)));
+}
+
 function persistThresholds() {
   const minCondition = document.getElementById("minCondition").value;
   const minHours = document.getElementById("minHours").value;
@@ -1510,6 +1525,45 @@ function renderTypeChips(selectedTypes, onChange) {
         selectedTypes.add(type);
       }
       persistSelectedTypes(selectedTypes);
+      chip.classList.toggle("active");
+      onChange();
+    });
+    container.appendChild(chip);
+  }
+}
+
+/**
+ * Location Group filter chips — one per distinct group name currently in
+ * use across allLocations (plus an "Ungrouped" chip for any location that
+ * doesn't have one set, via locationGroupOf(), so nothing becomes
+ * unfilterable/invisible just because it predates this field or hasn't
+ * been assigned a group yet). The set of AVAILABLE group names is managed
+ * separately on the Settings page (config/location_groups.json,
+ * locationsadmin.js) — this only shows groups actually assigned to at
+ * least one location right now, same "derive what's shown from what's
+ * actually in use" approach renderLocationChips already takes for
+ * individual locations.
+ */
+function renderGroupChips(allLocations, selectedGroups, onChange) {
+  const container = document.getElementById("groupChips");
+  if (!container) return;
+  container.innerHTML = "";
+  const seenGroups = new Set();
+  for (const loc of allLocations) {
+    const group = locationGroupOf(loc);
+    if (seenGroups.has(group)) continue;
+    seenGroups.add(group);
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "loc-chip" + (selectedGroups.has(group) ? " active" : "");
+    chip.textContent = group;
+    chip.addEventListener("click", () => {
+      if (selectedGroups.has(group)) {
+        selectedGroups.delete(group);
+      } else {
+        selectedGroups.add(group);
+      }
+      persistSelectedGroups(selectedGroups);
       chip.classList.toggle("active");
       onChange();
     });
