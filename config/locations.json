@@ -22,7 +22,11 @@
         "timeFromSpot": "00:10"
       }
     ],
-    "locationGroup": "Western Port"
+    "locationGroup": "Western Port",
+    "locationGroups": [
+      "Western Port",
+      "Western"
+    ]
   },
   {
     "name": "Corinella Boat Ramp, VIC",
@@ -38,7 +42,11 @@
         "timeFromSpot": "00:20"
       }
     ],
-    "locationGroup": "Western Port"
+    "locationGroup": "Western Port",
+    "locationGroups": [
+      "Western Port",
+      "Eastern"
+    ]
   },
   {
     "name": "Coronet Bay, VIC 3984",
@@ -54,7 +62,11 @@
         "timeFromSpot": "00:20"
       }
     ],
-    "locationGroup": "Western Port"
+    "locationGroup": "Western Port",
+    "locationGroups": [
+      "Western Port",
+      "Eastern"
+    ]
   },
   {
     "name": "Flinders Pier, VIC",
@@ -70,7 +82,12 @@
         "timeFromSpot": "00:20"
       }
     ],
-    "locationGroup": "Western Port"
+    "locationGroup": "Western Port",
+    "locationGroups": [
+      "Western Port",
+      "Southern",
+      "Western"
+    ]
   },
   {
     "name": "Gunnamatta Beach, VIC",
@@ -86,7 +103,10 @@
         "timeFromSpot": "00:20"
       }
     ],
-    "locationGroup": "South Beaches"
+    "locationGroup": "South Beaches",
+    "locationGroups": [
+      "South Beaches"
+    ]
   },
   {
     "name": "Hastings Jetty, VIC",
@@ -102,7 +122,11 @@
         "timeFromSpot": "01:00"
       }
     ],
-    "locationGroup": "Western Port"
+    "locationGroup": "Western Port",
+    "locationGroups": [
+      "Western Port",
+      "Western"
+    ]
   },
   {
     "name": "Kilcunda, VIC 3995",
@@ -118,7 +142,10 @@
         "timeFromSpot": "00:30"
       }
     ],
-    "locationGroup": "South Beaches"
+    "locationGroup": "South Beaches",
+    "locationGroups": [
+      "South Beaches"
+    ]
   },
   {
     "name": "Lang Lang Boat Ramp, VIC",
@@ -144,7 +171,11 @@
         "timeFromSpot": "00:00"
       }
     ],
-    "locationGroup": "Western Port"
+    "locationGroup": "Western Port",
+    "locationGroups": [
+      "Western Port",
+      "Eastern"
+    ]
   },
   {
     "name": "Mornington Pier, VIC",
@@ -160,7 +191,11 @@
         "timeFromSpot": "00:15"
       }
     ],
-    "locationGroup": "Port Phillip"
+    "locationGroup": "Port Phillip",
+    "locationGroups": [
+      "Port Phillip",
+      "Eastern"
+    ]
   },
   {
     "name": "Patterson River Entrance, VIC",
@@ -176,7 +211,11 @@
         "timeFromSpot": "00:20"
       }
     ],
-    "locationGroup": "Port Phillip"
+    "locationGroup": "Port Phillip",
+    "locationGroups": [
+      "Port Phillip",
+      "Eastern"
+    ]
   },
   {
     "name": "Rosebud Pier, VIC",
@@ -192,7 +231,12 @@
         "timeFromSpot": "00:20"
       }
     ],
-    "locationGroup": "Port Phillip"
+    "locationGroup": "Port Phillip",
+    "locationGroups": [
+      "Port Phillip",
+      "Eastern",
+      "Southern"
+    ]
   },
   {
     "name": "Safety Beach Boat Ramp, VIC",
@@ -208,7 +252,12 @@
         "timeFromSpot": "00:20"
       }
     ],
-    "locationGroup": "Port Phillip"
+    "locationGroup": "Port Phillip",
+    "locationGroups": [
+      "Port Phillip",
+      "Eastern",
+      "Southern"
+    ]
   },
   {
     "name": "Sorrento Pier, VIC",
@@ -224,7 +273,12 @@
         "timeFromSpot": "00:20"
       }
     ],
-    "locationGroup": "Port Phillip"
+    "locationGroup": "Port Phillip",
+    "locationGroups": [
+      "Port Phillip",
+      "Eastern",
+      "Southern"
+    ]
   },
   {
     "name": "Stony Point Boat Ramp, VIC",
@@ -240,7 +294,11 @@
         "timeFromSpot": "00:20"
       }
     ],
-    "locationGroup": "Western Port"
+    "locationGroup": "Western Port",
+    "locationGroups": [
+      "Western Port",
+      "Western"
+    ]
   },
   {
     "name": "Warneet Boat Ramp, VIC",
@@ -256,7 +314,11 @@
         "timeFromSpot": "01:00"
       }
     ],
-    "locationGroup": "Western Port"
+    "locationGroup": "Western Port",
+    "locationGroups": [
+      "Western Port",
+      "Northern"
+    ]
   },
   {
     "name": "Williamstown Beach, VIC",
@@ -272,7 +334,11 @@
         "timeFromSpot": "00:20"
       }
     ],
-    "locationGroup": "Port Phillip"
+    "locationGroup": "Port Phillip",
+    "locationGroups": [
+      "Port Phillip",
+      "Northern"
+    ]
   },
   {
     "name": "Betka Beach VIC",
@@ -286,7 +352,10 @@
         "timeFromSpot": "00:20"
       }
     ],
-    "locationGroup": "Mallacoota"
+    "locationGroup": "Mallacoota",
+    "locationGroups": [
+      "Mallacoota"
+    ]
   },
   {
     "name": "Metung, VIC 3904",
@@ -301,7 +370,10 @@
       }
     ],
     "tidal": false,
-    "locationGroup": "Lakes Entrance"
+    "locationGroup": "Lakes Entrance",
+    "locationGroups": [
+      "Lakes Entrance"
+    ]
   },
   {
     "name": "Lakes Entrance Beach VIC",
@@ -315,6 +387,9 @@
         "timeFromSpot": "00:20"
       }
     ],
-    "locationGroup": "Lakes Entrance"
+    "locationGroup": "Lakes Entrance",
+    "locationGroups": [
+      "Lakes Entrance"
+    ]
   }
 ]
