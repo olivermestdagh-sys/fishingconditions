@@ -1369,13 +1369,38 @@ main.wide {
 }
 
 .weeknew-session-chip .badge-stack {
-  gap: 8px;
+  gap: 6px;
+  /* Now up to 5 badges (Location, Fishing, plus Temp/Wind/Rain below) —
+     220px isn't wide enough for all of them on one line, so this wraps
+     into a second row rather than overflowing or squeezing everything
+     unreadably thin. */
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 
 .weeknew-session-chip .condition-badge {
   min-width: 26px;
   height: 26px;
   font-size: 0.7rem;
+}
+
+/* Temp/Wind/Rain badges — same badge "family" as the Location/Fishing
+   circles (same height, same white bold text) but these show a literal
+   range/percentage rather than a 1–5 score, so there's no color scale to
+   apply (conditionColor() doesn't mean anything for a temperature range) —
+   a fixed, distinct color per type instead, and a pill rather than a
+   perfect circle since text like "14–19°" doesn't fit a 26px circle.
+   Selector matches .weeknew-session-chip .condition-badge's own
+   specificity (two classes) rather than just .weeknew-range-badge alone —
+   otherwise that more specific existing rule's font-size/min-width would
+   win over this one's, regardless of which comes later in the file. */
+.weeknew-session-chip .weeknew-range-badge {
+  min-width: 26px;
+  width: auto;
+  padding: 0 7px;
+  border-radius: 13px;
+  font-size: 0.62rem;
+  white-space: nowrap;
 }
 
 .weeknew-session-chip .badge-label {

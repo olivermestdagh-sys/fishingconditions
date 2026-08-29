@@ -1413,6 +1413,18 @@ function average(rows, field, from, to) {
   return vals.reduce((a, b) => a + b, 0) / vals.length;
 }
 
+function rangeOf(rows, field, from, to) {
+  const vals = rows.filter((r) => r._t >= from && r._t <= to && r[field] != null).map((r) => r[field]);
+  if (vals.length === 0) return null;
+  return { min: Math.min(...vals), max: Math.max(...vals) };
+}
+
+function maxOf(rows, field, from, to) {
+  const vals = rows.filter((r) => r._t >= from && r._t <= to && r[field] != null).map((r) => r[field]);
+  if (vals.length === 0) return null;
+  return Math.max(...vals);
+}
+
 const DAY_COLORS = [
   { bg: "#eaf2fb", accent: "#1f4e78", photoTint: "rgba(234,242,251,0.86)" }, // blue
   { bg: "#fef3e0", accent: "#b45309", photoTint: "rgba(254,243,224,0.86)" }, // amber

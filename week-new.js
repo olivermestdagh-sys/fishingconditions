@@ -337,6 +337,9 @@ function computeLocationRows() {
         ...w,
         avgCondition: average(locRows, "Condition", w.from, w.to),
         avgFishingCondition: average(locRows, "Fishing Condition", w.from, w.to),
+        tempRange: rangeOf(locRows, "Temp Forecast (C)", w.from, w.to),
+        windRange: rangeOf(locRows, "Wind Forecast (km/h)", w.from, w.to),
+        maxRain: maxOf(locRows, "Rainfall Probability (%)", w.from, w.to),
       });
     }
     return { loc, locRows, sessions };
@@ -665,6 +668,18 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
           <div class="badge-item">
             <div class="condition-badge" style="background:${conditionColor(s.avgFishingCondition)}">${s.avgFishingCondition != null ? s.avgFishingCondition.toFixed(1) : "–"}</div>
             <div class="badge-label">Fishing</div>
+          </div>
+          <div class="badge-item">
+            <div class="condition-badge weeknew-range-badge" style="background:#ea580c">${s.tempRange ? `${Math.round(s.tempRange.min)}–${Math.round(s.tempRange.max)}°` : "–"}</div>
+            <div class="badge-label">Temp</div>
+          </div>
+          <div class="badge-item">
+            <div class="condition-badge weeknew-range-badge" style="background:#0ea5e9">${s.windRange ? `${Math.round(s.windRange.min)}–${Math.round(s.windRange.max)}` : "–"}</div>
+            <div class="badge-label">Wind</div>
+          </div>
+          <div class="badge-item">
+            <div class="condition-badge weeknew-range-badge" style="background:#64748b">${s.maxRain != null ? `${Math.round(s.maxRain)}%` : "–"}</div>
+            <div class="badge-label">Rain</div>
           </div>
         </div>
       `;
