@@ -181,19 +181,45 @@ async function init() {
   document.getElementById("launchTime").addEventListener("input", persistTripTimes);
   document.getElementById("homeBy").addEventListener("input", persistTripTimes);
 
-  renderLocationChips(allLocations, selectedLocations, renderWeekView);
-  renderTypeChips(selectedTypes, renderWeekView);
-  renderGroupChips(allLocations, selectedGroups, renderWeekView);
+  // Cross-filtering: changing Type narrows which Location Group AND which
+  // Location chips are even offered (a chip for a group/location with no
+  // match for the currently-selected type(s) is just noise); changing
+  // Group narrows which Location chips are offered, in turn. This only
+  // changes which chips are OFFERED, not what's actually selected — a
+  // location/group that temporarily disappears stays in its Set exactly
+  // as it was, so changing Type/Group back brings it back with whatever
+  // checked state it had before, rather than resetting it.
+  function refreshLocationChips() {
+    renderLocationChips(allLocations, selectedLocations, renderWeekView, selectedTypes, selectedGroups);
+  }
+  function onGroupFilterChanged() {
+    refreshLocationChips();
+    renderWeekView();
+  }
+  function onTypeFilterChanged() {
+    renderGroupChips(allLocations, selectedGroups, onGroupFilterChanged, selectedTypes);
+    refreshLocationChips();
+    renderWeekView();
+  }
+
+  refreshLocationChips();
+  renderTypeChips(selectedTypes, onTypeFilterChanged);
+  renderGroupChips(allLocations, selectedGroups, onGroupFilterChanged, selectedTypes);
   document.getElementById("btnLocAll").addEventListener("click", () => {
-    selectedLocations = new Set(allLocations.map((l) => l.name));
+    // Selects every CURRENTLY OFFERED (narrowed by Type+Group) location,
+    // not literally every location regardless of the active filters —
+    // matches what's actually shown as a chip right now.
+    selectedLocations = new Set(
+      allLocations.filter((l) => selectedTypes.has(l.type) && selectedGroups.has(locationGroupOf(l))).map((l) => l.name)
+    );
     persistSelectedLocations(selectedLocations);
-    renderLocationChips(allLocations, selectedLocations, renderWeekView);
+    refreshLocationChips();
     renderWeekView();
   });
   document.getElementById("btnLocNone").addEventListener("click", () => {
     selectedLocations = new Set();
     persistSelectedLocations(selectedLocations);
-    renderLocationChips(allLocations, selectedLocations, renderWeekView);
+    refreshLocationChips();
     renderWeekView();
   });
   wireThresholdStepper("minCondition", 0.1, 1, 5, conditionColor);

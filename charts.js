@@ -1481,7 +1481,21 @@ function persistThresholds() {
 // onChange is called after the toggle (with no arguments) so each caller
 // can supply its own "re-render everything that depends on this filter"
 // logic, rather than this function hardcoding a specific one.
-function renderLocationChips(allLocations, selectedLocations, onChange) {
+// onChange is called after the toggle (with no arguments) so each caller
+// can supply its own "re-render everything that depends on this filter"
+// logic, rather than this function hardcoding a specific one.
+//
+// narrowByTypes/narrowByGroups are optional (both callers pass them; not
+// required for backward compatibility with any future caller that
+// doesn't need cross-filtering) — when given, a location only gets a
+// chip here if it has at least one (name,type) entry matching the
+// current Type filter AND whose group matches the current Location
+// Group filter. This only affects which chips are OFFERED, not what's
+// actually selected — a location that disappears because its type/group
+// no longer matches stays in selectedLocations exactly as it was, so if
+// the Type/Group filter changes back, it reappears with its previous
+// checked state rather than resetting.
+function renderLocationChips(allLocations, selectedLocations, onChange, narrowByTypes, narrowByGroups) {
   const container = document.getElementById("locationChips");
   container.innerHTML = "";
   // A location's name is no longer unique on its own (Kayak and Land based
@@ -1489,6 +1503,8 @@ function renderLocationChips(allLocations, selectedLocations, onChange) {
   // per physical spot, not one per (name, type) combination.
   const seenNames = new Set();
   for (const loc of allLocations) {
+    if (narrowByTypes && !narrowByTypes.has(loc.type)) continue;
+    if (narrowByGroups && !narrowByGroups.has(locationGroupOf(loc))) continue;
     if (seenNames.has(loc.name)) continue;
     seenNames.add(loc.name);
     const chip = document.createElement("button");
@@ -1543,13 +1559,19 @@ function renderTypeChips(selectedTypes, onChange) {
  * least one location right now, same "derive what's shown from what's
  * actually in use" approach renderLocationChips already takes for
  * individual locations.
+ *
+ * narrowByTypes (optional) restricts this to groups that have at least
+ * one location matching the current Type filter — same "narrow the
+ * offered chips, don't touch what's actually selected" approach as
+ * renderLocationChips's own narrowing params.
  */
-function renderGroupChips(allLocations, selectedGroups, onChange) {
+function renderGroupChips(allLocations, selectedGroups, onChange, narrowByTypes) {
   const container = document.getElementById("groupChips");
   if (!container) return;
   container.innerHTML = "";
   const seenGroups = new Set();
   for (const loc of allLocations) {
+    if (narrowByTypes && !narrowByTypes.has(loc.type)) continue;
     const group = locationGroupOf(loc);
     if (seenGroups.has(group)) continue;
     seenGroups.add(group);
