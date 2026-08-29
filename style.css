@@ -1510,3 +1510,50 @@ main.wide {
     margin-bottom: 6px;
   }
 }
+
+/* Double-tap-to-fullscreen (see week-new.js's setupFullscreenToggle) —
+   toggles real browser fullscreen on #weekTimelineScroll itself, rather
+   than relying purely on the CSS rotation trick above. Fullscreen
+   elements render in the browser's own "top layer", explicitly exempt
+   from any ancestor's CSS transform per spec — so once this element IS
+   the fullscreen element, body's own rotate(-90deg) (see
+   html.weeknew-force-landscape above) no longer applies to it at all,
+   good or bad depending on what actually happens next:
+     - If screen.orientation.lock('landscape') succeeds — only possible at
+       all inside a genuine fullscreen + user-gesture context, which a
+       double-tap now provides — the device is genuinely landscape and
+       this displays correctly on its own, no rotation trick needed.
+     - If lock isn't available (unsupported browser, or it simply fails)
+       and the phone is still physically portrait, the exact same rotation
+       trick is re-applied here, directly to the fullscreen element this
+       time, so it still displays correctly either way.
+   The two states are mutually exclusive by construction: once truly
+   landscape (lock succeeded, or the person just physically turned the
+   phone), (orientation: portrait) below stops matching on its own and
+   this block does nothing — same self-adjusting behavior as the base
+   force-landscape trick.
+   !important on max-height overrides the small inline pixel value
+   week-new.html's sizing script sets for the NON-fullscreen layout
+   (computed to fit alongside the header/nav/filters chrome) — that
+   number has nothing to do with fullscreen, where this element is the
+   only thing on screen. */
+#weekTimelineScroll:fullscreen,
+#weekTimelineScroll:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  max-height: 100vh !important;
+  background: var(--white);
+}
+@media screen and (max-width: 900px) and (orientation: portrait) {
+  #weekTimelineScroll:fullscreen,
+  #weekTimelineScroll:-webkit-full-screen {
+    width: 100vh;
+    height: 100vw;
+    max-height: 100vw !important;
+    transform-origin: left top;
+    transform: rotate(-90deg);
+    position: fixed;
+    top: 100%;
+    left: 0;
+  }
+}
