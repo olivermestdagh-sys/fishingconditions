@@ -1147,7 +1147,7 @@ def main():
                     "lat": loc.get("lat"),
                     "lng": loc.get("lng"),
                     "tideMaxObserved": loc.get("tideMaxObserved"),
-                    "locationGroup": loc.get("locationGroup"),
+                    "locationGroups": loc.get("locationGroups") or [],
                     **type_config,
                 })
         except Exception as e:  # noqa: BLE001 - one bad location shouldn't kill the whole run
