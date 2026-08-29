@@ -663,11 +663,11 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
         <div class="badge-stack">
           <div class="badge-item">
             <div class="condition-badge" style="background:${conditionColor(s.avgCondition)}">${s.avgCondition != null ? s.avgCondition.toFixed(1) : "–"}</div>
-            <div class="badge-label">Location</div>
+            <div class="badge-label">Loc</div>
           </div>
           <div class="badge-item">
             <div class="condition-badge" style="background:${conditionColor(s.avgFishingCondition)}">${s.avgFishingCondition != null ? s.avgFishingCondition.toFixed(1) : "–"}</div>
-            <div class="badge-label">Fishing</div>
+            <div class="badge-label">Fish</div>
           </div>
           <div class="badge-item">
             <div class="condition-badge weeknew-range-badge" style="background:#ea580c">${s.tempRange ? `${Math.round(s.tempRange.min)}–${Math.round(s.tempRange.max)}°` : "–"}</div>

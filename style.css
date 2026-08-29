@@ -1369,19 +1369,31 @@ main.wide {
 }
 
 .weeknew-session-chip .badge-stack {
-  gap: 6px;
-  /* Now up to 5 badges (Location, Fishing, plus Temp/Wind/Rain below) —
-     220px isn't wide enough for all of them on one line, so this wraps
-     into a second row rather than overflowing or squeezing everything
-     unreadably thin. */
-  flex-wrap: wrap;
-  row-gap: 6px;
+  gap: 4px;
+  /* Forced single-line (see "Loc"/"Fish" label shortening in week-new.js,
+     and the tighter sizing below) rather than wrapping into a second
+     row — a wrapped second row for just one badge (Rain) read as visually
+     unbalanced and made chip height inconsistent depending on how many
+     badges a session happened to have. */
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+
+.weeknew-session-chip .badge-item {
+  /* Shrinks below its own content's natural width when the row is tight —
+     needed for flex-wrap:nowrap to actually fit 5 items rather than just
+     letting them overflow the chip's edge. min-width:0 is the standard
+     escape hatch (flex items default to min-width:auto, which refuses to
+     shrink past content size otherwise). */
+  min-width: 0;
+  flex: 1 1 0;
 }
 
 .weeknew-session-chip .condition-badge {
-  min-width: 26px;
-  height: 26px;
-  font-size: 0.7rem;
+  min-width: 22px;
+  height: 22px;
+  font-size: 0.62rem;
+  padding: 0 4px;
 }
 
 /* Temp/Wind/Rain badges — same badge "family" as the Location/Fishing
@@ -1389,22 +1401,37 @@ main.wide {
    range/percentage rather than a 1–5 score, so there's no color scale to
    apply (conditionColor() doesn't mean anything for a temperature range) —
    a fixed, distinct color per type instead, and a pill rather than a
-   perfect circle since text like "14–19°" doesn't fit a 26px circle.
+   perfect circle since text like "14–19°" doesn't fit a 22px circle.
    Selector matches .weeknew-session-chip .condition-badge's own
    specificity (two classes) rather than just .weeknew-range-badge alone —
    otherwise that more specific existing rule's font-size/min-width would
    win over this one's, regardless of which comes later in the file. */
 .weeknew-session-chip .weeknew-range-badge {
-  min-width: 26px;
+  min-width: 0;
   width: auto;
-  padding: 0 7px;
-  border-radius: 13px;
-  font-size: 0.62rem;
+  max-width: 100%;
+  padding: 0 4px;
+  border-radius: 11px;
+  font-size: 0.56rem;
+  /* Truncates rather than wrapping/overflowing in the rare case a value
+     is wider than its column has room for at this squeeze (e.g. a
+     3-digit wind range) — every real value seen in practice fits without
+     ever actually triggering the ellipsis, this is just a safety net. */
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .weeknew-session-chip .badge-label {
-  font-size: 0.58rem;
+  font-size: 0.56rem;
+  /* Truncates a label that's still wider than its column at this size —
+     shortening LOCATION/FISHING to LOC/FISH (see week-new.js) already
+     covers the normal case; this is the same safety net as the badge
+     value above, for anything unexpectedly long. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .weeknew-no-session {
