@@ -64,6 +64,13 @@ let activeRowCharts = [];
 // (disconnected) at the start of every render alongside activeRowCharts,
 // since it's watching DOM elements that are about to be thrown away.
 let rowVisibilityObserver = null;
+// Plain-scroll-event fallback for the same job — see the comment where
+// this is wired up in renderWeekView for why IntersectionObserver alone
+// wasn't reliable enough on its own. Tracked so the old listener can be
+// removed before a new one is attached on the next render, same reason
+// rowVisibilityObserver gets disconnected rather than left to pile up.
+let rowVisibilityScrollTarget = null;
+let rowVisibilityScrollHandler = null;
 
 const PINNED_LOCATIONS_STORAGE_KEY = "goodConditionsPinnedLocationsNew";
 
@@ -353,6 +360,12 @@ function renderWeekView() {
   for (const c of activeRowCharts) c.destroy();
   activeRowCharts = [];
   if (rowVisibilityObserver) rowVisibilityObserver.disconnect();
+  if (rowVisibilityScrollTarget) {
+    rowVisibilityScrollTarget.removeEventListener("scroll", rowVisibilityScrollHandler);
+    window.removeEventListener("resize", rowVisibilityScrollHandler);
+    rowVisibilityScrollTarget = null;
+    rowVisibilityScrollHandler = null;
+  }
 
   const locationRows = computeLocationRows();
   const emptyState = document.getElementById("weekEmptyState");
@@ -522,27 +535,68 @@ function renderWeekView() {
   const rowBuilds = locationRows.map((entry) => buildLocationRowElement(entry, timelineStart, timelineEnd, totalTrackWidth));
   for (const { row } of rowBuilds) inner.appendChild(row);
 
-  const builtBySidebar = new Map(rowBuilds.map(({ sidebar, chartWrap, renderChart }) => [sidebar, { chartWrap, renderChart }]));
+  const builtBySidebar = new Map(rowBuilds.map(({ sidebar, chartWrap, renderChart }) => [sidebar, { chartWrap, renderChart, rendered: false }]));
+
+  function renderIfNeeded(sidebar) {
+    const built = builtBySidebar.get(sidebar);
+    if (!built || built.rendered) return;
+    built.rendered = true;
+    if (rowVisibilityObserver) rowVisibilityObserver.unobserve(sidebar); // only ever needs to render once
+    // Force layout before Chart.js measures this row's canvas — same
+    // reasoning as the old all-at-once version (see the removed comment
+    // this replaced): a canvas can measure as zero/stale size if Chart.js
+    // reads it before the browser has actually settled layout.
+    void built.chartWrap.offsetHeight;
+    built.renderChart();
+  }
+
+  // IntersectionObserver is the primary mechanism — efficient, and it's
+  // what all the earlier testing for this feature was verified against.
+  // But it turned out not to fire reliably in every real scroll scenario
+  // on a real device (confirmed on a Samsung S21 — rows beyond the
+  // initially-visible few stayed permanently blank on scroll, not just
+  // slow to appear), so a plain 'scroll'-event fallback below acts as a
+  // safety net that doesn't depend on IntersectionObserver working at
+  // all — whichever one actually fires first renders a row; renderIfNeeded's
+  // own `rendered` flag stops the other from doing anything redundant.
   rowVisibilityObserver = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-        const built = builtBySidebar.get(entry.target);
-        if (!built) continue;
-        rowVisibilityObserver.unobserve(entry.target); // only ever needs to render once
-        // Force layout before Chart.js measures this row's canvas — same
-        // reasoning as the old all-at-once version (see the removed
-        // comment this replaced): a canvas can measure as zero/stale size
-        // if Chart.js reads it before the browser has actually settled
-        // layout. Cheap insurance, and by this point (an IntersectionObserver
-        // callback) layout has almost certainly already run anyway.
-        void built.chartWrap.offsetHeight;
-        built.renderChart();
+        if (entry.isIntersecting) renderIfNeeded(entry.target);
       }
     },
     { root: scrollWrap, rootMargin: "400px 0px 400px 0px", threshold: 0 }
   );
   for (const { sidebar } of rowBuilds) rowVisibilityObserver.observe(sidebar);
+
+  // Manual fallback: on every scroll (and resize — covers the
+  // enter/exit-fullscreen transition, which can resize the board
+  // dramatically without necessarily firing a 'scroll' event on its own),
+  // check every not-yet-rendered row's actual position against the
+  // scroll container's current visible bounds directly, with the same
+  // rootMargin-equivalent buffer as the observer above. rAF-throttled so
+  // this doesn't run on every single scroll event, just once per frame.
+  let fallbackScheduled = false;
+  function checkVisibleRowsManually() {
+    fallbackScheduled = false;
+    const rootRect = scrollWrap.getBoundingClientRect();
+    for (const [sidebar, built] of builtBySidebar) {
+      if (built.rendered) continue;
+      const rect = sidebar.getBoundingClientRect();
+      const verticallyVisible = rect.bottom > rootRect.top - 400 && rect.top < rootRect.bottom + 400;
+      if (verticallyVisible) renderIfNeeded(sidebar);
+    }
+  }
+  function scheduleFallbackCheck() {
+    if (fallbackScheduled) return;
+    fallbackScheduled = true;
+    requestAnimationFrame(checkVisibleRowsManually);
+  }
+  rowVisibilityScrollHandler = scheduleFallbackCheck;
+  rowVisibilityScrollTarget = scrollWrap;
+  scrollWrap.addEventListener("scroll", rowVisibilityScrollHandler, { passive: true });
+  window.addEventListener("resize", rowVisibilityScrollHandler);
+  checkVisibleRowsManually(); // catch whatever's already visible immediately, don't wait for the first scroll/resize
 }
 
 
