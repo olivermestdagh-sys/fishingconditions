@@ -660,4 +660,118 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
   return { row, sidebar, chartWrap, renderChart };
 }
 
+/**
+ * Double-tap (or double-click, for free — the same detector handles
+ * mouse pointers too) #weekTimelineScroll — "the frame that contains all
+ * the days/locations/graphs" — to toggle real browser fullscreen on it.
+ *
+ * This exists alongside the CSS rotate-for-landscape trick (week-new.html
+ * / style.css), not instead of it: neither the Fullscreen API nor
+ * screen.orientation.lock() can fire outside a genuine user gesture —
+ * that's exactly why the base landscape behavior had to be a CSS trick
+ * rather than a real orientation lock in the first place. A double-tap
+ * IS a real user gesture, so both become available at that moment —
+ * fullscreen hands the WHOLE physical screen to the board (hiding the
+ * browser's own address bar too, something no CSS trick can do), and a
+ * successful orientation lock gives a genuine landscape view instead of
+ * a simulated one. See the matching #weekTimelineScroll:fullscreen rules
+ * in style.css for what happens if the lock isn't available or fails.
+ *
+ * Double-tap is detected manually (two pointerup events close together in
+ * both time and position) rather than relying on the browser's native
+ * 'dblclick' event, which fires inconsistently for touch input across
+ * browsers. touch-action:manipulation on the target (set below) disables
+ * the browser's own native double-tap-to-zoom so it doesn't fire at the
+ * same time as — or instead of — this.
+ */
+function setupFullscreenToggle() {
+  const target = document.getElementById("weekTimelineScroll");
+  if (!target) return;
+  target.style.touchAction = "manipulation";
+
+  let lastTapTime = 0;
+  let lastTapX = 0;
+  let lastTapY = 0;
+  const DOUBLE_TAP_MS = 350;
+  const DOUBLE_TAP_MAX_DIST = 30; // px — taps this far apart are two separate single taps, not a double-tap
+
+  function isFullscreen() {
+    return document.fullscreenElement === target || document.webkitFullscreenElement === target;
+  }
+
+  async function enterFullscreen() {
+    try {
+      if (target.requestFullscreen) await target.requestFullscreen();
+      else if (target.webkitRequestFullscreen) target.webkitRequestFullscreen();
+      else return;
+    } catch (err) {
+      return; // fullscreen refused/unsupported — nothing further to do
+    }
+    // Best-effort only — genuinely works now (inside fullscreen + a user
+    // gesture) on browsers that support it, but plenty don't (notably iOS
+    // Safari never does) — silently ignored on failure, since the
+    // fullscreen view itself is still a real win even without a true
+    // orientation lock (see the CSS fallback rotation in style.css).
+    if (screen.orientation && screen.orientation.lock) {
+      try {
+        await screen.orientation.lock("landscape");
+      } catch (err) {
+        /* expected on unsupported browsers */
+      }
+    }
+  }
+
+  function exitFullscreen() {
+    if (screen.orientation && screen.orientation.unlock) {
+      try {
+        screen.orientation.unlock();
+      } catch (err) {
+        /* ignore */
+      }
+    }
+    if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+  }
+
+  target.addEventListener("pointerup", (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return; // ignore right-click etc.
+    // Ignore taps that landed on an actual control (pin buttons, +/−
+    // steppers) — someone double-tapping a button wants to activate the
+    // button twice, not also toggle fullscreen underneath it.
+    if (e.target.closest("button")) return;
+
+    const now = Date.now();
+    const dx = e.clientX - lastTapX;
+    const dy = e.clientY - lastTapY;
+    const isDoubleTap = now - lastTapTime < DOUBLE_TAP_MS && Math.sqrt(dx * dx + dy * dy) < DOUBLE_TAP_MAX_DIST;
+
+    if (isDoubleTap) {
+      lastTapTime = 0; // reset so an accidental third tap doesn't chain into another toggle
+      if (isFullscreen()) exitFullscreen();
+      else enterFullscreen();
+    } else {
+      lastTapTime = now;
+      lastTapX = e.clientX;
+      lastTapY = e.clientY;
+    }
+  });
+
+  // Android's back button/gesture (and other OS-level exits) can leave
+  // fullscreen without ever going through exitFullscreen() above — this
+  // keeps the orientation lock in sync with whatever actually happened,
+  // rather than assuming our own toggle is the only way fullscreen ends.
+  const onFullscreenChange = () => {
+    if (!isFullscreen() && screen.orientation && screen.orientation.unlock) {
+      try {
+        screen.orientation.unlock();
+      } catch (err) {
+        /* ignore */
+      }
+    }
+  };
+  document.addEventListener("fullscreenchange", onFullscreenChange);
+  document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+}
+
 init();
+setupFullscreenToggle();
