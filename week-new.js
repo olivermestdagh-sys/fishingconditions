@@ -37,6 +37,19 @@ const DATA_URL = "data/conditions.json";
 const PIXELS_PER_HOUR = isMobileDevice ? 16 : 32;
 const SIDEBAR_WIDTH = 220; // px — the frozen left-hand column showing each row's location name/pin/sessions
 
+// One-time visual legend on each row's FIRST session chip — a small black
+// wind-vane over the Location badge, a small black fish over the Fishing
+// badge — hand-drawn as inline SVG rather than an emoji (emoji render in
+// whatever multi-color style the platform's own font provides, not
+// reliably "black", and this site otherwise has zero external icon/image
+// dependencies to begin with). Sized and positioned via CSS
+// (.condition-badge svg — see style.css) as a small corner overlay so the
+// existing numeric score stays the primary, legible content of the badge.
+const WINDVANE_ICON_SVG =
+  '<svg class="badge-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l4 8h-2.6v10h-2.8V10H8z"/><rect x="4" y="20.5" width="16" height="1.6" rx="0.8"/></svg>';
+const FISH_ICON_SVG =
+  '<svg class="badge-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12c3-5 10-5 13 0-3 5-10 5-13 0z"/><path d="M16 12l5-4.5v9z"/><circle cx="6.5" cy="10.6" r="1" fill="#fff"/></svg>';
+
 let allRows = [];
 let allLocations = [];
 let sunTimesData = {};
@@ -641,25 +654,30 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
   if (sessions.length === 0) {
     sessionsWrap.innerHTML = `<p class="footnote weeknew-no-session">No qualifying session in this period.</p>`;
   } else {
-    for (const s of sessions) {
+    sessions.forEach((s, sIndex) => {
       const timeLabel = `${fmtNaive(s.from, { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(s.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
       const chip = document.createElement("div");
       chip.className = "weeknew-session-chip";
+      // Icons only on each row's FIRST session chip — a one-time visual
+      // legend (wind-vane for Location, fish for Fishing) so what the two
+      // badge colors/numbers mean is recognizable at a glance, without
+      // repeating the same icon on every session chip in a row that has
+      // more than one qualifying window.
       chip.innerHTML = `
         <div class="weeknew-session-time">${timeLabel} · ${s.hoursLabel}h</div>
         <div class="badge-stack">
           <div class="badge-item">
-            <div class="condition-badge" style="background:${conditionColor(s.avgCondition)}">${s.avgCondition != null ? s.avgCondition.toFixed(1) : "–"}</div>
+            <div class="condition-badge" style="background:${conditionColor(s.avgCondition)}">${s.avgCondition != null ? s.avgCondition.toFixed(1) : "–"}${sIndex === 0 ? WINDVANE_ICON_SVG : ""}</div>
             <div class="badge-label">Location</div>
           </div>
           <div class="badge-item">
-            <div class="condition-badge" style="background:${conditionColor(s.avgFishingCondition)}">${s.avgFishingCondition != null ? s.avgFishingCondition.toFixed(1) : "–"}</div>
+            <div class="condition-badge" style="background:${conditionColor(s.avgFishingCondition)}">${s.avgFishingCondition != null ? s.avgFishingCondition.toFixed(1) : "–"}${sIndex === 0 ? FISH_ICON_SVG : ""}</div>
             <div class="badge-label">Fishing</div>
           </div>
         </div>
       `;
       sessionsWrap.appendChild(chip);
-    }
+    });
   }
   sidebar.appendChild(sessionsWrap);
   row.appendChild(sidebar);
@@ -921,5 +939,60 @@ function setupFullscreenToggle() {
   document.addEventListener("webkitfullscreenchange", onFullscreenChange);
 }
 
+/**
+ * Click-and-drag-to-pan for desktop (mouse) — grab the board anywhere
+ * (background, a chart, the sidebar) and drag to scroll it, rather than
+ * needing a trackpad/scrollbar. Filtered to e.pointerType === "mouse"
+ * specifically — touch already has native drag-to-scroll, and re-doing
+ * it here too would double up with (and likely fight) that, plus the
+ * hold-to-show-tooltip gesture on each chart. A genuine click (not a
+ * drag) is left alone — this only ever engages once the pointer has
+ * actually moved past a small threshold, so a plain click still reaches
+ * whatever it would normally reach (a pin button, the fullscreen
+ * double-tap detector, hold-to-show-tooltip's own tap handling).
+ */
+function setupDragToScroll(scrollWrap) {
+  const DRAG_THRESHOLD_PX = 6;
+  let isDown = false;
+  let draggedPastThreshold = false;
+  let startX = 0;
+  let startY = 0;
+  let startScrollLeft = 0;
+  let startScrollTop = 0;
+
+  scrollWrap.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "mouse" || e.button !== 0) return;
+    isDown = true;
+    draggedPastThreshold = false;
+    startX = e.clientX;
+    startY = e.clientY;
+    startScrollLeft = scrollWrap.scrollLeft;
+    startScrollTop = scrollWrap.scrollTop;
+  });
+
+  window.addEventListener("pointermove", (e) => {
+    if (!isDown) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (!draggedPastThreshold) {
+      if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD_PX) return;
+      draggedPastThreshold = true;
+      scrollWrap.classList.add("weeknew-dragging");
+    }
+    e.preventDefault(); // stop text selection while actively dragging
+    scrollWrap.scrollLeft = startScrollLeft - dx;
+    scrollWrap.scrollTop = startScrollTop - dy;
+  });
+
+  function endDrag() {
+    isDown = false;
+    draggedPastThreshold = false;
+    scrollWrap.classList.remove("weeknew-dragging");
+  }
+  window.addEventListener("pointerup", endDrag);
+  window.addEventListener("pointercancel", endDrag);
+}
+
 init();
 setupFullscreenToggle();
+setupDragToScroll(document.getElementById("weekTimelineScroll"));
