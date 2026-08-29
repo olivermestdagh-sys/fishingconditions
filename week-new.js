@@ -236,11 +236,32 @@ async function init() {
   // pattern as the saved-locations filter above.
   pinnedOrder = loadPinnedOrder().filter((n) => allNames.includes(n));
 
+  // Cross-filtering: changing Type narrows which Location Group AND which
+  // Location chips are even offered; changing Group narrows which
+  // Location chips are offered, in turn — see charts.js's renderGroupChips/
+  // renderLocationChips for the full reasoning (same approach here, just
+  // via this page's own pin-aware renderLocationChipsWithPins instead of
+  // the shared renderLocationChips).
+  function onGroupFilterChanged() {
+    renderLocationChipsWithPins();
+    renderWeekView();
+  }
+  function onTypeFilterChanged() {
+    renderGroupChips(allLocations, selectedGroups, onGroupFilterChanged, selectedTypes);
+    renderLocationChipsWithPins();
+    renderWeekView();
+  }
+
   renderLocationChipsWithPins();
-  renderTypeChips(selectedTypes, renderWeekView);
-  renderGroupChips(allLocations, selectedGroups, renderWeekView);
+  renderTypeChips(selectedTypes, onTypeFilterChanged);
+  renderGroupChips(allLocations, selectedGroups, onGroupFilterChanged, selectedTypes);
   document.getElementById("btnLocAll").addEventListener("click", () => {
-    selectedLocations = new Set(allLocations.map((l) => l.name));
+    // Selects every CURRENTLY OFFERED (narrowed by Type+Group) location,
+    // not literally every location regardless of the active filters —
+    // matches what's actually shown as a chip right now.
+    selectedLocations = new Set(
+      allLocations.filter((l) => selectedTypes.has(l.type) && selectedGroups.has(locationGroupOf(l))).map((l) => l.name)
+    );
     persistSelectedLocations(selectedLocations);
     renderLocationChipsWithPins();
     renderWeekView();
@@ -265,12 +286,18 @@ async function init() {
  * shared chips) is completely unaffected by this page's pinning feature.
  * The star and the chip's own select/deselect are separate click targets
  * (the star calls stopPropagation) so tapping one never triggers the other.
+ *
+ * Narrowed by the current Type and Location Group filters — same
+ * "restrict which chips are offered, don't touch what's actually
+ * selected" approach as charts.js's own renderLocationChips.
  */
 function renderLocationChipsWithPins() {
   const container = document.getElementById("locationChips");
   container.innerHTML = "";
   const seenNames = new Set();
   for (const loc of allLocations) {
+    if (!selectedTypes.has(loc.type)) continue;
+    if (!selectedGroups.has(locationGroupOf(loc))) continue;
     if (seenNames.has(loc.name)) continue;
     seenNames.add(loc.name);
 
