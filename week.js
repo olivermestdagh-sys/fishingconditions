@@ -10,6 +10,7 @@ let sunTimesData = {};
 let moonPhasesData = {};
 let selectedLocations = new Set();
 let selectedTypes = new Set(["Kayak", "Land based"]);
+let selectedGroups = new Set();
 let currentTile = null;
 let modalChart = null;
 let previewChart = null;
@@ -131,6 +132,23 @@ async function init() {
   }
   selectedTypes = Array.isArray(savedTypes) && savedTypes.length ? new Set(savedTypes) : new Set(["Kayak", "Land based"]);
 
+  // Location Group defaults to "everything currently in use" — same
+  // pattern as selectedLocations above — rather than a hardcoded list
+  // like Type's two fixed values, since which groups exist is entirely
+  // data-driven (managed on the Settings page).
+  let savedGroups = null;
+  try {
+    savedGroups = JSON.parse(localStorage.getItem(GROUP_FILTER_STORAGE_KEY) || "null");
+  } catch {
+    savedGroups = null;
+  }
+  const allGroups = Array.from(new Set(allLocations.map((l) => locationGroupOf(l))));
+  if (Array.isArray(savedGroups) && savedGroups.length) {
+    selectedGroups = new Set(savedGroups.filter((g) => allGroups.includes(g)));
+  } else {
+    selectedGroups = new Set(allGroups);
+  }
+
   let savedThresholds = null;
   try {
     savedThresholds = JSON.parse(localStorage.getItem(THRESHOLDS_STORAGE_KEY) || "null");
@@ -165,6 +183,7 @@ async function init() {
 
   renderLocationChips(allLocations, selectedLocations, renderWeekView);
   renderTypeChips(selectedTypes, renderWeekView);
+  renderGroupChips(allLocations, selectedGroups, renderWeekView);
   document.getElementById("btnLocAll").addEventListener("click", () => {
     selectedLocations = new Set(allLocations.map((l) => l.name));
     persistSelectedLocations(selectedLocations);
@@ -205,12 +224,19 @@ async function init() {
  * showing once, not once per day.
  */
 function computeWeekTiles() {
+  // Name -> group lookup, built once per call from allLocations — every
+  // output entry for the same location name carries the same
+  // locationGroup regardless of type (see fetch_conditions.py), so this
+  // doesn't need to vary by type.
+  const groupByName = new Map(allLocations.map((l) => [l.name, locationGroupOf(l)]));
+
   const byLocation = {};
   for (const r of allRows) {
     const name = r["Location Name"];
     const type = r["Type"];
     if (!selectedLocations.has(name)) continue;
     if (!selectedTypes.has(type)) continue;
+    if (!selectedGroups.has(groupByName.get(name) || UNGROUPED_LABEL)) continue;
     const key = `${name}::${type}`;
     (byLocation[key] || (byLocation[key] = [])).push(r);
   }

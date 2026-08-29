@@ -1,5 +1,6 @@
 const GITHUB_API = "https://api.github.com";
 const FILE_PATH = "config/locations.json";
+const GROUPS_FILE_PATH = "config/location_groups.json";
 const BRANCH = "main";
 const WORKFLOW_FILE = "update.yml";
 
@@ -63,6 +64,8 @@ function defaultTypeConfig(type) {
 
 let locations = [];
 let currentSha = null;
+let locationGroups = [];
+let groupsSha = null;
 
 function utf8ToBase64(str) {
   return btoa(unescape(encodeURIComponent(str)));
@@ -115,7 +118,157 @@ async function init() {
   document.getElementById("btnSave").addEventListener("click", () => onSave(false));
   document.getElementById("btnSaveAndRefresh").addEventListener("click", () => onSave(true));
 
+  document.getElementById("btnAddGroup").addEventListener("click", onAddGroup);
+  document.getElementById("newGroupInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      onAddGroup();
+    }
+  });
+  document.getElementById("btnSaveGroups").addEventListener("click", onSaveGroups);
+
+  // Groups load first — renderRows() (called at the end of loadLocations)
+  // builds each location's Location Group <select> options from
+  // locationGroups, so those need to already be populated by the time it
+  // first runs, not filled in after the fact.
+  await loadLocationGroups();
   await loadLocations();
+}
+
+async function loadLocationGroups() {
+  const conn = getConnection();
+  try {
+    if (conn && conn.owner && conn.repo && conn.token) {
+      const res = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${GROUPS_FILE_PATH}?ref=${BRANCH}`, {
+        headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+      });
+      if (res.status === 404) {
+        // File doesn't exist in the repo yet — perfectly normal the first
+        // time this feature is used; starts as an empty list and gets
+        // created the first time "Save groups" below is used.
+        locationGroups = [];
+        groupsSha = null;
+      } else if (!res.ok) {
+        throw new Error(`GitHub returned ${res.status}`);
+      } else {
+        const json = await res.json();
+        groupsSha = json.sha;
+        const decoded = decodeURIComponent(escape(atob(json.content.replace(/\n/g, ""))));
+        locationGroups = JSON.parse(decoded);
+      }
+    } else {
+      // No connection yet — fall back to the public static file if it
+      // exists; a 404 here (file not created yet) is just as normal as
+      // above, not worth surfacing as an error.
+      const res = await fetch("config/location_groups.json", { cache: "no-store" });
+      locationGroups = res.ok ? await res.json() : [];
+    }
+  } catch (err) {
+    console.error(err);
+    locationGroups = [];
+  }
+  document.getElementById("groupsSection").style.display = "block";
+  renderGroupsList();
+}
+
+function renderGroupsList() {
+  const list = document.getElementById("groupsList");
+  list.innerHTML = "";
+  if (locationGroups.length === 0) {
+    list.innerHTML = `<p class="footnote" style="margin:0;text-align:left;">No groups yet — add one below.</p>`;
+    return;
+  }
+  locationGroups.forEach((group, idx) => {
+    const chip = document.createElement("span");
+    chip.className = "loc-chip";
+    chip.style.cssText = "cursor:default;display:inline-flex;align-items:center;gap:6px;";
+    chip.innerHTML = `
+      <span>${group.replace(/</g, "&lt;")}</span>
+      <button type="button" data-remove-group="${idx}" aria-label="Remove ${group.replace(/"/g, "&quot;")}" style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>
+    `;
+    list.appendChild(chip);
+  });
+  list.querySelectorAll("button[data-remove-group]").forEach((btn) => {
+    btn.addEventListener("click", (e) => onRemoveGroup(Number(e.currentTarget.dataset.removeGroup)));
+  });
+}
+
+function onAddGroup() {
+  const input = document.getElementById("newGroupInput");
+  const name = input.value.trim();
+  if (!name || locationGroups.includes(name)) {
+    input.value = "";
+    return;
+  }
+  locationGroups.push(name);
+  input.value = "";
+  renderGroupsList();
+  renderRows(); // each location row's Location Group <select> needs the new option available immediately, not just after a reload
+}
+
+function onRemoveGroup(idx) {
+  const removed = locationGroups[idx];
+  locationGroups.splice(idx, 1);
+  // Any location currently set to the removed group falls back to
+  // unassigned ("— none —") rather than silently keeping a value that no
+  // longer appears anywhere as a selectable option.
+  for (const loc of locations) {
+    if (loc.locationGroup === removed) loc.locationGroup = "";
+  }
+  renderGroupsList();
+  renderRows();
+}
+
+function setGroupsSaveStatus(text, isError) {
+  const el = document.getElementById("groupsSaveStatus");
+  el.textContent = text;
+  el.style.color = isError ? "#dc2626" : "#16a34a";
+}
+
+async function onSaveGroups() {
+  const conn = getConnection();
+  if (!conn) {
+    setGroupsSaveStatus("Connect to GitHub first (above) before saving.", true);
+    return;
+  }
+  setGroupsSaveStatus("Saving…");
+  try {
+    // Re-check the current sha immediately before writing — same
+    // reasoning as onSave() below for locations.json (in case the file
+    // changed elsewhere since it was loaded), plus the common case here
+    // of this being a brand-new file that doesn't exist in the repo yet.
+    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${GROUPS_FILE_PATH}?ref=${BRANCH}`, {
+      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+    });
+    if (getRes.status === 404) {
+      groupsSha = null; // creating the file for the first time
+    } else if (!getRes.ok) {
+      throw new Error(`Could not read current file (${getRes.status})`);
+    } else {
+      groupsSha = (await getRes.json()).sha;
+    }
+
+    const content = JSON.stringify(locationGroups, null, 2) + "\n";
+    const body = { message: "Update location groups via site", content: utf8ToBase64(content), branch: BRANCH };
+    // sha omitted entirely when creating the file for the first time —
+    // GitHub's API rejects an explicit sha:null on a create.
+    if (groupsSha) body.sha = groupsSha;
+
+    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${GROUPS_FILE_PATH}`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!putRes.ok) {
+      const errBody = await putRes.json().catch(() => ({}));
+      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
+    }
+    groupsSha = (await putRes.json()).content.sha;
+    setGroupsSaveStatus("Saved to GitHub.");
+  } catch (err) {
+    console.error(err);
+    setGroupsSaveStatus("Save failed: " + err.message, true);
+  }
 }
 
 async function loadLocations() {
@@ -165,6 +318,13 @@ function renderRows() {
           <label class="loc-edit-label">Shore faces</label>
           <select data-field="shore" data-idx="${i}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);">
             ${SHORE_OPTIONS.map((s) => `<option value="${s}" ${loc.shore === s ? "selected" : ""}>${s}</option>`).join("")}
+          </select>
+        </div>
+        <div style="min-width:140px;">
+          <label class="loc-edit-label">Location Group</label>
+          <select data-field="locationGroup" data-idx="${i}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);">
+            <option value="" ${!loc.locationGroup ? "selected" : ""}>— none —</option>
+            ${locationGroups.map((g) => `<option value="${g}" ${loc.locationGroup === g ? "selected" : ""}>${g}</option>`).join("")}
           </select>
         </div>
         <div style="min-width:140px;display:flex;align-items:flex-end;padding-bottom:8px;">
