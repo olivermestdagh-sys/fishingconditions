@@ -1291,14 +1291,18 @@ const TYPE_FILTER_STORAGE_KEY = "goodConditionsSelectedTypes";
 const GROUP_FILTER_STORAGE_KEY = "goodConditionsSelectedGroups";
 const THRESHOLDS_STORAGE_KEY = "goodConditionsThresholds";
 
-// Locations without a Location Group assigned yet (or before this field
+// Locations without any Location Group assigned yet (or before this field
 // existed at all) still need to be filterable/visible rather than
 // silently disappearing — grouped under this pseudo-value alongside
 // whatever real group names exist, both here and in renderGroupChips.
 const UNGROUPED_LABEL = "Ungrouped";
 
-function locationGroupOf(loc) {
-  return loc.locationGroup && loc.locationGroup.trim() ? loc.locationGroup : UNGROUPED_LABEL;
+// A location can belong to several groups at once (locationGroups is an
+// array) — always returns a non-empty array, so every call site can just
+// iterate/some() over it without a separate "no group" special case.
+function locationGroupsOf(loc) {
+  const groups = Array.isArray(loc.locationGroups) ? loc.locationGroups.filter((g) => g && g.trim()) : [];
+  return groups.length ? groups : [UNGROUPED_LABEL];
 }
 
 function fmtNaive(ms, opts) {
@@ -1481,20 +1485,18 @@ function persistThresholds() {
 // onChange is called after the toggle (with no arguments) so each caller
 // can supply its own "re-render everything that depends on this filter"
 // logic, rather than this function hardcoding a specific one.
-// onChange is called after the toggle (with no arguments) so each caller
-// can supply its own "re-render everything that depends on this filter"
-// logic, rather than this function hardcoding a specific one.
 //
 // narrowByTypes/narrowByGroups are optional (both callers pass them; not
 // required for backward compatibility with any future caller that
 // doesn't need cross-filtering) — when given, a location only gets a
 // chip here if it has at least one (name,type) entry matching the
-// current Type filter AND whose group matches the current Location
-// Group filter. This only affects which chips are OFFERED, not what's
-// actually selected — a location that disappears because its type/group
-// no longer matches stays in selectedLocations exactly as it was, so if
-// the Type/Group filter changes back, it reappears with its previous
-// checked state rather than resetting.
+// current Type filter AND at least one of its groups matches the current
+// Location Group filter (a location can belong to several groups — ANY
+// match is enough, not all of them). This only affects which chips are
+// OFFERED, not what's actually selected — a location that disappears
+// because its type/group no longer matches stays in selectedLocations
+// exactly as it was, so if the Type/Group filter changes back, it
+// reappears with its previous checked state rather than resetting.
 function renderLocationChips(allLocations, selectedLocations, onChange, narrowByTypes, narrowByGroups) {
   const container = document.getElementById("locationChips");
   container.innerHTML = "";
@@ -1504,7 +1506,7 @@ function renderLocationChips(allLocations, selectedLocations, onChange, narrowBy
   const seenNames = new Set();
   for (const loc of allLocations) {
     if (narrowByTypes && !narrowByTypes.has(loc.type)) continue;
-    if (narrowByGroups && !narrowByGroups.has(locationGroupOf(loc))) continue;
+    if (narrowByGroups && !locationGroupsOf(loc).some((g) => narrowByGroups.has(g))) continue;
     if (seenNames.has(loc.name)) continue;
     seenNames.add(loc.name);
     const chip = document.createElement("button");
@@ -1550,15 +1552,16 @@ function renderTypeChips(selectedTypes, onChange) {
 
 /**
  * Location Group filter chips — one per distinct group name currently in
- * use across allLocations (plus an "Ungrouped" chip for any location that
- * doesn't have one set, via locationGroupOf(), so nothing becomes
+ * use across allLocations (plus an "Ungrouped" chip for any location with
+ * no groups at all, via locationGroupsOf(), so nothing becomes
  * unfilterable/invisible just because it predates this field or hasn't
- * been assigned a group yet). The set of AVAILABLE group names is managed
- * separately on the Settings page (config/location_groups.json,
- * locationsadmin.js) — this only shows groups actually assigned to at
- * least one location right now, same "derive what's shown from what's
- * actually in use" approach renderLocationChips already takes for
- * individual locations.
+ * been assigned a group yet). A location can belong to several groups at
+ * once, so it contributes a chip candidate for EACH of its groups, not
+ * just one. The set of AVAILABLE group names is managed separately on the
+ * Settings page (config/location_groups.json, locationsadmin.js) — this
+ * only shows groups actually assigned to at least one location right now,
+ * same "derive what's shown from what's actually in use" approach
+ * renderLocationChips already takes for individual locations.
  *
  * narrowByTypes (optional) restricts this to groups that have at least
  * one location matching the current Type filter — same "narrow the
@@ -1572,24 +1575,25 @@ function renderGroupChips(allLocations, selectedGroups, onChange, narrowByTypes)
   const seenGroups = new Set();
   for (const loc of allLocations) {
     if (narrowByTypes && !narrowByTypes.has(loc.type)) continue;
-    const group = locationGroupOf(loc);
-    if (seenGroups.has(group)) continue;
-    seenGroups.add(group);
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "loc-chip" + (selectedGroups.has(group) ? " active" : "");
-    chip.textContent = group;
-    chip.addEventListener("click", () => {
-      if (selectedGroups.has(group)) {
-        selectedGroups.delete(group);
-      } else {
-        selectedGroups.add(group);
-      }
-      persistSelectedGroups(selectedGroups);
-      chip.classList.toggle("active");
-      onChange();
-    });
-    container.appendChild(chip);
+    for (const group of locationGroupsOf(loc)) {
+      if (seenGroups.has(group)) continue;
+      seenGroups.add(group);
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "loc-chip" + (selectedGroups.has(group) ? " active" : "");
+      chip.textContent = group;
+      chip.addEventListener("click", () => {
+        if (selectedGroups.has(group)) {
+          selectedGroups.delete(group);
+        } else {
+          selectedGroups.add(group);
+        }
+        persistSelectedGroups(selectedGroups);
+        chip.classList.toggle("active");
+        onChange();
+      });
+      container.appendChild(chip);
+    }
   }
 }
 

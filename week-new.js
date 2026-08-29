@@ -213,7 +213,7 @@ async function init() {
   } catch {
     savedGroups = null;
   }
-  const allGroups = Array.from(new Set(allLocations.map((l) => locationGroupOf(l))));
+  const allGroups = Array.from(new Set(allLocations.flatMap((l) => locationGroupsOf(l))));
   if (Array.isArray(savedGroups) && savedGroups.length) {
     selectedGroups = new Set(savedGroups.filter((g) => allGroups.includes(g)));
   } else {
@@ -260,7 +260,9 @@ async function init() {
     // not literally every location regardless of the active filters —
     // matches what's actually shown as a chip right now.
     selectedLocations = new Set(
-      allLocations.filter((l) => selectedTypes.has(l.type) && selectedGroups.has(locationGroupOf(l))).map((l) => l.name)
+      allLocations
+        .filter((l) => selectedTypes.has(l.type) && locationGroupsOf(l).some((g) => selectedGroups.has(g)))
+        .map((l) => l.name)
     );
     persistSelectedLocations(selectedLocations);
     renderLocationChipsWithPins();
@@ -297,7 +299,7 @@ function renderLocationChipsWithPins() {
   const seenNames = new Set();
   for (const loc of allLocations) {
     if (!selectedTypes.has(loc.type)) continue;
-    if (!selectedGroups.has(locationGroupOf(loc))) continue;
+    if (!locationGroupsOf(loc).some((g) => selectedGroups.has(g))) continue;
     if (seenNames.has(loc.name)) continue;
     seenNames.add(loc.name);
 
@@ -367,7 +369,10 @@ function computeLocationRows() {
   const minHours = Number(document.getElementById("minHours").value) || 1;
 
   const filtered = allLocations.filter(
-    (loc) => selectedLocations.has(loc.name) && selectedTypes.has(loc.type) && selectedGroups.has(locationGroupOf(loc))
+    (loc) =>
+      selectedLocations.has(loc.name) &&
+      selectedTypes.has(loc.type) &&
+      locationGroupsOf(loc).some((g) => selectedGroups.has(g))
   );
   const ordered = sortLocationsForDisplay(filtered);
 

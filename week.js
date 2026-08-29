@@ -142,7 +142,7 @@ async function init() {
   } catch {
     savedGroups = null;
   }
-  const allGroups = Array.from(new Set(allLocations.map((l) => locationGroupOf(l))));
+  const allGroups = Array.from(new Set(allLocations.flatMap((l) => locationGroupsOf(l))));
   if (Array.isArray(savedGroups) && savedGroups.length) {
     selectedGroups = new Set(savedGroups.filter((g) => allGroups.includes(g)));
   } else {
@@ -210,7 +210,9 @@ async function init() {
     // not literally every location regardless of the active filters —
     // matches what's actually shown as a chip right now.
     selectedLocations = new Set(
-      allLocations.filter((l) => selectedTypes.has(l.type) && selectedGroups.has(locationGroupOf(l))).map((l) => l.name)
+      allLocations
+        .filter((l) => selectedTypes.has(l.type) && locationGroupsOf(l).some((g) => selectedGroups.has(g)))
+        .map((l) => l.name)
     );
     persistSelectedLocations(selectedLocations);
     refreshLocationChips();
@@ -250,11 +252,11 @@ async function init() {
  * showing once, not once per day.
  */
 function computeWeekTiles() {
-  // Name -> group lookup, built once per call from allLocations — every
+  // Name -> groups lookup, built once per call from allLocations — every
   // output entry for the same location name carries the same
-  // locationGroup regardless of type (see fetch_conditions.py), so this
+  // locationGroups regardless of type (see fetch_conditions.py), so this
   // doesn't need to vary by type.
-  const groupByName = new Map(allLocations.map((l) => [l.name, locationGroupOf(l)]));
+  const groupsByName = new Map(allLocations.map((l) => [l.name, locationGroupsOf(l)]));
 
   const byLocation = {};
   for (const r of allRows) {
@@ -262,7 +264,8 @@ function computeWeekTiles() {
     const type = r["Type"];
     if (!selectedLocations.has(name)) continue;
     if (!selectedTypes.has(type)) continue;
-    if (!selectedGroups.has(groupByName.get(name) || UNGROUPED_LABEL)) continue;
+    const groups = groupsByName.get(name) || [UNGROUPED_LABEL];
+    if (!groups.some((g) => selectedGroups.has(g))) continue;
     const key = `${name}::${type}`;
     (byLocation[key] || (byLocation[key] = [])).push(r);
   }
