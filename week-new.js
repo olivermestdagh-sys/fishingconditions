@@ -261,7 +261,7 @@ async function init() {
     // matches what's actually shown as a chip right now.
     selectedLocations = new Set(
       allLocations
-        .filter((l) => selectedTypes.has(l.type) && locationGroupsOf(l).some((g) => selectedGroups.has(g)))
+        .filter((l) => selectedTypes.has(l.type) && locationGroupsOf(l).every((g) => selectedGroups.has(g)))
         .map((l) => l.name)
     );
     persistSelectedLocations(selectedLocations);
@@ -299,7 +299,7 @@ function renderLocationChipsWithPins() {
   const seenNames = new Set();
   for (const loc of allLocations) {
     if (!selectedTypes.has(loc.type)) continue;
-    if (!locationGroupsOf(loc).some((g) => selectedGroups.has(g))) continue;
+    if (!locationGroupsOf(loc).every((g) => selectedGroups.has(g))) continue;
     if (seenNames.has(loc.name)) continue;
     seenNames.add(loc.name);
 
@@ -372,7 +372,7 @@ function computeLocationRows() {
     (loc) =>
       selectedLocations.has(loc.name) &&
       selectedTypes.has(loc.type) &&
-      locationGroupsOf(loc).some((g) => selectedGroups.has(g))
+      locationGroupsOf(loc).every((g) => selectedGroups.has(g))
   );
   const ordered = sortLocationsForDisplay(filtered);
 

@@ -1490,13 +1490,14 @@ function persistThresholds() {
 // required for backward compatibility with any future caller that
 // doesn't need cross-filtering) — when given, a location only gets a
 // chip here if it has at least one (name,type) entry matching the
-// current Type filter AND at least one of its groups matches the current
-// Location Group filter (a location can belong to several groups — ANY
-// match is enough, not all of them). This only affects which chips are
-// OFFERED, not what's actually selected — a location that disappears
-// because its type/group no longer matches stays in selectedLocations
-// exactly as it was, so if the Type/Group filter changes back, it
-// reappears with its previous checked state rather than resetting.
+// current Type filter AND every one of its groups is currently selected
+// in the Location Group filter (a location can belong to several groups
+// — ALL of them must be selected, not just one, or it drops out). This
+// only affects which chips are OFFERED, not what's actually selected — a
+// location that disappears because its type/group no longer matches
+// stays in selectedLocations exactly as it was, so if the Type/Group
+// filter changes back, it reappears with its previous checked state
+// rather than resetting.
 function renderLocationChips(allLocations, selectedLocations, onChange, narrowByTypes, narrowByGroups) {
   const container = document.getElementById("locationChips");
   container.innerHTML = "";
@@ -1506,7 +1507,7 @@ function renderLocationChips(allLocations, selectedLocations, onChange, narrowBy
   const seenNames = new Set();
   for (const loc of allLocations) {
     if (narrowByTypes && !narrowByTypes.has(loc.type)) continue;
-    if (narrowByGroups && !locationGroupsOf(loc).some((g) => narrowByGroups.has(g))) continue;
+    if (narrowByGroups && !locationGroupsOf(loc).every((g) => narrowByGroups.has(g))) continue;
     if (seenNames.has(loc.name)) continue;
     seenNames.add(loc.name);
     const chip = document.createElement("button");
