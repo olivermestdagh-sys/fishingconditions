@@ -5,6 +5,46 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Olie's Kayak and Surf Fishing Conditions – Week Ahead (new)</title>
 <link rel="stylesheet" href="style.css" />
+<script>
+  // Belt-and-suspenders companion to the CSS rotate-for-landscape trick in
+  // style.css (search for "weeknew-force-landscape" there for the full
+  // explanation of why this exists instead of screen.orientation.lock()).
+  // The CSS alone uses 100vh/100vw, which is where this technique most
+  // often breaks on REAL phones: mobile Safari and mobile Chrome both
+  // resize the visible viewport as their address bar shows/hides while
+  // scrolling, and `vh`/`vw` have a long, inconsistent history across
+  // browsers/versions of referring to the *largest possible* viewport
+  // (bar hidden) rather than the *currently visible* one (bar shown) —
+  // so a size computed from them can end up taller/wider than what's
+  // actually on screen, which reads as "nothing happened" rather than a
+  // clean rotation. window.innerWidth/innerHeight don't have that
+  // ambiguity — they always reflect the actual current viewport — so this
+  // runs immediately (before any data fetch, before charts.js/week-new.js
+  // even load) and sets the rotated size in real pixels instead, then
+  // redoes it on resize/orientationchange so it keeps tracking correctly
+  // as the address bar shows/hides or the phone is actually turned.
+  function applyForceLandscapeSizing() {
+    var isPhoneWidth = window.matchMedia("(max-width: 900px)").matches;
+    var isPortrait = window.matchMedia("(orientation: portrait)").matches;
+    var body = document.body;
+    if (!body) return;
+    if (isPhoneWidth && isPortrait) {
+      body.style.width = window.innerHeight + "px";
+      body.style.height = window.innerWidth + "px";
+      body.style.top = window.innerHeight + "px";
+    } else {
+      // Not phone-portrait (already landscape, or a wide/desktop window) —
+      // clear any inline override so the normal (untransformed) CSS layout
+      // applies, exactly as the plain CSS media query alone would do.
+      body.style.width = "";
+      body.style.height = "";
+      body.style.top = "";
+    }
+  }
+  document.addEventListener("DOMContentLoaded", applyForceLandscapeSizing);
+  window.addEventListener("resize", applyForceLandscapeSizing);
+  window.addEventListener("orientationchange", applyForceLandscapeSizing);
+</script>
 </head>
 <body>
 

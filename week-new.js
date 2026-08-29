@@ -485,28 +485,38 @@ function renderWeekView() {
   // spanning the full [timelineStart, timelineEnd] range, identically
   // sized/positioned on every row.
   //
-  // Every row's DOM (sidebar + correctly-sized empty canvas) is built and
-  // attached immediately, so the page's overall scrollable size is right
-  // from the start — but the actual Chart.js chart for each row is only
-  // built once that row scrolls into view (via IntersectionObserver
-  // below), not all 14+ of them upfront. Building every row's chart
-  // eagerly on load measured at over a second of blocking main-thread
-  // work even on a fast desktop, before accounting for a real phone's
-  // slower CPU and Chart.js scaling canvas resolution by devicePixelRatio
-  // (typically 2–3 on mobile, multiplying that cost several times over) —
-  // exactly the kind of load-time cost this avoids by only ever building
-  // charts for rows actually being looked at (plus a little runway just
-  // off-screen — see rootMargin below — so scrolling doesn't reveal a
-  // blank row that pops in a moment later).
+  // Every row's DOM is built and attached immediately, but each row's
+  // chartWrap starts at a tiny placeholder width (see buildLocationRowElement)
+  // rather than its true, often-several-thousand-pixel width — expanding
+  // every row to full width upfront, even ones far below the fold, is
+  // real browser layout cost independent of Chart.js itself. Both the
+  // width expansion AND the actual Chart.js chart are deferred until the
+  // row scrolls into view (via IntersectionObserver below). Building
+  // every row's chart eagerly on load measured at over a second of
+  // blocking main-thread work even on a fast desktop, before accounting
+  // for a real phone's slower CPU and Chart.js scaling canvas resolution
+  // by devicePixelRatio (typically 2–3 on mobile, multiplying that cost
+  // several times over) — exactly the kind of load-time cost this avoids.
+  //
+  // The SIDEBAR, not the row itself, is what gets observed for
+  // visibility — the row's own width is temporarily tiny (see above)
+  // until rendered, which would otherwise make its intersection depend on
+  // horizontal scroll position too (a row parked at x:[0,40] only
+  // "intersects" a root whose visible x-range happens to include that,
+  // e.g. scrolled near day 1 — wrong the moment you've scrolled sideways
+  // to look at day 4). The sidebar is pinned to the visible left edge via
+  // position:sticky regardless of horizontal scroll, so its intersection
+  // reflects vertical scroll position only, exactly what "is this
+  // location currently being looked at" should mean here.
   const rowBuilds = locationRows.map((entry) => buildLocationRowElement(entry, timelineStart, timelineEnd, totalTrackWidth));
   for (const { row } of rowBuilds) inner.appendChild(row);
 
-  const builtByRow = new Map(rowBuilds.map(({ row, chartWrap, renderChart }) => [row, { chartWrap, renderChart }]));
+  const builtBySidebar = new Map(rowBuilds.map(({ sidebar, chartWrap, renderChart }) => [sidebar, { chartWrap, renderChart }]));
   rowVisibilityObserver = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
-        const built = builtByRow.get(entry.target);
+        const built = builtBySidebar.get(entry.target);
         if (!built) continue;
         rowVisibilityObserver.unobserve(entry.target); // only ever needs to render once
         // Force layout before Chart.js measures this row's canvas — same
@@ -521,7 +531,7 @@ function renderWeekView() {
     },
     { root: scrollWrap, rootMargin: "400px 0px 400px 0px", threshold: 0 }
   );
-  for (const { row } of rowBuilds) rowVisibilityObserver.observe(row);
+  for (const { sidebar } of rowBuilds) rowVisibilityObserver.observe(sidebar);
 }
 
 
@@ -591,7 +601,16 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
 
   const chartWrap = document.createElement("div");
   chartWrap.className = "weeknew-row-chart";
-  chartWrap.style.width = totalTrackWidth + "px";
+  // NOT set to the real totalTrackWidth yet — that's often several
+  // thousand pixels, and setting it on every row upfront (even ones whose
+  // chart is deferred — see renderChart below) forces the browser to lay
+  // out that many extremely wide boxes immediately on load, which is real
+  // cost independent of Chart.js itself. A small fixed placeholder for
+  // now (not a percentage — .weeknew-row sizes itself to its own content
+  // via width:max-content, so a percentage width here has nothing stable
+  // to resolve against); renderChart expands it to the true width right
+  // before building the chart, once this row is actually about to be shown.
+  chartWrap.style.width = "40px";
   const canvas = document.createElement("canvas");
   chartWrap.appendChild(canvas);
   row.appendChild(chartWrap);
@@ -602,6 +621,7 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
   // renderWeekView only AFTER this row has been appended to the document
   // — see the comment above the two-pass loop in renderWeekView for why.
   const renderChart = () => {
+    chartWrap.style.width = totalTrackWidth + "px"; // now expand to the row's real (wide) width, right before Chart.js needs to measure it
     if (displayRows.length === 0) return;
     const rowChart = renderConditionsChart({
       canvas,
@@ -626,7 +646,7 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
     if (rowChart) activeRowCharts.push(rowChart);
   };
 
-  return { row, chartWrap, renderChart };
+  return { row, sidebar, chartWrap, renderChart };
 }
 
 init();
