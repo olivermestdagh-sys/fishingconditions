@@ -707,12 +707,106 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
       compact: true,
       sessionSpan: sessions.map((s) => ({ from: s.from, to: s.to })),
       xRange: { min: timelineStart, max: timelineEnd },
+      disableBuiltinEvents: true, // this page drives the tooltip itself — see wireHoldToShowTooltip below
     });
-    if (rowChart) activeRowCharts.push(rowChart);
+    if (rowChart) {
+      activeRowCharts.push(rowChart);
+      wireHoldToShowTooltip(rowChart, canvas);
+    }
   };
 
   return { row, sidebar, chartWrap, renderChart };
 }
+
+/**
+ * Replaces Chart.js's default "tap anywhere to show the tooltip" behavior
+ * (disabled per-chart via disableBuiltinEvents above) with a hold-to-show
+ * gesture, better suited to a board where every row is also a horizontally
+ * scrollable, pinch/pan-able surface: a quick tap doesn't show anything
+ * until the tooltip has been explicitly turned on. Behavior:
+ *   - Hold (press and don't move) for 2 seconds: shows the tooltip at that
+ *     point, and "arms" the chart so it stays responsive to quick taps.
+ *   - While armed, a quick tap anywhere moves the tooltip to that point —
+ *     ordinary tap-to-inspect, same as Chart.js's own default behavior,
+ *     just gated behind the initial hold.
+ *   - Holding for 2 seconds again disarms it and hides the tooltip,
+ *     returning to the initial "tap does nothing" state.
+ * A press that moves more than a few pixels before the hold completes is
+ * treated as a scroll/pan gesture, not a hold, and cancels the timer —
+ * this canvas lives inside a horizontally (and, in fullscreen, vertically)
+ * scrollable board, and a hold-timer that fired despite the person
+ * actually trying to scroll would be exactly the wrong moment to pop up a
+ * tooltip.
+ */
+function wireHoldToShowTooltip(chart, canvas) {
+  const HOLD_MS = 2000;
+  const MOVE_CANCEL_PX = 10;
+  let pressTimer = null;
+  let pressStartX = 0;
+  let pressStartY = 0;
+  let armed = false;
+
+  function elementsAt(e) {
+    const mode = chart.options.interaction ? chart.options.interaction.mode : "index";
+    const intersect = chart.options.interaction ? chart.options.interaction.intersect : false;
+    return chart.getElementsAtEventForMode(e, mode, { intersect }, true);
+  }
+
+  function showTooltipAt(e) {
+    const elements = elementsAt(e);
+    if (elements.length === 0) return;
+    const rect = canvas.getBoundingClientRect();
+    chart.tooltip.setActiveElements(elements, { x: e.clientX - rect.left, y: e.clientY - rect.top });
+    chart.update();
+  }
+
+  function hideTooltip() {
+    chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+    chart.update();
+  }
+
+  function clearPressTimer() {
+    if (pressTimer != null) {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    pressStartX = e.clientX;
+    pressStartY = e.clientY;
+    clearPressTimer();
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      if (armed) {
+        armed = false;
+        hideTooltip();
+      } else {
+        armed = true;
+        showTooltipAt(e);
+      }
+    }, HOLD_MS);
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    if (pressTimer == null) return;
+    const dx = e.clientX - pressStartX;
+    const dy = e.clientY - pressStartY;
+    if (Math.sqrt(dx * dx + dy * dy) > MOVE_CANCEL_PX) clearPressTimer();
+  });
+
+  canvas.addEventListener("pointerup", (e) => {
+    const firedAsHold = pressTimer == null;
+    clearPressTimer();
+    if (firedAsHold) return; // the timer callback above already handled this press
+    if (armed) showTooltipAt(e); // ordinary quick tap while armed — move the tooltip, same as Chart.js's own default tap behavior
+    // else: not armed yet — a plain quick tap does nothing, exactly the suppression that was asked for.
+  });
+
+  canvas.addEventListener("pointercancel", clearPressTimer);
+  canvas.addEventListener("pointerleave", clearPressTimer);
+}
+
 
 /**
  * Double-tap (or double-click, for free — the same detector handles
