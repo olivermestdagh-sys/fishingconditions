@@ -203,10 +203,15 @@ async function init() {
   }
   selectedTypes = Array.isArray(savedTypes) && savedTypes.length ? new Set(savedTypes) : new Set(["Kayak", "Land based"]);
 
-  // Location Group defaults to "everything currently in use" — same
-  // pattern as selectedLocations above — rather than a hardcoded list
-  // like Type's two fixed values, since which groups exist is entirely
-  // data-driven (managed on the Settings page).
+  // Location Group defaults to EMPTY — the opposite of selectedLocations
+  // above, and deliberately so: this filter is AND-style tag matching
+  // (see groupsMatchFilter in charts.js) where checking a chip ADDS a
+  // requirement rather than including a category, so no chips checked
+  // correctly means no requirement applied yet (show everything), not
+  // "select every group" the way Location/Type default to. Defaulting to
+  // all-checked here — the naive parallel to those other two filters —
+  // would mean a location needs literally every group that currently
+  // exists just to show up on a fresh visit.
   let savedGroups = null;
   try {
     savedGroups = JSON.parse(localStorage.getItem(GROUP_FILTER_STORAGE_KEY) || "null");
@@ -214,11 +219,7 @@ async function init() {
     savedGroups = null;
   }
   const allGroups = Array.from(new Set(allLocations.flatMap((l) => locationGroupsOf(l))));
-  if (Array.isArray(savedGroups) && savedGroups.length) {
-    selectedGroups = new Set(savedGroups.filter((g) => allGroups.includes(g)));
-  } else {
-    selectedGroups = new Set(allGroups);
-  }
+  selectedGroups = new Set(Array.isArray(savedGroups) ? savedGroups.filter((g) => allGroups.includes(g)) : []);
 
   let savedThresholds = null;
   try {
@@ -261,7 +262,7 @@ async function init() {
     // matches what's actually shown as a chip right now.
     selectedLocations = new Set(
       allLocations
-        .filter((l) => selectedTypes.has(l.type) && locationGroupsOf(l).every((g) => selectedGroups.has(g)))
+        .filter((l) => selectedTypes.has(l.type) && groupsMatchFilter(locationGroupsOf(l), selectedGroups))
         .map((l) => l.name)
     );
     persistSelectedLocations(selectedLocations);
@@ -299,7 +300,7 @@ function renderLocationChipsWithPins() {
   const seenNames = new Set();
   for (const loc of allLocations) {
     if (!selectedTypes.has(loc.type)) continue;
-    if (!locationGroupsOf(loc).every((g) => selectedGroups.has(g))) continue;
+    if (!groupsMatchFilter(locationGroupsOf(loc), selectedGroups)) continue;
     if (seenNames.has(loc.name)) continue;
     seenNames.add(loc.name);
 
@@ -372,7 +373,7 @@ function computeLocationRows() {
     (loc) =>
       selectedLocations.has(loc.name) &&
       selectedTypes.has(loc.type) &&
-      locationGroupsOf(loc).every((g) => selectedGroups.has(g))
+      groupsMatchFilter(locationGroupsOf(loc), selectedGroups)
   );
   const ordered = sortLocationsForDisplay(filtered);
 
