@@ -284,5 +284,18 @@
       }
     ],
     "tidal": false
+  },
+  {
+    "name": "Lakes Entrance Beach VIC",
+    "shore": "NE",
+    "types": [
+      {
+        "type": "Land based",
+        "setUp": "00:20",
+        "packUp": "00:20",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
+      }
+    ]
   }
 ]
