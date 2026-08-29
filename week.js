@@ -211,7 +211,7 @@ async function init() {
     // matches what's actually shown as a chip right now.
     selectedLocations = new Set(
       allLocations
-        .filter((l) => selectedTypes.has(l.type) && locationGroupsOf(l).some((g) => selectedGroups.has(g)))
+        .filter((l) => selectedTypes.has(l.type) && locationGroupsOf(l).every((g) => selectedGroups.has(g)))
         .map((l) => l.name)
     );
     persistSelectedLocations(selectedLocations);
@@ -265,7 +265,7 @@ function computeWeekTiles() {
     if (!selectedLocations.has(name)) continue;
     if (!selectedTypes.has(type)) continue;
     const groups = groupsByName.get(name) || [UNGROUPED_LABEL];
-    if (!groups.some((g) => selectedGroups.has(g))) continue;
+    if (!groups.every((g) => selectedGroups.has(g))) continue;
     const key = `${name}::${type}`;
     (byLocation[key] || (byLocation[key] = [])).push(r);
   }
