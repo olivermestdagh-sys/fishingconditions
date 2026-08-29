@@ -1354,7 +1354,13 @@ main.wide {
 .weeknew-row-chart {
   position: relative;
   flex: 0 0 auto;
-  min-height: 300px;
+  /* --weeknew-mobile-row-height is set by the inline script in
+     week-new.html, on phone-portrait devices only — measured against the
+     actual space available in the rotated layout, so a row's graph fills
+     the visible board without needing a second scroll just to see its own
+     top/bottom. Falls back to the original fixed 300px wherever that
+     variable isn't set (desktop, or JS disabled). */
+  min-height: var(--weeknew-mobile-row-height, 300px);
   padding: 4px 6px;
 }
 
@@ -1466,6 +1472,41 @@ main.wide {
     margin-right: calc(50% - 50vh);
   }
   html.weeknew-force-landscape .week-timeline-scroll {
-    max-height: 65vw;
+    max-height: 65vw; /* fallback only — week-new.html's inline script overrides this with a precisely measured pixel value once it runs */
+  }
+
+  /* The chrome above the timeline board (title bar, nav tabs, filters
+     toggle) eats a disproportionate share of the very limited vertical
+     budget available in this rotated layout — the whole "landscape
+     height" here is just the phone's own physical width (e.g. ~360px on
+     a Samsung S21), nothing close to a real landscape screen's height.
+     Trimmed down specifically here so more of that budget goes to the
+     actual graphs, which is what a mobile visitor is on this page for —
+     with zero effect on any other page, since none of them carry the
+     weeknew-force-landscape class this is scoped to. */
+  html.weeknew-force-landscape .topbar {
+    padding: 6px 10px 4px;
+  }
+  html.weeknew-force-landscape .topbar h1 {
+    font-size: 0.95rem;
+  }
+  html.weeknew-force-landscape .updated {
+    font-size: 0.68rem;
+    margin-top: 2px;
+  }
+  html.weeknew-force-landscape .tabnav {
+    padding: 4px 8px 0;
+    gap: 3px;
+  }
+  html.weeknew-force-landscape .tabnav a {
+    padding: 5px 4px;
+    font-size: 0.72rem;
+  }
+  html.weeknew-force-landscape main {
+    padding: 6px 6px 20px;
+  }
+  html.weeknew-force-landscape .gc-filters.summary-card {
+    padding: 8px 10px;
+    margin-bottom: 6px;
   }
 }

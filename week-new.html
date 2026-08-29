@@ -23,22 +23,68 @@
   // even load) and sets the rotated size in real pixels instead, then
   // redoes it on resize/orientationchange so it keeps tracking correctly
   // as the address bar shows/hides or the phone is actually turned.
+  // offsetTop is only relative to an element's nearest POSITIONED
+  // ancestor, not the page as a whole — and there's a position:relative
+  // section between #weekTimelineScroll and <body> here (the summary-card
+  // wrapping it), so reading scrollWrap.offsetTop directly gives its
+  // offset within THAT section, not the true distance down from the top
+  // of the (rotated) page. Walking the whole offsetParent chain up to
+  // body and summing each segment's own offsetTop gives the real
+  // cumulative distance, regardless of how many positioned ancestors sit
+  // in between.
+  function getOffsetTopWithinBody(el) {
+    var top = 0;
+    var node = el;
+    while (node && node !== document.body) {
+      top += node.offsetTop || 0;
+      node = node.offsetParent;
+    }
+    return top;
+  }
+
   function applyForceLandscapeSizing() {
     var isPhoneWidth = window.matchMedia("(max-width: 900px)").matches;
     var isPortrait = window.matchMedia("(orientation: portrait)").matches;
     var body = document.body;
     if (!body) return;
+    var scrollWrap = document.getElementById("weekTimelineScroll");
     if (isPhoneWidth && isPortrait) {
       body.style.width = window.innerHeight + "px";
       body.style.height = window.innerWidth + "px";
       body.style.top = window.innerHeight + "px";
+
+      // Also size the timeline board — and each location row inside it —
+      // to the ACTUAL space available in the rotated layout, instead of
+      // approximating with another vw/vh guess (the previous 65vw board
+      // cap left less room than a single row's own graph needs, forcing a
+      // second, awkward scroll just to see that row's own top/bottom).
+      // offsetTop/offsetHeight reflect an element's position in its own
+      // normal, PRE-rotation document flow — exactly the axis that still
+      // means "top to bottom" here, since the whole body (including this
+      // measurement) rotates as one rigid unit; only how it's painted on
+      // screen changes, not the relative layout within it.
+      if (scrollWrap) {
+        var available = window.innerWidth - getOffsetTopWithinBody(scrollWrap) - 40; // ~40px for the footer line below the board
+        if (available > 60) {
+          scrollWrap.style.maxHeight = available + "px";
+          // Each row's graph gets nearly that same height, so ONE row
+          // fills the visible board — scrolling moves cleanly to the next
+          // location instead of first needing to scroll around inside a
+          // single row just to see all of it. Read by .weeknew-row-chart
+          // in style.css, with a plain 300px fallback for anything that
+          // doesn't set this (desktop, or JS disabled).
+          document.documentElement.style.setProperty("--weeknew-mobile-row-height", (available - 20) + "px");
+        }
+      }
     } else {
       // Not phone-portrait (already landscape, or a wide/desktop window) —
-      // clear any inline override so the normal (untransformed) CSS layout
-      // applies, exactly as the plain CSS media query alone would do.
+      // clear every inline override so the normal (untransformed) CSS
+      // layout applies, exactly as it would with no JS at all.
       body.style.width = "";
       body.style.height = "";
       body.style.top = "";
+      if (scrollWrap) scrollWrap.style.maxHeight = "";
+      document.documentElement.style.removeProperty("--weeknew-mobile-row-height");
     }
   }
   document.addEventListener("DOMContentLoaded", applyForceLandscapeSizing);
