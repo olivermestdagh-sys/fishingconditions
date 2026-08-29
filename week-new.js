@@ -37,19 +37,6 @@ const DATA_URL = "data/conditions.json";
 const PIXELS_PER_HOUR = isMobileDevice ? 16 : 32;
 const SIDEBAR_WIDTH = 220; // px — the frozen left-hand column showing each row's location name/pin/sessions
 
-// One-time visual legend on each row's FIRST session chip — a small black
-// wind-vane over the Location badge, a small black fish over the Fishing
-// badge — hand-drawn as inline SVG rather than an emoji (emoji render in
-// whatever multi-color style the platform's own font provides, not
-// reliably "black", and this site otherwise has zero external icon/image
-// dependencies to begin with). Sized and positioned via CSS
-// (.condition-badge svg — see style.css) as a small corner overlay so the
-// existing numeric score stays the primary, legible content of the badge.
-const WINDVANE_ICON_SVG =
-  '<svg class="badge-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l4 8h-2.6v10h-2.8V10H8z"/><rect x="4" y="20.5" width="16" height="1.6" rx="0.8"/></svg>';
-const FISH_ICON_SVG =
-  '<svg class="badge-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12c3-5 10-5 13 0-3 5-10 5-13 0z"/><path d="M16 12l5-4.5v9z"/><circle cx="6.5" cy="10.6" r="1" fill="#fff"/></svg>';
-
 let allRows = [];
 let allLocations = [];
 let sunTimesData = {};
@@ -429,6 +416,16 @@ function renderWeekView() {
 
   const headerSpacer = document.createElement("div");
   headerSpacer.className = "weeknew-header-spacer";
+  // The gesture hints live here specifically — top-left, above the first
+  // location's name and before the first day column — rather than
+  // floating over the graphs themselves, which is where they'd otherwise
+  // sit right on top of the data being described.
+  headerSpacer.innerHTML = `
+    <div class="weeknew-graph-hint" aria-hidden="true">
+      <div>Double-tap toggles full screen</div>
+      <div>Hold for 2s to toggle data point</div>
+    </div>
+  `;
   headerRow.appendChild(headerSpacer);
 
   const headerTrack = document.createElement("div");
@@ -654,30 +651,25 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
   if (sessions.length === 0) {
     sessionsWrap.innerHTML = `<p class="footnote weeknew-no-session">No qualifying session in this period.</p>`;
   } else {
-    sessions.forEach((s, sIndex) => {
+    for (const s of sessions) {
       const timeLabel = `${fmtNaive(s.from, { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(s.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
       const chip = document.createElement("div");
       chip.className = "weeknew-session-chip";
-      // Icons only on each row's FIRST session chip — a one-time visual
-      // legend (wind-vane for Location, fish for Fishing) so what the two
-      // badge colors/numbers mean is recognizable at a glance, without
-      // repeating the same icon on every session chip in a row that has
-      // more than one qualifying window.
       chip.innerHTML = `
         <div class="weeknew-session-time">${timeLabel} · ${s.hoursLabel}h</div>
         <div class="badge-stack">
           <div class="badge-item">
-            <div class="condition-badge" style="background:${conditionColor(s.avgCondition)}">${s.avgCondition != null ? s.avgCondition.toFixed(1) : "–"}${sIndex === 0 ? WINDVANE_ICON_SVG : ""}</div>
+            <div class="condition-badge" style="background:${conditionColor(s.avgCondition)}">${s.avgCondition != null ? s.avgCondition.toFixed(1) : "–"}</div>
             <div class="badge-label">Location</div>
           </div>
           <div class="badge-item">
-            <div class="condition-badge" style="background:${conditionColor(s.avgFishingCondition)}">${s.avgFishingCondition != null ? s.avgFishingCondition.toFixed(1) : "–"}${sIndex === 0 ? FISH_ICON_SVG : ""}</div>
+            <div class="condition-badge" style="background:${conditionColor(s.avgFishingCondition)}">${s.avgFishingCondition != null ? s.avgFishingCondition.toFixed(1) : "–"}</div>
             <div class="badge-label">Fishing</div>
           </div>
         </div>
       `;
       sessionsWrap.appendChild(chip);
-    });
+    }
   }
   sidebar.appendChild(sessionsWrap);
   row.appendChild(sidebar);
@@ -726,6 +718,7 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
       sessionSpan: sessions.map((s) => ({ from: s.from, to: s.to })),
       xRange: { min: timelineStart, max: timelineEnd },
       disableBuiltinEvents: true, // this page drives the tooltip itself — see wireHoldToShowTooltip below
+      showFirstBoxIcons: true, // windvane/fish legend on each row's own first condition-strip box
     });
     if (rowChart) {
       activeRowCharts.push(rowChart);
