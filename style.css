@@ -1313,12 +1313,22 @@ main.wide {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* Capped to match the chart's own height (same variable, same fallback)
+     so a location with many qualifying sessions can't inflate this taller
+     than the graph beside it — .weeknew-row stretches both children to
+     match the tallest one by default, so an uncapped sidebar was
+     stretching the CHART taller too ("funny" extra height) whenever a
+     row had 4+ session chips. overflow:hidden is a safety net; the actual
+     scrolling happens one level in, on .weeknew-row-sessions specifically. */
+  max-height: var(--weeknew-mobile-row-height, 300px);
+  overflow: hidden;
 }
 
 .weeknew-row-title-line {
   display: flex;
   align-items: flex-start;
   gap: 6px;
+  flex: 0 0 auto;
 }
 
 .weeknew-row-title .window-loc {
@@ -1335,6 +1345,13 @@ main.wide {
   flex-direction: column;
   gap: 6px;
   overflow-y: auto;
+  /* flex:1 lets this take whatever vertical space is left in the sidebar
+     after the name/pin line above; min-height:0 is required for a flex
+     child to actually shrink below its own content's natural size —
+     without it, overflow-y:auto has nothing to ever trigger on, since the
+     box just keeps growing to fit every chip instead. */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .weeknew-session-chip {
