@@ -22,8 +22,19 @@
 // the old per-tile sticky-content trick, or trip schedule — none of that
 // applies to an always-visible row-per-location layout either.
 
+// Detects "this is a phone-sized device" the same way the CSS
+// force-landscape trick in week-new.html does (max-width: 900px) —
+// checked against the SHORTER of the two dimensions so it's
+// orientation-independent (a phone rotated to landscape is still a phone).
+const isMobileDevice = Math.min(window.innerWidth, window.innerHeight) <= 900;
+
 const DATA_URL = "data/conditions.json";
-const PIXELS_PER_HOUR = 32;
+// Half the usual scale on mobile — 32px/hour was sized for a desktop-width
+// screen. At that same scale on a phone's much narrower rotated-landscape
+// width, a single day took up nearly the entire visible width on its own,
+// leaving almost no surrounding context and forcing far more horizontal
+// scrolling per day than made sense for the smaller screen.
+const PIXELS_PER_HOUR = isMobileDevice ? 16 : 32;
 const SIDEBAR_WIDTH = 220; // px — the frozen left-hand column showing each row's location name/pin/sessions
 
 let allRows = [];
