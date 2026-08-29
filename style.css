@@ -1339,6 +1339,25 @@ main.wide {
   min-width: 26px;
   height: 26px;
   font-size: 0.7rem;
+  position: relative;
+}
+
+/* One-time legend icon (windvane / fish — see WINDVANE_ICON_SVG /
+   FISH_ICON_SVG in week-new.js) overlaid in the corner of a FIRST session
+   chip's badge, small enough to sit alongside the number rather than
+   cover it. */
+.badge-icon {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 13px;
+  height: 13px;
+  fill: #000;
+  background: var(--white);
+  border-radius: 50%;
+  padding: 1.5px;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.18);
+  pointer-events: none;
 }
 
 .weeknew-session-chip .badge-label {
@@ -1556,4 +1575,51 @@ main.wide {
     top: 100%;
     left: 0;
   }
+}
+
+/* Corner hint text (week-new.html) explaining the double-tap-fullscreen
+   and hold-to-show-tooltip gestures. position:fixed rather than sticky or
+   absolute — it needs to stay pinned to the same visual corner regardless
+   of scrolling #weekTimelineScroll in either direction, survive into
+   fullscreen rendering (only descendants of the fullscreen element still
+   render at all — a sibling positioned over the top the normal way would
+   simply vanish), AND still land in the right place whether or not the
+   mobile force-landscape rotation above is active. position:fixed
+   normally anchors to the true browser viewport, but per spec it instead
+   anchors to the nearest ancestor with a CSS transform if one exists —
+   which on mobile is exactly body's own rotate(-90deg) — so this single
+   rule correctly tracks the ROTATED view on mobile and the plain viewport
+   on desktop, with no separate cases needed. Being fixed-positioned also
+   means it's taken out of normal flow entirely, so nesting it inside
+   #weekTimelineScroll doesn't add any extra scrollable space. */
+.weeknew-graph-hint {
+  position: fixed;
+  top: 8px;
+  right: 12px;
+  z-index: 20;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--grey-500);
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Desktop click-and-drag-to-pan (week-new.js's setupDragToScroll) — grab
+   cursor invites the drag; grabbing cursor (added/removed by JS while a
+   drag is actually in progress) confirms it's happening. Both are inert
+   on touch devices (no cursor to show), so no separate mobile/desktop
+   scoping needed there — but scoped to html.weeknew-force-landscape
+   (present unconditionally on week-new.html, regardless of screen size —
+   only the rotation behavior itself is gated by screen size) so the OLD
+   Week Ahead page, which shares this same .week-timeline-scroll class but
+   has no drag-to-scroll JS at all, doesn't show a misleading grab cursor. */
+html.weeknew-force-landscape .week-timeline-scroll {
+  cursor: grab;
+}
+html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
+  cursor: grabbing;
 }
