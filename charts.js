@@ -182,7 +182,55 @@ function buildAxisUnitLabelsPlugin() {
   };
 }
 
-function buildConditionStripsPlugin(rows, isMobile) {
+/**
+ * Small black canvas-drawn icons for the very first box of each condition
+ * strip (see buildConditionStripsPlugin's showFirstBoxIcons option) — a
+ * one-time visual legend so what the "Loc"/"Fish" strips and their colors
+ * mean is recognizable without needing to read the small row labels.
+ * Hand-drawn with Canvas path commands rather than an SVG/image asset —
+ * this site has zero external icon dependencies to begin with, and these
+ * need to be drawn directly into the chart's own canvas anyway (CSS/HTML
+ * icons can't be overlaid at a precise pixel position inside a <canvas>).
+ */
+function drawWindvaneIcon(ctx, cx, cy, size) {
+  ctx.save();
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - size);
+  ctx.lineTo(cx + size * 0.55, cy - size * 0.15);
+  ctx.lineTo(cx + size * 0.18, cy - size * 0.15);
+  ctx.lineTo(cx + size * 0.18, cy + size);
+  ctx.lineTo(cx - size * 0.18, cy + size);
+  ctx.lineTo(cx - size * 0.18, cy - size * 0.15);
+  ctx.lineTo(cx - size * 0.55, cy - size * 0.15);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawFishIcon(ctx, cx, cy, size) {
+  ctx.save();
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.moveTo(cx - size, cy);
+  ctx.quadraticCurveTo(cx - size * 0.3, cy - size * 0.75, cx + size * 0.5, cy);
+  ctx.quadraticCurveTo(cx - size * 0.3, cy + size * 0.75, cx - size, cy);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(cx + size * 0.5, cy);
+  ctx.lineTo(cx + size * 1.3, cy - size * 0.5);
+  ctx.lineTo(cx + size * 1.3, cy + size * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.fillStyle = "#fff";
+  ctx.arc(cx - size * 0.55, cy - size * 0.15, size * 0.16, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false) {
   const stripHeight = isMobile ? 11 : 14;
   const rowGap = isMobile ? 2 : 3;
   const bottomMargin = 4; // small gap above the axis line itself
@@ -219,7 +267,7 @@ function buildConditionStripsPlugin(rows, isMobile) {
       ctx.fillRect(left, locStripTop - 2, right - left, (fishStripTop + stripHeight) - locStripTop + 4);
       ctx.restore();
 
-      const drawStrip = (field, label, stripTop) => {
+      const drawStrip = (field, label, stripTop, iconDrawFn) => {
         ctx.save();
         ctx.font = `700 ${isMobile ? 8 : 9}px -apple-system, BlinkMacSystemFont, sans-serif`;
         ctx.fillStyle = "#475569";
@@ -229,6 +277,7 @@ function buildConditionStripsPlugin(rows, isMobile) {
         ctx.textBaseline = "middle";
         ctx.fillText(label, left - 4, stripTop + stripHeight / 2);
 
+        let iconDrawn = false;
         for (let i = 0; i < rows.length; i++) {
           const val = rows[i][field];
           if (val == null) continue;
@@ -239,12 +288,17 @@ function buildConditionStripsPlugin(rows, isMobile) {
           if (clippedEnd <= clippedStart) continue;
           ctx.fillStyle = conditionStripColor(val);
           ctx.fillRect(clippedStart, stripTop, clippedEnd - clippedStart, stripHeight);
+          if (showFirstBoxIcons && !iconDrawn && iconDrawFn) {
+            iconDrawn = true;
+            const iconSize = Math.min(stripHeight, clippedEnd - clippedStart) * 0.3;
+            iconDrawFn(ctx, (clippedStart + clippedEnd) / 2, stripTop + stripHeight / 2, iconSize);
+          }
         }
         ctx.restore();
       };
 
-      drawStrip("Condition", "Loc", locStripTop);
-      drawStrip("Fishing Condition", "Fish", fishStripTop);
+      drawStrip("Condition", "Loc", locStripTop, drawWindvaneIcon);
+      drawStrip("Fishing Condition", "Fish", fishStripTop, drawFishIcon);
     },
   };
 }
@@ -855,7 +909,7 @@ function buildSessionSpanPlugin(spans) {
   };
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -1001,7 +1055,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
     plugins: [
       buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHeading, showSunTimes),
       buildSessionSpanPlugin(sessionSpanList),
-      buildConditionStripsPlugin(rows, isMobile),
+      buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons),
       buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime),
       // Skipped in compact mode — nothing to label when there are no axes.
       ...(compact ? [] : [buildAxisUnitLabelsPlugin()]),
