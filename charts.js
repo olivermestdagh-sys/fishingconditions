@@ -192,19 +192,55 @@ function buildAxisUnitLabelsPlugin() {
  * need to be drawn directly into the chart's own canvas anyway (CSS/HTML
  * icons can't be overlaid at a precise pixel position inside a <canvas>).
  */
-function drawWindvaneIcon(ctx, cx, cy, size) {
+function drawWindsockIcon(ctx, cx, cy, size) {
   ctx.save();
+  const poleTopX = cx - size * 0.9;
+  const poleTopY = cy - size * 0.75;
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = size * 0.12;
+  ctx.beginPath();
+  ctx.moveTo(poleTopX, poleTopY);
+  ctx.lineTo(poleTopX, cy + size * 0.95);
+  ctx.stroke();
+
+  // Mount bracket + open mouth ring connecting the pole to the sock.
+  const ringX = poleTopX + size * 0.32;
+  const ringY = poleTopY + size * 0.1;
+  ctx.lineWidth = size * 0.06;
+  ctx.beginPath();
+  ctx.moveTo(poleTopX, poleTopY);
+  ctx.lineTo(ringX, ringY - size * 0.22);
+  ctx.moveTo(poleTopX, poleTopY);
+  ctx.lineTo(ringX, ringY + size * 0.22);
+  ctx.stroke();
+  ctx.lineWidth = size * 0.07;
+  ctx.beginPath();
+  ctx.ellipse(ringX, ringY, size * 0.06, size * 0.24, 0.25, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Body: stays wide for most of its length before a blunt (not pointed)
+  // rounded tip, drooping diagonally — a real windsock's fabric tube
+  // shape, not a flat pennant/flag tapering straight to a point.
+  const tailX = ringX + size * 1.5;
+  const tailY = ringY + size * 0.7;
   ctx.fillStyle = "#000";
   ctx.beginPath();
-  ctx.moveTo(cx, cy - size);
-  ctx.lineTo(cx + size * 0.55, cy - size * 0.15);
-  ctx.lineTo(cx + size * 0.18, cy - size * 0.15);
-  ctx.lineTo(cx + size * 0.18, cy + size);
-  ctx.lineTo(cx - size * 0.18, cy + size);
-  ctx.lineTo(cx - size * 0.18, cy - size * 0.15);
-  ctx.lineTo(cx - size * 0.55, cy - size * 0.15);
+  ctx.moveTo(ringX + size * 0.1, ringY - size * 0.26);
+  ctx.quadraticCurveTo(ringX + size * 0.95, ringY, tailX, tailY - size * 0.1);
+  ctx.quadraticCurveTo(tailX + size * 0.1, tailY, tailX, tailY + size * 0.1);
+  ctx.quadraticCurveTo(ringX + size * 0.95, ringY + size * 0.32, ringX + size * 0.1, ringY + size * 0.26);
   ctx.closePath();
   ctx.fill();
+
+  // Wind bands (the segmented stripes visible on a real windsock).
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = size * 0.06;
+  ctx.beginPath();
+  ctx.moveTo(ringX + size * 0.55, ringY - size * 0.13);
+  ctx.lineTo(ringX + size * 0.5, ringY + size * 0.18);
+  ctx.moveTo(ringX + size * 0.95, ringY - size * 0.02);
+  ctx.lineTo(ringX + size * 0.92, ringY + size * 0.26);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -212,20 +248,20 @@ function drawFishIcon(ctx, cx, cy, size) {
   ctx.save();
   ctx.fillStyle = "#000";
   ctx.beginPath();
-  ctx.moveTo(cx - size, cy);
-  ctx.quadraticCurveTo(cx - size * 0.3, cy - size * 0.75, cx + size * 0.5, cy);
-  ctx.quadraticCurveTo(cx - size * 0.3, cy + size * 0.75, cx - size, cy);
+  ctx.moveTo(cx + size, cy);
+  ctx.quadraticCurveTo(cx + size * 0.3, cy - size * 0.75, cx - size * 0.5, cy);
+  ctx.quadraticCurveTo(cx + size * 0.3, cy + size * 0.75, cx + size, cy);
   ctx.closePath();
   ctx.fill();
   ctx.beginPath();
-  ctx.moveTo(cx + size * 0.5, cy);
-  ctx.lineTo(cx + size * 1.3, cy - size * 0.5);
-  ctx.lineTo(cx + size * 1.3, cy + size * 0.5);
+  ctx.moveTo(cx - size * 0.5, cy);
+  ctx.lineTo(cx - size * 1.3, cy - size * 0.5);
+  ctx.lineTo(cx - size * 1.3, cy + size * 0.5);
   ctx.closePath();
   ctx.fill();
   ctx.beginPath();
   ctx.fillStyle = "#fff";
-  ctx.arc(cx - size * 0.55, cy - size * 0.15, size * 0.16, 0, Math.PI * 2);
+  ctx.arc(cx + size * 0.55, cy - size * 0.15, size * 0.16, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
@@ -297,7 +333,7 @@ function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false) {
         ctx.restore();
       };
 
-      drawStrip("Condition", "Loc", locStripTop, drawWindvaneIcon);
+      drawStrip("Condition", "Loc", locStripTop, drawWindsockIcon);
       drawStrip("Fishing Condition", "Fish", fishStripTop, drawFishIcon);
     },
   };
