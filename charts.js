@@ -1305,6 +1305,41 @@ function locationGroupsOf(loc) {
   return groups.length ? groups : [UNGROUPED_LABEL];
 }
 
+/**
+ * A set of tags matches the Location Group filter only if EVERY currently
+ * selected group is among that location's own tags — the location can
+ * have additional tags beyond what's selected; those extras don't
+ * disqualify it. This is deliberately the filter-side AND, not the
+ * location-side AND: checking whether the location's tags are all
+ * selected would mean unchecking any one of a multi-tagged location's
+ * groups hides it entirely, and selecting MORE filter chips could pull in
+ * unrelated locations that merely share one tag with the selection (e.g.
+ * filtering on {A, B} would wrongly also match a location tagged only
+ * {C, B}). This way, filtering on {A} shows anything tagged A regardless
+ * of what else it's tagged with, and filtering on {A, B} narrows further
+ * to only things tagged with BOTH — checking more boxes narrows results,
+ * matching what "AND" means for the person doing the filtering.
+ *
+ * An empty selection matches EVERYTHING — the opposite convention from
+ * the Location/Type filters, where an empty set means "None was clicked,
+ * hide everything". Those are simple set-membership filters (checking a
+ * box includes a category); this is an AND-style tag filter, where
+ * checking a box ADDS A REQUIREMENT rather than including a category —
+ * so having nothing checked means no requirement has been added yet, not
+ * that every possible requirement applies at once. Concretely: if this
+ * treated an empty selection as "match nothing" (or defaulted every chip
+ * to checked on load, mirroring Location/Type), a location would need
+ * literally every group that exists just to show up on a fresh visit —
+ * checking more boxes here is meant to narrow down, not to opt back in.
+ */
+function groupsMatchFilter(locGroups, selectedGroups) {
+  if (selectedGroups.size === 0) return true;
+  for (const g of selectedGroups) {
+    if (!locGroups.includes(g)) return false;
+  }
+  return true;
+}
+
 function fmtNaive(ms, opts) {
   const d = new Date(ms);
   return new Intl.DateTimeFormat([], { timeZone: "UTC", ...opts }).format(d);
@@ -1507,7 +1542,7 @@ function renderLocationChips(allLocations, selectedLocations, onChange, narrowBy
   const seenNames = new Set();
   for (const loc of allLocations) {
     if (narrowByTypes && !narrowByTypes.has(loc.type)) continue;
-    if (narrowByGroups && !locationGroupsOf(loc).every((g) => narrowByGroups.has(g))) continue;
+    if (narrowByGroups && !groupsMatchFilter(locationGroupsOf(loc), narrowByGroups)) continue;
     if (seenNames.has(loc.name)) continue;
     seenNames.add(loc.name);
     const chip = document.createElement("button");
