@@ -209,11 +209,14 @@ function onAddGroup() {
 function onRemoveGroup(idx) {
   const removed = locationGroups[idx];
   locationGroups.splice(idx, 1);
-  // Any location currently set to the removed group falls back to
-  // unassigned ("— none —") rather than silently keeping a value that no
-  // longer appears anywhere as a selectable option.
+  // Any location currently tagged with the removed group has it dropped
+  // from its list rather than silently keeping a value that no longer
+  // appears anywhere as a selectable option — other groups it has stay
+  // untouched.
   for (const loc of locations) {
-    if (loc.locationGroup === removed) loc.locationGroup = "";
+    if (Array.isArray(loc.locationGroups)) {
+      loc.locationGroups = loc.locationGroups.filter((g) => g !== removed);
+    }
   }
   renderGroupsList();
   renderRows();
@@ -320,12 +323,9 @@ function renderRows() {
             ${SHORE_OPTIONS.map((s) => `<option value="${s}" ${loc.shore === s ? "selected" : ""}>${s}</option>`).join("")}
           </select>
         </div>
-        <div style="min-width:140px;">
-          <label class="loc-edit-label">Location Group</label>
-          <select data-field="locationGroup" data-idx="${i}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);">
-            <option value="" ${!loc.locationGroup ? "selected" : ""}>— none —</option>
-            ${locationGroups.map((g) => `<option value="${g}" ${loc.locationGroup === g ? "selected" : ""}>${g}</option>`).join("")}
-          </select>
+        <div style="min-width:200px;">
+          <label class="loc-edit-label">Location Groups</label>
+          <div class="grouptag-box" data-grouptag-idx="${i}">${groupTagBoxInnerHtml(i)}</div>
         </div>
         <div style="min-width:140px;display:flex;align-items:flex-end;padding-bottom:8px;">
           <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;cursor:pointer;">
@@ -355,6 +355,7 @@ function renderRows() {
   });
 
   wireRowListeners(list);
+  locations.forEach((_, i) => wireGroupTagBox(i));
 }
 
 function renderTypeSection(loc, typeConfig, locIdx, typeIdx) {
@@ -390,6 +391,110 @@ function renderTypeSection(loc, typeConfig, locIdx, typeIdx) {
       ` : ""}
     </div>
   `;
+}
+
+/**
+ * Renders just the INSIDE of one location's Location Groups tag box
+ * (existing chips + the empty input + an empty suggestions container) —
+ * called both when first building a row (renderRows) and whenever that
+ * one location's groups change (refreshGroupTagBox), so adding/removing a
+ * tag only ever touches its own box rather than re-rendering every
+ * location row on the page (which would lose scroll position/focus
+ * elsewhere on a long list).
+ */
+function groupTagBoxInnerHtml(idx) {
+  const loc = locations[idx];
+  const groups = Array.isArray(loc.locationGroups) ? loc.locationGroups : [];
+  const chipsHtml = groups
+    .map(
+      (g) => `
+    <span class="grouptag-chip">
+      ${g.replace(/</g, "&lt;")}
+      <button type="button" data-remove-grouptag data-group="${g.replace(/"/g, "&quot;")}" aria-label="Remove ${g.replace(/"/g, "&quot;")}">×</button>
+    </span>
+  `
+    )
+    .join("");
+  return `
+    <div class="grouptag-chips">${chipsHtml}</div>
+    <input type="text" class="grouptag-input" placeholder="Add group…" autocomplete="off" />
+    <div class="grouptag-suggestions"></div>
+  `;
+}
+
+function refreshGroupTagBox(idx) {
+  const box = document.querySelector(`.grouptag-box[data-grouptag-idx="${idx}"]`);
+  if (!box) return;
+  box.innerHTML = groupTagBoxInnerHtml(idx);
+  wireGroupTagBox(idx);
+}
+
+/**
+ * Wires up one location's Location Groups tag box: typing filters a
+ * dropdown of not-yet-assigned groups (from the master locationGroups
+ * list managed in the section above — this is deliberately NOT a free-text
+ * field for inventing new group names on the fly, only existing ones are
+ * ever suggested), clicking a suggestion adds it, × on a chip removes it.
+ */
+function wireGroupTagBox(idx) {
+  const box = document.querySelector(`.grouptag-box[data-grouptag-idx="${idx}"]`);
+  if (!box) return;
+  const loc = locations[idx];
+  const input = box.querySelector(".grouptag-input");
+  const suggestionsEl = box.querySelector(".grouptag-suggestions");
+
+  function currentGroups() {
+    if (!Array.isArray(loc.locationGroups)) loc.locationGroups = [];
+    return loc.locationGroups;
+  }
+
+  function showSuggestions() {
+    const query = input.value.trim().toLowerCase();
+    const assigned = new Set(currentGroups());
+    const matches = locationGroups.filter((g) => !assigned.has(g) && (!query || g.toLowerCase().includes(query)));
+    if (matches.length === 0) {
+      suggestionsEl.style.display = "none";
+      suggestionsEl.innerHTML = "";
+      return;
+    }
+    suggestionsEl.innerHTML = matches
+      .map((g) => `<button type="button" class="grouptag-suggestion" data-add-group="${g.replace(/"/g, "&quot;")}">${g.replace(/</g, "&lt;")}</button>`)
+      .join("");
+    suggestionsEl.style.display = "block";
+    suggestionsEl.querySelectorAll("button[data-add-group]").forEach((btn) => {
+      // mousedown, not click — fires BEFORE the input's blur, so
+      // preventDefault here stops focus ever leaving the input at all,
+      // rather than racing a blur handler that would otherwise hide this
+      // dropdown before a plain click on it could register.
+      btn.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        const group = e.currentTarget.dataset.addGroup;
+        if (!currentGroups().includes(group)) currentGroups().push(group);
+        input.value = "";
+        refreshGroupTagBox(idx);
+      });
+    });
+  }
+
+  input.addEventListener("input", showSuggestions);
+  input.addEventListener("focus", showSuggestions);
+  input.addEventListener("blur", () => {
+    suggestionsEl.style.display = "none";
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      suggestionsEl.style.display = "none";
+      input.blur();
+    }
+  });
+
+  box.querySelectorAll("button[data-remove-grouptag]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const group = e.currentTarget.dataset.group;
+      loc.locationGroups = currentGroups().filter((g) => g !== group);
+      refreshGroupTagBox(idx);
+    });
+  });
 }
 
 function wireRowListeners(list) {
