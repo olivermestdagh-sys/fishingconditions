@@ -1802,3 +1802,218 @@ function computeSchedule(loc, launchStr, homeByStr, driveMinutes) {
     driveMinutes,
   };
 }
+
+/**
+ * Replaces Chart.js's default "tap anywhere to show the tooltip" behavior
+ * (disabled per-chart via the chart's own disableBuiltinEvents option —
+ * see renderConditionsChart) with a hold-to-show gesture: a quick tap
+ * doesn't show anything until the tooltip has been explicitly turned on.
+ * Behavior:
+ *   - Hold (press and don't move) for 2 seconds: shows the tooltip at that
+ *     point, and "arms" the chart so it stays responsive to quick taps.
+ *   - While armed, a quick tap anywhere moves the tooltip to that point —
+ *     ordinary tap-to-inspect, same as Chart.js's own default behavior,
+ *     just gated behind the initial hold.
+ *   - Holding for 2 seconds again disarms it and hides the tooltip,
+ *     returning to the initial "tap does nothing" state.
+ * A press that moves more than a few pixels before the hold completes is
+ * treated as a scroll/pan gesture, not a hold, and cancels the timer —
+ * useful on any page where this canvas might sit inside a scrollable
+ * area, so a hold-timer firing while someone's actually trying to scroll
+ * isn't exactly the wrong moment for a tooltip to pop up.
+ *
+ * Takes a getChart() FUNCTION rather than a fixed chart instance — some
+ * callers (Live) reuse the same persistent <canvas> across repeated
+ * renders (switching location, periodic refresh), destroying and
+ * recreating the Chart.js instance each time while the canvas element
+ * itself never changes; wiring this once in that case, against a getter
+ * that always reads whatever the current chart is, avoids attaching a
+ * fresh set of duplicate listeners to that same canvas on every render.
+ * Callers whose canvas genuinely is recreated each time (Week (graphs),
+ * a fresh canvas per row) can just pass a trivial () => chart closure.
+ */
+function wireHoldToShowTooltip(getChart, canvas) {
+  const HOLD_MS = 2000;
+  const MOVE_CANCEL_PX = 10;
+  let pressTimer = null;
+  let pressStartX = 0;
+  let pressStartY = 0;
+  let armed = false;
+
+  function elementsAt(e) {
+    const chart = getChart();
+    if (!chart) return [];
+    const mode = chart.options.interaction ? chart.options.interaction.mode : "index";
+    const intersect = chart.options.interaction ? chart.options.interaction.intersect : false;
+    return chart.getElementsAtEventForMode(e, mode, { intersect }, true);
+  }
+
+  function showTooltipAt(e) {
+    const chart = getChart();
+    if (!chart) return;
+    const elements = elementsAt(e);
+    if (elements.length === 0) return;
+    const rect = canvas.getBoundingClientRect();
+    chart.tooltip.setActiveElements(elements, { x: e.clientX - rect.left, y: e.clientY - rect.top });
+    chart.update();
+  }
+
+  function hideTooltip() {
+    const chart = getChart();
+    if (!chart) return;
+    chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+    chart.update();
+  }
+
+  function clearPressTimer() {
+    if (pressTimer != null) {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    pressStartX = e.clientX;
+    pressStartY = e.clientY;
+    clearPressTimer();
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      if (armed) {
+        armed = false;
+        hideTooltip();
+      } else {
+        armed = true;
+        showTooltipAt(e);
+      }
+    }, HOLD_MS);
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    if (pressTimer == null) return;
+    const dx = e.clientX - pressStartX;
+    const dy = e.clientY - pressStartY;
+    if (Math.sqrt(dx * dx + dy * dy) > MOVE_CANCEL_PX) clearPressTimer();
+  });
+
+  canvas.addEventListener("pointerup", (e) => {
+    const firedAsHold = pressTimer == null;
+    clearPressTimer();
+    if (firedAsHold) return; // the timer callback above already handled this press
+    if (armed) showTooltipAt(e); // ordinary quick tap while armed — move the tooltip, same as Chart.js's own default tap behavior
+    // else: not armed yet — a plain quick tap does nothing, exactly the suppression that was asked for.
+  });
+
+  canvas.addEventListener("pointercancel", clearPressTimer);
+  canvas.addEventListener("pointerleave", clearPressTimer);
+}
+
+/**
+ * Double-tap (or double-click, for free — the same detector handles mouse
+ * pointers too) the element with id === targetId to toggle real browser
+ * fullscreen on it. Used for "the frame that contains the graph(s)" on
+ * both Week (graphs) (#weekTimelineScroll) and Live (#liveChartFrame).
+ *
+ * Fullscreen + a genuine user gesture is also the only context in which
+ * screen.orientation.lock() can ever succeed — neither API can fire
+ * outside a real user gesture, which is why a page needing a landscape
+ * view on load at all (Week (graphs)) has to fall back to a CSS rotation
+ * trick instead; this double-tap gives both APIs a real gesture to work
+ * with, so the orientation lock attempted here has a genuine chance of
+ * working, on top of fullscreen itself hiding the browser's own address
+ * bar too (something no CSS trick can do).
+ *
+ * Double-tap is detected manually (two pointerup events close together in
+ * both time and position) rather than relying on the browser's native
+ * 'dblclick' event, which fires inconsistently for touch input across
+ * browsers. touch-action:manipulation on the target (set below) disables
+ * the browser's own native double-tap-to-zoom so it doesn't fire at the
+ * same time as — or instead of — this.
+ */
+function setupFullscreenToggle(targetId) {
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  target.style.touchAction = "manipulation";
+
+  let lastTapTime = 0;
+  let lastTapX = 0;
+  let lastTapY = 0;
+  const DOUBLE_TAP_MS = 350;
+  const DOUBLE_TAP_MAX_DIST = 30; // px — taps this far apart are two separate single taps, not a double-tap
+
+  function isFullscreen() {
+    return document.fullscreenElement === target || document.webkitFullscreenElement === target;
+  }
+
+  async function enterFullscreen() {
+    try {
+      if (target.requestFullscreen) await target.requestFullscreen();
+      else if (target.webkitRequestFullscreen) target.webkitRequestFullscreen();
+      else return;
+    } catch (err) {
+      return; // fullscreen refused/unsupported — nothing further to do
+    }
+    // Best-effort only — genuinely works now (inside fullscreen + a user
+    // gesture) on browsers that support it, but plenty don't (notably iOS
+    // Safari never does) — silently ignored on failure, since the
+    // fullscreen view itself is still a real win even without a true
+    // orientation lock.
+    if (screen.orientation && screen.orientation.lock) {
+      try {
+        await screen.orientation.lock("landscape");
+      } catch (err) {
+        /* expected on unsupported browsers */
+      }
+    }
+  }
+
+  function exitFullscreen() {
+    if (screen.orientation && screen.orientation.unlock) {
+      try {
+        screen.orientation.unlock();
+      } catch (err) {
+        /* ignore */
+      }
+    }
+    if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+  }
+
+  target.addEventListener("pointerup", (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return; // ignore right-click etc.
+    // Ignore taps that landed on an actual control (buttons, steppers) —
+    // someone double-tapping a button wants to activate the button twice,
+    // not also toggle fullscreen underneath it.
+    if (e.target.closest("button")) return;
+
+    const now = Date.now();
+    const dx = e.clientX - lastTapX;
+    const dy = e.clientY - lastTapY;
+    const isDoubleTap = now - lastTapTime < DOUBLE_TAP_MS && Math.sqrt(dx * dx + dy * dy) < DOUBLE_TAP_MAX_DIST;
+
+    if (isDoubleTap) {
+      lastTapTime = 0; // reset so an accidental third tap doesn't chain into another toggle
+      if (isFullscreen()) exitFullscreen();
+      else enterFullscreen();
+    } else {
+      lastTapTime = now;
+      lastTapX = e.clientX;
+      lastTapY = e.clientY;
+    }
+  });
+
+  // Android's back button/gesture (and other OS-level exits) can leave
+  // fullscreen without ever going through exitFullscreen() above — this
+  // keeps the orientation lock in sync with whatever actually happened,
+  // rather than assuming our own toggle is the only way fullscreen ends.
+  const onFullscreenChange = () => {
+    if (!isFullscreen() && screen.orientation && screen.orientation.unlock) {
+      try {
+        screen.orientation.unlock();
+      } catch (err) {
+        /* ignore */
+      }
+    }
+  };
+  document.addEventListener("fullscreenchange", onFullscreenChange);
+  document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+}

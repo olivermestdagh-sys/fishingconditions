@@ -10,31 +10,7 @@ let currentLocationName = null;
 let currentType = null;
 let currentLoc = null;
 let stopFishingTime = null;
-let lastChartParams = null;
-let modalChart = null;
 // googleRoutesApiKey comes from charts.js (loaded before this file).
-
-function openChartModal() {
-  if (!lastChartParams) return;
-  const overlay = document.getElementById("chartModalOverlay");
-  overlay.style.display = "flex";
-  modalChart = renderConditionsChart({
-    canvas: document.getElementById("liveChartModal"),
-    rows: lastChartParams.rows,
-    sunTimes: lastChartParams.sunTimes,
-    existingChart: modalChart,
-    locationName: lastChartParams.locationName,
-    tideMaxObserved: lastChartParams.tideMaxObserved,
-    moonPhases: liveData.moonPhases,
-    minTideHeight: lastChartParams.minTideHeight,
-    stopFishingTime: lastChartParams.stopFishingTime,
-    compact: false,
-  });
-}
-
-function closeChartModal() {
-  document.getElementById("chartModalOverlay").style.display = "none";
-}
 
 function timeToMinutes(hhmm) {
   const m = String(hhmm || "").match(/^(\d{1,2}):(\d{1,2})$/);
@@ -341,12 +317,8 @@ function renderForLocation(loc) {
     minTideHeight: loc.minTideHeight,
     stopFishingTime,
     compact: false,
+    disableBuiltinEvents: true, // this page drives the tooltip itself — see wireHoldToShowTooltip in init(), and charts.js
   });
-  // Full axes shown directly here too now, not just once the modal opens —
-  // no more stripped-down "compact" version anywhere on the site. Tapping
-  // still opens the modal (a bigger view), it's just no longer the only
-  // place axes show up.
-  lastChartParams = { rows: windowRows, sunTimes, locationName: loc.name, tideMaxObserved: loc.tideMaxObserved, minTideHeight: loc.minTideHeight, stopFishingTime };
 
   if (windowRows.length === 0) {
     document.getElementById("liveChartSection").style.display = "none";
@@ -382,8 +354,15 @@ async function init() {
     document.getElementById("homeAddress").value = savedTimings.address || "";
   }
   document.getElementById("btnUpdateTimings").addEventListener("click", updateTimings);
-  document.getElementById("liveChart").addEventListener("click", openChartModal);
-  document.getElementById("btnCloseChartModal").addEventListener("click", closeChartModal);
+  // Wired once here, not inside renderForLocation — that function reuses
+  // this same persistent <canvas> across every location switch and
+  // periodic refresh (destroying and recreating the Chart.js instance
+  // each time, but never the canvas element itself), so wiring these
+  // per-render would stack up duplicate listeners on the same canvas.
+  // getChart() always reads whatever the current liveChart is, so this
+  // stays correct across those re-renders without needing to be re-wired.
+  wireHoldToShowTooltip(() => liveChart, document.getElementById("liveChart"));
+  setupFullscreenToggle("liveChartFrame");
 
   try {
     const res = await fetch(DATA_URL, { cache: "no-store" });
