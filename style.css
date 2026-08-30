@@ -1288,7 +1288,7 @@ main.wide {
   padding: 2px 8px;
 }
 
-.weeknew-graph-hint {
+.graph-gesture-hint {
   font-size: 0.6rem;
   line-height: 1.3;
   color: var(--grey-500);
@@ -1745,4 +1745,51 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
 
 .grouptag-suggestion:hover {
   background: var(--grey-100);
+}
+
+/* Live tab's chart frame (live.html) — fixes a real bug, not just a style
+   choice: the old plain <canvas height="220"> had no CSS-defined height on
+   its parent section at all (only an HTML attribute, which is just an
+   initial hint, not something Chart.js's maintainAspectRatio:false sizing
+   can keep anchored to). Without a definite-height container to measure
+   against, the canvas's actual rendered size drifted across re-renders —
+   worse on mobile, where devicePixelRatio scaling exaggerates any such
+   drift — which is what "stretches vertically" actually was. A fixed,
+   stable height here is the fix; the canvas fills it via the same
+   position:absolute + width/height:100% pattern used everywhere else on
+   this site for exactly this reason. */
+.live-chart-frame {
+  position: relative;
+  height: 380px;
+  margin-bottom: 4px;
+}
+
+.live-chart-frame canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.live-chart-frame:fullscreen,
+.live-chart-frame:-webkit-full-screen {
+  height: 100vh;
+  width: 100vw;
+  background: var(--white);
+}
+
+/* Overrides .graph-gesture-hint's own position:fixed (correct for Week
+   (graphs), where the graph board effectively IS the whole page) —
+   here the chart is just one section among several (GPS status, summary,
+   timings form, then the chart), so pinning to the browser viewport's
+   corner would show the hint disconnected from the chart itself whenever
+   it isn't already scrolled to the top. position:absolute, anchored to
+   this frame's own position:relative box instead, keeps it visually tied
+   to the chart specifically, in or out of fullscreen. */
+.live-chart-frame .graph-gesture-hint {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 5;
 }
