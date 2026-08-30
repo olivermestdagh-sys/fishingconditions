@@ -54,6 +54,117 @@ let pinnedOrder = []; // location NAMES, in the order they were pinned — oldes
 // whatever was already built.
 let activeRowCharts = [];
 
+// Deliberately module-level, not per-row — holding on ANY row's graph
+// shows the tooltip at that same moment on every OTHER currently-rendered
+// row too, not just the one actually touched (see wireSyncedTooltip
+// below). syncedTooltipTime is the real time (chart x-value) currently
+// being shown, kept around so a row that only scrolls into view (and
+// gets its chart built) WHILE already armed picks up the same synced
+// position immediately, rather than showing nothing until its own next
+// interaction.
+let tooltipsArmed = false;
+let syncedTooltipTime = null;
+
+/**
+ * Applies the tooltip, at real time xVal, to every currently-rendered row
+ * chart at once — not just the one that was actually held/tapped. Each
+ * chart shares the exact same [timelineStart, timelineEnd] x-range and
+ * PIXELS_PER_HOUR scale (see renderWeekView), so converting xVal through
+ * EACH chart's own x-scale, rather than assuming the same pixel offset or
+ * data index applies everywhere, is what actually keeps this correct even
+ * if two locations' underlying row data don't line up 1:1 (a gap, a
+ * missing hour) — it's driven by real time, not shared array position.
+ */
+function applySyncedTooltip(xVal) {
+  syncedTooltipTime = xVal;
+  for (const chart of activeRowCharts) {
+    const xScale = chart.scales.x;
+    if (!xScale) continue;
+    const px = xScale.getPixelForValue(xVal);
+    const rect = chart.canvas.getBoundingClientRect();
+    const mode = chart.options.interaction ? chart.options.interaction.mode : "index";
+    const intersect = chart.options.interaction ? chart.options.interaction.intersect : false;
+    const elements = chart.getElementsAtEventForMode(
+      { clientX: rect.left + px, clientY: rect.top + rect.height / 2 },
+      mode,
+      { intersect },
+      true
+    );
+    if (elements.length === 0) continue;
+    chart.tooltip.setActiveElements(elements, { x: px, y: rect.height / 2 });
+    chart.update();
+  }
+}
+
+function hideSyncedTooltip() {
+  syncedTooltipTime = null;
+  for (const chart of activeRowCharts) {
+    chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+    chart.update();
+  }
+}
+
+/**
+ * Same hold-for-2s / quick-tap-while-armed gesture as charts.js's shared
+ * wireHoldToShowTooltip, but broadcasting to every row via
+ * applySyncedTooltip/hideSyncedTooltip above instead of only the chart the
+ * gesture happened on — kept as its own page-local version rather than
+ * generalizing the shared one, since "every other chart on the page too"
+ * isn't something Live (a single chart) has any use for.
+ */
+function wireSyncedTooltip(chart, canvas) {
+  const HOLD_MS = 2000;
+  const MOVE_CANCEL_PX = 10;
+  let pressTimer = null;
+  let pressStartX = 0;
+  let pressStartY = 0;
+
+  function xValAt(e) {
+    const rect = canvas.getBoundingClientRect();
+    return chart.scales.x.getValueForPixel(e.clientX - rect.left);
+  }
+
+  function clearPressTimer() {
+    if (pressTimer != null) {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    pressStartX = e.clientX;
+    pressStartY = e.clientY;
+    clearPressTimer();
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      if (tooltipsArmed) {
+        tooltipsArmed = false;
+        hideSyncedTooltip();
+      } else {
+        tooltipsArmed = true;
+        applySyncedTooltip(xValAt(e));
+      }
+    }, HOLD_MS);
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    if (pressTimer == null) return;
+    const dx = e.clientX - pressStartX;
+    const dy = e.clientY - pressStartY;
+    if (Math.sqrt(dx * dx + dy * dy) > MOVE_CANCEL_PX) clearPressTimer();
+  });
+
+  canvas.addEventListener("pointerup", (e) => {
+    const firedAsHold = pressTimer == null;
+    clearPressTimer();
+    if (firedAsHold) return; // the timer callback above already handled this press
+    if (tooltipsArmed) applySyncedTooltip(xValAt(e));
+  });
+
+  canvas.addEventListener("pointercancel", clearPressTimer);
+  canvas.addEventListener("pointerleave", clearPressTimer);
+}
+
 // Lazily builds a row's chart only once that row actually scrolls into
 // view, instead of building every location's chart upfront — with 14+
 // locations each rendering a several-thousand-pixel-wide, high-resolution
@@ -786,12 +897,19 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
       compact: true,
       sessionSpan: sessions.map((s) => ({ from: s.from, to: s.to })),
       xRange: { min: timelineStart, max: timelineEnd },
-      disableBuiltinEvents: true, // this page drives the tooltip itself — see wireHoldToShowTooltip below
+      disableBuiltinEvents: true, // this page drives the tooltip itself — see wireSyncedTooltip below
       showFirstBoxIcons: true, // windvane/fish legend on each row's own first condition-strip box
     });
     if (rowChart) {
       activeRowCharts.push(rowChart);
-      wireHoldToShowTooltip(() => rowChart, canvas);
+      wireSyncedTooltip(rowChart, canvas);
+      // If the tooltip is already armed (from an interaction on a
+      // different row, or before this row had even scrolled into view /
+      // been rendered yet), apply it to THIS newly-built chart
+      // immediately too, rather than leaving it blank until its own next
+      // interaction — "active on all graphs" should include ones that
+      // only just started existing.
+      if (tooltipsArmed && syncedTooltipTime != null) applySyncedTooltip(syncedTooltipTime);
     }
   };
 
