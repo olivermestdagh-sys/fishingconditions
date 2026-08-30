@@ -428,6 +428,75 @@ function findTideThresholdCrossings(rows, threshold) {
 }
 
 /**
+ * Finds the local peaks (high tide) and troughs (low tide) in the tide
+ * curve — a point counts as a peak/trough if it's higher/lower than both
+ * its immediate neighbors. Same "hourly samples, minor approximation"
+ * caveat as findTideThresholdCrossings above: the real curve between
+ * readings is a cosine, not straight lines meeting at a point, so the
+ * true peak time can fall a little either side of the sampled hour this
+ * reports — close enough for "roughly when", not a tide-table replacement.
+ * The very first/last row is never reported: with nothing before/after it
+ * to compare against, there's no way to tell whether it's a genuine local
+ * extreme or just where the visible data happens to end.
+ */
+function findTideExtrema(rows) {
+  const tideRows = rows
+    .filter((r) => r["Tide Height (m)"] != null)
+    .slice()
+    .sort((a, b) => a._t - b._t);
+
+  const extrema = [];
+  for (let i = 1; i < tideRows.length - 1; i++) {
+    const prev = tideRows[i - 1]["Tide Height (m)"];
+    const curr = tideRows[i]["Tide Height (m)"];
+    const next = tideRows[i + 1]["Tide Height (m)"];
+    if (curr > prev && curr >= next) {
+      extrema.push({ t: tideRows[i]._t, height: curr, type: "high" });
+    } else if (curr < prev && curr <= next) {
+      extrema.push({ t: tideRows[i]._t, height: curr, type: "low" });
+    }
+  }
+  return extrema;
+}
+
+/**
+ * Labels each high/low tide directly on the tide curve — a small dot at
+ * the peak/trough plus its time, in the tide line's own color, so reading
+ * "when's the next high tide" doesn't require hovering for a tooltip.
+ * Applies universally, everywhere renderConditionsChart is used, same as
+ * buildTooltipCrosshairPlugin below.
+ */
+function buildTideExtremaPlugin(rows) {
+  const extrema = findTideExtrema(rows);
+  return {
+    id: "tideExtrema",
+    afterDatasetsDraw(chart) {
+      if (extrema.length === 0) return;
+      const { ctx, chartArea, scales } = chart;
+      if (!chartArea || !scales.x || !scales.yTide) return;
+      const xScale = scales.x;
+      const yScale = scales.yTide;
+      const { left, right } = chartArea;
+      ctx.save();
+      ctx.font = "700 9px -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#4f46e5";
+      for (const ex of extrema) {
+        const x = xScale.getPixelForValue(ex.t);
+        if (x < left || x > right) continue; // outside this chart's own visible range
+        const y = yScale.getPixelForValue(ex.height);
+        ctx.beginPath();
+        ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.textBaseline = ex.type === "high" ? "bottom" : "top";
+        ctx.fillText(fmtChartTick(ex.t), x, ex.type === "high" ? y - 5 : y + 5);
+      }
+      ctx.restore();
+    },
+  };
+}
+
+/**
  * Marks exactly which moment (and which line's value at that moment) the
  * tooltip is currently showing — a vertical crosshair across the full
  * plot height at the tooltip's x-position, plus an enlarged, white-ringed
@@ -1170,6 +1239,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       buildSessionSpanPlugin(sessionSpanList),
       buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons),
       buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime),
+      buildTideExtremaPlugin(rows),
       buildTooltipCrosshairPlugin(),
       // Skipped in compact mode — nothing to label when there are no axes.
       ...(compact ? [] : [buildAxisUnitLabelsPlugin()]),
