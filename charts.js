@@ -427,6 +427,83 @@ function findTideThresholdCrossings(rows, threshold) {
   return crossings;
 }
 
+/**
+ * Marks exactly which moment (and which line's value at that moment) the
+ * tooltip is currently showing — a vertical crosshair across the full
+ * plot height at the tooltip's x-position, plus an enlarged, white-ringed
+ * dot on every visible dataset's own point at that same position. Without
+ * this, a floating tooltip box only tells you the VALUES; on a chart with
+ * several overlapping lines (and, in compact mode, no axes at all to
+ * cross-reference against), it's easy to lose track of which vertical
+ * slice of the chart — and which specific point on each line — those
+ * values actually came from.
+ *
+ * Applies universally, everywhere renderConditionsChart is used, and
+ * regardless of how the tooltip was triggered (Chart.js's own default
+ * tap/hover, or a caller manually driving it via chart.tooltip.setActiveElements
+ * — see wireHoldToShowTooltip) — chart.tooltip.getActiveElements() reflects
+ * the current tooltip state either way, so this doesn't need to know which
+ * one is in play.
+ *
+ * Skips the wind datasets' own highlight dot specifically — those already
+ * render a large directional arrow at every valid point (see
+ * makeArrowCanvas/pointStyle below), so an additional plain circle on top
+ * would just clutter an already-distinct marker rather than clarify it.
+ */
+function buildTooltipCrosshairPlugin() {
+  return {
+    id: "tooltipCrosshair",
+    // afterDatasetsDraw, not afterDraw — same reasoning as the other
+    // overlay plugins in this file: the built-in tooltip also draws in
+    // afterDraw, and Chart.js doesn't guarantee draw order between two
+    // afterDraw-hooked plugins based on registration order alone.
+    // afterDatasetsDraw is a strictly earlier phase, so this is always
+    // drawn — and the crosshair line specifically drawn — before (i.e.
+    // underneath) the tooltip box, rather than risking it visually
+    // covering the tooltip's own text.
+    afterDatasetsDraw(chart) {
+      const active = chart.tooltip && chart.tooltip.getActiveElements ? chart.tooltip.getActiveElements() : [];
+      if (!active || active.length === 0) return;
+      const { ctx, chartArea } = chart;
+      if (!chartArea) return;
+      const { top, bottom } = chartArea;
+      const { datasetIndex, index } = active[0];
+      const meta = chart.getDatasetMeta(datasetIndex);
+      const anchorPoint = meta && meta.data && meta.data[index];
+      if (!anchorPoint) return;
+      const x = anchorPoint.x;
+
+      ctx.save();
+      ctx.strokeStyle = "rgba(15, 23, 42, 0.55)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(x, top);
+      ctx.lineTo(x, bottom);
+      ctx.stroke();
+      ctx.restore();
+
+      chart.data.datasets.forEach((ds, dIdx) => {
+        if (ds.yAxisID === "yWind") return; // already has its own big arrow marker at this point
+        const dMeta = chart.getDatasetMeta(dIdx);
+        if (!dMeta || dMeta.hidden) return;
+        const point = dMeta.data && dMeta.data[index];
+        const value = ds.data && ds.data[index] ? ds.data[index].y : null;
+        if (!point || value == null) return;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = ds.borderColor || "#000";
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = "#fff";
+        ctx.stroke();
+        ctx.restore();
+      });
+    },
+  };
+}
+
 function buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime) {
   return {
     id: "nowAndThreshold",
@@ -1093,6 +1170,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       buildSessionSpanPlugin(sessionSpanList),
       buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons),
       buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime),
+      buildTooltipCrosshairPlugin(),
       // Skipped in compact mode — nothing to label when there are no axes.
       ...(compact ? [] : [buildAxisUnitLabelsPlugin()]),
     ],
