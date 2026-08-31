@@ -311,6 +311,7 @@ function renderRows() {
 
     const row = document.createElement("div");
     row.className = "window-card loc-edit-card";
+    row.dataset.locRowIdx = i; // targeted by the map's marker clicks to scroll-to/highlight this row — see renderSettingsLocationMap
     row.innerHTML = `
       <div class="loc-edit-top">
         <div style="flex:2;min-width:180px;">
@@ -363,6 +364,34 @@ function renderRows() {
 
   wireRowListeners(list);
   locations.forEach((_, i) => wireGroupTagBox(i));
+  renderSettingsLocationMap();
+}
+
+/**
+ * Builds the Settings tab's map (renderLeafletLocationMap, charts.js) —
+ * one marker per location (this list is already one entry per name,
+ * unlike the Location tab's data, so no type-grouping needed here).
+ * Clicking a marker scrolls to and briefly highlights that location's
+ * edit card below, rather than selecting/navigating anywhere — this page
+ * is for finding a specific location to EDIT, not for choosing one to
+ * view.
+ */
+function renderSettingsLocationMap() {
+  const points = locations.map((loc, i) => ({
+    lat: loc.lat,
+    lng: loc.lng,
+    label: loc.name || "(unnamed)",
+    onClick: () => jumpToLocationRow(i),
+  }));
+  renderLeafletLocationMap("settingsLocationMap", points);
+}
+
+function jumpToLocationRow(idx) {
+  const row = document.querySelector(`.loc-edit-card[data-loc-row-idx="${idx}"]`);
+  if (!row) return;
+  row.scrollIntoView({ behavior: "smooth", block: "center" });
+  row.classList.add("loc-edit-card-highlight");
+  setTimeout(() => row.classList.remove("loc-edit-card-highlight"), 1800);
 }
 
 function renderTypeSection(loc, typeConfig, locIdx, typeIdx) {

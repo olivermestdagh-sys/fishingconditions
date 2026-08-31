@@ -34,10 +34,10 @@ async function init() {
   // avoids a race where the very first chart render below would happen
   // before tideOffset had been merged in.
   await loadTideOffsets(state.data.locations);
+  renderLocationMap();
 
   document.getElementById("locationSelect").addEventListener("change", (e) => {
-    localStorage.setItem("selectedLocation", e.target.value);
-    renderLocation(e.target.value);
+    selectLocationByKey(e.target.value);
   });
   document.getElementById("conditionsChart").addEventListener("click", openChartModal);
   document.getElementById("btnCloseChartModal").addEventListener("click", closeChartModal);
@@ -49,6 +49,64 @@ async function init() {
     document.getElementById("locationSelect").value = initial;
     renderLocation(initial);
   }
+}
+
+// Shared by the dropdown's own change handler and the map's marker clicks
+// below — one place that updates the dropdown's value, persists the
+// choice, and re-renders, so both selection methods always stay in sync
+// with each other.
+function selectLocationByKey(key) {
+  localStorage.setItem("selectedLocation", key);
+  document.getElementById("locationSelect").value = key;
+  renderLocation(key);
+}
+
+/**
+ * Builds the Location tab's map (renderLeafletLocationMap, charts.js) —
+ * one marker per distinct location NAME, since lat/lng is the same
+ * regardless of which type variant it is. A location with only one type
+ * selects directly on click; one with both Kayak and Land based entries
+ * opens a small popup to choose between them instead, since a single
+ * marker can't otherwise say which of the two the person meant.
+ */
+function renderLocationMap() {
+  const byName = new Map();
+  for (const loc of state.data.locations) {
+    if (!byName.has(loc.name)) byName.set(loc.name, []);
+    byName.get(loc.name).push(loc);
+  }
+
+  const points = [];
+  for (const [name, variants] of byName) {
+    const { lat, lng } = variants[0];
+    if (variants.length === 1) {
+      const key = locationKey(variants[0].name, variants[0].type);
+      points.push({ lat, lng, label: name, onClick: () => selectLocationByKey(key) });
+    } else {
+      const popupHtml = `
+        <div style="font-weight:600;margin-bottom:6px;">${name}</div>
+        ${variants
+          .map((v) => `<button type="button" class="map-popup-type-btn" data-map-key="${locationKey(v.name, v.type)}">${v.type}</button>`)
+          .join("")}
+      `;
+      points.push({ lat, lng, label: name, popupHtml });
+    }
+  }
+
+  const map = renderLeafletLocationMap("locationMap", points);
+  if (!map) return;
+  // Popup content only exists in the DOM once a popup actually opens (up
+  // until then it's just an HTML string Leaflet is holding onto), so its
+  // buttons have to be wired here rather than up front.
+  map.on("popupopen", (e) => {
+    const popupEl = e.popup.getElement();
+    popupEl.querySelectorAll("[data-map-key]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        selectLocationByKey(btn.dataset.mapKey);
+        map.closePopup();
+      });
+    });
+  });
 }
 
 function groupRowsByLocation() {

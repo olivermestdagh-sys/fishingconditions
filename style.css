@@ -1793,3 +1793,55 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
   right: 8px;
   z-index: 5;
 }
+
+/* Location-picker map (conditions.html's Location tab, locations.html's
+   Settings tab — see renderLeafletLocationMap in charts.js). Leaflet
+   REQUIRES its container to have an explicit height in CSS or it renders
+   as a blank 0-height box — this is that height, plus rounding to match
+   the card it sits inside. */
+.location-map {
+  height: 280px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--grey-100);
+}
+
+/* Leaflet's own popup content (the type-choice buttons on a Location
+   tab marker with more than one type — see app.js) needs its OWN
+   button styling, since Leaflet popups render outside this site's normal
+   card/button component tree — matches .btn-secondary closely enough to
+   look native rather than injecting a whole shared class here. */
+.map-popup-type-btn {
+  display: block;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--grey-200);
+  background: var(--white);
+  color: var(--blue-900);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.map-popup-type-btn:last-child {
+  margin-bottom: 0;
+}
+
+/* Brief highlight flash when a location's edit card is jumped to from
+   the Settings map (see jumpToLocationRow, locationsadmin.js) — confirms
+   which card the map click actually landed on, since scrollIntoView
+   alone can be easy to miss on a long list. */
+.loc-edit-card-highlight {
+  animation: loc-edit-card-flash 1.8s ease-out;
+}
+
+@keyframes loc-edit-card-flash {
+  0%, 20% {
+    box-shadow: 0 0 0 3px var(--blue-700);
+  }
+  100% {
+    box-shadow: none;
+  }
+}
