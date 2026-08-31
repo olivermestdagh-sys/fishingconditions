@@ -1806,6 +1806,15 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
   background: var(--grey-100);
 }
 
+/* Resets Leaflet's default marker-icon styling (a background/border meant
+   for its own default image-based pin) so the hand-drawn SVG pins (see
+   buildMapPinDivIcon, charts.js) render on their own, without an extra
+   box around them. */
+.location-map-pin {
+  background: none;
+  border: none;
+}
+
 /* Leaflet's own popup content (the type-choice buttons on a Location
    tab marker with more than one type — see app.js) needs its OWN
    button styling, since Leaflet popups render outside this site's normal

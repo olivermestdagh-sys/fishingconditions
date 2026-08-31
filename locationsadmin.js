@@ -377,12 +377,17 @@ function renderRows() {
  * view.
  */
 function renderSettingsLocationMap() {
-  const points = locations.map((loc, i) => ({
-    lat: loc.lat,
-    lng: loc.lng,
-    label: loc.name || "(unnamed)",
-    onClick: () => jumpToLocationRow(i),
-  }));
+  const points = locations.map((loc, i) => {
+    const types = (loc.types || []).map((t) => t.type);
+    const iconKind = types.includes("Kayak") && types.includes("Land based") ? "both" : types.includes("Land based") ? "landBased" : "kayak";
+    return {
+      lat: loc.lat,
+      lng: loc.lng,
+      label: loc.name || "(unnamed)",
+      iconKind,
+      onClick: () => jumpToLocationRow(i),
+    };
+  });
   renderLeafletLocationMap("settingsLocationMap", points);
 }
 
