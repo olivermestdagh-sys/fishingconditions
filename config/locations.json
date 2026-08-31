@@ -393,5 +393,23 @@
     "locationGroups": [
       "Lakes Entrance"
     ]
+  },
+  {
+    "name": "Cape Woolamai Beach",
+    "shore": "NE",
+    "types": [
+      {
+        "type": "Land based",
+        "setUp": "00:10",
+        "packUp": "00:10",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
+      }
+    ],
+    "lat": -38.54427195995182,
+    "lng": 145.34040927886966,
+    "locationGroups": [
+      "South Beaches"
+    ]
   }
 ]
