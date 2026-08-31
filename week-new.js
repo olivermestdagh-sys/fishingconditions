@@ -805,7 +805,12 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
 
   const sidebar = document.createElement("div");
   sidebar.className = "weeknew-row-sidebar";
-  sidebar.style.backgroundImage = `url("${buildTypeWatermarkDataUri(loc.type)}")`;
+  // Same photo + white-wash treatment as Week (sessions)' own tiles (see
+  // buildTileElement/.week-tile-bg in week.js) — reusing those same two
+  // images rather than a separate icon set, so a location reads the same
+  // way regardless of which of the two pages you're looking at it from.
+  const photoUrl = loc.type === "Kayak" ? "images/type-kayak.jpg" : "images/type-landbased.jpg";
+  sidebar.style.backgroundImage = `linear-gradient(rgba(255,255,255,0.88), rgba(255,255,255,0.88)), url(${photoUrl})`;
 
   const isPinned = pinnedOrder.includes(loc.name);
   const star = document.createElement("button");
