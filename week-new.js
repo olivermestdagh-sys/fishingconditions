@@ -54,63 +54,82 @@ let pinnedOrder = []; // location NAMES, in the order they were pinned — oldes
 // whatever was already built.
 let activeRowCharts = [];
 
-// Deliberately module-level, not per-row — holding on ANY row's graph
-// shows the tooltip at that same moment on every OTHER currently-rendered
-// row too, not just the one actually touched (see wireSyncedTooltip
-// below). syncedTooltipTime is the real time (chart x-value) currently
-// being shown, kept around so a row that only scrolls into view (and
-// gets its chart built) WHILE already armed picks up the same synced
-// position immediately, rather than showing nothing until its own next
-// interaction.
+// Deliberately module-level, not per-row — only ONE row's tooltip is ever
+// showing at a time (see showTooltipOn below), and which one that is can
+// change without needing to re-hold: a quick tap on a DIFFERENT row, while
+// armed, moves it there instead of adding a second one.
 let tooltipsArmed = false;
-let syncedTooltipTime = null;
+let activeTooltipChart = null;
 
 /**
- * Applies the tooltip, at real time xVal, to every currently-rendered row
- * chart at once — not just the one that was actually held/tapped. Each
- * chart shares the exact same [timelineStart, timelineEnd] x-range and
- * PIXELS_PER_HOUR scale (see renderWeekView), so converting xVal through
- * EACH chart's own x-scale, rather than assuming the same pixel offset or
- * data index applies everywhere, is what actually keeps this correct even
- * if two locations' underlying row data don't line up 1:1 (a gap, a
- * missing hour) — it's driven by real time, not shared array position.
+ * Fully hides a chart's tooltip — clearing active elements alone isn't
+ * enough: Chart.js's own tooltip fade-out is an animation, and that
+ * animation doesn't reliably resolve when the state change comes from
+ * this kind of external/manual update rather than a genuine hover event
+ * — even chart.update("none") (its "skip animation" mode) turned out to
+ * still let the tooltip plugin's own internal update lifecycle silently
+ * recompute and overwrite a manually-set opacity before the next paint
+ * (confirmed directly: opacity read back as 1 immediately after setting
+ * it to 0 and calling update("none")). chart.draw() bypasses that
+ * lifecycle entirely — a direct, synchronous canvas repaint of whatever
+ * the current state already is, with no update-cycle recomputation in
+ * between to fight with. Safe to skip update() here specifically because
+ * nothing about the chart's actual DATA or scales is changing, only the
+ * tooltip's own transient display state.
  */
-function applySyncedTooltip(xVal) {
-  syncedTooltipTime = xVal;
-  for (const chart of activeRowCharts) {
-    const xScale = chart.scales.x;
-    if (!xScale) continue;
-    const px = xScale.getPixelForValue(xVal);
-    const rect = chart.canvas.getBoundingClientRect();
-    const mode = chart.options.interaction ? chart.options.interaction.mode : "index";
-    const intersect = chart.options.interaction ? chart.options.interaction.intersect : false;
-    const elements = chart.getElementsAtEventForMode(
-      { clientX: rect.left + px, clientY: rect.top + rect.height / 2 },
-      mode,
-      { intersect },
-      true
-    );
-    if (elements.length === 0) continue;
-    chart.tooltip.setActiveElements(elements, { x: px, y: rect.height / 2 });
-    chart.update();
-  }
+function clearTooltip(chart) {
+  chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+  chart.tooltip.opacity = 0;
+  chart.draw();
 }
 
-function hideSyncedTooltip() {
-  syncedTooltipTime = null;
-  for (const chart of activeRowCharts) {
-    chart.tooltip.setActiveElements([], { x: 0, y: 0 });
-    chart.update();
+/**
+ * Shows the tooltip on exactly one chart — the one just held/tapped —
+ * clearing it from every OTHER currently-rendered row first, so switching
+ * between graphs never leaves more than one tooltip box on screen at once.
+ */
+function showTooltipOn(chart, xVal) {
+  activeTooltipChart = chart;
+  for (const c of activeRowCharts) {
+    if (c === chart) continue;
+    clearTooltip(c);
+  }
+  const xScale = chart.scales.x;
+  if (!xScale) return;
+  const px = xScale.getPixelForValue(xVal);
+  const rect = chart.canvas.getBoundingClientRect();
+  const mode = chart.options.interaction ? chart.options.interaction.mode : "index";
+  const intersect = chart.options.interaction ? chart.options.interaction.intersect : false;
+  const elements = chart.getElementsAtEventForMode(
+    { clientX: rect.left + px, clientY: rect.top + rect.height / 2 },
+    mode,
+    { intersect },
+    true
+  );
+  if (elements.length === 0) return;
+  chart.tooltip.setActiveElements(elements, { x: px, y: rect.height / 2 });
+  // Same reasoning as clearTooltip above, in reverse — opacity forced to
+  // 1 directly and chart.draw() instead of update(), rather than trusting
+  // Chart.js's own animated show transition to resolve synchronously.
+  chart.tooltip.opacity = 1;
+  chart.draw();
+}
+
+function hideAllTooltips() {
+  activeTooltipChart = null;
+  for (const c of activeRowCharts) {
+    clearTooltip(c);
   }
 }
 
 /**
- * Same hold-for-2s / quick-tap-while-armed gesture as charts.js's shared
- * wireHoldToShowTooltip, but broadcasting to every row via
- * applySyncedTooltip/hideSyncedTooltip above instead of only the chart the
- * gesture happened on — kept as its own page-local version rather than
- * generalizing the shared one, since "every other chart on the page too"
- * isn't something Live (a single chart) has any use for.
+ * Same hold-for-2s gesture as charts.js's shared wireHoldToShowTooltip,
+ * but able to move the tooltip to a DIFFERENT row's graph on a quick tap
+ * without needing to re-hold there first — kept as its own page-local
+ * version rather than generalizing the shared one, since "any graph can
+ * take over from any other" isn't something Live (a single chart) has any
+ * use for. Holding again ANYWHERE while armed disarms it everywhere,
+ * regardless of which row currently has it.
  */
 function wireSyncedTooltip(chart, canvas) {
   const HOLD_MS = 2000;
@@ -139,10 +158,10 @@ function wireSyncedTooltip(chart, canvas) {
       pressTimer = null;
       if (tooltipsArmed) {
         tooltipsArmed = false;
-        hideSyncedTooltip();
+        hideAllTooltips();
       } else {
         tooltipsArmed = true;
-        applySyncedTooltip(xValAt(e));
+        showTooltipOn(chart, xValAt(e));
       }
     }, HOLD_MS);
   });
@@ -158,7 +177,7 @@ function wireSyncedTooltip(chart, canvas) {
     const firedAsHold = pressTimer == null;
     clearPressTimer();
     if (firedAsHold) return; // the timer callback above already handled this press
-    if (tooltipsArmed) applySyncedTooltip(xValAt(e));
+    if (tooltipsArmed) showTooltipOn(chart, xValAt(e)); // quick tap while armed — shows here, moving it off whichever row had it before
   });
 
   canvas.addEventListener("pointercancel", clearPressTimer);
@@ -903,13 +922,10 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
     if (rowChart) {
       activeRowCharts.push(rowChart);
       wireSyncedTooltip(rowChart, canvas);
-      // If the tooltip is already armed (from an interaction on a
-      // different row, or before this row had even scrolled into view /
-      // been rendered yet), apply it to THIS newly-built chart
-      // immediately too, rather than leaving it blank until its own next
-      // interaction — "active on all graphs" should include ones that
-      // only just started existing.
-      if (tooltipsArmed && syncedTooltipTime != null) applySyncedTooltip(syncedTooltipTime);
+      // Deliberately no "already armed elsewhere, so show here too" logic
+      // — only one row's tooltip is ever showing at a time (see
+      // showTooltipOn), and a row that's only just scrolled into view
+      // wasn't the one actually tapped/held, so it stays blank until it is.
     }
   };
 
