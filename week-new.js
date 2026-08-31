@@ -142,12 +142,10 @@ function wireSyncedTooltip(chart, canvas) {
   let pressStartY = 0;
 
   function xValAt(e) {
-    // e.offsetX, not canvas.getBoundingClientRect() + e.clientX — see
-    // xValFromEvent in charts.js for why the rect-based approach breaks
-    // under this page's mobile rotation. Inlined here (rather than
-    // calling that shared helper directly) only because this closure
-    // already has its own `chart` in scope; same underlying logic.
-    return chart.scales.x.getValueForPixel(e.offsetX);
+    // xValFromEvent (charts.js) — prefers e.offsetX (unaffected by this
+    // page's mobile rotation) with a rect-based fallback for browsers
+    // where offsetX isn't reliably populated on touch events.
+    return xValFromEvent(chart, e);
   }
 
   function clearPressTimer() {

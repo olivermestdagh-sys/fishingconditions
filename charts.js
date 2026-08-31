@@ -2044,10 +2044,10 @@ function elementsAtIndex(chart, index) {
 }
 
 /**
- * Converts a pointer/mouse event into the chart's own logical x-value,
- * using e.offsetX — the event's position in the TARGET element's own
- * local, pre-transform coordinate space (per spec, unaffected by any CSS
- * transform on an ancestor) — rather than the
+ * Reads a pointer/mouse event's local X position on the given canvas,
+ * preferring e.offsetX (the event's position in the TARGET element's own
+ * local, pre-transform coordinate space — per spec, unaffected by any CSS
+ * transform on an ancestor) over the
  * "e.clientX - canvas.getBoundingClientRect().left" pattern used
  * elsewhere on this site. Those two are equivalent for a normal,
  * untransformed canvas, but genuinely diverge under a rotation: Week
@@ -2062,9 +2062,28 @@ function elementsAtIndex(chart, index) {
  * crosshair (drawn from the chart's own logical coordinates, unaffected)
  * to show correctly while Chart.js's own tooltip box — positioned via
  * this same broken pixel math — did not.
+ *
+ * Falls back to the rect-based computation if offsetX isn't a usable
+ * number — some mobile Safari versions have historically been
+ * inconsistent about populating offsetX/offsetY on TOUCH-originated
+ * PointerEvents specifically (reliable for mouse). The fallback is only
+ * correct when nothing is rotated, but that's still strictly better than
+ * silently producing NaN and showing nothing at all.
  */
+function localXFromEvent(e, canvas) {
+  if (typeof e.offsetX === "number" && !Number.isNaN(e.offsetX)) return e.offsetX;
+  const rect = canvas.getBoundingClientRect();
+  return e.clientX - rect.left;
+}
+
+function localYFromEvent(e, canvas) {
+  if (typeof e.offsetY === "number" && !Number.isNaN(e.offsetY)) return e.offsetY;
+  const rect = canvas.getBoundingClientRect();
+  return e.clientY - rect.top;
+}
+
 function xValFromEvent(chart, e) {
-  return chart.scales.x.getValueForPixel(e.offsetX);
+  return chart.scales.x.getValueForPixel(localXFromEvent(e, chart.canvas));
 }
 
 /**
@@ -2092,7 +2111,7 @@ function wireHoldToShowTooltip(getChart, canvas) {
     if (!chart) return;
     const elements = elementsAt(e);
     if (elements.length === 0) return;
-    chart.tooltip.setActiveElements(elements, { x: e.offsetX, y: e.offsetY });
+    chart.tooltip.setActiveElements(elements, { x: localXFromEvent(e, canvas), y: localYFromEvent(e, canvas) });
     // opacity forced directly and chart.draw() used instead of update() —
     // confirmed directly (via a live chart, not just reasoning about it)
     // that even chart.update("none") lets the tooltip plugin's own
