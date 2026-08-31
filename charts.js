@@ -540,23 +540,33 @@ function buildTideExtremaPlugin(rows) {
  * makeArrowCanvas/pointStyle below), so an additional plain circle on top
  * would just clutter an already-distinct marker rather than clarify it.
  */
-function buildTooltipCrosshairPlugin() {
+function buildTooltipCrosshairPlugin(rows) {
   return {
     id: "tooltipCrosshair",
-    // afterDatasetsDraw, not afterDraw — same reasoning as the other
-    // overlay plugins in this file: the built-in tooltip also draws in
-    // afterDraw, and Chart.js doesn't guarantee draw order between two
-    // afterDraw-hooked plugins based on registration order alone.
-    // afterDatasetsDraw is a strictly earlier phase, so this is always
-    // drawn — and the crosshair line specifically drawn — before (i.e.
-    // underneath) the tooltip box, rather than risking it visually
-    // covering the tooltip's own text.
+    // afterDatasetsDraw, not afterDraw — drawn after the lines/points but
+    // (for pages using Chart.js's own native tooltip) still before that
+    // tooltip's own afterDraw-hooked rendering, so this never paints over
+    // it. Callers that manually drive the tooltip (Live, Week (graphs) —
+    // see disableBuiltinEvents/wireHoldToShowTooltip) disable the native
+    // tooltip entirely (plugins.tooltip.enabled:false below) and rely on
+    // THIS plugin to draw the whole box itself — Chart.js's own tooltip
+    // rendering turned out to be unreliable when driven by an externally
+    // triggered setActiveElements() rather than a genuine hover event:
+    // position/size don't always get computed (confirmed directly against
+    // a live chart — x/y/width/height came back undefined despite
+    // getActiveElements() and opacity both being correct), in a way that
+    // varied unpredictably across environments and was never fully
+    // pinned down. This plugin's own drawing — same
+    // "getActiveElements() + draw directly" approach as the crosshair and
+    // highlighted points below, already proven reliable in every tested
+    // scenario — sidesteps that whole class of problem rather than
+    // continuing to fight it.
     afterDatasetsDraw(chart) {
       const active = chart.tooltip && chart.tooltip.getActiveElements ? chart.tooltip.getActiveElements() : [];
       if (!active || active.length === 0) return;
       const { ctx, chartArea } = chart;
       if (!chartArea) return;
-      const { top, bottom } = chartArea;
+      const { top, bottom, left, right } = chartArea;
       const { datasetIndex, index } = active[0];
       const meta = chart.getDatasetMeta(datasetIndex);
       const anchorPoint = meta && meta.data && meta.data[index];
@@ -573,13 +583,14 @@ function buildTooltipCrosshairPlugin() {
       ctx.stroke();
       ctx.restore();
 
-      chart.data.datasets.forEach((ds, dIdx) => {
-        if (ds.yAxisID === "yWind") return; // already has its own big arrow marker at this point
-        const dMeta = chart.getDatasetMeta(dIdx);
-        if (!dMeta || dMeta.hidden) return;
-        const point = dMeta.data && dMeta.data[index];
-        const value = ds.data && ds.data[index] ? ds.data[index].y : null;
-        if (!point || value == null) return;
+      for (const el of active) {
+        const ds = chart.data.datasets[el.datasetIndex];
+        if (!ds || ds.yAxisID === "yWind") continue; // already has its own big arrow marker at this point
+        const dMeta = chart.getDatasetMeta(el.datasetIndex);
+        if (!dMeta || dMeta.hidden) continue;
+        const point = dMeta.data && dMeta.data[el.index];
+        const value = ds.data && ds.data[el.index] ? ds.data[el.index].y : null;
+        if (!point || value == null) continue;
         ctx.save();
         ctx.beginPath();
         ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
@@ -589,9 +600,89 @@ function buildTooltipCrosshairPlugin() {
         ctx.strokeStyle = "#fff";
         ctx.stroke();
         ctx.restore();
-      });
+      }
+
+      // The tooltip box itself — only drawn when the native Chart.js
+      // tooltip is disabled (disableBuiltinEvents callers: Live, Week
+      // (graphs)). Everywhere else, Chart.js's own tooltip is still
+      // enabled and draws its own box via the normal hover/tap path — the
+      // crosshair and highlighted points above still draw universally
+      // (that's the whole point of this plugin for those callers), but
+      // drawing a SECOND box here too would duplicate it.
+      if (!chart.options.plugins.tooltip.enabled) {
+        // Mirrors the callbacks configured on Chart.js's own native
+        // tooltip (title: formatted time; one line per active dataset, in
+        // that dataset's own label/color; afterBody: Location/Fishing
+        // Condition, drawn as strips rather than real datasets so they're
+        // pulled from the row directly) — kept in sync by hand since this
+        // plugin doesn't go through those callbacks at all.
+        const row = rows && rows[index];
+        const lines = [];
+        const t = row ? row._t : (chart.data.labels && chart.data.labels[index]);
+        if (t != null) {
+          lines.push({ text: new Intl.DateTimeFormat([], { timeZone: "UTC", weekday: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(t)), bold: true });
+        }
+        for (const el of active) {
+          const ds = chart.data.datasets[el.datasetIndex];
+          if (!ds) continue;
+          const val = ds.data[el.index] ? ds.data[el.index].y : null;
+          if (val == null) continue;
+          const formatted = Number.isInteger(val) ? String(val) : val.toFixed(1);
+          lines.push({ text: `${ds.label}: ${formatted}`, color: ds.borderColor || "#e5e7eb" });
+        }
+        if (row) {
+          if (row["Condition"] != null) {
+            lines.push({ text: `Location ${row["Condition"].toFixed(1)}/5 — ${row["Condition Reason"] || ""}` });
+          }
+          if (row["Fishing Condition"] != null) {
+            lines.push({ text: `Fishing ${row["Fishing Condition"].toFixed(1)}/5 — ${row["Fishing Condition Reason"] || ""}` });
+          }
+        }
+        drawTooltipBox(ctx, chartArea, x, lines);
+      }
     },
   };
+}
+
+function drawTooltipBox(ctx, chartArea, x, lines) {
+  if (lines.length === 0) return;
+  const { top, bottom, left, right } = chartArea;
+
+  ctx.save();
+  const fontSize = 11;
+  const lineHeight = fontSize + 5;
+  const padding = 8;
+  let maxWidth = 0;
+  for (const line of lines) {
+    ctx.font = `${line.bold ? "700 " : ""}${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    maxWidth = Math.max(maxWidth, ctx.measureText(line.text).width);
+  }
+  const boxWidth = maxWidth + padding * 2;
+  const boxHeight = lines.length * lineHeight + padding * 2;
+
+  let boxX = x + 12;
+  if (boxX + boxWidth > right) boxX = x - 12 - boxWidth;
+  boxX = Math.max(left, Math.min(boxX, right - boxWidth));
+  let boxY = top + 8;
+  boxY = Math.max(top, Math.min(boxY, bottom - boxHeight));
+
+  ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
+  if (ctx.roundRect) {
+    ctx.beginPath();
+    ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 6);
+    ctx.fill();
+  } else {
+    ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+  }
+
+  lines.forEach((line, i) => {
+    ctx.fillStyle = line.color || "#f1f5f9";
+    ctx.font = `${line.bold ? "700 " : ""}${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText(line.text, boxX + padding, boxY + padding + i * lineHeight);
+  });
+  ctx.restore();
 }
 
 function buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime) {
@@ -1261,7 +1352,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons),
       buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime),
       buildTideExtremaPlugin(rows),
-      buildTooltipCrosshairPlugin(),
+      buildTooltipCrosshairPlugin(rows),
       // Skipped in compact mode — nothing to label when there are no axes.
       ...(compact ? [] : [buildAxisUnitLabelsPlugin()]),
     ],
@@ -1388,6 +1479,17 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
           },
         },
         tooltip: {
+          // Disabled entirely for callers that manually drive the
+          // tooltip (disableBuiltinEvents — Live, Week (graphs)) — see
+          // buildTooltipCrosshairPlugin for why: Chart.js's own tooltip
+          // rendering proved unreliable when triggered by an externally
+          // set active element rather than a genuine hover, so those
+          // pages draw their own box instead. enabled:false only turns
+          // off the native BOX rendering — chart.tooltip.getActiveElements()
+          // / setActiveElements() keep working exactly the same, which is
+          // all that plugin needs. Every other caller is unaffected and
+          // keeps Chart.js's normal tap/hover tooltip exactly as before.
+          enabled: !disableBuiltinEvents,
           callbacks: {
             title: (items) =>
               items.length
@@ -2112,16 +2214,14 @@ function wireHoldToShowTooltip(getChart, canvas) {
     const elements = elementsAt(e);
     if (elements.length === 0) return;
     chart.tooltip.setActiveElements(elements, { x: localXFromEvent(e, canvas), y: localYFromEvent(e, canvas) });
-    // opacity forced directly and chart.draw() used instead of update() —
-    // confirmed directly (via a live chart, not just reasoning about it)
-    // that even chart.update("none") lets the tooltip plugin's own
-    // internal update lifecycle silently recompute and overwrite a
-    // manually-set opacity before the next paint. chart.draw() bypasses
-    // that lifecycle entirely: a direct, synchronous repaint of whatever
-    // the current state already is. Safe to skip update() here
-    // specifically because nothing about the chart's actual DATA or
-    // scales is changing, only the tooltip's own transient display state.
-    chart.tooltip.opacity = 1;
+    // No opacity juggling needed — buildTooltipCrosshairPlugin draws the
+    // whole tooltip itself, straight from getActiveElements(), so all
+    // this needs to do is update which elements are active and repaint.
+    // chart.draw() (not update()) is a direct, synchronous repaint with
+    // no risk of Chart.js's own tooltip lifecycle interfering — safe to
+    // skip update() here specifically because nothing about the chart's
+    // actual DATA or scales is changing, only the tooltip's transient
+    // active-elements state.
     chart.draw();
   }
 
@@ -2129,7 +2229,6 @@ function wireHoldToShowTooltip(getChart, canvas) {
     const chart = getChart();
     if (!chart) return;
     chart.tooltip.setActiveElements([], { x: 0, y: 0 });
-    chart.tooltip.opacity = 0;
     chart.draw();
   }
 
