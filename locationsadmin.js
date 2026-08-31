@@ -333,6 +333,13 @@ function renderRows() {
             Affected by tides
           </label>
         </div>
+        <div style="min-width:130px;">
+          <label class="loc-edit-label">Tide offset (min)</label>
+          <input type="number" step="1" inputmode="numeric" data-numfield="tideOffset" data-idx="${i}"
+            value="${loc.tideOffset != null ? loc.tideOffset : ""}" placeholder="0"
+            title="Positive: this location's tide runs later than the matched station. Negative: earlier."
+            style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+        </div>
         <button data-remove-loc="${i}" class="btn-secondary" style="height:38px;">Remove location</button>
       </div>
 
@@ -511,6 +518,19 @@ function wireRowListeners(list) {
       const idx = Number(e.target.dataset.idx);
       const field = e.target.dataset.boolfield;
       locations[idx][field] = e.target.checked;
+    });
+  });
+
+  // Location-level numeric fields (as opposed to data-typefield, which is
+  // per-type) — same "store a real number, not the string every input's
+  // .value naturally is" reasoning: fetch_conditions.py does arithmetic
+  // with this (a timedelta of minutes), which a quoted JSON string would
+  // break.
+  list.querySelectorAll("input[data-numfield]").forEach((el) => {
+    el.addEventListener("input", (e) => {
+      const idx = Number(e.target.dataset.idx);
+      const field = e.target.dataset.numfield;
+      locations[idx][field] = e.target.value === "" ? null : parseFloat(e.target.value);
     });
   });
 
