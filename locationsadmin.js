@@ -79,6 +79,15 @@ let groupsSha = null;
 // yet."), not a CDN/network issue with Leaflet itself.
 let locationCoords = {};
 
+// Index into `locations` of the single card the Settings list should show,
+// or null to show all of them. Set by clicking a marker on the Settings map
+// (see jumpToLocationRow) and cleared by the "Show all locations" banner
+// button (see applyLocationFilter) — this page can list 15+ locations, each
+// with a fairly tall edit card, so once someone's clicked a specific spot
+// on the map to find it, cutting the rest of the list out entirely is much
+// faster than scrolling+highlighting through everything else to find it.
+let selectedLocationIdx = null;
+
 /**
  * Fetches data/conditions.json purely to pick up each location's lat/lng
  * for the Settings tab's map — see the comment on locationCoords above for
@@ -154,6 +163,9 @@ async function init() {
   document.getElementById("btnDisconnect").addEventListener("click", onDisconnect);
   document.getElementById("btnAddRow").addEventListener("click", () => {
     locations.push({ name: "", shore: "N", types: [defaultTypeConfig("Kayak")] });
+    // Clear any active map-click filter so the newly added (empty) card is
+    // actually visible instead of being hidden by a stale selection.
+    selectedLocationIdx = null;
     renderRows();
   });
   document.getElementById("btnSave").addEventListener("click", () => onSave(false));
@@ -407,6 +419,7 @@ function renderRows() {
   wireRowListeners(list);
   locations.forEach((_, i) => wireGroupTagBox(i));
   renderSettingsLocationMap();
+  applyLocationFilter();
 }
 
 /**
@@ -440,11 +453,56 @@ function renderSettingsLocationMap() {
 }
 
 function jumpToLocationRow(idx) {
+  selectedLocationIdx = idx;
+  applyLocationFilter();
   const row = document.querySelector(`.loc-edit-card[data-loc-row-idx="${idx}"]`);
   if (!row) return;
   row.scrollIntoView({ behavior: "smooth", block: "center" });
   row.classList.add("loc-edit-card-highlight");
   setTimeout(() => row.classList.remove("loc-edit-card-highlight"), 1800);
+}
+
+/**
+ * Shows only the card matching selectedLocationIdx and hides every other
+ * one, plus a small "Show all locations" banner above the list to get back
+ * out of the filtered view. Pure show/hide against the ALREADY-RENDERED
+ * DOM — deliberately not a call to renderRows(), which would also rebuild
+ * the Leaflet map (see renderSettingsLocationMap) and reset its pan/zoom on
+ * every single marker click, which would fight with the very map click
+ * that triggered this in the first place. Called both right after a marker
+ * click (via jumpToLocationRow) and at the end of every renderRows(), so a
+ * structural change elsewhere (toggling a type, editing while filtered)
+ * re-applies the same filter instead of silently dropping it.
+ */
+function applyLocationFilter() {
+  const list = document.getElementById("locationsList");
+  if (!list) return;
+  list.querySelectorAll(".loc-edit-card").forEach((card) => {
+    const idx = Number(card.dataset.locRowIdx);
+    card.style.display = selectedLocationIdx === null || idx === selectedLocationIdx ? "" : "none";
+  });
+
+  let banner = document.getElementById("locationFilterBanner");
+  if (selectedLocationIdx === null || !locations[selectedLocationIdx]) {
+    if (banner) banner.remove();
+    return;
+  }
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "locationFilterBanner";
+    banner.className = "summary-card";
+    banner.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:10px 14px;";
+    list.parentNode.insertBefore(banner, list);
+  }
+  const loc = locations[selectedLocationIdx];
+  banner.innerHTML = `
+    <span style="font-size:0.9rem;">Showing only <strong>${(loc.name || "(unnamed)").replace(/</g, "&lt;")}</strong></span>
+    <button type="button" id="btnShowAllLocations" class="btn-secondary">Show all locations</button>
+  `;
+  document.getElementById("btnShowAllLocations").addEventListener("click", () => {
+    selectedLocationIdx = null;
+    applyLocationFilter();
+  });
 }
 
 function renderTypeSection(loc, typeConfig, locIdx, typeIdx) {
@@ -648,6 +706,10 @@ function wireRowListeners(list) {
     btn.addEventListener("click", (e) => {
       const idx = Number(e.currentTarget.dataset.removeLoc);
       locations.splice(idx, 1);
+      // Indices shift after a removal, so any active filter would now
+      // point at the wrong (or a nonexistent) card — clear it rather than
+      // risk showing the wrong location or an empty filtered view.
+      selectedLocationIdx = null;
       renderRows();
     });
   });
