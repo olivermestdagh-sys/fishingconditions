@@ -26,7 +26,8 @@
     "locationGroups": [
       "Western Port",
       "Western"
-    ]
+    ],
+    "tideOffset": 30
   },
   {
     "name": "Corinella Boat Ramp, VIC",
