@@ -67,6 +67,47 @@ let currentSha = null;
 let locationGroups = [];
 let groupsSha = null;
 
+// Name -> {lat, lng}, populated by loadLocationCoords() below. The admin
+// config this page edits (config/locations.json, loaded into `locations`
+// above) never stores coordinates itself — lat/lng only get resolved by
+// fetch_conditions.py via WillyWeather's location search on each scheduled
+// run, and are written into the GENERATED data/conditions.json, not back
+// into the config file. Without this separate lookup, renderSettingsLocationMap
+// below would have no coordinates to plot markers with for ANY location, no
+// matter how many are configured — that was the actual cause of the
+// Settings map appearing blank ("No locations with coordinates to show
+// yet."), not a CDN/network issue with Leaflet itself.
+let locationCoords = {};
+
+/**
+ * Fetches data/conditions.json purely to pick up each location's lat/lng
+ * for the Settings tab's map — see the comment on locationCoords above for
+ * why this can't just come from the `locations` array already loaded from
+ * config/locations.json. A cache-busting query param sidesteps GitHub
+ * Pages' CDN cache (same issue/fix as loadTideOffsets in charts.js, just
+ * applied to a different file) so a location added and refreshed moments
+ * ago shows up on the map without needing a hard refresh. Fails silently —
+ * on error, locationCoords just stays empty and every marker falls back to
+ * the "no coordinates" case, rather than blocking the rest of the page
+ * from working.
+ */
+async function loadLocationCoords() {
+  try {
+    const res = await fetch(`data/conditions.json?_=${Date.now()}`, { cache: "no-store" });
+    const data = await res.json();
+    for (const loc of data.locations || []) {
+      // Kayak/Land based variants of the same physical location repeat the
+      // same name with the same lat/lng — first one in wins, rest are
+      // redundant writes of the same value.
+      if (loc.name && !(loc.name in locationCoords)) {
+        locationCoords[loc.name] = { lat: loc.lat, lng: loc.lng };
+      }
+    }
+  } catch (err) {
+    console.error("Could not load location coordinates for Settings map:", err);
+  }
+}
+
 function utf8ToBase64(str) {
   return btoa(unescape(encodeURIComponent(str)));
 }
@@ -127,11 +168,12 @@ async function init() {
   });
   document.getElementById("btnSaveGroups").addEventListener("click", onSaveGroups);
 
-  // Groups load first — renderRows() (called at the end of loadLocations)
-  // builds each location's Location Group <select> options from
-  // locationGroups, so those need to already be populated by the time it
-  // first runs, not filled in after the fact.
-  await loadLocationGroups();
+  // Groups and coords both need to be ready before the first renderRows()
+  // (called at the end of loadLocations, which renders the map too) — groups
+  // populate each location's Location Group <select>, coords populate the
+  // map's markers. Both are independent of `locations` itself, so they load
+  // in parallel rather than one after another.
+  await Promise.all([loadLocationGroups(), loadLocationCoords()]);
   await loadLocations();
 }
 
@@ -380,9 +422,15 @@ function renderSettingsLocationMap() {
   const points = locations.map((loc, i) => {
     const types = (loc.types || []).map((t) => t.type);
     const iconKind = types.includes("Kayak") && types.includes("Land based") ? "both" : types.includes("Land based") ? "landBased" : "kayak";
+    // Coordinates come from locationCoords (data/conditions.json), NOT
+    // loc.lat/loc.lng — config/locations.json never has those fields. A
+    // brand-new, not-yet-saved-and-refreshed location simply won't be in
+    // the lookup yet and gets filtered out by renderLeafletLocationMap's
+    // own valid-points check, same as any other unresolved coordinate.
+    const coords = locationCoords[loc.name] || {};
     return {
-      lat: loc.lat,
-      lng: loc.lng,
+      lat: coords.lat,
+      lng: coords.lng,
       label: loc.name || "(unnamed)",
       iconKind,
       onClick: () => jumpToLocationRow(i),
