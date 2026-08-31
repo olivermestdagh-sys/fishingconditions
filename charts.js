@@ -480,10 +480,20 @@ function findTideThresholdCrossings(rows, threshold) {
  * see app.js's location-with-multiple-types case) — a point supplies
  * one or the other, not normally both.
  *
+ * opts.onMapClick(lat, lng), if given, fires when the MAP ITSELF (not a
+ * marker) is clicked — used by the Settings tab's "click map to add a
+ * location" action (see locationsadmin.js) to capture exactly where the
+ * admin clicked. Its presence also changes the empty-map fallback: with no
+ * onMapClick, zero valid points means nothing useful can be shown at all,
+ * so the function bails to an explanatory message; WITH onMapClick, a
+ * genuinely empty map is still shown (centered on Port Phillip/Western
+ * Port, since that's this whole site's coverage area) so there's still
+ * something clickable to start the very first location from.
+ *
  * Returns the Leaflet map instance, or null if Leaflet/the container
  * isn't available, or there are no valid (lat/lng-bearing) points to
- * show — callers can use that null to fall back to showing an
- * explanatory message instead of an empty map box.
+ * show AND no onMapClick was given — callers can use that null to fall
+ * back to showing an explanatory message instead of an empty map box.
  */
 /**
  * Hand-drawn map pin icons (Kayak / Land based / both) for
@@ -564,11 +574,11 @@ function buildMapPinDivIcon(kind) {
 // preference, not two separate ones.
 const MAP_VIEW_STORAGE_KEY = "goodConditionsLocationMapView";
 
-function renderLeafletLocationMap(containerId, points) {
+function renderLeafletLocationMap(containerId, points, opts = {}) {
   const container = document.getElementById(containerId);
   if (!container || typeof L === "undefined") return null;
   const valid = points.filter((p) => p.lat != null && p.lng != null);
-  if (valid.length === 0) {
+  if (valid.length === 0 && !opts.onMapClick) {
     container.innerHTML = `<p class="footnote" style="margin:0;">No locations with coordinates to show yet.</p>`;
     return null;
   }
@@ -602,6 +612,13 @@ function renderLeafletLocationMap(containerId, points) {
   }
   if (savedView && typeof savedView.lat === "number" && typeof savedView.lng === "number" && typeof savedView.zoom === "number") {
     map.setView([savedView.lat, savedView.lng], savedView.zoom);
+  } else if (bounds.length === 0) {
+    // Only reachable via the onMapClick early-return bypass above (a
+    // genuinely empty map, no locations with coordinates at all yet) —
+    // fitBounds([]) has nothing to fit, so center on Port Phillip/Western
+    // Port generally, since that's this whole site's coverage area, rather
+    // than Leaflet's default (mid-Atlantic, lat/lng 0,0).
+    map.setView([-38.2, 145.1], 9);
   } else if (bounds.length === 1) {
     // A single marker has no useful "bounds" to fit (fitBounds on one
     // point zooms in to the max level, which is usually too tight) —
@@ -622,6 +639,14 @@ function renderLeafletLocationMap(containerId, points) {
   };
   map.on("moveend", saveCurrentView);
   map.on("zoomend", saveCurrentView);
+
+  if (opts.onMapClick) {
+    // Fires on a genuine click on open map area. Leaflet doesn't bubble
+    // marker clicks up to this handler by default, so clicking an existing
+    // pin correctly triggers ONLY that marker's own onClick (set above),
+    // never both.
+    map.on("click", (e) => opts.onMapClick(e.latlng.lat, e.latlng.lng));
+  }
 
   return map;
 }

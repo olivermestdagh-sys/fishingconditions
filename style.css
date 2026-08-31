@@ -1815,6 +1815,27 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
   background: var(--grey-100);
 }
 
+/* Settings tab only — while "📍 Click map to add location" is armed (see
+   toggleAddLocationClickMode/onSettingsMapClick in locationsadmin.js), the
+   cursor becomes a crosshair over the map itself so it's visually obvious
+   the next click places a new location rather than just panning around. */
+.location-map.map-click-armed {
+  cursor: crosshair;
+}
+
+/* Same active/pressed treatment as .type-photo-card.active and
+   .loc-chip.active elsewhere on this page — reused here for
+   #btnAddByMapClick while armed, so "this button is currently on" reads
+   consistently with the rest of the Settings tab's own toggle buttons. */
+.btn-secondary.active {
+  background: var(--blue-700);
+  color: var(--white);
+}
+
+.btn-secondary.active:hover {
+  background: var(--blue-900);
+}
+
 /* Resets Leaflet's default marker-icon styling (a background/border meant
    for its own default image-based pin) so the hand-drawn SVG pins (see
    buildMapPinDivIcon, charts.js) render on their own, without an extra

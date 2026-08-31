@@ -168,6 +168,7 @@ async function init() {
     selectedLocationIdx = null;
     renderRows();
   });
+  document.getElementById("btnAddByMapClick").addEventListener("click", toggleAddLocationClickMode);
   document.getElementById("btnSave").addEventListener("click", () => onSave(false));
   document.getElementById("btnSaveAndRefresh").addEventListener("click", () => onSave(true));
 
@@ -426,21 +427,25 @@ function renderRows() {
  * Builds the Settings tab's map (renderLeafletLocationMap, charts.js) —
  * one marker per location (this list is already one entry per name,
  * unlike the Location tab's data, so no type-grouping needed here).
- * Clicking a marker scrolls to and briefly highlights that location's
- * edit card below, rather than selecting/navigating anywhere — this page
- * is for finding a specific location to EDIT, not for choosing one to
- * view.
+ * Clicking a marker scrolls to and briefly highlights (and filters down
+ * to, via jumpToLocationRow/applyLocationFilter) that location's edit card
+ * below. Clicking open map area, when "click to add" mode is armed (see
+ * addLocationClickArmed / btnAddByMapClick), starts a brand-new location
+ * anchored at that exact point instead — see onSettingsMapClick.
  */
 function renderSettingsLocationMap() {
   const points = locations.map((loc, i) => {
     const types = (loc.types || []).map((t) => t.type);
     const iconKind = types.includes("Kayak") && types.includes("Land based") ? "both" : types.includes("Land based") ? "landBased" : "kayak";
-    // Coordinates come from locationCoords (data/conditions.json), NOT
-    // loc.lat/loc.lng — config/locations.json never has those fields. A
-    // brand-new, not-yet-saved-and-refreshed location simply won't be in
-    // the lookup yet and gets filtered out by renderLeafletLocationMap's
-    // own valid-points check, same as any other unresolved coordinate.
-    const coords = locationCoords[loc.name] || {};
+    // Prefer the location's OWN lat/lng (present on anything added via the
+    // map's "click to add" action — see onSettingsMapClick) over
+    // locationCoords (data/conditions.json) — it's the admin's own chosen
+    // point, available immediately with no refresh needed, and for a
+    // brand-new location it's the ONLY coordinate that exists at all until
+    // the next "Save & refresh data now" run. Legacy locations (added
+    // before this feature existed, no lat/lng in config) still fall back
+    // to locationCoords exactly as before.
+    const coords = loc.lat != null && loc.lng != null ? loc : locationCoords[loc.name] || {};
     return {
       lat: coords.lat,
       lng: coords.lng,
@@ -449,7 +454,66 @@ function renderSettingsLocationMap() {
       onClick: () => jumpToLocationRow(i),
     };
   });
-  renderLeafletLocationMap("settingsLocationMap", points);
+  renderLeafletLocationMap("settingsLocationMap", points, { onMapClick: onSettingsMapClick });
+  document.getElementById("settingsLocationMap").classList.toggle("map-click-armed", addLocationClickArmed);
+}
+
+// True while the "📍 Click map to add location" button is armed — the
+// NEXT click on open map area (not a marker) starts a new location there;
+// see onSettingsMapClick. A separate armed step (rather than every map
+// click always adding a location) avoids accidentally creating locations
+// while just panning/exploring the map, which is the map's much more
+// common use on this page.
+let addLocationClickArmed = false;
+
+function toggleAddLocationClickMode() {
+  addLocationClickArmed = !addLocationClickArmed;
+  const btn = document.getElementById("btnAddByMapClick");
+  if (btn) {
+    btn.textContent = addLocationClickArmed ? "Click the map to place it… (cancel)" : "📍 Click map to add location";
+    btn.classList.toggle("active", addLocationClickArmed);
+  }
+  const mapEl = document.getElementById("settingsLocationMap");
+  if (mapEl) mapEl.classList.toggle("map-click-armed", addLocationClickArmed);
+}
+
+/**
+ * Starts a brand-new location anchored at the exact point clicked on the
+ * Settings map. Stores lat/lng directly on the location object — this is
+ * NEW: config/locations.json has never stored coordinates before (they
+ * used to only exist in the GENERATED data/conditions.json, resolved by
+ * fetch_conditions.py's name-text search). fetch_conditions.py now checks
+ * for a stored lat/lng first and, when present, resolves WillyWeather
+ * against THAT coordinate instead of the name — so what actually gets
+ * fetched matches exactly where this was clicked, not wherever a
+ * name-text search happens to land. See process_location() in
+ * fetch_conditions.py for the other half of this.
+ */
+function onSettingsMapClick(lat, lng) {
+  if (!addLocationClickArmed) return;
+  addLocationClickArmed = false;
+  const btn = document.getElementById("btnAddByMapClick");
+  if (btn) {
+    btn.textContent = "📍 Click map to add location";
+    btn.classList.remove("active");
+  }
+
+  locations.push({
+    name: "",
+    shore: "N",
+    types: [defaultTypeConfig("Kayak")],
+    lat,
+    lng,
+  });
+  selectedLocationIdx = locations.length - 1;
+  renderRows();
+
+  // Focus straight into the name field of the new (now the only visible,
+  // thanks to selectedLocationIdx/applyLocationFilter) card — clicking the
+  // map already told us WHERE, all that's left is WHAT to call it.
+  const newRow = document.querySelector(`.loc-edit-card[data-loc-row-idx="${selectedLocationIdx}"]`);
+  const nameInput = newRow && newRow.querySelector('input[data-field="name"]');
+  if (nameInput) nameInput.focus();
 }
 
 function jumpToLocationRow(idx) {
