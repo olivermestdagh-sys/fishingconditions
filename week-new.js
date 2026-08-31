@@ -805,6 +805,7 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
 
   const sidebar = document.createElement("div");
   sidebar.className = "weeknew-row-sidebar";
+  sidebar.style.backgroundImage = `url("${buildTypeWatermarkDataUri(loc.type)}")`;
 
   const isPinned = pinnedOrder.includes(loc.name);
   const star = document.createElement("button");

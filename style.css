@@ -1308,6 +1308,17 @@ main.wide {
   flex: 0 0 220px;
   width: 220px;
   background: var(--white);
+  /* Per-location Kayak/Land based watermark (backgroundImage set inline,
+     per row, in week-new.js — this is just the shared positioning/sizing,
+     the same regardless of which specific image a given row loads).
+     no-repeat since the default is to TILE a background-image, which
+     would turn one watermark glyph into a distracting repeated pattern
+     rather than a single subtle mark; bottom-right placement keeps it
+     clear of the location name/session chips, which all start from the
+     top-left. */
+  background-repeat: no-repeat;
+  background-position: bottom -6px right -6px;
+  background-size: 92px 92px;
   border-right: 1px solid var(--grey-100);
   padding: 10px 10px 12px;
   display: flex;
