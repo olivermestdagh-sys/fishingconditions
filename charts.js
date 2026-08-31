@@ -559,27 +559,6 @@ function buildMapPinDivIcon(kind) {
   });
 }
 
-/**
- * A subtle, oversized version of the kayak/rod glyph (the same shapes
- * used for the map markers, minus the pin/circle wrapper) as a CSS
- * background-image data URI — used on Week (graphs)' row sidebars
- * (week-new.js) as a faint per-location watermark, so which type a row
- * is for is recognizable at a glance without reading the "Kayak"/"Land
- * based" text label. Kept genuinely faint (a pale, low-saturation tint
- * rather than the marker's own bold color) since this sits directly
- * behind session chip text and needs to stay out of the way of it.
- */
-function buildTypeWatermarkDataUri(type) {
-  // Pale tints of the same blue/brown already used for the map markers
-  // (MAP_PIN_STYLES) — faint enough to sit behind text, but still
-  // reinforcing the same color language rather than introducing a third,
-  // unrelated neutral one.
-  const color = type === "Land based" ? "#F0E4D2" : "#D9E7F4";
-  const glyph = type === "Land based" ? rodGlyphSvg(color, 20, 20, 2.1) : kayakGlyphSvg(color, 20, 20, 2.1);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">${glyph}</svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
-
 // Shared between the Location tab's map and the Settings tab's map — both
 // show the same geography, so "where was I last looking" is one
 // preference, not two separate ones.
