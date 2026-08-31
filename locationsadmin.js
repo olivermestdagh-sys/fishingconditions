@@ -88,6 +88,41 @@ let locationCoords = {};
 // faster than scrolling+highlighting through everything else to find it.
 let selectedLocationIdx = null;
 
+// Persists selectedLocationIdx across page reloads (a plain browser
+// refresh — NOT the same thing as fetch_conditions.py's data refresh) so
+// clicking a location on the map "sticks": reload the Settings tab and
+// it's still filtered to the same one, rather than silently popping back
+// to showing everything. Stored by NAME rather than array index — index
+// isn't a stable identity across a reload (locations can be added/removed
+// elsewhere in the meantime), but name is, for anything actually saved.
+const SELECTED_LOCATION_STORAGE_KEY = "settingsSelectedLocationName";
+
+/**
+ * The one place selectedLocationIdx should ever be set — keeps it and its
+ * localStorage mirror (SELECTED_LOCATION_STORAGE_KEY) from drifting apart.
+ * A brand-new, not-yet-named location (idx valid but loc.name === "") is
+ * deliberately NOT persisted: it only exists in memory until "Save changes"
+ * actually writes it to GitHub, so there's nothing meaningful to restore
+ * for it after a reload anyway — persisting nothing here just means a
+ * reload correctly falls back to whatever named location (if any) was
+ * selected before it.
+ */
+function selectLocation(idx) {
+  selectedLocationIdx = idx;
+  const loc = idx != null ? locations[idx] : null;
+  try {
+    if (loc && loc.name) localStorage.setItem(SELECTED_LOCATION_STORAGE_KEY, loc.name);
+    else localStorage.removeItem(SELECTED_LOCATION_STORAGE_KEY);
+  } catch {
+    // localStorage can throw in rare cases (private browsing quirks on
+    // some browsers, storage disabled) — the filter still works for this
+    // session via selectedLocationIdx itself, it just won't survive a
+    // reload, which is a reasonable degrade rather than something to
+    // surface as an error to the user.
+  }
+  applyLocationFilter();
+}
+
 /**
  * Fetches data/conditions.json purely to pick up each location's lat/lng
  * for the Settings tab's map — see the comment on locationCoords above for
@@ -163,9 +198,11 @@ async function init() {
   document.getElementById("btnDisconnect").addEventListener("click", onDisconnect);
   document.getElementById("btnAddRow").addEventListener("click", () => {
     locations.push({ name: "", shore: "N", types: [defaultTypeConfig("Kayak")] });
-    // Clear any active map-click filter so the newly added (empty) card is
-    // actually visible instead of being hidden by a stale selection.
-    selectedLocationIdx = null;
+    // Show just the new blank card (same as clicking a marker on the map)
+    // rather than the whole list — nothing left to persist across a reload
+    // for it yet (see selectLocation), but it should still be the ONLY
+    // thing visible right now so it's obvious where to start typing.
+    selectLocation(locations.length - 1);
     renderRows();
   });
   document.getElementById("btnAddByMapClick").addEventListener("click", toggleAddLocationClickMode);
@@ -353,6 +390,23 @@ async function loadLocations() {
     setStatus("Could not load locations: " + err.message, true);
     locations = [];
   }
+
+  // Restore whichever location was last clicked/selected, by name — see
+  // SELECTED_LOCATION_STORAGE_KEY/selectLocation. Done here (after
+  // `locations` is fully populated, before the first renderRows()) rather
+  // than in selectLocation itself, since this is the ONE case where
+  // selectedLocationIdx is set without going through selectLocation — the
+  // value's already in storage, so re-writing it right back via
+  // selectLocation would just be a redundant no-op localStorage write on
+  // every single page load.
+  try {
+    const savedName = localStorage.getItem(SELECTED_LOCATION_STORAGE_KEY);
+    const idx = savedName ? locations.findIndex((l) => l.name === savedName) : -1;
+    selectedLocationIdx = idx >= 0 ? idx : null;
+  } catch {
+    selectedLocationIdx = null;
+  }
+
   document.getElementById("locationsSection").style.display = "block";
   renderRows();
 }
@@ -464,9 +518,7 @@ function renderSettingsLocationMap() {
 // click always adding a location) avoids accidentally creating locations
 // while just panning/exploring the map, which is the map's much more
 // common use on this page.
-let addLocationClickArmed = false;
-
-function toggleAddLocationClickMode() {
+let addLocationClickArmed = false;function toggleAddLocationClickMode() {
   addLocationClickArmed = !addLocationClickArmed;
   const btn = document.getElementById("btnAddByMapClick");
   if (btn) {
@@ -505,7 +557,7 @@ function onSettingsMapClick(lat, lng) {
     lat,
     lng,
   });
-  selectedLocationIdx = locations.length - 1;
+  selectLocation(locations.length - 1);
   renderRows();
 
   // Focus straight into the name field of the new (now the only visible,
@@ -517,8 +569,7 @@ function onSettingsMapClick(lat, lng) {
 }
 
 function jumpToLocationRow(idx) {
-  selectedLocationIdx = idx;
-  applyLocationFilter();
+  selectLocation(idx);
   const row = document.querySelector(`.loc-edit-card[data-loc-row-idx="${idx}"]`);
   if (!row) return;
   row.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -564,8 +615,7 @@ function applyLocationFilter() {
     <button type="button" id="btnShowAllLocations" class="btn-secondary">Show all locations</button>
   `;
   document.getElementById("btnShowAllLocations").addEventListener("click", () => {
-    selectedLocationIdx = null;
-    applyLocationFilter();
+    selectLocation(null);
   });
 }
 
@@ -771,9 +821,10 @@ function wireRowListeners(list) {
       const idx = Number(e.currentTarget.dataset.removeLoc);
       locations.splice(idx, 1);
       // Indices shift after a removal, so any active filter would now
-      // point at the wrong (or a nonexistent) card — clear it rather than
-      // risk showing the wrong location or an empty filtered view.
-      selectedLocationIdx = null;
+      // point at the wrong (or a nonexistent) card — clear it (and its
+      // persisted copy, via selectLocation) rather than risk showing the
+      // wrong location or an empty filtered view.
+      selectLocation(null);
       renderRows();
     });
   });
