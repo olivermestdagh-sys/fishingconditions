@@ -518,7 +518,9 @@ function renderSettingsLocationMap() {
 // click always adding a location) avoids accidentally creating locations
 // while just panning/exploring the map, which is the map's much more
 // common use on this page.
-let addLocationClickArmed = false;function toggleAddLocationClickMode() {
+let addLocationClickArmed = false;
+
+function toggleAddLocationClickMode() {
   addLocationClickArmed = !addLocationClickArmed;
   const btn = document.getElementById("btnAddByMapClick");
   if (btn) {
@@ -527,6 +529,14 @@ let addLocationClickArmed = false;function toggleAddLocationClickMode() {
   }
   const mapEl = document.getElementById("settingsLocationMap");
   if (mapEl) mapEl.classList.toggle("map-click-armed", addLocationClickArmed);
+  // Re-run the filter so arming immediately hides whatever location was
+  // previously shown (see the "armed" branch in applyLocationFilter) —
+  // otherwise the old selection would keep showing right up until the map
+  // is actually clicked, which reads as if arming did nothing at all.
+  // Deliberately does NOT touch selectedLocationIdx/localStorage itself —
+  // canceling (armed -> unarmed without a map click) falls straight back
+  // to whatever was selected before arming, exactly as if nothing happened.
+  applyLocationFilter();
 }
 
 /**
@@ -580,28 +590,63 @@ function jumpToLocationRow(idx) {
 /**
  * Shows only the card matching selectedLocationIdx and hides every other
  * one, plus a small "Show all locations" banner above the list to get back
- * out of the filtered view. Pure show/hide against the ALREADY-RENDERED
- * DOM — deliberately not a call to renderRows(), which would also rebuild
- * the Leaflet map (see renderSettingsLocationMap) and reset its pan/zoom on
- * every single marker click, which would fight with the very map click
- * that triggered this in the first place. Called both right after a marker
- * click (via jumpToLocationRow) and at the end of every renderRows(), so a
- * structural change elsewhere (toggling a type, editing while filtered)
- * re-applies the same filter instead of silently dropping it.
+ * out of the filtered view. While "click map to add location" is armed
+ * (addLocationClickArmed), hides EVERY card instead — there's no location
+ * to show yet, only a pending click, and leaving the previous selection
+ * visible would look like arming did nothing. Pure show/hide against the
+ * ALREADY-RENDERED DOM — deliberately not a call to renderRows(), which
+ * would also rebuild the Leaflet map (see renderSettingsLocationMap) and
+ * reset its pan/zoom on every single marker click, which would fight with
+ * the very map click that triggered this in the first place. Called after
+ * a marker click (via jumpToLocationRow), after arming/disarming "click to
+ * add" (via toggleAddLocationClickMode), and at the end of every
+ * renderRows(), so a structural change elsewhere (toggling a type, editing
+ * while filtered) re-applies the same filter instead of silently dropping
+ * it.
  */
 function applyLocationFilter() {
   const list = document.getElementById("locationsList");
   if (!list) return;
+
+  if (addLocationClickArmed) {
+    list.querySelectorAll(".loc-edit-card").forEach((card) => {
+      card.style.display = "none";
+    });
+    showLocationFilterBanner(
+      "Click the map to place your new location…",
+      "Cancel",
+      () => toggleAddLocationClickMode()
+    );
+    return;
+  }
+
   list.querySelectorAll(".loc-edit-card").forEach((card) => {
     const idx = Number(card.dataset.locRowIdx);
     card.style.display = selectedLocationIdx === null || idx === selectedLocationIdx ? "" : "none";
   });
 
-  let banner = document.getElementById("locationFilterBanner");
   if (selectedLocationIdx === null || !locations[selectedLocationIdx]) {
-    if (banner) banner.remove();
+    removeLocationFilterBanner();
     return;
   }
+  const loc = locations[selectedLocationIdx];
+  showLocationFilterBanner(
+    `Showing only <strong>${(loc.name || "(unnamed)").replace(/</g, "&lt;")}</strong>`,
+    "Show all locations",
+    () => selectLocation(null)
+  );
+}
+
+/**
+ * Shared banner element for both applyLocationFilter states above ("armed,
+ * waiting for a map click" and "filtered to one saved location") — same
+ * spot in the DOM, same look, just different message/button text/action,
+ * so there's only ever at most one such banner rather than two competing
+ * pieces of UI stacking on top of each other.
+ */
+function showLocationFilterBanner(messageHtml, buttonLabel, onButtonClick) {
+  const list = document.getElementById("locationsList");
+  let banner = document.getElementById("locationFilterBanner");
   if (!banner) {
     banner = document.createElement("div");
     banner.id = "locationFilterBanner";
@@ -609,14 +654,16 @@ function applyLocationFilter() {
     banner.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:10px 14px;";
     list.parentNode.insertBefore(banner, list);
   }
-  const loc = locations[selectedLocationIdx];
   banner.innerHTML = `
-    <span style="font-size:0.9rem;">Showing only <strong>${(loc.name || "(unnamed)").replace(/</g, "&lt;")}</strong></span>
-    <button type="button" id="btnShowAllLocations" class="btn-secondary">Show all locations</button>
+    <span style="font-size:0.9rem;">${messageHtml}</span>
+    <button type="button" id="locationFilterBannerBtn" class="btn-secondary">${buttonLabel}</button>
   `;
-  document.getElementById("btnShowAllLocations").addEventListener("click", () => {
-    selectLocation(null);
-  });
+  document.getElementById("locationFilterBannerBtn").addEventListener("click", onButtonClick);
+}
+
+function removeLocationFilterBanner() {
+  const banner = document.getElementById("locationFilterBanner");
+  if (banner) banner.remove();
 }
 
 function renderTypeSection(loc, typeConfig, locIdx, typeIdx) {
