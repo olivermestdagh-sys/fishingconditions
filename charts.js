@@ -460,24 +460,6 @@ function findTideThresholdCrossings(rows, threshold) {
  * original hourly sample.
  */
 /**
- * Fetches config/locations.json (the fast, directly-editable admin-side
- * file — NOT the slow WillyWeather-derived conditions.json every page
- * already loads) purely to pick up each location's tideOffset, and
- * merges it onto the matching entries in allLocations by name. This is
- * what makes a changed tide offset take effect on the next page load
- * instead of needing "Save & refresh data now" (which re-fetches from
- * WillyWeather and can take several minutes) — every OTHER per-location
- * setting still needs that full refresh, but the tide offset specifically
- * doesn't depend on anything WillyWeather-fetched changing, only on
- * which point of the already-fetched curve gets sampled at render time.
- * cache:"no-store" specifically so a just-edited offset is never served
- * stale from the browser's own HTTP cache — the whole point is picking up
- * a change immediately, not on whatever schedule that cache would allow.
- * Fails silently (locations simply keep whatever tideOffset they already
- * had, i.e. none) if the fetch fails for any reason — best-effort, not
- * something that should block the page from rendering at all.
- */
-/**
  * Low-level Leaflet map builder shared by the Location tab (app.js) and
  * the Settings tab (locationsadmin.js) — each page builds its own
  * `points` array (with whatever popup/click behavior makes sense there;
@@ -503,6 +485,80 @@ function findTideThresholdCrossings(rows, threshold) {
  * show — callers can use that null to fall back to showing an
  * explanatory message instead of an empty map box.
  */
+/**
+ * Hand-drawn map pin icons (Kayak / Land based / both) for
+ * renderLeafletLocationMap below — built the same way this site already
+ * builds its other icons (the windsock/fish markers on the graphs)
+ * rather than depending on an icon font or library, since there's no
+ * ready-made "kayak" icon in any standard set anyway. A classic teardrop
+ * pin with a small circular window near the top holding the actual
+ * symbol — kayak: a solid hull with a white paddle line (and blade caps
+ * at each end) crossing it, the paddle drawn in white specifically so it
+ * reads as a distinct line rather than blending into a same-color hull;
+ * land based: a bold bent fishing rod, with the line down to the hook
+ * drawn thin/faint so the rod itself — not the line — is the dominant
+ * shape, matching which part actually signifies "fishing" at a glance.
+ */
+const MAP_PIN_STYLES = {
+  kayak: { fill: "#185FA5", light: "#E6F1FB" },
+  landBased: { fill: "#854F0B", light: "#FAEEDA" },
+  both: { fill: "#534AB7", light: "#EEEDFE" },
+};
+
+function kayakGlyphSvg(color, cx, cy, scale) {
+  return `
+    <g transform="translate(${cx} ${cy}) scale(${scale})">
+      <path d="M-9 0 Q-6 -3.2 0 -3.2 Q6 -3.2 9 0 Q6 3.2 0 3.2 Q-6 3.2 -9 0 Z" fill="${color}"/>
+      <line x1="-7.5" y1="-6.5" x2="7.5" y2="6.5" stroke="white" stroke-width="1.3" stroke-linecap="round"/>
+      <line x1="-9.3" y1="-8.3" x2="-6" y2="-5" stroke="white" stroke-width="2.6" stroke-linecap="round"/>
+      <line x1="6" y1="5" x2="9.3" y2="8.3" stroke="white" stroke-width="2.6" stroke-linecap="round"/>
+    </g>
+  `;
+}
+
+function rodGlyphSvg(color, cx, cy, scale) {
+  return `
+    <g transform="translate(${cx} ${cy}) scale(${scale})">
+      <path d="M-8 8 L5 -8 Q8 -12 6.5 -7" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M6 -7.5 L8.5 6" fill="none" stroke="${color}" stroke-width="0.8" stroke-dasharray="1,1.2" opacity="0.75"/>
+      <circle cx="8.5" cy="7" r="1.4" fill="${color}"/>
+    </g>
+  `;
+}
+
+function buildMapPinIconHtml(kind) {
+  const { fill, light } = MAP_PIN_STYLES[kind] || MAP_PIN_STYLES.kayak;
+  let glyph;
+  if (kind === "landBased") glyph = rodGlyphSvg(fill, 17, 16, 1);
+  else if (kind === "both") glyph = kayakGlyphSvg(fill, 12.5, 16, 0.62) + rodGlyphSvg(fill, 21.5, 16, 0.62);
+  else glyph = kayakGlyphSvg(fill, 17, 16, 1);
+  return `
+    <svg width="34" height="44" viewBox="0 0 34 44" xmlns="http://www.w3.org/2000/svg">
+      <path d="M17 2C9.3 2 3 8.3 3 16c0 11 14 26 14 26s14-15 14-26C31 8.3 24.7 2 17 2z" fill="${fill}"/>
+      <circle cx="17" cy="16" r="10.5" fill="${light}"/>
+      ${glyph}
+    </svg>
+  `;
+}
+
+/**
+ * A Leaflet divIcon (arbitrary HTML/SVG rather than an image file) for
+ * the given kind — "kayak", "landBased", or "both". className resets
+ * Leaflet's own default icon CSS (which otherwise adds a background/
+ * border meant for its default image-based marker and would clash with
+ * a custom SVG one) — see the .location-map-pin rule in style.css.
+ */
+function buildMapPinDivIcon(kind) {
+  return L.divIcon({
+    html: buildMapPinIconHtml(kind),
+    className: "location-map-pin",
+    iconSize: [34, 44],
+    iconAnchor: [17, 44],
+    popupAnchor: [0, -40],
+    tooltipAnchor: [0, -38],
+  });
+}
+
 function renderLeafletLocationMap(containerId, points) {
   const container = document.getElementById(containerId);
   if (!container || typeof L === "undefined") return null;
@@ -512,7 +568,7 @@ function renderLeafletLocationMap(containerId, points) {
     return null;
   }
 
-  const map = L.map(container, { scrollWheelZoom: false });
+  const map = L.map(container, { scrollWheelZoom: true });
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     maxZoom: 18,
@@ -521,7 +577,7 @@ function renderLeafletLocationMap(containerId, points) {
   const bounds = [];
   for (const p of valid) {
     bounds.push([p.lat, p.lng]);
-    const marker = L.marker([p.lat, p.lng]).addTo(map);
+    const marker = L.marker([p.lat, p.lng], { icon: buildMapPinDivIcon(p.iconKind || "kayak") }).addTo(map);
     if (p.label) marker.bindTooltip(p.label, { direction: "top" });
     if (p.popupHtml) marker.bindPopup(p.popupHtml);
     if (p.onClick) marker.on("click", p.onClick);
@@ -539,6 +595,21 @@ function renderLeafletLocationMap(containerId, points) {
   return map;
 }
 
+/**
+ * Fetches config/locations.json (the fast, directly-editable admin-side
+ * file — NOT the slow WillyWeather-derived conditions.json every page
+ * already loads) purely to pick up each location's tideOffset, and
+ * merges it onto the matching entries in allLocations by name. This is
+ * what makes a changed tide offset take effect on the next page load
+ * instead of needing "Save & refresh data now" (which re-fetches from
+ * WillyWeather and can take several minutes) — every OTHER per-location
+ * setting still needs that full refresh, but the tide offset specifically
+ * doesn't depend on anything WillyWeather-fetched changing, only on
+ * which point of the already-fetched curve gets sampled at render time.
+ * Fails silently (locations simply keep whatever tideOffset they already
+ * had, i.e. none) if the fetch fails for any reason — best-effort, not
+ * something that should block the page from rendering at all.
+ */
 async function loadTideOffsets(allLocations) {
   try {
     // A cache-busting query parameter, not just {cache:"no-store"} — that
