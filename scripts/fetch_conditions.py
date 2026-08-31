@@ -321,40 +321,6 @@ def normalize_dt(v):
         return None
 
 
-def apply_tide_offset(raw_readings, offset_minutes):
-    """Shifts the timestamp of tide-related readings (Tide Height (m),
-    Tide Type — the two series build_readings pulls from WillyWeather's
-    "tides" forecast) by offset_minutes. Some locations don't sit right at
-    the tide station WillyWeather matches them to (a river mouth upstream
-    of the nearest coastal gauge, a bay that lags/leads the open-water
-    station), so their real tide events happen some number of minutes
-    later or earlier than what gets reported for the matched station.
-    Positive means this location's tide runs LATER than the matched
-    station's (its own high tide arrives offset_minutes after the
-    station's); negative means EARLIER. Every other reading (temp, wind,
-    rain, etc.) is left untouched — this is specifically a tide-timing
-    correction, not a whole-location time shift.
-
-    Returns each shifted tide entry's datetime as a real datetime object
-    rather than reformatting it back into WillyWeather's own
-    "%Y-%m-%d %H:%M:%S" string — normalize_dt (used downstream on every
-    reading regardless of source) already accepts a datetime object
-    directly, so there's no need to round-trip through a string just to
-    match the shape of the unshifted entries.
-    """
-    if not offset_minutes:
-        return raw_readings
-    delta = timedelta(minutes=offset_minutes)
-    shifted = []
-    for series, dt_raw, value in raw_readings:
-        if series in ("Tide Height (m)", "Tide Type"):
-            dt = normalize_dt(dt_raw)
-            if dt is not None:
-                dt_raw = dt + delta
-        shifted.append((series, dt_raw, value))
-    return shifted
-
-
 def compass_to_degrees(direction):
     if not direction:
         return None
@@ -867,7 +833,6 @@ def process_location(loc):
     direction_by_hour = hourly_lookup(current_direction_hourly)
 
     raw_readings = build_readings(weather)
-    raw_readings = apply_tide_offset(raw_readings, loc.get("tideOffset"))
     if not location_is_tidal:
         # Filtered at the source, not after the fact — Tide Status below is
         # DERIVED from these two raw series (a location's actual tide
