@@ -574,9 +574,31 @@ function buildMapPinDivIcon(kind) {
 // preference, not two separate ones.
 const MAP_VIEW_STORAGE_KEY = "goodConditionsLocationMapView";
 
+// Tracks the live Leaflet map instance per container (keyed by containerId)
+// across repeated renderLeafletLocationMap calls. The Settings tab in
+// particular calls this on every renderRows() — initial load, adding a
+// location, removing one, toggling a type, and now the map-click-to-add
+// flow — all reusing the SAME #settingsLocationMap div. Leaflet throws
+// "Error: Map container is already initialized" if L.map() is called again
+// on a container that already has a live map, without tearing the old one
+// down first — and since that throw happens mid-function, it silently
+// skipped the applyLocationFilter() call right after it in the caller,
+// which is what made a fresh "click to add" location appear alongside
+// every OTHER location instead of alone. map.remove() is Leaflet's own
+// teardown (unbinds events/layers, clears the container's internal
+// "already initialized" flag) — calling it first makes every one of these
+// re-renders safe.
+const leafletMapInstances = {};
+
 function renderLeafletLocationMap(containerId, points, opts = {}) {
   const container = document.getElementById(containerId);
   if (!container || typeof L === "undefined") return null;
+
+  if (leafletMapInstances[containerId]) {
+    leafletMapInstances[containerId].remove();
+    delete leafletMapInstances[containerId];
+  }
+
   const valid = points.filter((p) => p.lat != null && p.lng != null);
   if (valid.length === 0 && !opts.onMapClick) {
     container.innerHTML = `<p class="footnote" style="margin:0;">No locations with coordinates to show yet.</p>`;
@@ -584,6 +606,7 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
   }
 
   const map = L.map(container, { scrollWheelZoom: true });
+  leafletMapInstances[containerId] = map;
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     maxZoom: 18,
