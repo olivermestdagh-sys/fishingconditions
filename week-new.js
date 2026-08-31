@@ -96,18 +96,21 @@ function showTooltipOn(chart, xVal) {
   }
   const xScale = chart.scales.x;
   if (!xScale) return;
-  const px = xScale.getPixelForValue(xVal);
-  const rect = chart.canvas.getBoundingClientRect();
-  const mode = chart.options.interaction ? chart.options.interaction.mode : "index";
-  const intersect = chart.options.interaction ? chart.options.interaction.intersect : false;
-  const elements = chart.getElementsAtEventForMode(
-    { clientX: rect.left + px, clientY: rect.top + rect.height / 2 },
-    mode,
-    { intersect },
-    true
-  );
+  // Element lookup done directly from the data (nearestIndexForXVal +
+  // elementsAtIndex, in charts.js) rather than via
+  // chart.getElementsAtEventForMode with a reconstructed clientX — that
+  // reconstruction (rect.left + a logical pixel value) breaks under this
+  // page's mobile force-landscape rotation, where the canvas's internal
+  // drawing buffer and its rotated VISUAL bounding rect end up with their
+  // width/height axes effectively swapped. See xValFromEvent in charts.js
+  // for the full explanation (same underlying issue, on the input side).
+  const index = nearestIndexForXVal(chart, xVal);
+  const elements = elementsAtIndex(chart, index);
   if (elements.length === 0) return;
-  chart.tooltip.setActiveElements(elements, { x: px, y: rect.height / 2 });
+  const px = xScale.getPixelForValue(xVal);
+  const chartArea = chart.chartArea;
+  const py = chartArea ? (chartArea.top + chartArea.bottom) / 2 : 0;
+  chart.tooltip.setActiveElements(elements, { x: px, y: py });
   // Same reasoning as clearTooltip above, in reverse — opacity forced to
   // 1 directly and chart.draw() instead of update(), rather than trusting
   // Chart.js's own animated show transition to resolve synchronously.
@@ -139,8 +142,12 @@ function wireSyncedTooltip(chart, canvas) {
   let pressStartY = 0;
 
   function xValAt(e) {
-    const rect = canvas.getBoundingClientRect();
-    return chart.scales.x.getValueForPixel(e.clientX - rect.left);
+    // e.offsetX, not canvas.getBoundingClientRect() + e.clientX — see
+    // xValFromEvent in charts.js for why the rect-based approach breaks
+    // under this page's mobile rotation. Inlined here (rather than
+    // calling that shared helper directly) only because this closure
+    // already has its own `chart` in scope; same underlying logic.
+    return chart.scales.x.getValueForPixel(e.offsetX);
   }
 
   function clearPressTimer() {

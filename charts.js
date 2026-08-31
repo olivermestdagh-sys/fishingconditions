@@ -1997,6 +1997,77 @@ function computeSchedule(loc, launchStr, homeByStr, driveMinutes) {
  * recreating the Chart.js instance each time while the canvas element
  * itself never changes; wiring this once in that case, against a getter
  * that always reads whatever the current chart is, avoids attaching a
+/**
+ * Finds the data index nearest to xVal, reading the chart's own logical
+ * x-values directly rather than any screen-pixel-based lookup — needed
+ * because getElementsAtEventForMode's own event-position resolution
+ * breaks under a CSS transform on an ancestor (see xValFromEvent below
+ * for the full explanation); computing this straight from the data
+ * sidesteps that path entirely, and is equally correct wherever no
+ * transform is involved too.
+ */
+function nearestIndexForXVal(chart, xVal) {
+  const dataset = chart.data.datasets.find((d) => d.data && d.data.length);
+  if (!dataset) return -1;
+  let bestIdx = -1;
+  let bestDist = Infinity;
+  for (let i = 0; i < dataset.data.length; i++) {
+    const pt = dataset.data[i];
+    if (!pt || pt.x == null) continue;
+    const dist = Math.abs(pt.x - xVal);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
+/**
+ * Builds a chart.tooltip.setActiveElements()-compatible array for every
+ * visible dataset at a given data index — the same shape
+ * getElementsAtEventForMode("index", {intersect:false}) would return, but
+ * computed directly from the index rather than an event position, so it
+ * works identically regardless of any CSS transform on the canvas.
+ */
+function elementsAtIndex(chart, index) {
+  const elements = [];
+  if (index < 0) return elements;
+  chart.data.datasets.forEach((ds, datasetIndex) => {
+    const meta = chart.getDatasetMeta(datasetIndex);
+    if (!meta || meta.hidden) return;
+    const pt = ds.data && ds.data[index];
+    if (!pt || pt.y == null) return;
+    elements.push({ datasetIndex, index });
+  });
+  return elements;
+}
+
+/**
+ * Converts a pointer/mouse event into the chart's own logical x-value,
+ * using e.offsetX — the event's position in the TARGET element's own
+ * local, pre-transform coordinate space (per spec, unaffected by any CSS
+ * transform on an ancestor) — rather than the
+ * "e.clientX - canvas.getBoundingClientRect().left" pattern used
+ * elsewhere on this site. Those two are equivalent for a normal,
+ * untransformed canvas, but genuinely diverge under a rotation: Week
+ * (graphs)' mobile force-landscape layout (style.css) rotates <body>
+ * -90deg, and under that transform the canvas's internal drawing buffer
+ * and its VISUAL (post-rotation) bounding rect end up with their width
+ * and height axes effectively swapped — confirmed directly against a
+ * live chart: canvas.width/height read ~4586×292 while
+ * getBoundingClientRect() reported ~300×4598 for the same element. Any
+ * "clientX - rect.left" computation silently produces a wildly wrong
+ * value once that mismatch is in play, which is what caused the
+ * crosshair (drawn from the chart's own logical coordinates, unaffected)
+ * to show correctly while Chart.js's own tooltip box — positioned via
+ * this same broken pixel math — did not.
+ */
+function xValFromEvent(chart, e) {
+  return chart.scales.x.getValueForPixel(e.offsetX);
+}
+
+/**
  * fresh set of duplicate listeners to that same canvas on every render.
  * Callers whose canvas genuinely is recreated each time (Week (graphs),
  * a fresh canvas per row) can just pass a trivial () => chart closure.
@@ -2012,9 +2083,8 @@ function wireHoldToShowTooltip(getChart, canvas) {
   function elementsAt(e) {
     const chart = getChart();
     if (!chart) return [];
-    const mode = chart.options.interaction ? chart.options.interaction.mode : "index";
-    const intersect = chart.options.interaction ? chart.options.interaction.intersect : false;
-    return chart.getElementsAtEventForMode(e, mode, { intersect }, true);
+    const index = nearestIndexForXVal(chart, xValFromEvent(chart, e));
+    return elementsAtIndex(chart, index);
   }
 
   function showTooltipAt(e) {
@@ -2022,8 +2092,7 @@ function wireHoldToShowTooltip(getChart, canvas) {
     if (!chart) return;
     const elements = elementsAt(e);
     if (elements.length === 0) return;
-    const rect = canvas.getBoundingClientRect();
-    chart.tooltip.setActiveElements(elements, { x: e.clientX - rect.left, y: e.clientY - rect.top });
+    chart.tooltip.setActiveElements(elements, { x: e.offsetX, y: e.offsetY });
     // opacity forced directly and chart.draw() used instead of update() —
     // confirmed directly (via a live chart, not just reasoning about it)
     // that even chart.update("none") lets the tooltip plugin's own
