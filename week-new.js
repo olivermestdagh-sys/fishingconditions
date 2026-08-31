@@ -62,24 +62,13 @@ let tooltipsArmed = false;
 let activeTooltipChart = null;
 
 /**
- * Fully hides a chart's tooltip — clearing active elements alone isn't
- * enough: Chart.js's own tooltip fade-out is an animation, and that
- * animation doesn't reliably resolve when the state change comes from
- * this kind of external/manual update rather than a genuine hover event
- * — even chart.update("none") (its "skip animation" mode) turned out to
- * still let the tooltip plugin's own internal update lifecycle silently
- * recompute and overwrite a manually-set opacity before the next paint
- * (confirmed directly: opacity read back as 1 immediately after setting
- * it to 0 and calling update("none")). chart.draw() bypasses that
- * lifecycle entirely — a direct, synchronous canvas repaint of whatever
- * the current state already is, with no update-cycle recomputation in
- * between to fight with. Safe to skip update() here specifically because
- * nothing about the chart's actual DATA or scales is changing, only the
- * tooltip's own transient display state.
+ * Fully hides a chart's tooltip. No opacity juggling needed —
+ * buildTooltipCrosshairPlugin (charts.js) draws the whole tooltip itself,
+ * straight from getActiveElements(), so clearing that (and repainting) is
+ * all this needs to do.
  */
 function clearTooltip(chart) {
   chart.tooltip.setActiveElements([], { x: 0, y: 0 });
-  chart.tooltip.opacity = 0;
   chart.draw();
 }
 
@@ -111,10 +100,6 @@ function showTooltipOn(chart, xVal) {
   const chartArea = chart.chartArea;
   const py = chartArea ? (chartArea.top + chartArea.bottom) / 2 : 0;
   chart.tooltip.setActiveElements(elements, { x: px, y: py });
-  // Same reasoning as clearTooltip above, in reverse — opacity forced to
-  // 1 directly and chart.draw() instead of update(), rather than trusting
-  // Chart.js's own animated show transition to resolve synchronously.
-  chart.tooltip.opacity = 1;
   chart.draw();
 }
 
