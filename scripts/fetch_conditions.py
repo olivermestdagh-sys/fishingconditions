@@ -63,6 +63,24 @@ def search_location(name):
     return None
 
 
+def search_location_by_coords(lat, lng):
+    """Same result shape as search_location, but resolves the nearest
+    WillyWeather location to a coordinate instead of text-matching a name.
+    Used when a location already carries a real lat/lng in
+    config/locations.json (currently: only ones created via the Settings
+    map's "click to add" action — see locationsadmin.js). A coordinate is
+    unambiguous where a name string isn't — two spots on opposite sides of
+    the country can share a name, and a plain text search has no way to
+    tell them apart, but a lat/lng pins down exactly which one was meant."""
+    url = f"{BASE_URL}/{API_KEY}/search.json?lat={lat}&lng={lng}&limit=1"
+    data = http_get_json(url)
+    if not data:
+        return None
+    if isinstance(data, list) and len(data) > 0:
+        return data[0]
+    return None
+
+
 def get_pressure_forecast(lat, lng):
     """Hourly mean-sea-level pressure from Open-Meteo (free, no API key) —
     WillyWeather only offers pressure as a current/observational reading,
@@ -793,13 +811,36 @@ def process_location(loc):
     # be individually re-saved through the location editor.
     location_is_tidal = loc.get("tidal", True)
 
-    match = search_location(name)
+    # A location created via the Settings map's "click to add" action
+    # (locationsadmin.js) already carries a real, admin-chosen lat/lng in
+    # config/locations.json — resolve WillyWeather against THAT coordinate
+    # rather than text-searching the name, since a coordinate is
+    # unambiguous where a name string isn't (two spots on opposite sides of
+    # the country can share a name, and a plain text search has no way to
+    # tell them apart). Locations without a stored lat/lng — everything
+    # added before this feature existed, or added via the plain "+ Add
+    # location" button — fall back to the original name-search behavior,
+    # completely unaffected.
+    config_lat = loc.get("lat")
+    config_lng = loc.get("lng")
+    if config_lat is not None and config_lng is not None:
+        match = search_location_by_coords(config_lat, config_lng)
+        # Keep the admin's own clicked coordinate in the OUTPUT (used by the
+        # Live page's GPS matching and the Settings map) rather than
+        # whatever WillyWeather's nearest-location lookup returns — that's
+        # typically a station/locality centroid, less precise than the
+        # exact spot someone clicked when adding this location. WillyWeather
+        # is only being asked which data feed is closest here, not for a
+        # better coordinate to display or match against.
+        lat, lng = config_lat, config_lng
+    else:
+        match = search_location(name)
+        lat = match.get("lat") if match else None
+        lng = match.get("lng") if match else None
     matched_name = match.get("name") if match else None
     region = match.get("region") if match else None
     state = match.get("state") if match else None
     loc_id = match.get("id") if match else None
-    lat = match.get("lat") if match else None
-    lng = match.get("lng") if match else None
     # Attach to the SAME dict object referenced in main()'s locations list, so
     # it flows through into output["locations"] without changing this
     # function's return signature — needed for the Live page to match GPS
