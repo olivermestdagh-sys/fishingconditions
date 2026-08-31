@@ -176,7 +176,8 @@
     "locationGroups": [
       "Western Port",
       "Eastern"
-    ]
+    ],
+    "tideOffset": 30
   },
   {
     "name": "Mornington Pier, VIC",
