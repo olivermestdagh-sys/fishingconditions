@@ -559,6 +559,11 @@ function buildMapPinDivIcon(kind) {
   });
 }
 
+// Shared between the Location tab's map and the Settings tab's map — both
+// show the same geography, so "where was I last looking" is one
+// preference, not two separate ones.
+const MAP_VIEW_STORAGE_KEY = "goodConditionsLocationMapView";
+
 function renderLeafletLocationMap(containerId, points) {
   const container = document.getElementById(containerId);
   if (!container || typeof L === "undefined") return null;
@@ -583,17 +588,44 @@ function renderLeafletLocationMap(containerId, points) {
     if (p.onClick) marker.on("click", p.onClick);
   }
 
-  // A single marker has no useful "bounds" to fit (fitBounds on one point
-  // zooms in to the max level, which is usually too tight) — center on it
-  // at a reasonable fixed zoom instead.
-  if (bounds.length === 1) {
+  // Restores the last-viewed position/zoom if one was saved, rather than
+  // always resetting to "fit every marker" on every page load — once
+  // someone's zoomed in on their own local patch, they shouldn't have to
+  // re-zoom back in every time they open this page. Falls back to the
+  // original "fit everything" behavior the first time, before anything's
+  // ever been saved.
+  let savedView = null;
+  try {
+    savedView = JSON.parse(localStorage.getItem(MAP_VIEW_STORAGE_KEY) || "null");
+  } catch {
+    savedView = null;
+  }
+  if (savedView && typeof savedView.lat === "number" && typeof savedView.lng === "number" && typeof savedView.zoom === "number") {
+    map.setView([savedView.lat, savedView.lng], savedView.zoom);
+  } else if (bounds.length === 1) {
+    // A single marker has no useful "bounds" to fit (fitBounds on one
+    // point zooms in to the max level, which is usually too tight) —
+    // center on it at a reasonable fixed zoom instead.
     map.setView(bounds[0], 12);
   } else {
     map.fitBounds(bounds, { padding: [24, 24] });
   }
 
+  // Saves the current position/zoom whenever the user finishes panning or
+  // zooming — registered after the initial setView/fitBounds above
+  // deliberately, so restoring (or setting) the starting view doesn't
+  // itself immediately re-trigger a save; only genuine user interaction
+  // does.
+  const saveCurrentView = () => {
+    const center = map.getCenter();
+    localStorage.setItem(MAP_VIEW_STORAGE_KEY, JSON.stringify({ lat: center.lat, lng: center.lng, zoom: map.getZoom() }));
+  };
+  map.on("moveend", saveCurrentView);
+  map.on("zoomend", saveCurrentView);
+
   return map;
 }
+
 
 /**
  * Fetches config/locations.json (the fast, directly-editable admin-side
