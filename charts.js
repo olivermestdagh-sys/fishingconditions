@@ -479,7 +479,19 @@ function findTideThresholdCrossings(rows, threshold) {
  */
 async function loadTideOffsets(allLocations) {
   try {
-    const res = await fetch("config/locations.json", { cache: "no-store" });
+    // A cache-busting query parameter, not just {cache:"no-store"} — that
+    // option only tells THIS BROWSER not to use its own local cache; it
+    // does nothing about GitHub Pages' own CDN, which can keep serving an
+    // already-cached copy of this file for a while after it changes
+    // regardless of what the request asks for (confirmed directly on this
+    // site before: config/locations.json's neighbor charts.js was served
+    // with Cache-Control: max-age=600 — a full 10-minute window). Appending
+    // a query string makes every request a genuinely distinct URL as far
+    // as the CDN's cache is concerned, so it always has to fetch fresh
+    // from origin — the same fix already used elsewhere on this site for
+    // this exact class of problem (see the Tide Offset per-row field's
+    // own frontend-interpolation notes).
+    const res = await fetch(`config/locations.json?_=${Date.now()}`, { cache: "no-store" });
     if (!res.ok) return;
     const configLocations = await res.json();
     const offsetByName = new Map(configLocations.map((l) => [l.name, l.tideOffset]));
