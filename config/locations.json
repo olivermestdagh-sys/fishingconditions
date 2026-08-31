@@ -160,7 +160,7 @@
         "packUp": "00:30",
         "timeToSpot": "00:10",
         "timeFromSpot": "00:10",
-        "minTideHeight": 1.7
+        "minTideHeight": 1.6
       },
       {
         "type": "Land based",
