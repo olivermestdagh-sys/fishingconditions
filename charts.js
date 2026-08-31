@@ -447,6 +447,106 @@ function findTideThresholdCrossings(rows, threshold) {
  * to compare against, there's no way to tell whether it's a genuine local
  * extreme or just where the visible data happens to end.
  */
+/**
+ * Estimates the tide height at targetMs by interpolating within a
+ * location's own (unshifted) tide curve — the building block for
+ * applyTideOffsetToRows below. Cosine-eased between the two bracketing
+ * real samples (slow near each end, faster through the middle) rather
+ * than a straight line, matching the same interpolation shape
+ * fetch_conditions.py's own server-side tide interpolation already uses
+ * (the "Rule of Twelfths" — a real tide curve is smoothly curved, not
+ * straight segments meeting at a point), so a shifted curve still looks
+ * like a genuine tide curve rather than gaining visible kinks at each
+ * original hourly sample.
+ */
+/**
+ * Fetches config/locations.json (the fast, directly-editable admin-side
+ * file — NOT the slow WillyWeather-derived conditions.json every page
+ * already loads) purely to pick up each location's tideOffset, and
+ * merges it onto the matching entries in allLocations by name. This is
+ * what makes a changed tide offset take effect on the next page load
+ * instead of needing "Save & refresh data now" (which re-fetches from
+ * WillyWeather and can take several minutes) — every OTHER per-location
+ * setting still needs that full refresh, but the tide offset specifically
+ * doesn't depend on anything WillyWeather-fetched changing, only on
+ * which point of the already-fetched curve gets sampled at render time.
+ * cache:"no-store" specifically so a just-edited offset is never served
+ * stale from the browser's own HTTP cache — the whole point is picking up
+ * a change immediately, not on whatever schedule that cache would allow.
+ * Fails silently (locations simply keep whatever tideOffset they already
+ * had, i.e. none) if the fetch fails for any reason — best-effort, not
+ * something that should block the page from rendering at all.
+ */
+async function loadTideOffsets(allLocations) {
+  try {
+    const res = await fetch("config/locations.json", { cache: "no-store" });
+    if (!res.ok) return;
+    const configLocations = await res.json();
+    const offsetByName = new Map(configLocations.map((l) => [l.name, l.tideOffset]));
+    for (const loc of allLocations) {
+      if (offsetByName.has(loc.name)) loc.tideOffset = offsetByName.get(loc.name);
+    }
+  } catch (err) {
+    console.error("Could not load tide offsets from config/locations.json:", err);
+  }
+}
+
+function interpolatedTideHeightAt(sortedTideRows, targetMs) {
+  if (sortedTideRows.length === 0) return null;
+  const first = sortedTideRows[0];
+  if (targetMs <= first._t) return first["Tide Height (m)"];
+  const last = sortedTideRows[sortedTideRows.length - 1];
+  if (targetMs >= last._t) return last["Tide Height (m)"];
+  for (let i = 0; i < sortedTideRows.length - 1; i++) {
+    const a = sortedTideRows[i];
+    const b = sortedTideRows[i + 1];
+    if (a._t <= targetMs && targetMs <= b._t) {
+      const frac = (targetMs - a._t) / (b._t - a._t);
+      const eased = (1 - Math.cos(frac * Math.PI)) / 2;
+      const av = a["Tide Height (m)"];
+      const bv = b["Tide Height (m)"];
+      return av + (bv - av) * eased;
+    }
+  }
+  return null;
+}
+
+/**
+ * Applies a location's tide offset dynamically, at render time — no data
+ * refresh needed, unlike every other per-location setting on this site.
+ * Returns a new rows array (the original is never mutated) with
+ * "Tide Height (m)" on every row replaced by its value from
+ * offsetMinutes earlier/later in that SAME location's own original curve
+ * — e.g. offsetMinutes=15 means "this location's tide runs 15 minutes
+ * later than the matched station's", so what's shown for it at real time
+ * T is actually the station's own reading from T-15min. Only touches
+ * "Tide Height (m)" — everything downstream that reads it (the drawn
+ * curve, findTideExtrema's high/low labels, findTideThresholdCrossings'
+ * ramp-access times) picks up the shift automatically as a result, since
+ * they all read this same field from whatever rows they're given, with
+ * no separate code path of their own to update. "Tide Status" (the
+ * Incoming/Outgoing/High/Low label) and the Location/Fishing Condition
+ * SCORES are deliberately NOT touched here — those are computed
+ * server-side from the tide timing at fetch time, so they only reflect a
+ * changed offset after an actual data refresh; recomputing them
+ * client-side would mean reimplementing real scoring logic in JS and
+ * risking it drifting out of sync with the Python original.
+ */
+function applyTideOffsetToRows(rows, offsetMinutes) {
+  if (!offsetMinutes) return rows;
+  const tideRows = rows
+    .filter((r) => r["Tide Height (m)"] != null)
+    .slice()
+    .sort((a, b) => a._t - b._t);
+  if (tideRows.length === 0) return rows;
+  const offsetMs = offsetMinutes * 60000;
+  return rows.map((r) => {
+    if (r["Tide Height (m)"] == null) return r;
+    const shifted = interpolatedTideHeightAt(tideRows, r._t - offsetMs);
+    return shifted == null ? r : { ...r, "Tide Height (m)": shifted };
+  });
+}
+
 function findTideExtrema(rows) {
   const tideRows = rows
     .filter((r) => r["Tide Height (m)"] != null)
@@ -1203,10 +1303,18 @@ function buildSessionSpanPlugin(spans) {
   };
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
+  // Applied here, once, centrally — every caller of this shared function
+  // (every graph on the site) gets the shift automatically as a result,
+  // with no separate per-page code needed: the drawn curve, the high/low
+  // labels, and the ramp-access threshold-crossing times all read
+  // "Tide Height (m)" from these SAME rows, so shifting it here is enough
+  // for all three at once. See applyTideOffsetToRows for what this
+  // deliberately does NOT touch (Tide Status, Condition scores).
+  rows = applyTideOffsetToRows(rows, tideOffsetMinutes);
 
   // On mobile, the full descriptive legend labels take up a lot of vertical space
   // under the chart (often wrapping to several lines) — shorten them there, since

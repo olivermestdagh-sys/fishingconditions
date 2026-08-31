@@ -29,6 +29,11 @@ async function init() {
   groupRowsByLocation();
   renderUpdatedBanner();
   populateLocationPicker();
+  // Awaited — this is a small, fast, local file (not the slow
+  // WillyWeather pipeline), so the wait is negligible, and awaiting it
+  // avoids a race where the very first chart render below would happen
+  // before tideOffset had been merged in.
+  await loadTideOffsets(state.data.locations);
 
   document.getElementById("locationSelect").addEventListener("change", (e) => {
     localStorage.setItem("selectedLocation", e.target.value);
@@ -166,12 +171,19 @@ function renderCharts(rows, loc) {
     moonPhases: state.data.moonPhases,
     minTideHeight: loc ? loc.minTideHeight : null,
     compact: false,
+    tideOffsetMinutes: loc ? loc.tideOffset : null,
   });
   // Full axes shown directly here too now, not just once the modal opens —
   // no more stripped-down "compact" version anywhere on the site. Tapping
   // still opens the modal (a bigger view), it's just no longer the only
   // place axes show up.
-  lastChartParams = { rows, sunTimes, tideMaxObserved: loc ? loc.tideMaxObserved : null, minTideHeight: loc ? loc.minTideHeight : null };
+  lastChartParams = {
+    rows,
+    sunTimes,
+    tideMaxObserved: loc ? loc.tideMaxObserved : null,
+    minTideHeight: loc ? loc.minTideHeight : null,
+    tideOffsetMinutes: loc ? loc.tideOffset : null,
+  };
 }
 
 function openChartModal() {
@@ -187,6 +199,7 @@ function openChartModal() {
     moonPhases: state.data.moonPhases,
     minTideHeight: lastChartParams.minTideHeight,
     compact: false,
+    tideOffsetMinutes: lastChartParams.tideOffsetMinutes,
   });
 }
 

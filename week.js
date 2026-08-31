@@ -90,6 +90,10 @@ async function init() {
       const dt = new Date(data.generatedAt);
       document.getElementById("updated").textContent = `Updated ${dt.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
     }
+    // Awaited — small, fast, local file (not the slow WillyWeather
+    // pipeline), so negligible delay; avoids a race where the very first
+    // render below could happen before tideOffset had been merged in.
+    await loadTideOffsets(allLocations);
   } catch (err) {
     document.getElementById("updated").textContent = "Could not load data — has the site run its first update yet?";
     console.error(err);
@@ -716,6 +720,7 @@ function renderPreviewContent(t, tileEl) {
     minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
     compact: false, // full axes on both hover and pinned — no stripped-down "quick glance" version
     sessionSpan: { from: t.from, to: t.to },
+    tideOffsetMinutes: matchedLoc ? matchedLoc.tideOffset : null,
   });
 
   renderWeekSchedule(matchedLoc, "weekPreviewScheduleContainer").then(() => {
@@ -863,6 +868,7 @@ function selectTile(t) {
     minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
     compact: false,
     sessionSpan: { from: t.from, to: t.to },
+    tideOffsetMinutes: matchedLoc ? matchedLoc.tideOffset : null,
   });
 
   renderWeekSchedule(matchedLoc, "weekScheduleContainer").then(() => {
