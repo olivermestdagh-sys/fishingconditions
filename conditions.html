@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Olie's Kayak and Surf Fishing Conditions – Location</title>
 <link rel="stylesheet" href="style.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
 <body>
 
@@ -22,6 +23,11 @@
 </nav>
 
 <main>
+  <section class="summary-card" style="padding:10px;">
+    <div id="locationMap" class="location-map"></div>
+    <p class="footnote" style="margin:8px 4px 0;text-align:left;">Tap a marker to select that location — or use the dropdown below.</p>
+  </section>
+
   <section class="picker-row">
     <label for="locationSelect">Location</label>
     <select id="locationSelect"></select>
@@ -51,6 +57,7 @@
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="charts.js"></script>
 <script src="app.js"></script>
 </body>

@@ -477,6 +477,68 @@ function findTideThresholdCrossings(rows, threshold) {
  * had, i.e. none) if the fetch fails for any reason — best-effort, not
  * something that should block the page from rendering at all.
  */
+/**
+ * Low-level Leaflet map builder shared by the Location tab (app.js) and
+ * the Settings tab (locationsadmin.js) — each page builds its own
+ * `points` array (with whatever popup/click behavior makes sense there;
+ * see the two call sites for how they differ) and this just handles
+ * creating the map, the tile layer, and placing/fitting markers.
+ *
+ * Uses Leaflet + plain OpenStreetMap tiles specifically because they're
+ * free and need no API key, unlike Google Maps — appropriate here since
+ * this site otherwise has zero paid mapping dependencies. Both pages load
+ * Leaflet itself via CDN in their own <head> (see conditions.html /
+ * locations.html) — this function assumes window.L already exists by the
+ * time it's called.
+ *
+ * points: [{ lat, lng, label, onClick?, popupHtml? }]. A marker always
+ * gets a hover tooltip (label); onClick fires immediately on click
+ * (for a single, unambiguous selection), while popupHtml opens a
+ * Leaflet popup instead (for a marker that needs to offer a choice —
+ * see app.js's location-with-multiple-types case) — a point supplies
+ * one or the other, not normally both.
+ *
+ * Returns the Leaflet map instance, or null if Leaflet/the container
+ * isn't available, or there are no valid (lat/lng-bearing) points to
+ * show — callers can use that null to fall back to showing an
+ * explanatory message instead of an empty map box.
+ */
+function renderLeafletLocationMap(containerId, points) {
+  const container = document.getElementById(containerId);
+  if (!container || typeof L === "undefined") return null;
+  const valid = points.filter((p) => p.lat != null && p.lng != null);
+  if (valid.length === 0) {
+    container.innerHTML = `<p class="footnote" style="margin:0;">No locations with coordinates to show yet.</p>`;
+    return null;
+  }
+
+  const map = L.map(container, { scrollWheelZoom: false });
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 18,
+  }).addTo(map);
+
+  const bounds = [];
+  for (const p of valid) {
+    bounds.push([p.lat, p.lng]);
+    const marker = L.marker([p.lat, p.lng]).addTo(map);
+    if (p.label) marker.bindTooltip(p.label, { direction: "top" });
+    if (p.popupHtml) marker.bindPopup(p.popupHtml);
+    if (p.onClick) marker.on("click", p.onClick);
+  }
+
+  // A single marker has no useful "bounds" to fit (fitBounds on one point
+  // zooms in to the max level, which is usually too tight) — center on it
+  // at a reasonable fixed zoom instead.
+  if (bounds.length === 1) {
+    map.setView(bounds[0], 12);
+  } else {
+    map.fitBounds(bounds, { padding: [24, 24] });
+  }
+
+  return map;
+}
+
 async function loadTideOffsets(allLocations) {
   try {
     // A cache-busting query parameter, not just {cache:"no-store"} — that
