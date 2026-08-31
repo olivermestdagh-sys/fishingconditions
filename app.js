@@ -79,9 +79,11 @@ function renderLocationMap() {
   const points = [];
   for (const [name, variants] of byName) {
     const { lat, lng } = variants[0];
+    const types = variants.map((v) => v.type);
+    const iconKind = types.includes("Kayak") && types.includes("Land based") ? "both" : types.includes("Land based") ? "landBased" : "kayak";
     if (variants.length === 1) {
       const key = locationKey(variants[0].name, variants[0].type);
-      points.push({ lat, lng, label: name, onClick: () => selectLocationByKey(key) });
+      points.push({ lat, lng, label: name, iconKind, onClick: () => selectLocationByKey(key) });
     } else {
       const popupHtml = `
         <div style="font-weight:600;margin-bottom:6px;">${name}</div>
@@ -89,7 +91,7 @@ function renderLocationMap() {
           .map((v) => `<button type="button" class="map-popup-type-btn" data-map-key="${locationKey(v.name, v.type)}">${v.type}</button>`)
           .join("")}
       `;
-      points.push({ lat, lng, label: name, popupHtml });
+      points.push({ lat, lng, label: name, iconKind, popupHtml });
     }
   }
 
