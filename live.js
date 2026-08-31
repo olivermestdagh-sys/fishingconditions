@@ -318,6 +318,7 @@ function renderForLocation(loc) {
     stopFishingTime,
     compact: false,
     disableBuiltinEvents: true, // this page drives the tooltip itself — see wireHoldToShowTooltip in init(), and charts.js
+    tideOffsetMinutes: loc.tideOffset,
   });
 
   if (windowRows.length === 0) {
@@ -372,6 +373,11 @@ async function init() {
       const dt = new Date(liveData.generatedAt);
       document.getElementById("updated").textContent = `Updated ${dt.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
     }
+    // Awaited — small, fast, local file (not the slow WillyWeather
+    // pipeline), so negligible delay; avoids a race where the very first
+    // location match/render below could happen before tideOffset had
+    // been merged in.
+    await loadTideOffsets(liveData.locations);
   } catch (err) {
     setGpsStatus(`<div class="empty-state">Could not load conditions data — check your connection.</div>`);
     console.error(err);

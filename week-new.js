@@ -279,6 +279,10 @@ async function init() {
       const dt = new Date(data.generatedAt);
       document.getElementById("updated").textContent = `Updated ${dt.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
     }
+    // Awaited — small, fast, local file (not the slow WillyWeather
+    // pipeline), so negligible delay; avoids a race where the very first
+    // row renders below could happen before tideOffset had been merged in.
+    await loadTideOffsets(allLocations);
   } catch (err) {
     document.getElementById("updated").textContent = "Could not load data — has the site run its first update yet?";
     console.error(err);
@@ -908,6 +912,7 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
       xRange: { min: timelineStart, max: timelineEnd },
       disableBuiltinEvents: true, // this page drives the tooltip itself — see wireSyncedTooltip below
       showFirstBoxIcons: true, // windvane/fish legend on each row's own first condition-strip box
+      tideOffsetMinutes: loc.tideOffset,
     });
     if (rowChart) {
       activeRowCharts.push(rowChart);
