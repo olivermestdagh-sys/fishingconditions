@@ -136,16 +136,21 @@ main {
      32px wide) sitting over this same row — without this, "Tap the graph…"
      could sit directly under the × on a narrow screen. */
   padding-right: 36px;
-  margin-bottom: 10px;
+  margin-bottom: 4px;
 }
 
-.location-hover-panel-heading-row h2 {
+/* ID selector, not ".location-hover-panel-heading-row h2" — deliberately,
+   because that lost to the shared ".chart-section h2, .table-section h2"
+   rule below: both are (0,1,1) specificity, and .chart-section h2 sits
+   LATER in this file, so it silently won on source order alone. That's
+   the exact same class of bug as the earlier box-shadow "border" issue —
+   this h2 has actually been rendering at the shared rule's 0.95rem/
+   margin:0 0 10px this whole time, not the smaller/flush values below,
+   which is a real chunk of the "still too much space" being reported. An
+   ID beats a class unconditionally, regardless of source order, so this
+   can't lose the same way again. */
+#hoverPanelLocationName {
   margin: 0;
-  /* Smaller than the shared .chart-section h2 default (0.95rem) — this
-     heading now competes for space with "Tap the graph…" on the same
-     line, and with overlayHeading (see charts.js) reclaiming space inside
-     the graph itself too, the panel overall needed to read as more
-     compact end to end, not just below this row. */
   font-size: 0.85rem;
 }
 
@@ -165,7 +170,7 @@ main {
 .location-hover-panel-chart-wrap {
   position: relative;
   width: 100%;
-  height: 420px;
+  height: 378px; /* ~10% down from 420px, per request */
 }
 
 .location-hover-panel-chart-wrap canvas {
