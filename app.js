@@ -188,6 +188,12 @@ function renderCharts(rows, loc) {
     // the °C/km/h axis numbers aren't very readable at this size anyway,
     // and hiding them frees up real width/height for the plot itself.
     hideValueAxes: true,
+    // Draws the date headings/moon icons INSIDE the plot area instead of
+    // reserving a separate strip above it for them — reclaims real
+    // vertical space in this already-compact preview. The fullscreen modal
+    // below doesn't pass this, so it keeps the normal reserved-strip
+    // layout, which has more headroom to spare.
+    overlayHeading: true,
   });
   // Full axes shown directly here too now, not just once the modal opens —
   // no more stripped-down "compact" version anywhere on the site. Tapping
