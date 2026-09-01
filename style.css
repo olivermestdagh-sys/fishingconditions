@@ -1884,3 +1884,83 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
     box-shadow: none;
   }
 }
+
+/* WillyWeather candidate picker — shown after clicking the Settings map
+   with "click to add" armed and the willyweather-search Worker configured
+   (see showLocationCandidatePicker, locationsadmin.js). A centered,
+   bounded dialog rather than the site's other (fullscreen) modal pattern
+   used for chart previews (.chart-modal-overlay) — this needs to show a
+   short scrollable list plus two buttons, not take over the whole screen. */
+.ww-candidate-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.ww-candidate-dialog {
+  position: relative;
+  background: var(--white);
+  border-radius: var(--radius);
+  padding: 20px;
+  max-width: 420px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+}
+
+.ww-candidate-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: var(--grey-100);
+  color: var(--grey-500);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ww-candidate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ww-candidate-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--grey-200);
+  background: var(--white);
+  cursor: pointer;
+  text-align: left;
+}
+
+.ww-candidate-item:hover {
+  background: var(--grey-100);
+  border-color: var(--blue-700);
+}
+
+.ww-candidate-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--blue-900);
+}
+
+.ww-candidate-meta {
+  font-size: 0.78rem;
+  color: var(--grey-500);
+}

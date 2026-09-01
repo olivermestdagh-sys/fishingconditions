@@ -4,6 +4,20 @@ const GROUPS_FILE_PATH = "config/location_groups.json";
 const BRANCH = "main";
 const WORKFLOW_FILE = "update.yml";
 
+// URL of the willyweather-search Cloudflare Worker (see
+// cloudflare-worker/willyweather-search.js) — deliberately empty until it's
+// actually deployed. The Worker exists purely to keep the WillyWeather API
+// key off this public page (this file is served as-is by GitHub Pages;
+// anyone can view source) while still letting "click map to add location"
+// ask WillyWeather what's really at that spot. Left blank, the candidate
+// popup is simply skipped and clicking the map falls back to today's
+// behavior (a blank, manually-named location at that point) — nothing
+// breaks, it just doesn't get the live suggestions until this is set.
+// Paste in the Worker's own URL after following the deploy steps at the
+// top of cloudflare-worker/willyweather-search.js, e.g.
+// "https://fishingconditions-search.your-subdomain.workers.dev".
+const WILLYWEATHER_SEARCH_WORKER_URL = "";
+
 /**
  * Same icon shapes as charts.js's typeIconSvg — duplicated here rather than
  * loading the whole chart-rendering file just for two small icons, since
@@ -541,17 +555,14 @@ function toggleAddLocationClickMode() {
 
 /**
  * Starts a brand-new location anchored at the exact point clicked on the
- * Settings map. Stores lat/lng directly on the location object — this is
- * NEW: config/locations.json has never stored coordinates before (they
- * used to only exist in the GENERATED data/conditions.json, resolved by
- * fetch_conditions.py's name-text search). fetch_conditions.py now checks
- * for a stored lat/lng first and, when present, resolves WillyWeather
- * against THAT coordinate instead of the name — so what actually gets
- * fetched matches exactly where this was clicked, not wherever a
- * name-text search happens to land. See process_location() in
- * fetch_conditions.py for the other half of this.
+ * Settings map. If the willyweather-search Worker is configured (see
+ * WILLYWEATHER_SEARCH_WORKER_URL), asks it what's actually near this point
+ * first and lets the admin pick from real WillyWeather candidates — see
+ * showLocationCandidatePicker below — rather than typing a name and hoping
+ * it happens to text-match WillyWeather's own naming later. Either way,
+ * ends by creating the location via createNewLocationAt.
  */
-function onSettingsMapClick(lat, lng) {
+async function onSettingsMapClick(lat, lng) {
   if (!addLocationClickArmed) return;
   addLocationClickArmed = false;
   const btn = document.getElementById("btnAddByMapClick");
@@ -560,19 +571,151 @@ function onSettingsMapClick(lat, lng) {
     btn.classList.remove("active");
   }
 
-  locations.push({
-    name: "",
+  if (!WILLYWEATHER_SEARCH_WORKER_URL) {
+    createNewLocationAt(lat, lng);
+    return;
+  }
+
+  const candidates = await fetchWillyWeatherCandidates(lat, lng);
+  if (!candidates || candidates.length === 0) {
+    // Worker not reachable, not yet deployed, or genuinely nothing nearby
+    // in WillyWeather's own database — fall back to exactly today's
+    // behavior rather than blocking location creation on a live network
+    // call that may simply not be available right now.
+    createNewLocationAt(lat, lng);
+    return;
+  }
+
+  const result = await showLocationCandidatePicker(candidates);
+  if (result.action === "cancel") return;
+  if (result.action === "pick") {
+    createNewLocationAt(lat, lng, result.candidate);
+  } else {
+    createNewLocationAt(lat, lng);
+  }
+}
+
+/**
+ * Calls the willyweather-search Worker's coordinate-search endpoint.
+ * Returns an array (possibly empty) on success, or null on any failure
+ * (network error, non-OK response, Worker not yet deployed at this URL,
+ * malformed response) — null is the signal callers use to fall back to
+ * the manual-entry flow rather than getting stuck. Never throws.
+ */
+async function fetchWillyWeatherCandidates(lat, lng) {
+  try {
+    const res = await fetch(`${WILLYWEATHER_SEARCH_WORKER_URL}/search?lat=${lat}&lng=${lng}`);
+    if (!res.ok) {
+      console.error("willyweather-search Worker returned", res.status);
+      return null;
+    }
+    const data = await res.json();
+    return Array.isArray(data) ? data : null;
+  } catch (err) {
+    console.error("willyweather-search Worker request failed:", err);
+    return null;
+  }
+}
+
+/**
+ * Shows a small modal listing WillyWeather's candidate locations near a
+ * map click, and resolves once the admin picks one, chooses to enter a
+ * name manually instead, or cancels outright. Built fresh each call and
+ * torn down on any exit path — this page has no existing generic modal
+ * helper to reuse (checked charts.js/style.css; the only modal patterns
+ * there are the full-screen chart preview, a different shape of UI).
+ *
+ * Resolves to one of:
+ *   { action: "pick", candidate }  — admin chose a specific WillyWeather match
+ *   { action: "manual" }           — "None of these" — enter a name by hand
+ *   { action: "cancel" }           — closed without choosing anything
+ */
+function showLocationCandidatePicker(candidates) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "ww-candidate-overlay";
+
+    const items = candidates
+      .map(
+        (c, i) => `
+      <button type="button" class="ww-candidate-item" data-candidate-idx="${i}">
+        <span class="ww-candidate-name">${escapeHtml(c.name || "(unnamed)")}</span>
+        <span class="ww-candidate-meta">${escapeHtml([c.region, c.state].filter(Boolean).join(", "))}</span>
+      </button>`
+      )
+      .join("");
+
+    overlay.innerHTML = `
+      <div class="ww-candidate-dialog">
+        <button type="button" class="ww-candidate-close" aria-label="Cancel">&times;</button>
+        <h3 style="margin:0 0 4px;">What's here on WillyWeather?</h3>
+        <p class="footnote" style="margin:0 0 12px;">Pick the real match so weather/tide data resolves correctly from the very first data refresh.</p>
+        <div class="ww-candidate-list">${items}</div>
+        <button type="button" id="wwCandidateManual" class="btn-secondary" style="margin-top:12px;width:100%;">None of these — enter a name manually</button>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const cleanup = (result) => {
+      overlay.remove();
+      resolve(result);
+    };
+
+    overlay.querySelector(".ww-candidate-close").addEventListener("click", () => cleanup({ action: "cancel" }));
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) cleanup({ action: "cancel" });
+    });
+    overlay.querySelector("#wwCandidateManual").addEventListener("click", () => cleanup({ action: "manual" }));
+    overlay.querySelectorAll(".ww-candidate-item").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const idx = Number(btn.dataset.candidateIdx);
+        cleanup({ action: "pick", candidate: candidates[idx] });
+      });
+    });
+  });
+}
+
+function escapeHtml(str) {
+  return String(str || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/**
+ * The actual location-creation step, shared by both the "picked a real
+ * WillyWeather candidate" and "entering a name manually" paths. `lat`/`lng`
+ * are always the exact point clicked (see the "click to add" comment
+ * above this whole flow) — the admin's own precision beats WillyWeather's
+ * station/locality centroid regardless of which path got here. When a
+ * candidate is supplied, its id/name/region/state are cached directly onto
+ * the new location — see the WillyWeather id-caching tiers in
+ * process_location(), fetch_conditions.py — meaning this location's very
+ * FIRST scheduled run already has a confirmed id and never needs to search
+ * for it at all, not even once.
+ */
+function createNewLocationAt(lat, lng, candidate) {
+  const newLoc = {
+    name: candidate ? candidate.name : "",
     shore: "N",
     types: [defaultTypeConfig("Kayak")],
     lat,
     lng,
-  });
+  };
+  if (candidate) {
+    newLoc.willyweatherId = candidate.id;
+    newLoc.willyweatherName = candidate.name;
+    newLoc.willyweatherRegion = candidate.region;
+    newLoc.willyweatherState = candidate.state;
+  }
+  locations.push(newLoc);
   selectLocation(locations.length - 1);
   renderRows();
 
   // Focus straight into the name field of the new (now the only visible,
-  // thanks to selectedLocationIdx/applyLocationFilter) card — clicking the
-  // map already told us WHERE, all that's left is WHAT to call it.
+  // thanks to selectedLocationIdx/applyLocationFilter) card. When a
+  // candidate was picked, the name field is already pre-filled with
+  // WillyWeather's own name — still focused (and left editable, not
+  // disabled) since a custom personal label is fine too; only the cached
+  // willyweatherId above actually matters for data-fetching accuracy, not
+  // whatever this field says.
   const newRow = document.querySelector(`.loc-edit-card[data-loc-row-idx="${selectedLocationIdx}"]`);
   const nameInput = newRow && newRow.querySelector('input[data-field="name"]');
   if (nameInput) nameInput.focus();
