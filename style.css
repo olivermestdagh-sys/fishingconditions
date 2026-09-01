@@ -5,10 +5,20 @@
   --grey-500: #6b7280;
   --grey-200: #e5e7eb;
   --white: #ffffff;
-  --cond-5: #16a34a;
-  --cond-4: #65a30d;
-  --cond-3: #eab308;
-  --cond-2: #f97316;
+  /* Location/Fishing Condition score colours (1-5) — see
+     conditionStripColor's own comment in charts.js for the full
+     reasoning: two SEPARATE gradients (red->orange below 3.0, light
+     green->deep green at 3.0 and above), not one continuous rainbow, so
+     nothing below the "acceptable" threshold ever looks green and
+     nothing at/above it ever looks orange. These five values are the
+     exact colours that same gradient math produces at each whole number,
+     so a badge here (Week Ahead tiles, Live's current-condition badge —
+     see CONDITION_COLORS/conditionColor, charts.js) always agrees with
+     the strip drawn directly on the graph. */
+  --cond-5: #15803d;
+  --cond-4: #4eb875;
+  --cond-3: #86efac;
+  --cond-2: #e33f19;
   --cond-1: #dc2626;
   --cond-none: #9ca3af;
   --radius: 12px;
