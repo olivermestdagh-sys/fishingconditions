@@ -31,20 +31,20 @@
     <section class="chart-section location-hover-panel-chart">
       <div class="location-hover-panel-heading-row">
         <h2 id="hoverPanelLocationName">&nbsp;</h2>
-        <p class="footnote" style="margin:0;">Tap the graph for a bigger view</p>
       </div>
-      <div class="location-hover-panel-chart-wrap">
-        <canvas id="conditionsChart"></canvas>
+      <div id="locationChartFrame" class="location-hover-panel-chart-frame">
+        <div class="graph-gesture-hint" aria-hidden="true">
+          <div>Double-tap to expand</div>
+          <div>Hold for 2s to toggle data point</div>
+        </div>
+        <div id="locationChartScroll" class="location-hover-panel-chart-scroll">
+          <div id="locationChartWrap" class="location-hover-panel-chart-wrap">
+            <canvas id="conditionsChart"></canvas>
+          </div>
+        </div>
       </div>
       <p id="hoverPanelEmptyState" class="empty-state" style="display:none;">No data yet for this location. It'll appear after the next scheduled update.</p>
     </section>
-  </div>
-
-  <div id="chartModalOverlay" class="chart-modal-overlay" style="display:none;">
-    <button id="btnCloseChartModal" class="chart-modal-close" aria-label="Close">&times;</button>
-    <div class="chart-modal-inner">
-      <canvas id="conditionsChartModal"></canvas>
-    </div>
   </div>
 </main>
 
