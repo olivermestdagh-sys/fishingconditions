@@ -80,33 +80,6 @@ main {
   height: 100%;
 }
 
-/* Floats over the top-left corner of the Location tab's fullpage map (see
-   #btnPreviewMapClick/togglePreviewClickMode, app.js) — this page's `main`
-   is position:relative (see .map-fullpage-body main above), so this
-   anchors to the map area itself rather than the viewport. Sits below
-   .location-hover-panel's z-index:1000 (so the bottom-sheet panel still
-   draws over it once open) but above Leaflet's own internal panes
-   (highest ~700), matching the layering already established for that
-   panel. Only reachable while the hover panel ISN'T covering it — the
-   panel is a bottom sheet capped at max-height:75%, which always leaves
-   this top-left corner clear on any real viewport. */
-.location-preview-toggle {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 900;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-}
-
-/* Same "next click on open map area does something else" cursor treatment
-   as .location-map.map-click-armed (locations.html's Settings map) —
-   separate rule because this page's map uses .location-map-fullpage, a
-   different class with a different (100%/100%) height rule, not
-   .location-map's fixed 280px. */
-.location-map-fullpage.map-preview-armed {
-  cursor: crosshair;
-}
-
 /* Floating summary+graph panel, shown over the map on marker click — a
    bottom-sheet, the familiar "tap a map pin, details slide up" pattern
    from Google/Apple Maps, since this site is mobile-first and that's the
