@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""
+Validates an idea for auto-guessing a location's "shore faces" compass
+direction from OpenStreetMap's own coastline data, by running it against
+every location ALREADY in config/locations.json and comparing the guess
+to the real, human-picked `shore` value already saved there. This is a
+real accuracy check against ground truth you already trust, not a demo.
+
+WHY THIS IS A SEPARATE, STANDALONE SCRIPT (not something already run for
+you): it needs outbound internet access to the Overpass API
+(overpass-api.de) to query real OpenStreetMap coastline geometry, and the
+sandboxed environment this was written in has no route to that domain —
+only a fixed allowlist of package-registry/GitHub-adjacent domains. Rather
+than fake the numbers or reason from memory about Victorian coastline
+shapes (which risks being confidently wrong), this is meant to be run
+somewhere with normal internet access — your own machine, most likely.
+
+Run with:
+    python3 validate_shore.py [path/to/locations.json]
+
+No arguments needed if run from a folder containing config/locations.json
+or locations.json directly — it checks both.
+
+HOW THE GUESS WORKS
+--------------------
+OpenStreetMap tags real coastline geometry (natural=coastline) with a
+documented, strict convention: the way's nodes are ordered such that LAND
+is on the left and WATER is on the right, when walking the way in its
+stored direction (confirmed directly against OpenStreetMap's own wiki,
+not assumed). So for each location:
+
+  1. Ask Overpass for the nearest coastline way(s) within a growing search
+     radius (starts at 1km, widens to 3km then 8km if nothing's found —
+     small inlets/river mouths sometimes need more room than a straight
+     beach does).
+  2. Find the single closest line SEGMENT (a consecutive pair of nodes)
+     across everything returned, to the location's own lat/lng.
+  3. Take that segment's own directional bearing (from its first node to
+     its second, in the way's stored order).
+  4. Rotate +90° (to the RIGHT of that direction of travel) — per the
+     land-left/water-right convention, that's the seaward direction, i.e.
+     what this site's "shore faces X" field means (see the note below on
+     how that was confirmed).
+  5. Round to the nearest of the 16 compass points already used
+     everywhere else in this codebase.
+
+CONFIDENCE NOTE ON THE "shore" FIELD'S OWN MEANING: this script assumes
+`shore` = the compass direction the coastline/beach opens out toward,
+i.e. the water direction (matching the Settings page's own "Shore faces"
+label). This was cross-checked against Williamstown Beach's own saved
+shore="N" — it does front Port Phillip Bay to its north — but it's still
+worth Oliver double-checking, since getting this backwards would flip
+every comparison in this script 180° and make a genuinely working
+algorithm look like a broken one (or vice versa).
+
+WHERE THIS CAN GENUINELY BE WRONG, NOT JUST IMPRECISE
+-------------------------------------------------------
+- Small coves, marina-facing boat ramps, and river mouths can have nearby
+  coastline curving enough that "the" bearing is ambiguous — the same
+  ambiguity a person would face eyeballing it from a map.
+- Some points have no OSM coastline data nearby at all (real data gaps) —
+  reported as NO DATA below, not a wrong guess dressed up as a real one.
+- OpenStreetMap's own QA tooling tracks "wrong direction" coastline
+  segments as a known, real error category — meaning a small fraction of
+  segments genuinely ARE backwards in the live data, not a hypothetical.
+
+This script reports exact matches, "off by one compass step" (an
+adjacent-point miss, e.g. guessed N vs actual NNE, arguably still usable),
+and clean misses, so the accuracy picture isn't just one blunt number.
+"""
+
+import json
+import math
+import os
+import sys
+import time
+import urllib.parse
+import urllib.request
+
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+SEARCH_RADII_M = [1000, 3000, 8000]
+COMPASS_POINTS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+                  "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+COMPASS_DEGREES = {name: i * 22.5 for i, name in enumerate(COMPASS_POINTS)}
+
+
+def find_locations_file(arg_path):
+    candidates = [arg_path] if arg_path else ["config/locations.json", "locations.json"]
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+    print("Could not find locations.json — pass its path explicitly:", file=sys.stderr)
+    print("    python3 validate_shore.py path/to/locations.json", file=sys.stderr)
+    sys.exit(1)
+
+
+def overpass_query(lat, lng, radius_m):
+    ql = f'[out:json][timeout:25];way(around:{radius_m},{lat},{lng})[natural=coastline];out geom;'
+    url = f"{OVERPASS_URL}?data={urllib.parse.quote(ql)}"
+    req = urllib.request.Request(url, headers={"User-Agent": "fishingconditions-shore-validate/1.0"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def haversine_m(lat1, lng1, lat2, lng2):
+    """Great-circle distance in metres — plenty accurate at the sub-10km
+    scale every comparison here happens at."""
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def bearing_deg(lat1, lng1, lat2, lng2):
+    """Initial great-circle bearing from point 1 to point 2, in degrees
+    (0=N, 90=E, ...)."""
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dl = math.radians(lng2 - lng1)
+    x = math.sin(dl) * math.cos(p2)
+    y = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
+    return (math.degrees(math.atan2(x, y)) + 360) % 360
+
+
+def point_to_segment_distance_m(plat, plng, alat, alng, blat, blng):
+    """Approximate closest-point-on-segment distance using an equirectangular
+    projection local to the segment — more than accurate enough at the
+    scale here (a few km), far simpler than exact spherical geometry."""
+    lat0 = math.radians((alat + blat) / 2)
+    kx = 111320 * math.cos(lat0)  # metres per degree longitude at this latitude
+    ky = 110540  # metres per degree latitude (roughly constant)
+
+    def to_xy(lat, lng):
+        return (lng * kx, lat * ky)
+
+    px, py = to_xy(plat, plng)
+    ax, ay = to_xy(alat, alng)
+    bx, by = to_xy(blat, blng)
+
+    dx, dy = bx - ax, by - ay
+    seg_len_sq = dx * dx + dy * dy
+    if seg_len_sq == 0:
+        t = 0.0
+    else:
+        t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / seg_len_sq))
+    cx, cy = ax + t * dx, ay + t * dy
+    return math.hypot(px - cx, py - cy)
+
+
+def degrees_to_compass(deg):
+    idx = round((deg % 360) / 22.5) % 16
+    return COMPASS_POINTS[idx]
+
+
+def compass_step_diff(a, b):
+    """How many 22.5° steps apart two compass points are (0-8), for the
+    "off by one" reporting."""
+    if a not in COMPASS_DEGREES or b not in COMPASS_DEGREES:
+        return None
+    diff = abs(COMPASS_DEGREES[a] - COMPASS_DEGREES[b])
+    diff = min(diff, 360 - diff)
+    return round(diff / 22.5)
+
+
+def guess_shore_direction(lat, lng):
+    """Returns (guessed_compass_point, nearest_segment_distance_m) or
+    (None, None) if no coastline data was found at any search radius."""
+    best = None  # (distance_m, bearing_deg)
+    for radius in SEARCH_RADII_M:
+        try:
+            data = overpass_query(lat, lng, radius)
+        except Exception as e:
+            print(f"    Overpass request failed at radius {radius}m: {e}", file=sys.stderr)
+            continue
+        elements = data.get("elements", []) or []
+        for el in elements:
+            geometry = el.get("geometry") or []
+            for i in range(len(geometry) - 1):
+                a, b = geometry[i], geometry[i + 1]
+                if a.get("lat") is None or b.get("lat") is None:
+                    continue
+                dist = point_to_segment_distance_m(lat, lng, a["lat"], a["lon"], b["lat"], b["lon"])
+                if best is None or dist < best[0]:
+                    seg_bearing = bearing_deg(a["lat"], a["lon"], b["lat"], b["lon"])
+                    best = (dist, seg_bearing)
+        if best is not None:
+            break  # found something at this radius — no need to widen further
+        time.sleep(1)  # be polite to the shared public Overpass instance between escalating retries
+
+    if best is None:
+        return None, None
+    distance_m, seg_bearing = best
+    # Water is on the RIGHT of the way's own direction (land-left/water-right
+    # is OpenStreetMap's documented coastline convention) — +90° from the
+    # segment's bearing points seaward, which is what "shore faces X" means
+    # here (see the confidence note in this file's module docstring).
+    water_bearing = (seg_bearing + 90) % 360
+    return degrees_to_compass(water_bearing), distance_m
+
+
+def main():
+    arg_path = sys.argv[1] if len(sys.argv) > 1 else None
+    path = find_locations_file(arg_path)
+    with open(path) as f:
+        locations = json.load(f)
+
+    print(f"Validating shore-direction guesses against {path} ({len(locations)} locations)\n")
+    print(f"{'Location':<32} {'Actual':<7} {'Guessed':<8} {'Off by':<8} {'Nearest seg':<12} Result")
+    print("-" * 90)
+
+    exact = 0
+    within_one = 0
+    total_with_data = 0
+    no_data = 0
+
+    for loc in locations:
+        name = loc.get("name", "(unnamed)")
+        actual = loc.get("shore")
+        lat, lng = loc.get("lat"), loc.get("lng")
+        if lat is None or lng is None:
+            print(f"{name:<32} {'-':<7} {'-':<8} {'-':<8} {'-':<12} SKIPPED (no lat/lng)")
+            continue
+
+        guess, distance_m = guess_shore_direction(lat, lng)
+        time.sleep(1)  # politeness delay between locations, not just within one
+
+        if guess is None:
+            no_data += 1
+            print(f"{name:<32} {actual or '-':<7} {'NO DATA':<8} {'-':<8} {'-':<12} NO COASTLINE FOUND")
+            continue
+
+        total_with_data += 1
+        step_diff = compass_step_diff(actual, guess)
+        dist_str = f"{distance_m:.0f}m"
+        if step_diff == 0:
+            exact += 1
+            within_one += 1
+            result = "MATCH"
+        elif step_diff == 1:
+            within_one += 1
+            result = "close (1 step off)"
+        else:
+            result = "MISS"
+        print(f"{name:<32} {actual or '-':<7} {guess:<8} {step_diff if step_diff is not None else '-':<8} {dist_str:<12} {result}")
+
+    print("-" * 90)
+    if total_with_data > 0:
+        print(f"\nExact matches:        {exact}/{total_with_data} ({100*exact/total_with_data:.0f}%)")
+        print(f"Within 1 compass step: {within_one}/{total_with_data} ({100*within_one/total_with_data:.0f}%)")
+    print(f"No coastline data found: {no_data}/{len(locations)}")
+
+
+if __name__ == "__main__":
+    main()
