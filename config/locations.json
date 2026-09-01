@@ -544,7 +544,11 @@
     "locationGroups": [
       "South Beaches"
     ],
-    "tideMaxObserved": null
+    "tideMaxObserved": 2.69,
+    "willyweatherId": 11840,
+    "willyweatherName": "Cape Woolamai",
+    "willyweatherRegion": "Gippsland",
+    "willyweatherState": "VIC"
   },
   {
     "name": "Mallacoota",
@@ -564,6 +568,7 @@
     "willyweatherId": 12642,
     "willyweatherName": "Mallacoota",
     "willyweatherRegion": "East Gippsland",
-    "willyweatherState": "VIC"
+    "willyweatherState": "VIC",
+    "tideMaxObserved": null
   }
 ]
