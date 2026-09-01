@@ -30,6 +30,11 @@ OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 OPEN_METEO_MARINE_URL = "https://marine-api.open-meteo.com/v1/marine"
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config", "locations.json")
 OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "conditions.json")
+# WillyWeather's coordinate search rejects the request without an explicit
+# search radius — see search_location_by_coords for how that was actually
+# pinned down. Same 25km default as the live-preview Cloudflare Worker
+# (willyweather-search.js) uses for the same lookup.
+SEARCH_RANGE_KM = 25
 
 COMPASS_DEGREES = {
     "N": 0, "NNE": 22.5, "NE": 45, "ENE": 67.5, "E": 90, "ESE": 112.5, "SE": 135, "SSE": 157.5,
@@ -71,13 +76,49 @@ def search_location_by_coords(lat, lng):
     map's "click to add" action — see locationsadmin.js). A coordinate is
     unambiguous where a name string isn't — two spots on opposite sides of
     the country can share a name, and a plain text search has no way to
-    tell them apart, but a lat/lng pins down exactly which one was meant."""
-    url = f"{BASE_URL}/{API_KEY}/search.json?lat={lat}&lng={lng}&limit=1"
+    tell them apart, but a lat/lng pins down exactly which one was meant.
+
+    TWO BUGS FIXED HERE, found while debugging the Location tab's live
+    preview feature (the willyweather-search Cloudflare Worker's own
+    coordinate search hit the exact same problems first, live, against the
+    real API):
+
+    1. WillyWeather's coordinate search REJECTS the request outright
+       (400 invalid-request-parameters) without an explicit `range` value
+       AND a `units` declaration for it — neither was ever being sent.
+       WillyWeather's own error response, when asked, listed its actual
+       valid parameter names directly: lat, limit, lng, query, range,
+       units — `range` (not `distance`, despite that being the word in
+       WillyWeather's own earlier, more general error text) is the real
+       parameter name.
+    2. Even with a fixed request, the OLD code here expected a plain
+       array response — same shape as search_location's text-query
+       search — but WillyWeather's coordinate search returns a
+       different shape entirely: a single object,
+       {"location": {...}, "units": {...}}, not an array. The
+       `isinstance(data, list)` check below would have silently
+       returned None even for an otherwise-successful call, which is
+       almost certainly why every location resolved via a saved
+       coordinate has actually been falling through to name search this
+       whole time (see the WARNING branch below, and the fallback
+       already built into process_location for exactly this "coordinate
+       search found no match" case) — self-masking, since the fallback
+       usually still finds something via name search, just not via the
+       more precise path this function exists for.
+
+    SEARCH_RANGE_KM below is the same 25km default already chosen for the
+    live preview Worker (willyweather-search.js) — comfortably covers this
+    site's whole Port Phillip/Western Port coverage area without pulling
+    in a same-named location from a different bay."""
+    url = (
+        f"{BASE_URL}/{API_KEY}/search.json?lat={lat}&lng={lng}"
+        f"&range={SEARCH_RANGE_KM}&units=distance:km"
+    )
     data = http_get_json(url)
     if not data:
         return None
-    if isinstance(data, list) and len(data) > 0:
-        return data[0]
+    if isinstance(data, dict) and data.get("location"):
+        return data["location"]
     return None
 
 
