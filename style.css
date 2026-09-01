@@ -103,15 +103,21 @@ main {
   z-index: 1000;
 }
 
-.location-hover-panel-summary,
 .location-hover-panel-chart {
   box-shadow: none;
   padding: 0;
-  margin: 0 0 14px;
+  margin: 0;
 }
 
-.location-hover-panel-chart:last-child {
-  margin-bottom: 0;
+/* #hoverPanelLocationName now doubles as the panel's own heading (see
+   renderLocation, app.js, which sets this <h2>'s text to the location's
+   name) rather than a static "Conditions Graph" label — inherits its
+   look from the shared .chart-section h2 rule, no separate styling
+   needed. The badges/stats that used to sit above it in a separate
+   summary card are gone; the name moved up to take that spot instead. */
+
+#hoverPanelEmptyState {
+  margin: 0;
 }
 
 /* Chart.js's own responsive:true/maintainAspectRatio:false logic (see
