@@ -27,7 +27,14 @@
       "Western Port",
       "Western"
     ],
-    "tideOffset": 0
+    "tideOffset": 0,
+    "willyweatherId": 13803,
+    "willyweatherName": "Balnarring Beach",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.3884,
+    "lng": 145.1245,
+    "tideMaxObserved": 2.98
   },
   {
     "name": "Corinella Boat Ramp, VIC",
@@ -47,7 +54,14 @@
     "locationGroups": [
       "Western Port",
       "Eastern"
-    ]
+    ],
+    "willyweatherId": 35583,
+    "willyweatherName": "Corinella Boat Ramp",
+    "willyweatherRegion": "Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -38.4079,
+    "lng": 145.4234,
+    "tideMaxObserved": 2.86
   },
   {
     "name": "Coronet Bay, VIC 3984",
@@ -67,7 +81,14 @@
     "locationGroups": [
       "Western Port",
       "Eastern"
-    ]
+    ],
+    "willyweatherId": 11954,
+    "willyweatherName": "Coronet Bay",
+    "willyweatherRegion": "Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -38.4348,
+    "lng": 145.4426,
+    "tideMaxObserved": 2.86
   },
   {
     "name": "Flinders Pier, VIC",
@@ -88,7 +109,14 @@
       "Western Port",
       "Southern",
       "Western"
-    ]
+    ],
+    "willyweatherId": 27168,
+    "willyweatherName": "Flinders Pier",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.4758,
+    "lng": 145.0286,
+    "tideMaxObserved": 2.69
   },
   {
     "name": "Gunnamatta Beach, VIC",
@@ -107,7 +135,14 @@
     "locationGroup": "South Beaches",
     "locationGroups": [
       "South Beaches"
-    ]
+    ],
+    "willyweatherId": 18234,
+    "willyweatherName": "Gunnamatta Beach",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.457,
+    "lng": 144.8687,
+    "tideMaxObserved": 1.66
   },
   {
     "name": "Hastings Jetty, VIC",
@@ -127,7 +162,14 @@
     "locationGroups": [
       "Western Port",
       "Western"
-    ]
+    ],
+    "willyweatherId": 31737,
+    "willyweatherName": "Hastings Jetty",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.3082,
+    "lng": 145.1991,
+    "tideMaxObserved": 2.98
   },
   {
     "name": "Kilcunda, VIC 3995",
@@ -146,7 +188,14 @@
     "locationGroup": "South Beaches",
     "locationGroups": [
       "South Beaches"
-    ]
+    ],
+    "willyweatherId": 12454,
+    "willyweatherName": "Kilcunda",
+    "willyweatherRegion": "Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -38.5492,
+    "lng": 145.4754,
+    "tideMaxObserved": 2.69
   },
   {
     "name": "Lang Lang Boat Ramp, VIC",
@@ -177,7 +226,14 @@
       "Western Port",
       "Eastern"
     ],
-    "tideOffset": 30
+    "tideOffset": 30,
+    "willyweatherId": 31713,
+    "willyweatherName": "Lang Lang Boat Ramp",
+    "willyweatherRegion": "Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -38.3052,
+    "lng": 145.5214,
+    "tideMaxObserved": 3.2
   },
   {
     "name": "Mornington Pier, VIC",
@@ -197,7 +253,14 @@
     "locationGroups": [
       "Port Phillip",
       "Eastern"
-    ]
+    ],
+    "willyweatherId": 35618,
+    "willyweatherName": "Mornington Pier",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.2117,
+    "lng": 145.0349,
+    "tideMaxObserved": 0.91
   },
   {
     "name": "Patterson River Entrance, VIC",
@@ -217,7 +280,14 @@
     "locationGroups": [
       "Port Phillip",
       "Eastern"
-    ]
+    ],
+    "willyweatherId": 23948,
+    "willyweatherName": "Patterson River Entrance",
+    "willyweatherRegion": "Melbourne",
+    "willyweatherState": "VIC",
+    "lat": -38.0734,
+    "lng": 145.1197,
+    "tideMaxObserved": 0.87
   },
   {
     "name": "Rosebud Pier, VIC",
@@ -238,7 +308,14 @@
       "Port Phillip",
       "Eastern",
       "Southern"
-    ]
+    ],
+    "willyweatherId": 35608,
+    "willyweatherName": "Rosebud Pier",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.3503,
+    "lng": 144.9073,
+    "tideMaxObserved": 0.87
   },
   {
     "name": "Safety Beach Boat Ramp, VIC",
@@ -259,7 +336,14 @@
       "Port Phillip",
       "Eastern",
       "Southern"
-    ]
+    ],
+    "willyweatherId": 31834,
+    "willyweatherName": "Safety Beach Boat Ramp",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.3131,
+    "lng": 144.9911,
+    "tideMaxObserved": 0.87
   },
   {
     "name": "Sorrento Pier, VIC",
@@ -280,7 +364,14 @@
       "Port Phillip",
       "Eastern",
       "Southern"
-    ]
+    ],
+    "willyweatherId": 35607,
+    "willyweatherName": "Sorrento Pier",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.3357,
+    "lng": 144.7459,
+    "tideMaxObserved": 1.66
   },
   {
     "name": "Stony Point Boat Ramp, VIC",
@@ -300,7 +391,14 @@
     "locationGroups": [
       "Western Port",
       "Western"
-    ]
+    ],
+    "willyweatherId": 35584,
+    "willyweatherName": "Stony Point Boat Ramp",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.3744,
+    "lng": 145.2224,
+    "tideMaxObserved": 2.98
   },
   {
     "name": "Warneet Boat Ramp, VIC",
@@ -320,7 +418,14 @@
     "locationGroups": [
       "Western Port",
       "Northern"
-    ]
+    ],
+    "willyweatherId": 31734,
+    "willyweatherName": "Warneet Boat Ramp",
+    "willyweatherRegion": "Melbourne",
+    "willyweatherState": "VIC",
+    "lat": -38.2275,
+    "lng": 145.3066,
+    "tideMaxObserved": 2.98
   },
   {
     "name": "Williamstown Beach, VIC",
@@ -340,7 +445,14 @@
     "locationGroups": [
       "Port Phillip",
       "Northern"
-    ]
+    ],
+    "willyweatherId": 27141,
+    "willyweatherName": "Williamstown Beach",
+    "willyweatherRegion": "Melbourne",
+    "willyweatherState": "VIC",
+    "lat": -37.8674,
+    "lng": 144.8916,
+    "tideMaxObserved": 0.99
   },
   {
     "name": "Betka Beach VIC",
@@ -357,7 +469,14 @@
     "locationGroup": "Mallacoota",
     "locationGroups": [
       "Mallacoota"
-    ]
+    ],
+    "willyweatherId": 18288,
+    "willyweatherName": "Betka Beach",
+    "willyweatherRegion": "East Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -37.5775,
+    "lng": 149.7536,
+    "tideMaxObserved": 1.36
   },
   {
     "name": "Metung, VIC 3904",
@@ -375,7 +494,14 @@
     "locationGroup": "Lakes Entrance",
     "locationGroups": [
       "Lakes Entrance"
-    ]
+    ],
+    "willyweatherId": 12704,
+    "willyweatherName": "Metung",
+    "willyweatherRegion": "East Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -37.8835,
+    "lng": 147.8508,
+    "tideMaxObserved": null
   },
   {
     "name": "Lakes Entrance Beach VIC",
@@ -392,7 +518,14 @@
     "locationGroup": "Lakes Entrance",
     "locationGroups": [
       "Lakes Entrance"
-    ]
+    ],
+    "willyweatherId": 18294,
+    "willyweatherName": "Lakes Entrance Beach",
+    "willyweatherRegion": "East Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -37.8859,
+    "lng": 147.9875,
+    "tideMaxObserved": 1.2
   },
   {
     "name": "Cape Woolamai Beach",
@@ -410,6 +543,7 @@
     "lng": 145.34040927886966,
     "locationGroups": [
       "South Beaches"
-    ]
+    ],
+    "tideMaxObserved": null
   }
 ]
