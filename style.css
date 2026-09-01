@@ -103,8 +103,18 @@ main {
   z-index: 1000;
 }
 
-.location-hover-panel-chart {
+/* Higher specificity than the shared ".chart-section, .table-section"
+   rule (chosen over reordering, or !important) deliberately — needed
+   because a plain single-class selector here would lose to that rule on
+   source order alone (same 0,1,0 specificity, but .chart-section's own
+   rule appears LATER in this file) and its box-shadow/padding/background
+   would silently win, which is exactly what was happening before this
+   comment existed: a visible shadow "border" around the graph that
+   .location-hover-panel-chart's own box-shadow:none was never actually
+   managing to remove. */
+.chart-section.location-hover-panel-chart {
   box-shadow: none;
+  background: none;
   padding: 0;
   margin: 0;
 }
