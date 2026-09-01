@@ -114,6 +114,29 @@ main {
   margin-bottom: 0;
 }
 
+/* Chart.js's own responsive:true/maintainAspectRatio:false logic (see
+   renderConditionsChart, charts.js) sizes the canvas to fill its immediate
+   parent — if that parent's height is intrinsic (sized to its own
+   content, which INCLUDES the canvas), the two feed into each other and
+   the chart grows without bound on every resize tick. Exactly the same
+   bug already fixed once on the Live tab, and the same fix as
+   .week-chart-modal-chart-wrap below: an explicitly, fixedly sized,
+   position:relative wrapper the canvas absolutely fills, so the canvas's
+   own size can never influence its wrapper's size in the first place. */
+.location-hover-panel-chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 260px;
+}
+
+.location-hover-panel-chart-wrap canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+
 .location-hover-panel-close {
   position: absolute;
   top: 10px;
