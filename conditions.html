@@ -25,6 +25,8 @@
 <main>
   <div id="locationMap" class="location-map-fullpage"></div>
 
+  <button type="button" id="btnPreviewMapClick" class="btn-secondary location-preview-toggle">📍 Click map to preview a spot</button>
+
   <div id="locationHoverPanel" class="location-hover-panel" style="display:none;">
     <button id="btnCloseHoverPanel" class="location-hover-panel-close" aria-label="Close">&times;</button>
 
@@ -32,6 +34,7 @@
       <div class="location-hover-panel-heading-row">
         <h2 id="hoverPanelLocationName">&nbsp;</h2>
       </div>
+      <p id="hoverPanelPreviewNote" class="footnote" style="display:none;margin:0 0 8px;">Preview only — raw WillyWeather/Open-Meteo forecast for this exact point. No saved location config yet, so Location/Fishing Condition scoring isn't shown.</p>
       <div id="locationChartFrame" class="location-hover-panel-chart-frame">
         <div class="graph-gesture-hint" aria-hidden="true">
           <div>Double-tap to expand</div>
