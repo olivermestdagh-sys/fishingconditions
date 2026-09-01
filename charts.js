@@ -1753,7 +1753,12 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
           type: "linear",
           min: minT,
           max: maxT,
-          display: !compact,
+          // hideValueAxes hides this too, despite its name being about the
+          // y ("value") axes — its only actual caller (the Location tab's
+          // preview panel, app.js) wants every axis gone, and there was no
+          // reason to invent a second, near-identical flag just to cover
+          // the x-axis as well once that became true too.
+          display: !compact && !hideValueAxes,
           ticks: { maxTicksLimit: 10, callback: (value) => fmtChartTick(value) },
           grid: { color: "rgba(0,0,0,0.05)" },
         },
