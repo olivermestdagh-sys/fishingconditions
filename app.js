@@ -54,7 +54,6 @@ async function init() {
   renderLocationMap();
 
   document.getElementById("btnCloseHoverPanel").addEventListener("click", hideLocationHoverPanel);
-  document.getElementById("btnPreviewMapClick").addEventListener("click", togglePreviewClickMode);
 
   // Same gesture set as Week (graphs) and Live, all shared from charts.js:
   // hold 2s to toggle the tooltip, double-tap/double-click to toggle real
@@ -166,43 +165,20 @@ function renderLocationMap() {
   });
 }
 
-// True while the "📍 Click map to preview a spot" button is armed — the
-// NEXT click on open map area (not a marker) previews WillyWeather's live
-// conditions for that exact point instead of selecting one of this site's
-// own saved locations. Same armed/disarm shape as the Settings tab's
-// "click map to add location" (locationsadmin.js's addLocationClickArmed)
-// — a separate armed step avoids turning every ordinary pan/zoom click
-// into an unwanted preview lookup, which is the map's much more common use.
-let previewClickArmed = false;
-
-function togglePreviewClickMode() {
-  previewClickArmed = !previewClickArmed;
-  const btn = document.getElementById("btnPreviewMapClick");
-  btn.textContent = previewClickArmed ? "Click the map to preview… (cancel)" : "📍 Click map to preview a spot";
-  btn.classList.toggle("active", previewClickArmed);
-  document.getElementById("locationMap").classList.toggle("map-preview-armed", previewClickArmed);
-}
-
 /**
  * The Location tab's map-click handler (see renderLocationMap's
- * renderLeafletLocationMap call) — a no-op unless "click map to preview"
- * is currently armed, exactly like onSettingsMapClick's own armed guard.
- * Looks up real WillyWeather candidates near the clicked point (shared
- * fetchWillyWeatherCandidates, charts.js) and either previews the one
- * match directly, lets the person pick between several
+ * renderLeafletLocationMap call) — fires on every click on open map area
+ * (Leaflet doesn't bubble marker clicks up to this handler, so clicking an
+ * existing pin still only ever triggers that marker's own onClick, never
+ * this). Looks up real WillyWeather candidates near the clicked point
+ * (shared fetchWillyWeatherCandidates, charts.js) and either previews the
+ * one match directly, lets the person pick between several
  * (showLocationCandidatePicker, allowManual:false — there's no manual
  * fallback that makes sense here, unlike the Settings tab's own use of
  * this same picker), or shows a friendly "nothing nearby" message if
  * WillyWeather has no match at all.
  */
 async function onLocationMapClickForPreview(lat, lng) {
-  if (!previewClickArmed) return;
-  previewClickArmed = false;
-  const btn = document.getElementById("btnPreviewMapClick");
-  btn.textContent = "📍 Click map to preview a spot";
-  btn.classList.remove("active");
-  document.getElementById("locationMap").classList.remove("map-preview-armed");
-
   const candidates = await fetchWillyWeatherCandidates(lat, lng);
   if (!candidates || candidates.length === 0) {
     showLocationHoverPanel();

@@ -177,9 +177,10 @@ this site's own public, client-side code.
 
 ### Live preview from the Location tab (optional, same Worker)
 
-The Location tab's map has its own "📍 Click map to preview a spot"
-button — separate from Settings' "click to add", and doesn't create or
-save anything. Arm it, click anywhere on the map, and it:
+The Location tab's map itself doubles as a live preview tool — separate
+from Settings' "click to add", and doesn't create or save anything. Click
+anywhere on open map area (clicking an existing marker still selects that
+saved location as usual) and it:
 
 1. Asks the Worker's `/search` endpoint what's nearby (same lookup the
    Settings map uses), and if there's more than one candidate, shows the
