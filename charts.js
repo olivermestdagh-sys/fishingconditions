@@ -681,6 +681,131 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
   return map;
 }
 
+// --- GitHub read/write (shared) ---------------------------------------------
+//
+// Originally lived only in locationsadmin.js (the Settings tab's own
+// save flow) — moved here once the Location tab's preview needed the same
+// "is there a GitHub connection, read the current file, write it back"
+// plumbing for its own "Add as permanent location" button (see
+// saveNewLocationToGitHub below, and previewLocationOnMap/
+// btnAddPreviewAsLocation in app.js). GROUPS_FILE_PATH and WORKFLOW_FILE
+// stay local to locationsadmin.js — nothing outside the Settings page
+// touches location groups or triggers a data refresh.
+
+const GITHUB_API = "https://api.github.com";
+const FILE_PATH = "config/locations.json";
+const BRANCH = "main";
+
+/** Reads the same "ghConnection" localStorage entry the Settings page's
+ * own Connect/Disconnect buttons write to (locationsadmin.js) — since
+ * localStorage is scoped per-origin, not per-page, a connection made on
+ * the Settings tab is already visible here with no extra wiring. Returns
+ * null (never throws) if there's no connection, or the stored value is
+ * malformed somehow. */
+function getConnection() {
+  try {
+    return JSON.parse(localStorage.getItem("ghConnection") || "null");
+  } catch {
+    return null;
+  }
+}
+
+function utf8ToBase64(str) {
+  return btoa(unescape(encodeURIComponent(str)));
+}
+
+// Which timing fields apply to each type. Drive time is no longer a static
+// setting here at all — Week Ahead calculates it live from the device's
+// current location. Both types have a "getting to/from the actual spot"
+// step now — paddling for Kayak, walking from the carpark for Land based
+// (a real case: walking along the beach to a specific spot).
+const TYPE_TIME_FIELDS = {
+  Kayak: [
+    { key: "setUp", label: "Set up" },
+    { key: "packUp", label: "Pack up" },
+    { key: "timeToSpot", label: "Time to Spot" },
+    { key: "timeFromSpot", label: "Time From Spot" },
+  ],
+  "Land based": [
+    { key: "setUp", label: "Set up" },
+    { key: "packUp", label: "Pack up" },
+    { key: "timeToSpot", label: "Time to Spot" },
+    { key: "timeFromSpot", label: "Time From Spot" },
+  ],
+};
+
+function defaultTypeConfig(type) {
+  const config = { type };
+  for (const f of TYPE_TIME_FIELDS[type]) config[f.key] = "00:00";
+  return config;
+}
+
+/**
+ * Appends ONE new location object to config/locations.json on GitHub and
+ * commits it directly — same GitHub Contents API read-sha/write pattern
+ * locationsadmin.js's own onSave uses, just scoped to adding a single new
+ * entry rather than overwriting a whole in-memory array (the Location tab,
+ * unlike Settings, never loads the full locations list into memory, so
+ * this reads the current file fresh right before writing rather than
+ * trusting a copy that could be stale). Requires an existing GitHub
+ * connection (see getConnection) — callers should check that BEFORE even
+ * showing the option to save (see showAddPermanentButton, app.js), not
+ * just before calling this.
+ *
+ * Blocks on an exact name collision (rather than silently creating a
+ * confusing second entry with the same name — every page on this site
+ * assumes location names are unique, e.g. locationKey()'s name::type
+ * keying, the Settings map's marker-per-name grouping).
+ *
+ * Returns { success: true } or { success: false, error: "..." } — never
+ * throws, so callers can show the error text directly without their own
+ * try/catch.
+ */
+async function saveNewLocationToGitHub(newLoc) {
+  const conn = getConnection();
+  if (!conn || !conn.owner || !conn.repo || !conn.token) {
+    return { success: false, error: "Not connected to GitHub — connect from the Settings tab first." };
+  }
+  try {
+    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${FILE_PATH}?ref=${BRANCH}`, {
+      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+    });
+    if (!getRes.ok) throw new Error(`Could not read current file (${getRes.status})`);
+    const getJson = await getRes.json();
+    const decoded = decodeURIComponent(escape(atob(getJson.content.replace(/\n/g, ""))));
+    const locations = JSON.parse(decoded);
+
+    if (locations.some((l) => l.name === newLoc.name)) {
+      return { success: false, error: `A location named "${newLoc.name}" already exists — edit it from Settings instead of adding a duplicate.` };
+    }
+
+    locations.push(newLoc);
+    const content = JSON.stringify(locations, null, 2) + "\n";
+    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${FILE_PATH}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${conn.token}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: `Add location "${newLoc.name}" from Location tab preview`,
+        content: utf8ToBase64(content),
+        sha: getJson.sha,
+        branch: BRANCH,
+      }),
+    });
+    if (!putRes.ok) {
+      const errBody = await putRes.json().catch(() => ({}));
+      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
+    }
+    return { success: true };
+  } catch (err) {
+    console.error("saveNewLocationToGitHub failed:", err);
+    return { success: false, error: err.message };
+  }
+}
+
 // --- WillyWeather search / candidate picker (shared) -----------------------
 //
 // Originally lived only in locationsadmin.js (the Settings tab's "click map
