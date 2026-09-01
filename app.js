@@ -62,8 +62,10 @@ async function init() {
   // before this, it just wasn't being read back on load until now.
   const saved = localStorage.getItem("selectedLocation");
   if (saved && state.rowsByLocation[saved]) {
-    renderLocation(saved);
+    // Panel visible BEFORE rendering the chart into it, not after — see
+    // the comment on this same ordering in selectLocationByKey below.
     showLocationHoverPanel();
+    renderLocation(saved);
   }
 }
 
@@ -74,8 +76,17 @@ async function init() {
 // location now, so this is the map's marker-click handler in all but name.
 function selectLocationByKey(key) {
   localStorage.setItem("selectedLocation", key);
-  renderLocation(key);
+  // Show the panel FIRST, then render — a canvas inside a display:none
+  // ancestor measures as zero width/height, and Chart.js reads that
+  // measurement at construction time (new Chart(canvas, ...), inside
+  // renderLocation -> renderCharts). Rendering into a chart that was
+  // built against a 0x0 canvas and only fixed up later by Chart.js's own
+  // internal resize-observer catching up produced exactly the "graph
+  // looks lifted, weird space on the right" symptoms reported — this
+  // ordering avoids ever handing Chart.js a hidden canvas to measure in
+  // the first place, rather than relying on it to self-correct after.
   showLocationHoverPanel();
+  renderLocation(key);
 }
 
 /**
@@ -207,6 +218,16 @@ function renderCharts(rows, loc) {
   } else {
     chartWrap.style.width = "";
   }
+  // Force layout before Chart.js measures this canvas — same reasoning,
+  // and same fix, as week-new.js's own "void built.chartWrap.offsetHeight"
+  // before rendering into a row: a canvas can measure as zero/stale size
+  // if Chart.js reads it before the browser has actually settled layout,
+  // which the frame.style.display and chartWrap.style.width changes just
+  // above both trigger. Reading offsetHeight forces the browser to
+  // actually apply pending layout changes synchronously before the next
+  // line runs, rather than leaving them queued for whenever it would
+  // otherwise next repaint.
+  void chartWrap.offsetHeight;
   // Scrolling back to the start on every new render (a fresh location, or
   // the same one re-rendering) — otherwise a location switch could leave
   // the new graph scrolled to wherever the PREVIOUS location's view
