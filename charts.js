@@ -1528,7 +1528,7 @@ function buildSessionSpanPlugin(spans) {
   };
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes, hideValueAxes = false }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -1687,7 +1687,10 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       buildTideExtremaPlugin(rows),
       buildTooltipCrosshairPlugin(rows),
       // Skipped in compact mode — nothing to label when there are no axes.
-      ...(compact ? [] : [buildAxisUnitLabelsPlugin()]),
+      // Also skipped when hideValueAxes alone is set (x-axis still shows,
+      // but the °C/km/h axes these labels annotate don't) — same reasoning,
+      // just for a narrower case than full compact mode.
+      ...(compact || hideValueAxes ? [] : [buildAxisUnitLabelsPlugin()]),
     ],
     options: {
       responsive: true,
@@ -1764,9 +1767,9 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
         // directly at the top of each axis instead, by buildAxisUnitLabelsPlugin
         // below, using space already reserved for the day heading rather
         // than adding new margin.
-        yTemp: { position: "left", min: -5, max: 40, display: !compact, title: { display: false } },
+        yTemp: { position: "left", min: -5, max: 40, display: !compact && !hideValueAxes, title: { display: false } },
         yRain: { display: false, min: -10, max: 100 },
-        yWind: { position: "right", min: -5, max: 50, display: !compact, grid: { drawOnChartArea: false }, title: { display: false } },
+        yWind: { position: "right", min: -5, max: 50, display: !compact && !hideValueAxes, grid: { drawOnChartArea: false }, title: { display: false } },
         yTide: {
           // Always hidden — the filled tide shape on the chart already
           // conveys high/low visually; a numeric axis for it isn't needed,

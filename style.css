@@ -132,7 +132,7 @@ main {
 .location-hover-panel-chart-wrap {
   position: relative;
   width: 100%;
-  height: 260px;
+  height: 420px;
 }
 
 .location-hover-panel-chart-wrap canvas {

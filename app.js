@@ -38,6 +38,16 @@ async function init() {
   document.getElementById("conditionsChart").addEventListener("click", openChartModal);
   document.getElementById("btnCloseChartModal").addEventListener("click", closeChartModal);
   document.getElementById("btnCloseHoverPanel").addEventListener("click", hideLocationHoverPanel);
+
+  // Restores and shows whichever location was last viewed, rather than
+  // starting on a bare map every visit — the selection was already being
+  // saved to localStorage on every pick (see selectLocationByKey) even
+  // before this, it just wasn't being read back on load until now.
+  const saved = localStorage.getItem("selectedLocation");
+  if (saved && state.rowsByLocation[saved]) {
+    renderLocation(saved);
+    showLocationHoverPanel();
+  }
 }
 
 // Shared by the map's marker clicks (both the direct single-type case and
@@ -52,14 +62,11 @@ function selectLocationByKey(key) {
 }
 
 /**
- * The summary+graph panel that floats over the map on marker click (see
- * .location-hover-panel, style.css) — hidden by default (nothing selected
- * yet) and on every page load, even if a location was selected last visit;
- * showing it again requires an actual marker click, matching "hide the
- * graph until I click a location" rather than restoring previous state
- * automatically. The selection itself still persists to localStorage
- * (harmless, and available if a future "remember last view" feature wants
- * it) — only the panel's visibility doesn't.
+ * The graph panel that floats over the map on marker click (see
+ * .location-hover-panel, style.css). Also shown automatically on page
+ * load for whichever location was last viewed (see the end of init()) —
+ * the localStorage persistence in selectLocationByKey was already there
+ * before that was wired up, it just wasn't being read back yet.
  */
 function showLocationHoverPanel() {
   document.getElementById("locationHoverPanel").style.display = "block";
@@ -176,6 +183,11 @@ function renderCharts(rows, loc) {
     minTideHeight: loc ? loc.minTideHeight : null,
     compact: false,
     tideOffsetMinutes: loc ? loc.tideOffset : null,
+    // The floating panel is a quick-glance preview, not the detailed view
+    // (tapping it opens the full-axes fullscreen modal below for that) —
+    // the °C/km/h axis numbers aren't very readable at this size anyway,
+    // and hiding them frees up real width/height for the plot itself.
+    hideValueAxes: true,
   });
   // Full axes shown directly here too now, not just once the modal opens —
   // no more stripped-down "compact" version anywhere on the site. Tapping
