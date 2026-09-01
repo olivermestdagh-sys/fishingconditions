@@ -2565,8 +2565,16 @@ function xValFromEvent(chart, e) {
  * fresh set of duplicate listeners to that same canvas on every render.
  * Callers whose canvas genuinely is recreated each time (Week (graphs),
  * a fresh canvas per row) can just pass a trivial () => chart closure.
+ *
+ * opts.suppressQuickTap (default false): when true, a plain quick tap
+ * NEVER does anything, even while armed from a previous hold — normally
+ * (Live, Week (graphs)) a quick tap while armed moves the tooltip to the
+ * new position, matching Chart.js's own default tap behavior; the
+ * Location tab's inline preview opts out of that, since a plain single
+ * tap there is meant to be a complete no-op under every circumstance.
  */
-function wireHoldToShowTooltip(getChart, canvas) {
+function wireHoldToShowTooltip(getChart, canvas, opts = {}) {
+  const { suppressQuickTap = false } = opts;
   const HOLD_MS = 2000;
   const MOVE_CANCEL_PX = 10;
   let pressTimer = null;
@@ -2639,6 +2647,7 @@ function wireHoldToShowTooltip(getChart, canvas) {
     const firedAsHold = pressTimer == null;
     clearPressTimer();
     if (firedAsHold) return; // the timer callback above already handled this press
+    if (suppressQuickTap) return; // a plain quick tap is a complete no-op here — see opts.suppressQuickTap above
     if (armed) showTooltipAt(e); // ordinary quick tap while armed — move the tooltip, same as Chart.js's own default tap behavior
     // else: not armed yet — a plain quick tap does nothing, exactly the suppression that was asked for.
   });

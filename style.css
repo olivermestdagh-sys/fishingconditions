@@ -167,7 +167,22 @@ main {
    prevents that, same principle as every other chart-wrap on this site. */
 .location-hover-panel-chart-frame {
   position: relative;
-  height: 302px; /* 378px scaled down another ~20% per request (378*0.8=302.4) */
+  height: 302px; /* desktop / tablet — 378px scaled down ~20% (378*0.8=302.4) */
+}
+
+/* Same 900px threshold as isMobileDevice in app.js (Math.min(innerWidth,
+   innerHeight) <= 900) — the two aren't literally the same check (this is
+   a pure viewport-width media query; that also considers height, and
+   reacts to live window resizes a media query wouldn't need JS for) but
+   are meant to agree on "is this a phone" in practice. Keep them in sync
+   if either threshold ever changes. Mobile gets a further ~20% off the
+   already-reduced desktop height (302px), per request — desktop doesn't,
+   since "show the whole graph, no scrolling" was specifically a desktop
+   ask, not a further height cut. */
+@media (max-width: 900px) {
+  .location-hover-panel-chart-frame {
+    height: 242px; /* 302 * 0.8 = 241.6 */
+  }
 }
 
 .location-hover-panel-chart-frame:fullscreen,

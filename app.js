@@ -52,7 +52,7 @@ async function init() {
   // frame across every location switch (destroying/recreating the Chart.js
   // instance each time, never the DOM elements themselves), so wiring
   // these per-render would stack up duplicate listeners.
-  wireHoldToShowTooltip(() => state.chart, document.getElementById("conditionsChart"));
+  wireHoldToShowTooltip(() => state.chart, document.getElementById("conditionsChart"), { suppressQuickTap: true });
   setupFullscreenToggle("locationChartFrame");
   setupDragToScroll(document.getElementById("locationChartScroll"));
 
@@ -190,21 +190,29 @@ function renderCharts(rows, loc) {
   frame.style.display = "block";
   emptyState.style.display = "none";
 
-  // Explicit pixel width, proportional to the real time range being shown
-  // (see PIXELS_PER_HOUR above) — set BEFORE renderConditionsChart runs,
-  // since Chart.js measures its canvas's parent's width at construction
-  // time to decide the canvas's own size (same reason Week (graphs)'s row
-  // charts set their wrapper's width right before rendering into it, not
-  // after). Without this, the graph would render squashed to whatever
-  // narrow width the wrap happened to have first, then never widen even
-  // once this line did run.
-  const totalHours = Math.max(1, (rows[rows.length - 1]._t - rows[0]._t) / 3600000);
-  chartWrap.style.width = Math.round(totalHours * PIXELS_PER_HOUR) + "px";
+  // Mobile keeps the wide, un-squashed, horizontally-scrollable graph
+  // (explicit pixel width proportional to the real time range — see
+  // PIXELS_PER_HOUR above), set BEFORE renderConditionsChart runs, since
+  // Chart.js measures its canvas's parent's width at construction time to
+  // decide the canvas's own size (same reason Week (graphs)'s row charts
+  // set their wrapper's width right before rendering into it, not after).
+  // Desktop instead shows the whole graph with no scrolling at all —
+  // clearing any previous inline width here lets it fall back to CSS's
+  // min-width:100%, which (with nothing else constraining it wider) means
+  // exactly 100% of the visible frame, Chart.js squashing the data to fit
+  // exactly like it did before the wide/scrollable mobile behavior existed.
+  if (isMobileDevice) {
+    const totalHours = Math.max(1, (rows[rows.length - 1]._t - rows[0]._t) / 3600000);
+    chartWrap.style.width = Math.round(totalHours * PIXELS_PER_HOUR) + "px";
+  } else {
+    chartWrap.style.width = "";
+  }
   // Scrolling back to the start on every new render (a fresh location, or
   // the same one re-rendering) — otherwise a location switch could leave
   // the new graph scrolled to wherever the PREVIOUS location's view
   // happened to be left, which is disorienting since "now" is always meant
-  // to be near the start of the visible window.
+  // to be near the start of the visible window. A no-op on desktop, since
+  // there's nothing to scroll there in the first place.
   document.getElementById("locationChartScroll").scrollLeft = 0;
 
   const sunTimes = (loc && state.data.sunTimes && state.data.sunTimes[loc.name]) || [];
@@ -216,7 +224,14 @@ function renderCharts(rows, loc) {
     tideMaxObserved: loc ? loc.tideMaxObserved : null,
     moonPhases: state.data.moonPhases,
     minTideHeight: loc ? loc.minTideHeight : null,
-    compact: false,
+    // true (not the site's usual false) purely to disable
+    // renderConditionsChart's own legend-toggle-on-click listener — every
+    // OTHER thing compact:true would normally also change (hiding axes,
+    // skipping buildAxisUnitLabelsPlugin) is already independently covered
+    // by hideValueAxes below, so this has no other effect here. Needed so
+    // a plain single click/tap on this graph is a genuine no-op, matching
+    // suppressQuickTap below for the tooltip gesture.
+    compact: true,
     tideOffsetMinutes: loc ? loc.tideOffset : null,
     // The floating panel is a quick-glance view — the °C/km/h axis numbers
     // aren't very readable at this size anyway, and hiding them frees up
