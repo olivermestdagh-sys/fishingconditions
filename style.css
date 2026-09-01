@@ -126,6 +126,23 @@ main {
    needed. The badges/stats that used to sit above it in a separate
    summary card are gone; the name moved up to take that spot instead. */
 
+.location-hover-panel-heading-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  /* Leaves clear room for .location-hover-panel-close (top:10px; right:10px;
+     32px wide) sitting over this same row — without this, "Tap the graph…"
+     could sit directly under the × on a narrow screen. */
+  padding-right: 36px;
+  margin-bottom: 10px;
+}
+
+.location-hover-panel-heading-row h2 {
+  margin: 0;
+}
+
 #hoverPanelEmptyState {
   margin: 0;
 }
