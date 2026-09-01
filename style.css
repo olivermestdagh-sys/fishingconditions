@@ -141,6 +141,12 @@ main {
 
 .location-hover-panel-heading-row h2 {
   margin: 0;
+  /* Smaller than the shared .chart-section h2 default (0.95rem) — this
+     heading now competes for space with "Tap the graph…" on the same
+     line, and with overlayHeading (see charts.js) reclaiming space inside
+     the graph itself too, the panel overall needed to read as more
+     compact end to end, not just below this row. */
+  font-size: 0.85rem;
 }
 
 #hoverPanelEmptyState {

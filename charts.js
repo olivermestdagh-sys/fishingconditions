@@ -1208,7 +1208,7 @@ function drawMoonIcon(ctx, cx, cy, r, illuminationPct, waxing) {
   ctx.restore();
 }
 
-function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHeading = true, showSunTimes = true) {
+function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHeading = true, showSunTimes = true, overlayHeading = false) {
   // Group rows by calendar day, tracking each day's exact start/end timestamp — bands
   // are positioned by real elapsed time (via the linear x-axis), not by row index, so
   // they're pixel-accurate regardless of how densely each day happens to be sampled.
@@ -1371,20 +1371,47 @@ function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHea
           if (drawX - halfTextWidth < left) drawX = left + halfTextWidth;
           if (drawX + halfTextWidth > right) drawX = right - halfTextWidth;
 
-          ctx.fillText(headingText, drawX, top - 16);
+          // overlayHeading draws INSIDE the plot area, right at its top
+          // edge, instead of in the reserved padding strip above it (see
+          // the smaller layout.padding.top used alongside this in
+          // renderConditionsChart) — the Location tab's inline preview
+          // graph is the only caller that passes this, specifically to
+          // reclaim that reserved space rather than leave it blank. Text
+          // now sits over whatever's plotted there, so a small translucent
+          // backdrop behind it keeps it legible against a crossing line
+          // rather than relying on line/text colours never colliding.
+          if (overlayHeading) {
+            const textHeight = fontSize + 2;
+            ctx.save();
+            ctx.fillStyle = "rgba(255,255,255,0.78)";
+            ctx.fillRect(drawX - halfTextWidth - 3, top + 1, halfTextWidth * 2 + 6, textHeight);
+            ctx.restore();
+            ctx.fillStyle = "#1f4e78";
+            ctx.fillText(headingText, drawX, top + 2);
+          } else {
+            ctx.fillText(headingText, drawX, top - 16);
+          }
         }
 
-        // Moon phase, one icon per day, drawn ABOVE the day heading (needs
-        // its own reserved space — see the increased layout.padding.top
-        // where this chart gets built). Custom-drawn to the exact real
+        // Moon phase, one icon per day. Custom-drawn to the exact real
         // illumination percentage, not snapped to one of 8 fixed pictures.
         // Gated on moonPhases being passed at all (not on showDayHeading) —
         // callers that want the icon suppressed simply pass moonPhases: null,
-        // same as they always could.
+        // same as they always could. Normally drawn ABOVE the day heading
+        // (needs its own reserved space — see the increased
+        // layout.padding.top where this chart gets built) — but alongside
+        // overlayHeading, drawn just to the right of the date text instead,
+        // both sharing the same reclaimed strip at the very top of the
+        // plot area rather than each needing their own.
         const moonInfo = moonPhases && moonPhases[g.key];
         if (moonInfo && moonInfo.illumination != null) {
           const waxing = moonInfo.phase ? !moonInfo.phase.startsWith("Waning") : true;
-          drawMoonIcon(ctx, (xStart + xEnd) / 2, top - 28, 9, moonInfo.illumination, waxing);
+          if (overlayHeading) {
+            const moonX = Math.min((xStart + xEnd) / 2 + (showDayHeading ? 46 : 0), right - 10);
+            drawMoonIcon(ctx, moonX, top + 9, 7, moonInfo.illumination, waxing);
+          } else {
+            drawMoonIcon(ctx, (xStart + xEnd) / 2, top - 28, 9, moonInfo.illumination, waxing);
+          }
         }
       });
       ctx.restore();
@@ -1528,7 +1555,7 @@ function buildSessionSpanPlugin(spans) {
   };
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes, hideValueAxes = false }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes, hideValueAxes = false, overlayHeading = false }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -1680,7 +1707,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
     type: "line",
     data: { datasets },
     plugins: [
-      buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHeading, showSunTimes),
+      buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHeading, showSunTimes, overlayHeading),
       buildSessionSpanPlugin(sessionSpanList),
       buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons),
       buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime),
@@ -1746,7 +1773,12 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       // clipped by) the canvas edge instead of being padded clear of it —
       // a minor cosmetic cost against every row lining up correctly with
       // the shared header, which matters far more here.
-      layout: { padding: { top: showDayHeading || moonPhases ? 40 : 8 }, autoPadding: false },
+      // Also shrunk to the small (8) value, regardless of showDayHeading/
+      // moonPhases, when overlayHeading is set — that draws the day
+      // heading/moon icon INSIDE the plot area instead of in this reserved
+      // strip above it, specifically to reclaim the space this padding
+      // would otherwise set aside. See buildDayBandPlugin.
+      layout: { padding: { top: overlayHeading ? 8 : showDayHeading || moonPhases ? 40 : 8 }, autoPadding: false },
       interaction: { mode: "index", intersect: false },
       scales: {
         x: {
