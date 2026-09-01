@@ -3,10 +3,18 @@ const DATA_URL = "data/conditions.json";
 // parseNaive, dayKeyOf, formatDayHeading, dirToArrowRotation, windColor, fmtChartTick,
 // buildDayBandPlugin, renderConditionsChart, CONDITION_COLORS, wireHoldToShowTooltip,
 // setupFullscreenToggle, setupDragToScroll, fetchWillyWeatherCandidates,
-// showLocationCandidatePicker, and fetchWillyWeatherPreviewRows all come from charts.js
-// (loaded before this file).
+// showLocationCandidatePicker, fetchWillyWeatherPreviewRows, attachConditionScores,
+// SHORE_OPTIONS, and TYPE_OPTIONS all come from charts.js (loaded before this file).
 
-let state = { data: null, rowsByLocation: {}, chart: null };
+let state = {
+  data: null, rowsByLocation: {}, chart: null,
+  // Only meaningful while the hover panel is showing a PREVIEW (see
+  // previewLocationOnMap) — previewRows is what recalcPreviewCondition
+  // re-scores and re-renders on every Shore/Type change, without ever
+  // needing another network round trip.
+  previewRows: null, previewSunTimes: null, previewLoc: null,
+  previewShore: null, previewType: "Kayak",
+};
 
 // Text hoverPanelEmptyState starts with in the HTML — captured once here so
 // the preview flow (which temporarily repurposes this same element for
@@ -54,6 +62,8 @@ async function init() {
   renderLocationMap();
 
   document.getElementById("btnCloseHoverPanel").addEventListener("click", hideLocationHoverPanel);
+  document.getElementById("previewShoreSelect").addEventListener("change", recalcPreviewCondition);
+  document.getElementById("previewTypeSelect").addEventListener("change", recalcPreviewCondition);
 
   // Same gesture set as Week (graphs) and Live, all shared from charts.js:
   // hold 2s to toggle the tooltip, double-tap/double-click to toggle real
@@ -184,6 +194,7 @@ async function onLocationMapClickForPreview(lat, lng) {
     showLocationHoverPanel();
     document.getElementById("hoverPanelLocationName").textContent = "Preview";
     showPreviewNote(false);
+    showPreviewControls(false);
     document.getElementById("locationChartFrame").style.display = "none";
     const emptyState = document.getElementById("hoverPanelEmptyState");
     emptyState.textContent = "No WillyWeather location found near that point — try clicking somewhere closer to the coast.";
@@ -214,23 +225,28 @@ async function previewLocationOnMap(candidate, clickLat, clickLng) {
   showLocationHoverPanel();
   document.getElementById("hoverPanelLocationName").textContent = `${candidate.name} (preview)`;
   showPreviewNote(true);
+  showPreviewControls(false);
   document.getElementById("locationChartFrame").style.display = "none";
   const emptyState = document.getElementById("hoverPanelEmptyState");
   emptyState.textContent = "Loading preview…";
   emptyState.style.display = "block";
 
-  // The clicked point's own lat/lng, not the candidate's WillyWeather
-  // station/locality centroid, feeds Open-Meteo's pressure/marine calls —
-  // same "the person's own precision beats a station centroid" reasoning
-  // already established for the Settings map's click-to-add flow (see
-  // createNewLocationAt, locationsadmin.js).
-  const preview = await fetchWillyWeatherPreviewRows(candidate.id, clickLat, clickLng);
+  // clickLat/clickLng (the person's own precision) feed Open-Meteo's
+  // pressure/marine calls, same "the person's own precision beats a
+  // station centroid" reasoning already established for the Settings
+  // map's click-to-add flow (see createNewLocationAt, locationsadmin.js).
+  // candidate.lat/candidate.lng are passed SEPARATELY — the shore-
+  // direction guess deliberately uses WillyWeather's OWN resolved
+  // coordinate instead (Oliver's own call), not the click.
+  const preview = await fetchWillyWeatherPreviewRows(candidate.id, clickLat, clickLng, candidate.lat, candidate.lng);
   if (!preview || preview.rows.length === 0) {
     emptyState.textContent = "Couldn't load a preview for this spot — WillyWeather or Open-Meteo data wasn't available just now.";
     return;
   }
 
-  const previewLoc = {
+  state.previewRows = preview.rows;
+  state.previewSunTimes = preview.sunTimes;
+  state.previewLoc = {
     name: candidate.name,
     tideMaxObserved: preview.tideMaxObserved,
     // No saved config exists yet for a clicked-but-not-added spot, so
@@ -240,7 +256,71 @@ async function previewLocationOnMap(candidate, clickLat, clickLng) {
     minTideHeight: null,
     tideOffset: null,
   };
-  renderCharts(preview.rows, previewLoc, preview.sunTimes);
+
+  // Type defaults to Kayak regardless of tidal-ness (Oliver's call) —
+  // Shore only gets an auto-guessed starting value when WillyWeather
+  // actually returned tide data for this spot (preview.shoreGuess is
+  // already null otherwise — see buildPreviewRows, charts.js). Either
+  // way it's just a STARTING value; both are editable via the controls
+  // this populates below, and Location Condition recalculates live off
+  // whatever the person leaves them at.
+  state.previewType = "Kayak";
+  state.previewShore = preview.shoreGuess;
+
+  populatePreviewControls(preview.tidal, preview.shoreGuess);
+  recalcPreviewCondition();
+}
+
+/**
+ * Fills in and shows the Shore/Type dropdowns above the preview graph —
+ * SHORE_OPTIONS/TYPE_OPTIONS come from charts.js (shared with
+ * locationsadmin.js's own location editor, same lists). Doesn't wire
+ * their change listeners here — those are wired ONCE in init() (see
+ * onPreviewShoreOrTypeChange), same reasoning as every other listener
+ * wired once against this page's reused DOM rather than per-render.
+ */
+function populatePreviewControls(tidal, shoreGuess) {
+  const shoreSelect = document.getElementById("previewShoreSelect");
+  const typeSelect = document.getElementById("previewTypeSelect");
+
+  shoreSelect.innerHTML =
+    `<option value="">— pick shore —</option>` +
+    SHORE_OPTIONS.map((s) => `<option value="${s}">${s}</option>`).join("");
+  shoreSelect.value = shoreGuess || "";
+
+  typeSelect.innerHTML = TYPE_OPTIONS.map((t) => `<option value="${t}">${t}</option>`).join("");
+  typeSelect.value = state.previewType;
+
+  const hint = document.getElementById("previewShoreHint");
+  if (!tidal) {
+    hint.textContent = "No tide data for this spot — shore direction wasn't auto-detected; pick one to see Location Condition.";
+  } else if (shoreGuess) {
+    hint.textContent = "Auto-detected from nearby coastline data — double-check it, and change it if it looks wrong.";
+  } else {
+    hint.textContent = "Couldn't auto-detect a shore direction here — pick one to see Location Condition.";
+  }
+
+  showPreviewControls(true);
+}
+
+function showPreviewControls(show) {
+  document.getElementById("hoverPanelPreviewControls").style.display = show ? "flex" : "none";
+}
+
+/**
+ * Wired once in init() to both the Shore and Type <select>s — re-scores
+ * Location Condition against whatever's already been fetched (no network
+ * call needed, see attachConditionScores, charts.js) and re-renders. A
+ * no-op if there's no active preview (state.previewRows unset), which can
+ * only happen if these somehow fired while hidden — defensive, not
+ * expected in normal use.
+ */
+function recalcPreviewCondition() {
+  if (!state.previewRows) return;
+  state.previewShore = document.getElementById("previewShoreSelect").value || null;
+  state.previewType = document.getElementById("previewTypeSelect").value;
+  attachConditionScores(state.previewRows, state.previewType, state.previewShore);
+  renderCharts(state.previewRows, state.previewLoc, state.previewSunTimes);
 }
 
 function showPreviewNote(show) {
@@ -276,9 +356,11 @@ function renderLocation(key) {
 
   document.getElementById("hoverPanelLocationName").textContent = loc ? loc.name : "";
   // A real, saved location's own graph — not a preview (see
-  // previewLocationOnMap) — so the preview note/badge never lingers onto
-  // it if the panel was last showing a preview.
+  // previewLocationOnMap) — so the preview note/badge/controls never
+  // linger onto it if the panel was last showing a preview.
   showPreviewNote(false);
+  showPreviewControls(false);
+  state.previewRows = null;
   renderCharts(rows, loc);
 }
 

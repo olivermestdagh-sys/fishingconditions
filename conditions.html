@@ -32,7 +32,16 @@
       <div class="location-hover-panel-heading-row">
         <h2 id="hoverPanelLocationName">&nbsp;</h2>
       </div>
-      <p id="hoverPanelPreviewNote" class="footnote" style="display:none;margin:0 0 8px;">Preview only — raw WillyWeather/Open-Meteo forecast for this exact point. No saved location config yet, so Location/Fishing Condition scoring isn't shown.</p>
+      <p id="hoverPanelPreviewNote" class="footnote" style="display:none;margin:0 0 8px;">Preview only — live WillyWeather/Open-Meteo forecast for this exact point, not a saved location. Condition scoring below is calculated from the Shore/Type you set, not a saved config.</p>
+      <div id="hoverPanelPreviewControls" class="location-hover-panel-preview-controls" style="display:none;">
+        <label class="preview-control-label">Shore
+          <select id="previewShoreSelect" class="preview-control-select"></select>
+        </label>
+        <label class="preview-control-label">Type
+          <select id="previewTypeSelect" class="preview-control-select"></select>
+        </label>
+        <p id="previewShoreHint" class="footnote preview-shore-hint"></p>
+      </div>
       <div id="locationChartFrame" class="location-hover-panel-chart-frame">
         <div class="graph-gesture-hint" aria-hidden="true">
           <div>Double-tap to expand</div>
