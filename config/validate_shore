@@ -37,21 +37,24 @@ not assumed). So for each location:
      across everything returned, to the location's own lat/lng.
   3. Take that segment's own directional bearing (from its first node to
      its second, in the way's stored order).
-  4. Rotate +90° (to the RIGHT of that direction of travel) — per the
-     land-left/water-right convention, that's the seaward direction, i.e.
-     what this site's "shore faces X" field means (see the note below on
-     how that was confirmed).
+  4. Rotate -90° (to the LEFT of that direction of travel) — per the
+     land-left/water-right convention, that's the landward/inland
+     direction, i.e. what this site's "shore" field means (`shore` =
+     which way is the land, confirmed directly by Oliver — see the
+     confidence note below; NOT the water direction the Settings page's
+     "Shore faces" label might suggest at a glance).
   5. Round to the nearest of the 16 compass points already used
      everywhere else in this codebase.
 
-CONFIDENCE NOTE ON THE "shore" FIELD'S OWN MEANING: this script assumes
-`shore` = the compass direction the coastline/beach opens out toward,
-i.e. the water direction (matching the Settings page's own "Shore faces"
-label). This was cross-checked against Williamstown Beach's own saved
-shore="N" — it does front Port Phillip Bay to its north — but it's still
-worth Oliver double-checking, since getting this backwards would flip
-every comparison in this script 180° and make a genuinely working
-algorithm look like a broken one (or vice versa).
+CONFIDENCE NOTE ON THE "shore" FIELD'S OWN MEANING: `shore` = the compass
+direction of the LAND side at that point (confirmed directly by Oliver,
+overriding this script's earlier assumption based on the Settings page's
+"Shore faces" label, which reads the opposite way but isn't what the
+field actually means) — not the water direction. That matches
+land_based_wind_tier()'s own scoring logic in fetch_conditions.py: wind
+blowing FROM the `shore` direction is classified as "straight offshore"
+(clean, good conditions), which only makes sense if `shore` points
+inland — wind FROM inland blows OUT toward the water, i.e. offshore.
 
 WHERE THIS CAN GENUINELY BE WRONG, NOT JUST IMPRECISE
 -------------------------------------------------------
@@ -191,12 +194,14 @@ def guess_shore_direction(lat, lng):
     if best is None:
         return None, None
     distance_m, seg_bearing = best
-    # Water is on the RIGHT of the way's own direction (land-left/water-right
-    # is OpenStreetMap's documented coastline convention) — +90° from the
-    # segment's bearing points seaward, which is what "shore faces X" means
-    # here (see the confidence note in this file's module docstring).
-    water_bearing = (seg_bearing + 90) % 360
-    return degrees_to_compass(water_bearing), distance_m
+    # Land is on the LEFT of the way's own direction (land-left/water-right
+    # is OpenStreetMap's documented coastline convention) — -90° from the
+    # segment's bearing points inland, which is what `shore` means here
+    # (confirmed directly by Oliver — see the confidence note in this
+    # file's module docstring; it's the LAND direction, not the water
+    # direction the Settings page's "Shore faces" label might suggest).
+    land_bearing = (seg_bearing - 90) % 360
+    return degrees_to_compass(land_bearing), distance_m
 
 
 def main():
