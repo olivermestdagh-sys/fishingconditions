@@ -4,7 +4,8 @@ const DATA_URL = "data/conditions.json";
 // buildDayBandPlugin, renderConditionsChart, CONDITION_COLORS, wireHoldToShowTooltip,
 // setupFullscreenToggle, setupDragToScroll, fetchWillyWeatherCandidates,
 // showLocationCandidatePicker, fetchWillyWeatherPreviewRows, attachConditionScores,
-// SHORE_OPTIONS, and TYPE_OPTIONS all come from charts.js (loaded before this file).
+// SHORE_OPTIONS, TYPE_OPTIONS, getConnection, defaultTypeConfig, and
+// saveNewLocationToGitHub all come from charts.js (loaded before this file).
 
 let state = {
   data: null, rowsByLocation: {}, chart: null,
@@ -64,6 +65,7 @@ async function init() {
   document.getElementById("btnCloseHoverPanel").addEventListener("click", hideLocationHoverPanel);
   document.getElementById("previewShoreSelect").addEventListener("change", recalcPreviewCondition);
   document.getElementById("previewTypeSelect").addEventListener("change", recalcPreviewCondition);
+  document.getElementById("btnAddPreviewAsLocation").addEventListener("click", onAddPreviewAsLocation);
 
   // Same gesture set as Week (graphs) and Live, all shared from charts.js:
   // hold 2s to toggle the tooltip, double-tap/double-click to toggle real
@@ -195,6 +197,7 @@ async function onLocationMapClickForPreview(lat, lng) {
     document.getElementById("hoverPanelLocationName").textContent = "Preview";
     showPreviewNote(false);
     showPreviewControls(false);
+    hideAddPermanentButton();
     document.getElementById("locationChartFrame").style.display = "none";
     const emptyState = document.getElementById("hoverPanelEmptyState");
     emptyState.textContent = "No WillyWeather location found near that point — try clicking somewhere closer to the coast.";
@@ -256,6 +259,16 @@ async function previewLocationOnMap(candidate, clickLat, clickLng) {
     minTideHeight: null,
     tideOffset: null,
   };
+  // Kept for onAddPreviewAsLocation below — building a real
+  // config/locations.json entry needs the WillyWeather candidate's own
+  // id/name/region/state, the click's own lat/lng (same "person's own
+  // precision beats a station centroid" reasoning as everywhere else —
+  // see createNewLocationAt, locationsadmin.js), and whether this preview
+  // turned out tidal, all of which only exist right here, right now.
+  state.previewCandidate = candidate;
+  state.previewClickLat = clickLat;
+  state.previewClickLng = clickLng;
+  state.previewTidal = preview.tidal;
 
   // Type defaults to Kayak regardless of tidal-ness (Oliver's call) —
   // Shore only gets an auto-guessed starting value when WillyWeather
@@ -268,6 +281,7 @@ async function previewLocationOnMap(candidate, clickLat, clickLng) {
   state.previewShore = preview.shoreGuess;
 
   populatePreviewControls(preview.tidal, preview.shoreGuess);
+  showAddPermanentButton();
   recalcPreviewCondition();
 }
 
@@ -328,6 +342,94 @@ function showPreviewNote(show) {
   if (el) el.style.display = show ? "block" : "none";
 }
 
+/** True only when a GitHub connection already exists (same "ghConnection"
+ * localStorage entry the Settings tab's Connect button writes — see
+ * getConnection, charts.js) — this page never asks for a token itself, it
+ * just checks whether one's already sitting there from a Settings visit. */
+function canEditLocations() {
+  const conn = getConnection();
+  return !!(conn && conn.owner && conn.repo && conn.token);
+}
+
+/**
+ * Shows/resets the "Add as permanent location" button for the CURRENT
+ * preview — only ever shown if canEditLocations() (no point offering a
+ * save action that would just fail with "not connected"). Called once per
+ * fresh preview (previewLocationOnMap) so a stale "✓ Added" from a
+ * PREVIOUS preview never lingers onto a new one.
+ */
+function showAddPermanentButton() {
+  const btn = document.getElementById("btnAddPreviewAsLocation");
+  btn.style.display = canEditLocations() ? "block" : "none";
+  btn.disabled = false;
+  btn.textContent = "➕ Add as permanent location";
+  showPreviewAddStatus("", false);
+}
+
+function hideAddPermanentButton() {
+  document.getElementById("btnAddPreviewAsLocation").style.display = "none";
+  showPreviewAddStatus("", false);
+}
+
+function showPreviewAddStatus(text, isError) {
+  const el = document.getElementById("previewAddStatus");
+  el.textContent = text;
+  el.style.color = isError ? "#dc2626" : "";
+  el.style.display = text ? "block" : "none";
+}
+
+/**
+ * Saves the CURRENT preview as a real config/locations.json entry (see
+ * saveNewLocationToGitHub, charts.js) — the same minimal shape
+ * createNewLocationAt (locationsadmin.js's own map-click-to-add flow)
+ * builds: name/shore/types/lat/lng plus the WillyWeather id/name/region/
+ * state cache, so this location's very first scheduled run already has a
+ * confirmed WillyWeather id and never needs to search for it at all. The
+ * one thing createNewLocationAt can't supply that this CAN: `tidal` —
+ * this preview already determined that live (see buildPreviewRows,
+ * charts.js), where the manual click-to-add flow has no way to know it
+ * until the first scheduled run's own WillyWeather response comes back.
+ * Requires a Shore to already be picked — every location needs one (same
+ * rule validateLocations, locationsadmin.js, already enforces before a
+ * Settings save), and a preview with no shore guess and none picked
+ * manually yet has nothing valid to save.
+ */
+async function onAddPreviewAsLocation() {
+  if (!state.previewLoc || !state.previewCandidate) return;
+  if (!state.previewShore) {
+    showPreviewAddStatus("Pick a Shore direction first — every location needs one.", true);
+    return;
+  }
+
+  const btn = document.getElementById("btnAddPreviewAsLocation");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+  showPreviewAddStatus("", false);
+
+  const newLoc = {
+    name: state.previewCandidate.name,
+    shore: state.previewShore,
+    types: [defaultTypeConfig(state.previewType)],
+    lat: state.previewClickLat,
+    lng: state.previewClickLng,
+    tidal: state.previewTidal,
+    willyweatherId: state.previewCandidate.id,
+    willyweatherName: state.previewCandidate.name,
+    willyweatherRegion: state.previewCandidate.region,
+    willyweatherState: state.previewCandidate.state,
+  };
+
+  const result = await saveNewLocationToGitHub(newLoc);
+  if (result.success) {
+    btn.textContent = "✓ Added";
+    showPreviewAddStatus("Saved to config/locations.json. Trigger a data refresh from Settings (or wait for the next scheduled run) to see it with real scored data.", false);
+  } else {
+    btn.disabled = false;
+    btn.textContent = "➕ Add as permanent location";
+    showPreviewAddStatus(result.error, true);
+  }
+}
+
 function groupRowsByLocation() {
   state.rowsByLocation = {};
   for (const row of state.data.rows) {
@@ -360,6 +462,7 @@ function renderLocation(key) {
   // linger onto it if the panel was last showing a preview.
   showPreviewNote(false);
   showPreviewControls(false);
+  hideAddPermanentButton();
   state.previewRows = null;
   renderCharts(rows, loc);
 }

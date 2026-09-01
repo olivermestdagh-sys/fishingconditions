@@ -194,6 +194,17 @@ main {
   margin: 2px 0 0;
 }
 
+/* "Add as permanent location" button (see showAddPermanentButton/
+   onAddPreviewAsLocation, app.js) — full-width, matching the two
+   dropdowns above it, and only ever shown while previewing AND connected
+   to GitHub (see canEditLocations, app.js) — someone just viewing the
+   public site with no GitHub token never sees this at all, same as
+   Settings' own save button is meaningless without a connection. */
+.location-preview-add-btn {
+  width: 100%;
+  margin: 0 0 4px;
+}
+
 /* The whole "graph area" — hint overlay + horizontally-scrolling chart —
    as one fullscreen-able unit (see setupFullscreenToggle, charts.js,
    called on this element's id in app.js), matching how Week (graphs) and

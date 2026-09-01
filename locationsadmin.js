@@ -1,8 +1,17 @@
-const GITHUB_API = "https://api.github.com";
-const FILE_PATH = "config/locations.json";
+// GITHUB_API, FILE_PATH, BRANCH, getConnection, and utf8ToBase64 now live
+// in charts.js (loaded before this file) — the Location tab's own "Add as
+// permanent location" button (see app.js) needed the same GitHub
+// read/write plumbing this file already had, so they're shared rather
+// than duplicated. GROUPS_FILE_PATH and WORKFLOW_FILE stay here — nothing
+// outside this Settings page touches location GROUPS or triggers a data
+// refresh.
 const GROUPS_FILE_PATH = "config/location_groups.json";
-const BRANCH = "main";
 const WORKFLOW_FILE = "update.yml";
+
+// TYPE_TIME_FIELDS and defaultTypeConfig also now live in charts.js —
+// same reasoning, the preview's "Add as permanent location" flow needed
+// to build a real types[] entry with the same default timing fields this
+// page's own "+ Add location"/map-click flows already use.
 
 // WILLYWEATHER_SEARCH_WORKER_URL, fetchWillyWeatherCandidates,
 // showLocationCandidatePicker, and escapeHtml all now live in charts.js
@@ -47,32 +56,6 @@ function typeIconSvg(type, size) {
 // file) — the Location tab's preview scoring needs the same lists to
 // populate its own Shore/Type pickers, so they're shared rather than
 // duplicated. See charts.js's "Preview condition scoring" section.
-
-// Which timing fields apply to each type. Drive time is no longer a static
-// setting here at all — Week Ahead calculates it live from the device's
-// current location. Both types have a "getting to/from the actual spot"
-// step now — paddling for Kayak, walking from the carpark for Land based
-// (a real case: walking along the beach to a specific spot).
-const TYPE_TIME_FIELDS = {
-  Kayak: [
-    { key: "setUp", label: "Set up" },
-    { key: "packUp", label: "Pack up" },
-    { key: "timeToSpot", label: "Time to Spot" },
-    { key: "timeFromSpot", label: "Time From Spot" },
-  ],
-  "Land based": [
-    { key: "setUp", label: "Set up" },
-    { key: "packUp", label: "Pack up" },
-    { key: "timeToSpot", label: "Time to Spot" },
-    { key: "timeFromSpot", label: "Time From Spot" },
-  ],
-};
-
-function defaultTypeConfig(type) {
-  const config = { type };
-  for (const f of TYPE_TIME_FIELDS[type]) config[f.key] = "00:00";
-  return config;
-}
 
 let locations = [];
 let currentSha = null;
@@ -164,10 +147,6 @@ async function loadLocationCoords() {
   }
 }
 
-function utf8ToBase64(str) {
-  return btoa(unescape(encodeURIComponent(str)));
-}
-
 function parseHM(value) {
   const m = String(value || "").match(/^(\d{1,2}):(\d{1,2})$/);
   if (!m) return { h: 0, m: 0 };
@@ -176,14 +155,6 @@ function parseHM(value) {
 
 function formatHM(h, m) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
-
-function getConnection() {
-  try {
-    return JSON.parse(localStorage.getItem("ghConnection") || "null");
-  } catch {
-    return null;
-  }
 }
 
 function setStatus(text, isError) {
