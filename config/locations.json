@@ -564,11 +564,14 @@
     ],
     "lat": -37.55435935391175,
     "lng": 149.7561085224152,
-    "tidal": false,
+    "tidal": true,
     "willyweatherId": 12642,
     "willyweatherName": "Mallacoota",
     "willyweatherRegion": "East Gippsland",
     "willyweatherState": "VIC",
-    "tideMaxObserved": null
+    "tideMaxObserved": null,
+    "locationGroups": [
+      "Mallacoota"
+    ]
   }
 ]
