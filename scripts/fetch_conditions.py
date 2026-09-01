@@ -811,36 +811,119 @@ def process_location(loc):
     # be individually re-saved through the location editor.
     location_is_tidal = loc.get("tidal", True)
 
-    # A location created via the Settings map's "click to add" action
-    # (locationsadmin.js) already carries a real, admin-chosen lat/lng in
-    # config/locations.json — resolve WillyWeather against THAT coordinate
-    # rather than text-searching the name, since a coordinate is
-    # unambiguous where a name string isn't (two spots on opposite sides of
-    # the country can share a name, and a plain text search has no way to
-    # tell them apart). Locations without a stored lat/lng — everything
-    # added before this feature existed, or added via the plain "+ Add
-    # location" button — fall back to the original name-search behavior,
-    # completely unaffected.
+    # --- WillyWeather location resolution ---------------------------------
+    #
+    # Three tiers, cheapest/most-reliable first:
+    #
+    # 1. loc["willyweatherId"] already cached (see bottom of this block) —
+    #    skip search ENTIRELY, go straight to the real per-ID call. This is
+    #    the steady state for every location after its first successful
+    #    run: no search, no ambiguity, nothing that can pick the wrong
+    #    same-named location on the other side of the state.
+    # 2. No cache yet, but a real lat/lng is stored (added via the Settings
+    #    map's "click to add" action — see locationsadmin.js) — resolve by
+    #    coordinate. A coordinate is unambiguous where a name string isn't.
+    # 3. Neither of the above — fall back to the original name-text search.
+    #
+    # Whichever tier finds a match, its id/name/region/state/lat/lng get
+    # cached onto `loc` at the end of this block and (see main()) written
+    # back to config/locations.json, so every location only ever pays for
+    # tier 2 or 3 ONCE, the very first time it's ever resolved.
+    #
+    # IMPORTANT: coordinate search (tier 2) can come back with NO match at
+    # all — confirmed in practice (a real added location got zero data this
+    # way) — and this script's dev/test environment has no route to
+    # WillyWeather's API to fully verify its exact behavior. Every tier
+    # therefore falls through to the next rather than a location silently
+    # ending up with nothing because one lookup strategy didn't pan out.
+    cached_id = loc.get("willyweatherId")
     config_lat = loc.get("lat")
     config_lng = loc.get("lng")
-    if config_lat is not None and config_lng is not None:
-        match = search_location_by_coords(config_lat, config_lng)
-        # Keep the admin's own clicked coordinate in the OUTPUT (used by the
-        # Live page's GPS matching and the Settings map) rather than
-        # whatever WillyWeather's nearest-location lookup returns — that's
-        # typically a station/locality centroid, less precise than the
-        # exact spot someone clicked when adding this location. WillyWeather
-        # is only being asked which data feed is closest here, not for a
-        # better coordinate to display or match against.
-        lat, lng = config_lat, config_lng
+    match = None
+    loc_id = None
+
+    if cached_id:
+        loc_id = cached_id
     else:
-        match = search_location(name)
-        lat = match.get("lat") if match else None
-        lng = match.get("lng") if match else None
-    matched_name = match.get("name") if match else None
-    region = match.get("region") if match else None
-    state = match.get("state") if match else None
-    loc_id = match.get("id") if match else None
+        if config_lat is not None and config_lng is not None:
+            match = search_location_by_coords(config_lat, config_lng)
+            if not match:
+                print(
+                    f"WARNING: WillyWeather coordinate search found no match for "
+                    f"{name!r} at ({config_lat}, {config_lng}) — falling back to "
+                    f"name search",
+                    file=sys.stderr,
+                )
+                match = search_location(name)
+        else:
+            match = search_location(name)
+        loc_id = match.get("id") if match else None
+        if not match:
+            print(
+                f"WARNING: no WillyWeather match found for {name!r} — this "
+                f"location will have no weather/tide data this run",
+                file=sys.stderr,
+            )
+
+    weather = get_weather(loc_id) if loc_id else {}
+
+    if cached_id and not weather:
+        # The cached id no longer returns anything — WillyWeather may have
+        # retired/merged it, or the cache is simply wrong somehow. Rather
+        # than silently produce empty data run after run until someone
+        # happens to notice, drop the stale cache and re-resolve THIS SAME
+        # run via the normal coordinate/name search, exactly as if there
+        # had been no cache at all. Self-healing beats a permanently stuck
+        # bad cache entry.
+        print(
+            f"WARNING: cached WillyWeather id {cached_id} for {name!r} "
+            f"returned no data — dropping the cached id and re-searching",
+            file=sys.stderr,
+        )
+        loc["willyweatherId"] = None
+        if config_lat is not None and config_lng is not None:
+            match = search_location_by_coords(config_lat, config_lng)
+            if not match:
+                match = search_location(name)
+        else:
+            match = search_location(name)
+        loc_id = match.get("id") if match else None
+        weather = get_weather(loc_id) if loc_id else {}
+        if not match:
+            print(
+                f"WARNING: re-search for {name!r} also found no match — this "
+                f"location will have no weather/tide data this run",
+                file=sys.stderr,
+            )
+
+    if match:
+        # Cache everything the search found — id (so every future run skips
+        # search for this location entirely), plus name/region/state purely
+        # so those keep showing up in the output even on a cache-hit run
+        # that never calls search() at all.
+        loc["willyweatherId"] = match.get("id")
+        loc["willyweatherName"] = match.get("name")
+        loc["willyweatherRegion"] = match.get("region")
+        loc["willyweatherState"] = match.get("state")
+
+    matched_name = match.get("name") if match else loc.get("willyweatherName")
+    region = match.get("region") if match else loc.get("willyweatherRegion")
+    state = match.get("state") if match else loc.get("willyweatherState")
+
+    # lat/lng: the admin's own stored coordinate always wins if present —
+    # it's more precise than a station/locality centroid (see the "click to
+    # add" comment above). Only backfilled from a fresh match when the
+    # location has never had coordinates at all (e.g. added via the plain
+    # "+ Add location" button, pre-dating the map-click feature) — this
+    # means a location like that gains real coordinates for the Live page's
+    # GPS matching and the Settings map after its very first successful run,
+    # without anyone needing to go back and re-add it via the map.
+    if config_lat is None or config_lng is None:
+        if match:
+            loc["lat"] = match.get("lat")
+            loc["lng"] = match.get("lng")
+    lat = loc.get("lat")
+    lng = loc.get("lng")
     # Attach to the SAME dict object referenced in main()'s locations list, so
     # it flows through into output["locations"] without changing this
     # function's return signature — needed for the Live page to match GPS
@@ -848,7 +931,6 @@ def process_location(loc):
     loc["lat"] = lat
     loc["lng"] = lng
 
-    weather = get_weather(loc_id) if loc_id else {}
     sun_times = extract_sun_times(weather)
     sun_by_date = {s["date"]: s for s in sun_times}
 
@@ -1120,9 +1202,19 @@ def main():
     moon_phases = {}
     if locations:
         try:
-            first_match = search_location(locations[0]["name"])
-            if first_match and first_match.get("id"):
-                moon_weather = get_moon_phases(first_match["id"])
+            first_loc = locations[0]
+            # Same caching principle as process_location() — if the first
+            # configured location already has a cached WillyWeather id (see
+            # the resolution tiers there), use it directly rather than
+            # spending a name-search call here too. Which location this
+            # comes from doesn't matter (moon phase isn't location-specific)
+            # — locations[0] is just a convenient, always-available choice.
+            moon_loc_id = first_loc.get("willyweatherId")
+            if not moon_loc_id:
+                first_match = search_location(first_loc["name"])
+                moon_loc_id = first_match.get("id") if first_match else None
+            if moon_loc_id:
+                moon_weather = get_moon_phases(moon_loc_id)
                 illumination = extract_moon_illumination(moon_weather)
                 moon_phases = classify_moon_phase(illumination)
         except Exception as e:  # noqa: BLE001 - moon phase is a nice-to-have, not core data
@@ -1208,6 +1300,24 @@ def main():
         json.dump(output, f, indent=2, default=str)
 
     print(f"Wrote {len(all_rows)} rows to {OUTPUT_PATH}")
+
+    # Write the WillyWeather id/name/region/state cache (see the resolution
+    # tiers at the top of process_location()) back to config/locations.json
+    # — the whole point of caching is that it has to be PERSISTED somewhere
+    # for the next run to find, and the location's own config entry is the
+    # natural place for it to live rather than a separate file to keep in
+    # sync. `locations` is the SAME list read from CONFIG_PATH at the top of
+    # main(), and every `loc` dict in it has been mutated in place by
+    # process_location() with whatever it newly resolved — writing it back
+    # unconditionally is safe: git only actually commits this file (see
+    # .github/workflows/update.yml's file_pattern) when the content genuinely
+    # changed, so a run where every location already had a cached id
+    # produces an identical file and no commit at all.
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(locations, f, indent=2)
+        f.write("\n")
+
+    print(f"Wrote WillyWeather id cache back to {CONFIG_PATH}")
 
 
 if __name__ == "__main__":
