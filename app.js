@@ -144,68 +144,27 @@ function renderUpdatedBanner() {
 function renderLocation(key) {
   const loc = state.data.locations.find((l) => locationKey(l.name, l.type) === key);
   const rows = state.rowsByLocation[key] || [];
-  const now = new Date();
 
-  renderSummary(loc, rows, now);
+  document.getElementById("hoverPanelLocationName").textContent = loc ? loc.name : "";
   renderCharts(rows, loc);
 }
 
-function renderSummary(loc, rows, now) {
-  const card = document.getElementById("summaryCard");
+function renderCharts(rows, loc) {
+  const emptyState = document.getElementById("hoverPanelEmptyState");
+  const chartWrap = document.querySelector(".location-hover-panel-chart-wrap");
+
   if (rows.length === 0) {
-    card.innerHTML = `<div class="empty-state">No data yet for this location. It'll appear after the next scheduled update.</div>`;
+    if (state.chart) {
+      state.chart.destroy();
+      state.chart = null;
+    }
+    chartWrap.style.display = "none";
+    emptyState.style.display = "block";
     return;
   }
+  chartWrap.style.display = "block";
+  emptyState.style.display = "none";
 
-  const tempRt = lastNonNullAtOrBefore(rows, "Temp Realtime (C)", now);
-  const windRt = lastNonNullAtOrBefore(rows, "Wind Realtime (km/h)", now);
-  const conditionRow = nearestRowWithField(rows, "Condition", now);
-  const fishingRow = nearestRowWithField(rows, "Fishing Condition", now);
-  const tideRow = nearestRowWithField(rows, "Tide Status", now);
-  const tideHeightRow = nearestRowWithField(rows, "Tide Height (m)", now);
-
-  const conditionVal = conditionRow ? conditionRow["Condition"] : null;
-  const fishingVal = fishingRow ? fishingRow["Fishing Condition"] : null;
-
-  card.innerHTML = `
-    <div class="summary-top">
-      <div>
-        <div class="summary-title">${loc.name}</div>
-        <div class="summary-sub">${loc.type} · shore faces ${loc.shore}</div>
-      </div>
-      <div class="badge-stack">
-        <div class="badge-item">
-          <div class="condition-badge" style="background:${conditionVal != null ? (CONDITION_COLORS[Math.round(conditionVal)] || "var(--cond-none)") : "var(--cond-none)"}" title="${conditionRow && conditionRow["Condition Reason"] ? conditionRow["Condition Reason"].replace(/"/g, "&quot;") : ""}">
-            ${conditionVal != null ? conditionVal + "/5" : "–"}
-          </div>
-          <div class="badge-label">Location</div>
-        </div>
-        <div class="badge-item">
-          <div class="condition-badge" style="background:${fishingVal != null ? (CONDITION_COLORS[Math.round(fishingVal)] || "var(--cond-none)") : "var(--cond-none)"}" title="${fishingRow && fishingRow["Fishing Condition Reason"] ? fishingRow["Fishing Condition Reason"].replace(/"/g, "&quot;") : ""}">
-            ${fishingVal != null ? fishingVal + "/5" : "–"}
-          </div>
-          <div class="badge-label">Fishing</div>
-        </div>
-      </div>
-    </div>
-    <div class="stat-grid">
-      <div class="stat">
-        <div class="label">Temp now</div>
-        <div class="value">${tempRt ? tempRt["Temp Realtime (C)"] + "°C" : "–"}</div>
-      </div>
-      <div class="stat">
-        <div class="label">Wind now</div>
-        <div class="value">${windRt ? Math.round(windRt["Wind Realtime (km/h)"]) + " km/h " + (windRt["Wind Realtime Dir"] || "") : "–"}</div>
-      </div>
-      <div class="stat">
-        <div class="label">Tide</div>
-        <div class="value">${tideRow ? tideRow["Tide Status"] : "–"}${tideHeightRow ? " · " + tideHeightRow["Tide Height (m)"] + "m" : ""}</div>
-      </div>
-    </div>
-  `;
-}
-
-function renderCharts(rows, loc) {
   const sunTimes = (loc && state.data.sunTimes && state.data.sunTimes[loc.name]) || [];
   state.chart = renderConditionsChart({
     canvas: document.getElementById("conditionsChart"),
