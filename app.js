@@ -28,7 +28,6 @@ async function init() {
 
   groupRowsByLocation();
   renderUpdatedBanner();
-  populateLocationPicker();
   // Awaited — this is a small, fast, local file (not the slow
   // WillyWeather pipeline), so the wait is negligible, and awaiting it
   // avoids a race where the very first chart render below would happen
@@ -36,29 +35,38 @@ async function init() {
   await loadTideOffsets(state.data.locations);
   renderLocationMap();
 
-  document.getElementById("locationSelect").addEventListener("change", (e) => {
-    selectLocationByKey(e.target.value);
-  });
   document.getElementById("conditionsChart").addEventListener("click", openChartModal);
   document.getElementById("btnCloseChartModal").addEventListener("click", closeChartModal);
-
-  const saved = localStorage.getItem("selectedLocation");
-  const first = state.data.locations[0] ? locationKey(state.data.locations[0].name, state.data.locations[0].type) : null;
-  const initial = saved && state.rowsByLocation[saved] ? saved : first;
-  if (initial) {
-    document.getElementById("locationSelect").value = initial;
-    renderLocation(initial);
-  }
+  document.getElementById("btnCloseHoverPanel").addEventListener("click", hideLocationHoverPanel);
 }
 
-// Shared by the dropdown's own change handler and the map's marker clicks
-// below — one place that updates the dropdown's value, persists the
-// choice, and re-renders, so both selection methods always stay in sync
-// with each other.
+// Shared by the map's marker clicks (both the direct single-type case and
+// the multi-type popup's buttons) — persists the choice, renders it into
+// the hover panel, and shows the panel. There's no dropdown any more (see
+// the map-fills-the-page redesign) — the map IS the only way to pick a
+// location now, so this is the map's marker-click handler in all but name.
 function selectLocationByKey(key) {
   localStorage.setItem("selectedLocation", key);
-  document.getElementById("locationSelect").value = key;
   renderLocation(key);
+  showLocationHoverPanel();
+}
+
+/**
+ * The summary+graph panel that floats over the map on marker click (see
+ * .location-hover-panel, style.css) — hidden by default (nothing selected
+ * yet) and on every page load, even if a location was selected last visit;
+ * showing it again requires an actual marker click, matching "hide the
+ * graph until I click a location" rather than restoring previous state
+ * automatically. The selection itself still persists to localStorage
+ * (harmless, and available if a future "remember last view" feature wants
+ * it) — only the panel's visibility doesn't.
+ */
+function showLocationHoverPanel() {
+  document.getElementById("locationHoverPanel").style.display = "block";
+}
+
+function hideLocationHoverPanel() {
+  document.getElementById("locationHoverPanel").style.display = "none";
 }
 
 /**
@@ -131,29 +139,6 @@ function renderUpdatedBanner() {
   }
   const dt = new Date(state.data.generatedAt);
   document.getElementById("updated").textContent = `Updated ${dt.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
-}
-
-function populateLocationPicker() {
-  const select = document.getElementById("locationSelect");
-  select.innerHTML = "";
-  // Explicit key order guarantees Kayak entries list before Land based
-  // ones, regardless of what order locations happen to appear in the data.
-  const groups = { Kayak: [], "Land based": [] };
-  for (const loc of state.data.locations) {
-    (groups[loc.type] || (groups[loc.type] = [])).push(loc);
-  }
-  for (const [type, locs] of Object.entries(groups)) {
-    if (locs.length === 0) continue;
-    const optgroup = document.createElement("optgroup");
-    optgroup.label = type;
-    for (const loc of locs) {
-      const opt = document.createElement("option");
-      opt.value = locationKey(loc.name, loc.type);
-      opt.textContent = loc.name;
-      optgroup.appendChild(opt);
-    }
-    select.appendChild(optgroup);
-  }
 }
 
 function renderLocation(key) {

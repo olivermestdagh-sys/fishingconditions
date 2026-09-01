@@ -46,6 +46,89 @@ main {
   padding: 12px 12px 40px;
 }
 
+/* Location tab (conditions.html) ONLY — the map fills essentially the
+   whole viewport below the header/tabnav, with a floating summary+graph
+   panel appearing over it on marker click (see .location-hover-panel
+   below, showLocationHoverPanel/selectLocationByKey in app.js) rather than
+   separate scrolling sections underneath. Scoped to a body class rather
+   than changing `main`/`body` globally — every other page still uses the
+   normal scrolling card layout untouched. */
+.map-fullpage-body {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh; /* accounts for mobile browsers' address bar resizing the viewport; 100vh above is the fallback for browsers that don't support dvh yet, not a duplicate mistake */
+  overflow: hidden;
+}
+
+.map-fullpage-body .topbar,
+.map-fullpage-body .tabnav {
+  flex: none;
+}
+
+.map-fullpage-body main {
+  flex: 1;
+  min-height: 0;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+
+.location-map-fullpage {
+  width: 100%;
+  height: 100%;
+}
+
+/* Floating summary+graph panel, shown over the map on marker click — a
+   bottom-sheet, the familiar "tap a map pin, details slide up" pattern
+   from Google/Apple Maps, since this site is mobile-first and that's the
+   shape people already expect a map location card to take. */
+.location-hover-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 75%;
+  overflow-y: auto;
+  background: var(--white);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.25);
+  padding: 18px 16px 20px;
+  /* Above Leaflet's own internal panes (its highest, tooltipPane/popupPane,
+     cap out around 650/700) so the panel visually sits ON TOP of the map
+     and any markers under it, not partially behind them — but still well
+     below chart-modal-overlay's 10000, so tapping the graph inside this
+     panel to open the full-screen view still correctly draws over it. */
+  z-index: 1000;
+}
+
+.location-hover-panel-summary,
+.location-hover-panel-chart {
+  box-shadow: none;
+  padding: 0;
+  margin: 0 0 14px;
+}
+
+.location-hover-panel-chart:last-child {
+  margin-bottom: 0;
+}
+
+.location-hover-panel-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: var(--grey-100);
+  color: var(--grey-500);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
 .picker-row {
   display: flex;
   flex-direction: column;
