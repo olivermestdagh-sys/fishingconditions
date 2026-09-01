@@ -150,30 +150,33 @@ const TWILIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.05)";
 // scores don't read well as continuous lines next to six lines of raw
 // weather data — a strip (like a UV-index or pollen bar) is a clearer, more
 // compact way to show "how good was it" at a glance without adding visual
-// competition to the actual data. Colour interpolates smoothly between the
-// same five reference colours the badges use, since these scores are
-// commonly fractional (e.g. 3.8), not just whole numbers.
-const CONDITION_COLOR_STOPS = {
-  1: [220, 38, 38],   // --cond-1
-  2: [249, 115, 22],  // --cond-2
-  3: [234, 179, 8],   // --cond-3
-  4: [101, 163, 13],  // --cond-4
-  5: [22, 163, 74],   // --cond-5
-};
+// competition to the actual data.
+//
+// TWO SEPARATE gradients, not one continuous 1-5 rainbow: below 3.0 is
+// unambiguously "not acceptable" (red -> deep orange), and 3.0-5.0 is
+// unambiguously "acceptable" (light green -> deep green) — Oliver's own
+// threshold (3.0 = acceptable) is exactly where the colour FAMILY changes,
+// deliberately, rather than partway through a smooth blend that used to
+// put yellow right on top of the number people scan for most. A single
+// continuous gradient (the old approach) would still leave a value like
+// 2.7 looking part-way toward green on its way up to 3 — this doesn't:
+// nothing below 3.0 ever contains any green, nothing at or above 3.0 ever
+// contains any orange/red. CONDITION_COLORS (badges elsewhere — Week
+// Ahead tiles, Live's current-condition badge) reads the SAME --cond-1..5
+// CSS variables in style.css, which are set to match these exact stops at
+// each whole number, so a badge showing "3.0" and this strip both agree.
+const CONDITION_ZONE_BAD = { lo: [220, 38, 38], hi: [234, 88, 12] };   // 1.0 -> just under 3.0: red -> deep orange
+const CONDITION_ZONE_GOOD = { lo: [134, 239, 172], hi: [21, 128, 61] }; // 3.0 -> 5.0: light green -> deep green
 const CONDITION_NONE_COLOR = "rgb(156, 163, 175)"; // --cond-none
 
 function conditionStripColor(value) {
   if (value == null) return CONDITION_NONE_COLOR;
   const clamped = Math.max(1, Math.min(5, value));
-  const lower = Math.floor(clamped);
-  const upper = Math.min(5, Math.ceil(clamped));
-  if (lower === upper) {
-    const [r, g, b] = CONDITION_COLOR_STOPS[lower];
-    return `rgb(${r}, ${g}, ${b})`;
-  }
-  const t = clamped - lower;
-  const [r1, g1, b1] = CONDITION_COLOR_STOPS[lower];
-  const [r2, g2, b2] = CONDITION_COLOR_STOPS[upper];
+  const zone = clamped >= 3 ? CONDITION_ZONE_GOOD : CONDITION_ZONE_BAD;
+  const [loBound, hiBound] = clamped >= 3 ? [3, 5] : [1, 3];
+  const t = (clamped - loBound) / (hiBound - loBound);
+  const [r1, g1, b1] = zone.lo;
+  const [r2, g2, b2] = zone.hi;
   const r = Math.round(r1 + (r2 - r1) * t);
   const g = Math.round(g1 + (g2 - g1) * t);
   const b = Math.round(b1 + (b2 - b1) * t);
