@@ -16,7 +16,7 @@ const WORKFLOW_FILE = "update.yml";
 // Paste in the Worker's own URL after following the deploy steps at the
 // top of cloudflare-worker/willyweather-search.js, e.g.
 // "https://fishingconditions-search.your-subdomain.workers.dev".
-const WILLYWEATHER_SEARCH_WORKER_URL = "";
+const WILLYWEATHER_SEARCH_WORKER_URL = "fishingconditions-search.oliver-mestdagh.workers.dev";
 
 /**
  * Same icon shapes as charts.js's typeIconSvg — duplicated here rather than
