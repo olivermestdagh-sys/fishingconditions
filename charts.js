@@ -93,12 +93,22 @@ function windColor(speed) {
 // arrowhead — a bold dart/chevron shape, pointing up by default — onto a small offscreen canvas
 // per color, and use that as a custom pointStyle. Chart.js rotates/positions a canvas
 // pointStyle exactly like a built-in one, so dirToArrowRotation's angle math still applies
-// unchanged. Cached per color since there are only a handful of distinct wind-speed colors.
+// unchanged. Cached per color+filled combo since there are only a handful of distinct
+// wind-speed colors × the two forecast/realtime styles below.
 const ARROW_CANVAS_CACHE = new Map();
 
-function makeArrowCanvas(color) {
-  if (ARROW_CANVAS_CACHE.has(color)) return ARROW_CANVAS_CACHE.get(color);
-  const size = 14;
+/**
+ * filled=true (Wind Realtime — an actual observed reading) draws a solid
+ * dart. filled=false (Wind Forecast — a prediction, not yet a fact) draws
+ * the same silhouette as an outline only — the forecast/realtime
+ * distinction applied to every marker on this site's charts now (see the
+ * datasets in renderConditionsChart below): hollow for "this is a
+ * forecast", solid for "this actually happened".
+ */
+function makeArrowCanvas(color, filled = true) {
+  const cacheKey = `${color}|${filled}`;
+  if (ARROW_CANVAS_CACHE.has(cacheKey)) return ARROW_CANVAS_CACHE.get(cacheKey);
+  const size = 20; // was 14 — bigger markers across the board, per Oliver's request
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
@@ -108,16 +118,25 @@ function makeArrowCanvas(color) {
   // A bold arrowhead/dart shape — the concave notch at the back is what
   // reads clearly as "an arrowhead" at this size, rather than the thin
   // needle-with-small-tip look a full shaft+small-triangle combo gives.
-  ctx.fillStyle = color;
+  // Same proportions as the old 14px version, just scaled up to 20px.
   ctx.beginPath();
   ctx.moveTo(cx, 0);
-  ctx.lineTo(cx + 5, 11);
-  ctx.lineTo(cx, 8);
-  ctx.lineTo(cx - 5, 11);
+  ctx.lineTo(cx + 7, 15.7);
+  ctx.lineTo(cx, 11.4);
+  ctx.lineTo(cx - 7, 15.7);
   ctx.closePath();
-  ctx.fill();
 
-  ARROW_CANVAS_CACHE.set(color, canvas);
+  if (filled) {
+    ctx.fillStyle = color;
+    ctx.fill();
+  } else {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+  }
+
+  ARROW_CANVAS_CACHE.set(cacheKey, canvas);
   return canvas;
 }
 
@@ -2648,21 +2667,34 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
 
   const datasets = [
     {
+      // Forecast — hollow/outline marker (see makeArrowCanvas's own
+      // comment for the same forecast=hollow/realtime=solid convention
+      // applied to every paired series below): pointBackgroundColor
+      // "transparent" with a colored border is how Chart.js draws an
+      // outline-only circle, rather than a separate shape.
       label: L.tempFcst,
       data: pointsFor("Temp Forecast (C)"),
       borderColor: "#f97316",
       borderWidth: 1,
-      pointRadius: 2,
-      pointBackgroundColor: "#f97316",
+      pointRadius: 4,
+      pointBackgroundColor: "transparent",
+      pointBorderColor: "#f97316",
+      pointBorderWidth: 2,
       yAxisID: "yTemp",
       tension: 0.3,
     },
     {
+      // Realtime — solid/filled marker (an actual observed reading, not a
+      // prediction). Previously had no markers at all (pointRadius: 0);
+      // now shows a dot only where a real reading exists, same
+      // "only draw a point where there's really a value" guard the wind
+      // arrows below already used.
       label: L.tempNow,
       data: pointsFor("Temp Realtime (C)"),
       borderColor: "#fdba74",
       borderWidth: 1,
-      pointRadius: 0,
+      pointRadius: rows.map((r) => (r["Temp Realtime (C)"] != null ? 4 : 0)),
+      pointBackgroundColor: "#fdba74",
       yAxisID: "yTemp",
       tension: 0.3,
     },
@@ -2673,7 +2705,11 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       // seventh axis just for one line. Thin and light — a trend line to
       // glance at alongside air temp, not something meant to compete
       // visually with the wind/rain/tide lines that actually drive the
-      // Location/Fishing Condition scores.
+      // Location/Fishing Condition scores. No forecast/realtime pairing
+      // exists for this one (it's Open-Meteo's own forecast only), so it
+      // stays a plain line with no point markers, same as Tide/Pressure
+      // below — the forecast=hollow/realtime=solid convention only
+      // applies to series that actually have both variants.
       label: L.waterTemp,
       data: pointsFor("Water Temp (C)"),
       borderColor: "#7dd3fc",
@@ -2683,32 +2719,41 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       tension: 0.3,
     },
     {
+      // Rainfall probability only ever exists as a forecast (WillyWeather
+      // has no "realtime rainfall" reading this site plots) — hollow
+      // marker for the same reason Temp Forecast's is: it's a prediction,
+      // not yet a fact.
       label: L.rain,
       data: pointsFor("Rainfall Probability (%)"),
       borderColor: "#3b82f6",
-      pointRadius: 2,
-      pointBackgroundColor: "#3b82f6",
+      pointRadius: 4,
+      pointBackgroundColor: "transparent",
+      pointBorderColor: "#3b82f6",
+      pointBorderWidth: 2,
       yAxisID: "yRain",
       tension: 0.3,
     },
     {
+      // Forecast — hollow arrow (makeArrowCanvas's filled=false), bigger
+      // than before (radius 7 → 10, arrow canvas itself 14px → 20px).
       label: L.windFcst,
       data: pointsFor("Wind Forecast (km/h)"),
       borderColor: "#16a34a",
       borderWidth: 1,
-      pointStyle: rows.map((r) => makeArrowCanvas(windColor(r["Wind Forecast (km/h)"]))),
-      pointRadius: rows.map((r) => (r["Wind Forecast (km/h)"] != null ? 7 : 0)),
+      pointStyle: rows.map((r) => makeArrowCanvas(windColor(r["Wind Forecast (km/h)"]), false)),
+      pointRadius: rows.map((r) => (r["Wind Forecast (km/h)"] != null ? 10 : 0)),
       pointRotation: rows.map((r) => dirToArrowRotation(r["Wind Forecast Dir"])),
       yAxisID: "yWind",
       tension: 0.3,
     },
     {
+      // Realtime — solid arrow, same bigger size as the forecast one above.
       label: L.windNow,
       data: pointsFor("Wind Realtime (km/h)"),
       borderColor: "#86efac",
       borderWidth: 1,
-      pointStyle: rows.map((r) => makeArrowCanvas(windColor(r["Wind Realtime (km/h)"]))),
-      pointRadius: rows.map((r) => (r["Wind Realtime (km/h)"] != null ? 7 : 0)),
+      pointStyle: rows.map((r) => makeArrowCanvas(windColor(r["Wind Realtime (km/h)"]), true)),
+      pointRadius: rows.map((r) => (r["Wind Realtime (km/h)"] != null ? 10 : 0)),
       pointRotation: rows.map((r) => dirToArrowRotation(r["Wind Realtime Dir"])),
       yAxisID: "yWind",
       tension: 0.3,
@@ -2812,7 +2857,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       // false, moonPhases: null) so a tile that isn't drawing either doesn't
       // waste vertical space reserving room for them anyway.
       // autoPadding:false stops Chart.js reserving extra edge margin so
-      // large point markers (the pointRadius:7 wind arrows) never get
+      // large point markers (the pointRadius:10 wind arrows) never get
       // clipped when they land exactly at the x-axis's own min/max — which
       // they do on Week Ahead's row-per-location graphs, since every row's
       // first/last row of data sits exactly at the displayed range's own
