@@ -545,5 +545,25 @@
       "South Beaches"
     ],
     "tideMaxObserved": null
+  },
+  {
+    "name": "Mallacoota",
+    "shore": "S",
+    "types": [
+      {
+        "type": "Kayak",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ],
+    "lat": -37.55435935391175,
+    "lng": 149.7561085224152,
+    "tidal": false,
+    "willyweatherId": 12642,
+    "willyweatherName": "Mallacoota",
+    "willyweatherRegion": "East Gippsland",
+    "willyweatherState": "VIC"
   }
 ]
