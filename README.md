@@ -125,7 +125,57 @@ set a Launch Time/Home By. Drive time isn't one of these fields any more —
 see "Live drive-time lookup" below for how that's now calculated instead.
 Changes take effect on the next scheduled or manual run.
 
-## Live drive-time lookup
+## How locations get matched to WillyWeather
+
+Every location needs a specific WillyWeather location behind it to actually
+fetch data from. `fetch_conditions.py` resolves this once per location and
+then **caches it directly onto that location in `config/locations.json`**
+(`willyweatherId`, plus `willyweatherName`/`willyweatherRegion`/
+`willyweatherState` for reference) — every run after that skips search
+entirely for it and calls WillyWeather straight by id, which is both faster
+and immune to a name accidentally matching the wrong same-named place
+somewhere else in the state.
+
+The very first resolution, before anything's cached, tries in order:
+
+1. **A real, admin-chosen coordinate** — set via the Settings map's "click
+   map to add location" action, or picked from the WillyWeather candidate
+   popup (see below) — resolved by asking WillyWeather what's nearest that
+   exact point.
+2. **The location's name**, text-searched against WillyWeather — the
+   original behaviour, and still the fallback for anything added via the
+   plain "+ Add location" button or from before this feature existed. The
+   name needs to reasonably match WillyWeather's own naming for a place —
+   use the candidate popup (below) where possible to sidestep this
+   entirely, since it locks in the *correct* WillyWeather id directly, no
+   name-matching required at all.
+
+If a cached id ever stops returning data (WillyWeather retired or merged
+it), the next run automatically drops the stale cache and re-resolves from
+scratch — self-healing, no manual intervention needed. Check the Actions
+run log for `WARNING:` lines if a location's data ever goes quiet; the
+script explains exactly what it tried and why.
+
+### Getting real WillyWeather names via the map (optional)
+
+Clicking the Settings map's "📍 Click map to add location" button and then
+the map itself normally starts a blank, manually-named location at that
+point. If the small `willyweather-search` Cloudflare Worker (see
+`cloudflare-worker/willyweather-search.js`) is deployed and its URL pasted
+into `WILLYWEATHER_SEARCH_WORKER_URL` near the top of `locationsadmin.js`,
+that same click instead pops up WillyWeather's own real nearby candidates
+to choose from — picking one locks in its exact id immediately, so that
+location's very first scheduled run already knows precisely what it is,
+with no name-matching guesswork at all.
+
+This is optional — everything above works fine without it, just leaning
+more on name-search on a location's first run. See the deployment steps in
+the comment at the top of `cloudflare-worker/willyweather-search.js` for
+how to set the Worker up (a free Cloudflare account, no server to run).
+It exists purely so the WillyWeather API key never has to be exposed in
+this site's own public, client-side code.
+
+
 
 Week Ahead calculates drive time live, via Google's Routes API,
 rather than using a fixed value stored per location — the same spot might
@@ -316,11 +366,12 @@ from somewhere else entirely), a manual location picker is always available
 underneath as a fallback — no dependency on GPS actually working to use the
 page.
 
-This needs each location's coordinates, which come from the same
-WillyWeather search lookup already used for the weather/tide fetch — no new
-API calls, and nothing added to `config/locations.json` itself (coordinates
-only flow into the generated `data/conditions.json`, so your own location
-list stays exactly as you edit it).
+This needs each location's coordinates. As of the WillyWeather id-caching
+feature (see "How locations get matched to WillyWeather" below), a
+location's coordinates increasingly live directly in `config/locations.json`
+itself — either because you set them via the map, or because they got
+backfilled there automatically the first time a name-only location was
+successfully resolved.
 
 ### When to stop fishing
 
@@ -391,15 +442,25 @@ this restriction — nothing extra is drawn.
   `style.css`, `app.js`, `locationsadmin.js`, `charts.js` (shared charting
   code used by `app.js`, `week.js`, and `live.js`) — the
   website itself (no build step, no dependencies)
-- `scripts/fetch_conditions.py` — fetches from WillyWeather, writes `data/conditions.json`
-  (pure Python standard library only, no `pip install` needed)
-- `config/locations.json` — your tracked locations
+- `scripts/fetch_conditions.py` — fetches from WillyWeather, writes `data/conditions.json`,
+  and also writes back to `config/locations.json` (see "How locations get matched to
+  WillyWeather" above) — pure Python standard library only, no `pip install` needed
+- `config/locations.json` — your tracked locations. Also doubles as the WillyWeather
+  id cache now — don't be surprised to see `willyweatherId`/`willyweatherName` fields
+  appear on entries you never typed in yourself; that's the pipeline caching what it
+  resolved, not a bug
 - `config/settings.json` — API keys used client-side (currently just the
   Google Routes API key) — kept separate from the site's code so it's
   never overwritten by a code update; edit it from the Settings page
-- `.github/workflows/update.yml` — the schedule that runs the fetch script
+- `.github/workflows/update.yml` — the schedule that runs the fetch script; commits
+  both `data/conditions.json` and `config/locations.json` now (the latter for the id
+  cache above)
 - `data/conditions.json` — the generated data file (starts empty; gets
   overwritten automatically by the workflow)
+- `cloudflare-worker/willyweather-search.js` — optional, separate piece of
+  infrastructure (not deployed via GitHub Pages) that powers the WillyWeather
+  candidate popup on the Settings map — see "Getting real WillyWeather names
+  via the map" above
 
 ## Editing locations from the site itself
 
@@ -440,7 +501,10 @@ settings page (immediately invalidates it everywhere).
   errors.
 - **A location's card is empty**: check `config/locations.json` for a typo in
   the name (it must match a location search on WillyWeather, same as the
-  Excel version — include the state, e.g. "VIC", for a good match).
+  Excel version — include the state, e.g. "VIC", for a good match). Also
+  check the Actions run log for a `WARNING:` line about that location's name
+  or coordinates — the script now explains exactly what it tried and why a
+  match wasn't found, rather than failing silently.
 - **Workflow fails with an access/authorization error**: same fix as the
   Excel version — check the enabled services in your WillyWeather API admin
   settings (Search, Forecasts → Temperature/Wind/Tides/Rainfall Probability/Sun,
