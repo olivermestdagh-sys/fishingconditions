@@ -22,6 +22,21 @@
  *     `limit` is optional, defaults to 8, capped at 15 — this endpoint is
  *     for a human to visually pick from a short list, not for bulk data.
  *
+ *   GET /weather?id=<willyweatherId>&days=<n>
+ *     Proxies WillyWeather's own locations/{id}/weather.json for exactly
+ *     the forecast groups the site's chart needs (temperature, wind,
+ *     rainfall probability, tides, sunrise/sunset, plus today's realtime
+ *     observational graphs) and returns the response basically as-is —
+ *     the browser-side build (see fetchWillyWeatherPreviewRows, charts.js)
+ *     ports fetch_conditions.py's own build_readings() to pivot this into
+ *     rows, so the shape has to stay close to WillyWeather's own. Powers
+ *     the Location tab's "click map to preview a spot" feature — a live
+ *     look at an UNSAVED point's conditions, no location config needed.
+ *     `days` is optional, defaults to 4, capped at 6 (a preview doesn't
+ *     need the full week the scheduled pipeline pulls, and every call
+ *     here spends real WillyWeather quota on demand rather than once per
+ *     3-hour scheduled run like everything else does).
+ *
  * DEPLOYING THIS (one-time — see also the README.md section this links
  * from):
  *   1. Free account at https://dash.cloudflare.com/sign-up (no card needed).
@@ -54,6 +69,8 @@
 
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 15;
+const DEFAULT_WEATHER_DAYS = 4;
+const MAX_WEATHER_DAYS = 6;
 
 export default {
   async fetch(request, env) {
@@ -67,8 +84,12 @@ export default {
       return new Response(null, { headers: corsHeaders(env) });
     }
 
+    if (url.pathname === "/weather") {
+      return handleWeather(url, env);
+    }
+
     if (url.pathname !== "/search") {
-      return jsonResponse({ error: "Not found. Use GET /search?query=... or /search?lat=..&lng=.." }, 404, env);
+      return jsonResponse({ error: "Not found. Use GET /search?query=... or /search?lat=..&lng=.. or /weather?id=.." }, 404, env);
     }
 
     if (!env.WILLYWEATHER_API_KEY) {
@@ -133,6 +154,50 @@ function clampLimit(raw) {
   const n = parseInt(raw, 10);
   if (!Number.isFinite(n) || n < 1) return DEFAULT_LIMIT;
   return Math.min(n, MAX_LIMIT);
+}
+
+function clampWeatherDays(raw) {
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_WEATHER_DAYS;
+  return Math.min(n, MAX_WEATHER_DAYS);
+}
+
+/**
+ * GET /weather?id=<willyweatherId>&days=<n> — see the ENDPOINTS comment at
+ * the top of this file. Unlike /search's trimmed-down response, this
+ * passes WillyWeather's weather.json through close to verbatim (just
+ * unwrapped from the outer fetch/parse machinery) — the browser-side
+ * build_readings() port needs the same nested forecasts/observationalGraphs
+ * shape WillyWeather itself returns, not a hand-picked subset of fields.
+ */
+async function handleWeather(url, env) {
+  if (!env.WILLYWEATHER_API_KEY) {
+    console.error("WILLYWEATHER_API_KEY is not configured on this Worker.");
+    return jsonResponse({ error: "Search is not configured." }, 500, env);
+  }
+
+  const id = url.searchParams.get("id");
+  if (!id || !/^\d+$/.test(id)) {
+    return jsonResponse({ error: "Provide ?id=<willyweatherId> (numeric)." }, 400, env);
+  }
+  const days = clampWeatherDays(url.searchParams.get("days"));
+
+  const upstreamUrl =
+    `https://api.willyweather.com.au/v2/${env.WILLYWEATHER_API_KEY}/locations/${id}/weather.json` +
+    `?forecasts=temperature,wind,rainfallprobability,tides,sunrisesunset&days=${days}&observationalGraphs=temperature,wind`;
+
+  try {
+    const upstreamRes = await fetch(upstreamUrl, { headers: { "Content-Type": "application/json" } });
+    if (!upstreamRes.ok) {
+      console.error(`WillyWeather weather.json returned ${upstreamRes.status}`);
+      return jsonResponse({ error: "WillyWeather weather lookup failed upstream." }, 502, env);
+    }
+    const upstreamData = await upstreamRes.json();
+    return jsonResponse(upstreamData, 200, env);
+  } catch (err) {
+    console.error("WillyWeather weather.json request failed:", err);
+    return jsonResponse({ error: "WillyWeather weather lookup request failed." }, 502, env);
+  }
 }
 
 function isFiniteNumber(str) {

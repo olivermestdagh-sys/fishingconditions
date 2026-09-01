@@ -2,10 +2,19 @@ const DATA_URL = "data/conditions.json";
 
 // parseNaive, dayKeyOf, formatDayHeading, dirToArrowRotation, windColor, fmtChartTick,
 // buildDayBandPlugin, renderConditionsChart, CONDITION_COLORS, wireHoldToShowTooltip,
-// setupFullscreenToggle, and setupDragToScroll all come from charts.js (loaded before
-// this file).
+// setupFullscreenToggle, setupDragToScroll, fetchWillyWeatherCandidates,
+// showLocationCandidatePicker, and fetchWillyWeatherPreviewRows all come from charts.js
+// (loaded before this file).
 
 let state = { data: null, rowsByLocation: {}, chart: null };
+
+// Text hoverPanelEmptyState starts with in the HTML — captured once here so
+// the preview flow (which temporarily repurposes this same element for
+// "no match found"/"loading"/error messages — see onLocationMapClickForPreview
+// and previewLocationOnMap) can always restore it afterward, rather than a
+// stale preview message lingering the next time a REAL location genuinely
+// has no data.
+let defaultEmptyStateText = "";
 
 // Same convention as Week (graphs)' row charts (week-new.js's
 // PIXELS_PER_HOUR) — a genuinely readable, un-squashed width per hour of
@@ -33,6 +42,8 @@ async function init() {
     return;
   }
 
+  defaultEmptyStateText = document.getElementById("hoverPanelEmptyState").textContent;
+
   groupRowsByLocation();
   renderUpdatedBanner();
   // Awaited — this is a small, fast, local file (not the slow
@@ -43,6 +54,7 @@ async function init() {
   renderLocationMap();
 
   document.getElementById("btnCloseHoverPanel").addEventListener("click", hideLocationHoverPanel);
+  document.getElementById("btnPreviewMapClick").addEventListener("click", togglePreviewClickMode);
 
   // Same gesture set as Week (graphs) and Live, all shared from charts.js:
   // hold 2s to toggle the tooltip, double-tap/double-click to toggle real
@@ -138,7 +150,7 @@ function renderLocationMap() {
     }
   }
 
-  const map = renderLeafletLocationMap("locationMap", points);
+  const map = renderLeafletLocationMap("locationMap", points, { onMapClick: onLocationMapClickForPreview });
   if (!map) return;
   // Popup content only exists in the DOM once a popup actually opens (up
   // until then it's just an HTML string Leaflet is holding onto), so its
@@ -152,6 +164,112 @@ function renderLocationMap() {
       });
     });
   });
+}
+
+// True while the "📍 Click map to preview a spot" button is armed — the
+// NEXT click on open map area (not a marker) previews WillyWeather's live
+// conditions for that exact point instead of selecting one of this site's
+// own saved locations. Same armed/disarm shape as the Settings tab's
+// "click map to add location" (locationsadmin.js's addLocationClickArmed)
+// — a separate armed step avoids turning every ordinary pan/zoom click
+// into an unwanted preview lookup, which is the map's much more common use.
+let previewClickArmed = false;
+
+function togglePreviewClickMode() {
+  previewClickArmed = !previewClickArmed;
+  const btn = document.getElementById("btnPreviewMapClick");
+  btn.textContent = previewClickArmed ? "Click the map to preview… (cancel)" : "📍 Click map to preview a spot";
+  btn.classList.toggle("active", previewClickArmed);
+  document.getElementById("locationMap").classList.toggle("map-preview-armed", previewClickArmed);
+}
+
+/**
+ * The Location tab's map-click handler (see renderLocationMap's
+ * renderLeafletLocationMap call) — a no-op unless "click map to preview"
+ * is currently armed, exactly like onSettingsMapClick's own armed guard.
+ * Looks up real WillyWeather candidates near the clicked point (shared
+ * fetchWillyWeatherCandidates, charts.js) and either previews the one
+ * match directly, lets the person pick between several
+ * (showLocationCandidatePicker, allowManual:false — there's no manual
+ * fallback that makes sense here, unlike the Settings tab's own use of
+ * this same picker), or shows a friendly "nothing nearby" message if
+ * WillyWeather has no match at all.
+ */
+async function onLocationMapClickForPreview(lat, lng) {
+  if (!previewClickArmed) return;
+  previewClickArmed = false;
+  const btn = document.getElementById("btnPreviewMapClick");
+  btn.textContent = "📍 Click map to preview a spot";
+  btn.classList.remove("active");
+  document.getElementById("locationMap").classList.remove("map-preview-armed");
+
+  const candidates = await fetchWillyWeatherCandidates(lat, lng);
+  if (!candidates || candidates.length === 0) {
+    showLocationHoverPanel();
+    document.getElementById("hoverPanelLocationName").textContent = "Preview";
+    showPreviewNote(false);
+    document.getElementById("locationChartFrame").style.display = "none";
+    const emptyState = document.getElementById("hoverPanelEmptyState");
+    emptyState.textContent = "No WillyWeather location found near that point — try clicking somewhere closer to the coast.";
+    emptyState.style.display = "block";
+    return;
+  }
+
+  let candidate = candidates[0];
+  if (candidates.length > 1) {
+    const result = await showLocationCandidatePicker(candidates, { allowManual: false });
+    if (result.action !== "pick") return; // cancelled out of the picker — leave whatever was showing before untouched
+    candidate = result.candidate;
+  }
+
+  await previewLocationOnMap(candidate, lat, lng);
+}
+
+/**
+ * Fetches and renders a live WillyWeather preview for a clicked point into
+ * the SAME hover panel/graph a real saved location uses (renderCharts is
+ * shared unchanged — it only ever needed rows + a loc-shaped object, and a
+ * preview can supply both without being a real entry in
+ * state.rowsByLocation). Deliberately does NOT persist anything to
+ * localStorage — a preview is a one-off look, not a "last viewed
+ * location" a future page load should restore.
+ */
+async function previewLocationOnMap(candidate, clickLat, clickLng) {
+  showLocationHoverPanel();
+  document.getElementById("hoverPanelLocationName").textContent = `${candidate.name} (preview)`;
+  showPreviewNote(true);
+  document.getElementById("locationChartFrame").style.display = "none";
+  const emptyState = document.getElementById("hoverPanelEmptyState");
+  emptyState.textContent = "Loading preview…";
+  emptyState.style.display = "block";
+
+  // The clicked point's own lat/lng, not the candidate's WillyWeather
+  // station/locality centroid, feeds Open-Meteo's pressure/marine calls —
+  // same "the person's own precision beats a station centroid" reasoning
+  // already established for the Settings map's click-to-add flow (see
+  // createNewLocationAt, locationsadmin.js).
+  const preview = await fetchWillyWeatherPreviewRows(candidate.id, clickLat, clickLng);
+  if (!preview || preview.rows.length === 0) {
+    emptyState.textContent = "Couldn't load a preview for this spot — WillyWeather or Open-Meteo data wasn't available just now.";
+    return;
+  }
+
+  const previewLoc = {
+    name: candidate.name,
+    tideMaxObserved: preview.tideMaxObserved,
+    // No saved config exists yet for a clicked-but-not-added spot, so
+    // there's no per-location minTideHeight/tideOffset to apply — the
+    // graph draws with sensible defaults for both, same as it would for a
+    // brand-new location that hasn't had these set yet either.
+    minTideHeight: null,
+    tideOffset: null,
+  };
+  renderCharts(preview.rows, previewLoc, preview.sunTimes);
+}
+
+function showPreviewNote(show) {
+  const el = document.getElementById("hoverPanelPreviewNote");
+  if (el) el.style.display = show ? "block" : "none";
 }
 
 function groupRowsByLocation() {
@@ -181,10 +299,20 @@ function renderLocation(key) {
   const rows = state.rowsByLocation[key] || [];
 
   document.getElementById("hoverPanelLocationName").textContent = loc ? loc.name : "";
+  // A real, saved location's own graph — not a preview (see
+  // previewLocationOnMap) — so the preview note/badge never lingers onto
+  // it if the panel was last showing a preview.
+  showPreviewNote(false);
   renderCharts(rows, loc);
 }
 
-function renderCharts(rows, loc) {
+// sunTimesOverride lets previewLocationOnMap supply WillyWeather's own
+// sunrise/sunset for a clicked-but-unsaved point directly, rather than
+// this falling back to state.data.sunTimes (which only has entries for
+// this site's own saved locations, keyed by their saved name — a preview
+// has no entry there at all). Every other caller doesn't pass this, so
+// falls back to exactly the lookup that always ran here before.
+function renderCharts(rows, loc, sunTimesOverride) {
   const emptyState = document.getElementById("hoverPanelEmptyState");
   const frame = document.getElementById("locationChartFrame");
   const chartWrap = document.getElementById("locationChartWrap");
@@ -195,6 +323,12 @@ function renderCharts(rows, loc) {
       state.chart = null;
     }
     frame.style.display = "none";
+    // Restores the normal "no data for this location" copy — the same
+    // element gets repurposed for preview loading/error messages (see
+    // onLocationMapClickForPreview/previewLocationOnMap), and without this
+    // a preview's message could otherwise linger and be shown again here
+    // for an unrelated, genuinely-empty real location later.
+    emptyState.textContent = defaultEmptyStateText;
     emptyState.style.display = "block";
     return;
   }
@@ -236,7 +370,7 @@ function renderCharts(rows, loc) {
   // there's nothing to scroll there in the first place.
   document.getElementById("locationChartScroll").scrollLeft = 0;
 
-  const sunTimes = (loc && state.data.sunTimes && state.data.sunTimes[loc.name]) || [];
+  const sunTimes = sunTimesOverride || (loc && state.data.sunTimes && state.data.sunTimes[loc.name]) || [];
   state.chart = renderConditionsChart({
     canvas: document.getElementById("conditionsChart"),
     rows,

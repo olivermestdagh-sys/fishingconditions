@@ -674,6 +674,427 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
   return map;
 }
 
+// --- WillyWeather search / candidate picker (shared) -----------------------
+//
+// Originally lived only in locationsadmin.js (the Settings tab's "click map
+// to add location" flow) — moved here once app.js's Location tab needed the
+// exact same "click the map, ask WillyWeather what's really there, let the
+// person pick from real candidates" flow for its own "click map to preview
+// a spot" feature (see fetchWillyWeatherPreviewRows below, and
+// onLocationMapClickForPreview in app.js). Both callers now share one
+// implementation instead of two copies that could drift apart.
+//
+// URL of the willyweather-search Cloudflare Worker (see
+// willyweather-search.js) — deliberately empty until it's actually
+// deployed. The Worker exists purely to keep the WillyWeather API key off
+// this public site (every page here is served as-is by GitHub Pages;
+// anyone can view source) while still letting these map-click flows ask
+// WillyWeather what's really at a given point. Left blank, both callers
+// simply skip the live-suggestion step and fall back to their own
+// no-Worker behavior — nothing breaks, it just doesn't get live data until
+// this is set. Paste in the Worker's own URL after following the deploy
+// steps at the top of willyweather-search.js, e.g.
+// "https://fishingconditions-search.your-subdomain.workers.dev" — note the
+// "https://" is required; a bare hostname here is a relative path as far
+// as fetch() is concerned, not an absolute URL, and would silently 404
+// against this site's own origin instead of ever reaching the Worker.
+const WILLYWEATHER_SEARCH_WORKER_URL = "https://fishingconditions-search.oliver-mestdagh.workers.dev";
+
+/**
+ * Calls the willyweather-search Worker's coordinate-search endpoint.
+ * Returns an array (possibly empty) on success, or null on any failure
+ * (network error, non-OK response, Worker not yet deployed at this URL,
+ * malformed response) — null is the signal callers use to fall back to
+ * their own no-Worker behavior rather than getting stuck. Never throws.
+ */
+async function fetchWillyWeatherCandidates(lat, lng) {
+  if (!WILLYWEATHER_SEARCH_WORKER_URL) return null;
+  try {
+    const res = await fetch(`${WILLYWEATHER_SEARCH_WORKER_URL}/search?lat=${lat}&lng=${lng}`);
+    if (!res.ok) {
+      console.error("willyweather-search Worker returned", res.status);
+      return null;
+    }
+    const data = await res.json();
+    return Array.isArray(data) ? data : null;
+  } catch (err) {
+    console.error("willyweather-search Worker request failed:", err);
+    return null;
+  }
+}
+
+function escapeHtml(str) {
+  return String(str || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/**
+ * Shows a small modal listing WillyWeather's candidate locations near a
+ * map click, and resolves once the person picks one, chooses to enter/skip
+ * manually instead, or cancels outright. Built fresh each call and torn
+ * down on any exit path.
+ *
+ * opts.allowManual (default true) controls whether the "None of these"
+ * button appears at all — the Settings tab's "click to add" flow has a
+ * genuine manual-entry fallback to offer (createNewLocationAt with no
+ * candidate), but the Location tab's "click to preview" flow has nothing
+ * meaningful to fall back to (there's no location to preview without a
+ * real WillyWeather match) — see onLocationMapClickForPreview, app.js.
+ *
+ * Resolves to one of:
+ *   { action: "pick", candidate }  — chose a specific WillyWeather match
+ *   { action: "manual" }           — "None of these" (only when allowManual)
+ *   { action: "cancel" }           — closed without choosing anything
+ */
+function showLocationCandidatePicker(candidates, opts = {}) {
+  const allowManual = opts.allowManual !== false;
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "ww-candidate-overlay";
+
+    const items = candidates
+      .map(
+        (c, i) => `
+      <button type="button" class="ww-candidate-item" data-candidate-idx="${i}">
+        <span class="ww-candidate-name">${escapeHtml(c.name || "(unnamed)")}</span>
+        <span class="ww-candidate-meta">${escapeHtml([c.region, c.state].filter(Boolean).join(", "))}</span>
+      </button>`
+      )
+      .join("");
+
+    overlay.innerHTML = `
+      <div class="ww-candidate-dialog">
+        <button type="button" class="ww-candidate-close" aria-label="Cancel">&times;</button>
+        <h3 style="margin:0 0 4px;">What's here on WillyWeather?</h3>
+        <p class="footnote" style="margin:0 0 12px;">Pick the real match so weather/tide data resolves correctly.</p>
+        <div class="ww-candidate-list">${items}</div>
+        ${allowManual ? `<button type="button" id="wwCandidateManual" class="btn-secondary" style="margin-top:12px;width:100%;">None of these — enter a name manually</button>` : ""}
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const cleanup = (result) => {
+      overlay.remove();
+      resolve(result);
+    };
+
+    overlay.querySelector(".ww-candidate-close").addEventListener("click", () => cleanup({ action: "cancel" }));
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) cleanup({ action: "cancel" });
+    });
+    const manualBtn = overlay.querySelector("#wwCandidateManual");
+    if (manualBtn) manualBtn.addEventListener("click", () => cleanup({ action: "manual" }));
+    overlay.querySelectorAll(".ww-candidate-item").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const idx = Number(btn.dataset.candidateIdx);
+        cleanup({ action: "pick", candidate: candidates[idx] });
+      });
+    });
+  });
+}
+
+// --- WillyWeather live preview (Location tab "click map to preview") ------
+//
+// Builds a preview graph for an arbitrary map point WITHOUT it being a
+// saved location in config/locations.json — see previewLocationOnMap,
+// app.js. This is a browser-side port of fetch_conditions.py's own DATA
+// MERGING (build_readings/process_location) — NOT its scoring
+// (compute_condition/compute_fishing_condition), which needs each
+// location's own saved shore/threshold config that doesn't exist yet for
+// a spot that's only been clicked, not added. buildConditionStripsPlugin
+// simply has nothing to draw for a preview's Location/Fishing Condition
+// strips as a result — an empty strip, not a wrong one, and worth saying
+// so explicitly to whoever's looking (see the preview note in app.js).
+//
+// WillyWeather's own weather.json (via the Worker's /weather endpoint,
+// which is what keeps the API key off this page) supplies temperature,
+// wind, rainfall probability, tides, and sunrise/sunset. Open-Meteo's
+// pressure and marine (sea surface temperature) endpoints need no key at
+// all, so those go straight from the browser rather than through the
+// Worker — same division fetch_conditions.py itself uses.
+
+const OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
+const OPEN_METEO_MARINE_URL = "https://marine-api.open-meteo.com/v1/marine";
+// Deliberately shorter than fetch_conditions.py's own FORECAST_DAYS
+// default (6) — a preview doesn't need the full week the scheduled
+// pipeline pulls, and every preview call spends real, metered WillyWeather
+// quota on demand (unlike the scheduled pipeline's fixed 3-hourly cost),
+// so there's a genuine reason to keep it modest.
+const PREVIEW_FORECAST_DAYS = 4;
+
+/**
+ * The whole preview data pipeline for one clicked point: WillyWeather
+ * weather.json (via the Worker) plus Open-Meteo pressure/marine (direct),
+ * fetched in parallel, then pivoted into the same "rows" shape every other
+ * chart on this site already expects (see renderConditionsChart). Returns
+ * null on any failure (Worker not configured/reachable, WillyWeather id
+ * invalid, no data at all) — callers show a friendly message rather than a
+ * half-built graph. Never throws.
+ */
+async function fetchWillyWeatherPreviewRows(willyweatherId, lat, lng) {
+  if (!WILLYWEATHER_SEARCH_WORKER_URL) return null;
+  try {
+    const [weather, pressureByHour, sstByHour] = await Promise.all([
+      fetch(`${WILLYWEATHER_SEARCH_WORKER_URL}/weather?id=${encodeURIComponent(willyweatherId)}&days=${PREVIEW_FORECAST_DAYS}`).then((r) => (r.ok ? r.json() : null)),
+      fetchOpenMeteoPressureHourly(lat, lng),
+      fetchOpenMeteoSstHourly(lat, lng),
+    ]);
+    if (!weather || !weather.forecasts) return null;
+    return buildPreviewRows(weather, pressureByHour, sstByHour);
+  } catch (err) {
+    console.error("WillyWeather preview fetch failed:", err);
+    return null;
+  }
+}
+
+/** Hourly mean-sea-level pressure — same Open-Meteo call/params as
+ * get_pressure_forecast in fetch_conditions.py. Fails to {} (never
+ * throws), same as every other best-effort fetch on this site — a preview
+ * missing its Pressure line is far better than a preview that won't load
+ * at all over one flaky supplementary call. */
+async function fetchOpenMeteoPressureHourly(lat, lng) {
+  if (lat == null || lng == null) return {};
+  try {
+    const res = await fetch(`${OPEN_METEO_FORECAST_URL}?latitude=${lat}&longitude=${lng}&hourly=pressure_msl&forecast_days=${PREVIEW_FORECAST_DAYS}&timezone=auto`);
+    if (!res.ok) return {};
+    const data = await res.json();
+    return openMeteoHourlyLookup((data.hourly || {}).time, (data.hourly || {}).pressure_msl);
+  } catch (err) {
+    console.error("Open-Meteo pressure fetch failed:", err);
+    return {};
+  }
+}
+
+/** Hourly sea surface temperature — same Open-Meteo Marine call/params as
+ * get_marine_forecast in fetch_conditions.py (minus current
+ * velocity/direction, which only matters for Kayak's Condition scoring —
+ * out of scope for a scoring-free preview). */
+async function fetchOpenMeteoSstHourly(lat, lng) {
+  if (lat == null || lng == null) return {};
+  try {
+    const res = await fetch(`${OPEN_METEO_MARINE_URL}?latitude=${lat}&longitude=${lng}&hourly=sea_surface_temperature&forecast_days=${Math.min(PREVIEW_FORECAST_DAYS, 8)}&past_days=1&timezone=auto&cell_selection=sea`);
+    if (!res.ok) return {};
+    const data = await res.json();
+    return openMeteoHourlyLookup((data.hourly || {}).time, (data.hourly || {}).sea_surface_temperature);
+  } catch (err) {
+    console.error("Open-Meteo marine fetch failed:", err);
+    return {};
+  }
+}
+
+/** Open-Meteo returns parallel time[]/value[] arrays with "YYYY-MM-DDTHH:MM"
+ * timestamps (no seconds) — this re-keys them to "YYYY-MM-DD HH" hour
+ * buckets, the same lookup shape hourly_lookup() produces in
+ * fetch_conditions.py, so buildPreviewRows can attach a value to every row
+ * that falls in the same hour regardless of its own exact minute. */
+function openMeteoHourlyLookup(times, values) {
+  const out = {};
+  if (!times || !values) return out;
+  for (let i = 0; i < times.length; i++) {
+    const v = values[i];
+    if (v == null) continue;
+    out[String(times[i]).slice(0, 13).replace("T", " ")] = v;
+  }
+  return out;
+}
+
+/** Mirrors GetNumericField from fetch_conditions.py: grabs whatever
+ * numeric field is present on a temperature forecast entry, regardless of
+ * its exact name (WillyWeather's field name for this varies by product). */
+function previewNumericField(entry) {
+  for (const key in entry) {
+    if (key === "dateTime" || key === "type") continue;
+    const val = entry[key];
+    if (typeof val === "number" && !Number.isNaN(val)) return val;
+  }
+  return null;
+}
+
+/** WillyWeather's observationalGraphs timestamps are epoch SECONDS that
+ * already represent local wall-clock time (per their docs) — mirrors
+ * epoch_to_local_dt's UTC-math conversion (no real timezone shift) into
+ * this site's usual naive "YYYY-MM-DD HH:MM:SS" string convention, so the
+ * result slots into the same byDt pivot as every other reading below. */
+function previewEpochToNaiveString(epochSeconds) {
+  if (epochSeconds == null) return null;
+  const d = new Date(epochSeconds * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+
+/** Nearest of the 16 compass points to a given degree value — the reverse
+ * of COMPASS_DEGREES, needed by fillPreviewWindGaps' circular averaging. */
+function previewDegreesToCompass(deg) {
+  let closest = null;
+  let closestDiff = Infinity;
+  for (const name in COMPASS_DEGREES) {
+    const diff = Math.min(Math.abs(COMPASS_DEGREES[name] - deg), 360 - Math.abs(COMPASS_DEGREES[name] - deg));
+    if (diff < closestDiff) {
+      closestDiff = diff;
+      closest = name;
+    }
+  }
+  return closest;
+}
+
+/**
+ * Ports fill_wind_gaps from fetch_conditions.py: fills missing wind
+ * speed/direction by averaging the nearest REAL reading before and after
+ * the gap — never extrapolates past the first/last real one. Direction is
+ * averaged as unit vectors (not a plain numeric mean) so a gap between,
+ * say, 350° and 10° resolves to roughly 0° rather than swinging through
+ * 180°. Mutates rows in place, from a snapshot of the original values —
+ * see the Python original for why (an early fill must never feed a later
+ * gap's average).
+ */
+function fillPreviewWindGaps(rows) {
+  const n = rows.length;
+  const originalSpeed = rows.map((r) => (r["Wind Forecast (km/h)"] != null ? r["Wind Forecast (km/h)"] : null));
+  const originalDir = rows.map((r) => (r["Wind Forecast Dir"] != null ? r["Wind Forecast Dir"] : null));
+
+  const nearestReal = (values, i, step) => {
+    let j = i;
+    while (j >= 0 && j < n) {
+      if (values[j] != null) return j;
+      j += step;
+    }
+    return null;
+  };
+
+  for (let i = 0; i < n; i++) {
+    if (originalSpeed[i] != null) continue;
+    const prevIdx = nearestReal(originalSpeed, i - 1, -1);
+    const nextIdx = nearestReal(originalSpeed, i + 1, 1);
+    if (prevIdx != null && nextIdx != null) {
+      rows[i]["Wind Forecast (km/h)"] = Math.round(((originalSpeed[prevIdx] + originalSpeed[nextIdx]) / 2) * 10) / 10;
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    if (originalDir[i] != null) continue;
+    const prevIdx = nearestReal(originalDir, i - 1, -1);
+    const nextIdx = nearestReal(originalDir, i + 1, 1);
+    if (prevIdx == null || nextIdx == null) continue;
+    const deg1 = COMPASS_DEGREES[originalDir[prevIdx]];
+    const deg2 = COMPASS_DEGREES[originalDir[nextIdx]];
+    if (deg1 == null || deg2 == null) continue;
+    const rad1 = (deg1 * Math.PI) / 180;
+    const rad2 = (deg2 * Math.PI) / 180;
+    const avgX = (Math.cos(rad1) + Math.cos(rad2)) / 2;
+    const avgY = (Math.sin(rad1) + Math.sin(rad2)) / 2;
+    const avgDeg = ((Math.atan2(avgY, avgX) * 180) / Math.PI + 360) % 360;
+    rows[i]["Wind Forecast Dir"] = previewDegreesToCompass(avgDeg);
+  }
+}
+
+/**
+ * Pivots WillyWeather's weather.json (raw forecast/observational shape)
+ * plus the two Open-Meteo hourly lookups into the "rows" array
+ * renderConditionsChart expects — ports process_location's merge step
+ * (not its scoring). Returns { rows, sunTimes, tideMaxObserved }.
+ */
+function buildPreviewRows(weather, pressureByHour, sstByHour) {
+  const forecasts = weather.forecasts || {};
+  const byDt = {};
+  const setField = (dtRaw, field, value) => {
+    if (dtRaw == null || value == null) return;
+    const rec = byDt[dtRaw] || (byDt[dtRaw] = { dateTime: dtRaw });
+    rec[field] = value;
+  };
+
+  for (const day of (forecasts.temperature || {}).days || []) {
+    for (const entry of day.entries || []) {
+      setField(entry.dateTime, "Temp Forecast (C)", previewNumericField(entry));
+    }
+  }
+  for (const day of (forecasts.wind || {}).days || []) {
+    for (const entry of day.entries || []) {
+      setField(entry.dateTime, "Wind Forecast (km/h)", entry.speed);
+      setField(entry.dateTime, "Wind Forecast Dir", entry.directionText || entry.direction);
+    }
+  }
+  for (const day of (forecasts.rainfallprobability || {}).days || []) {
+    for (const entry of day.entries || []) {
+      setField(entry.dateTime, "Rainfall Probability (%)", entry.probability);
+    }
+  }
+
+  // Tide events are WillyWeather's actual high/low readings — a handful
+  // per day, not an hourly curve — kept as their own sorted list (rather
+  // than only living inside byDt) so interpolatedTideHeightAt below (the
+  // same cosine interpolation the Tide Offset feature already uses) has a
+  // clean bracketing pair to interpolate between for every OTHER hourly
+  // row that has no real tide reading of its own.
+  const realTideEvents = [];
+  for (const day of (forecasts.tides || {}).days || []) {
+    for (const entry of day.entries || []) {
+      if (entry.height == null) continue;
+      setField(entry.dateTime, "Tide Height (m)", entry.height);
+      const t = parseNaive(entry.dateTime);
+      if (t != null) realTideEvents.push({ _t: t, "Tide Height (m)": entry.height });
+    }
+  }
+  realTideEvents.sort((a, b) => a._t - b._t);
+
+  const obsGraphs = weather.observationalGraphs || {};
+  const tempGroups = ((obsGraphs.temperature || {}).dataConfig || {}).series?.groups || [];
+  for (const group of tempGroups) {
+    for (const point of group.points || []) {
+      setField(previewEpochToNaiveString(point.x), "Temp Realtime (C)", point.y);
+    }
+  }
+  const windGroups = ((obsGraphs.wind || {}).dataConfig || {}).series?.groups || [];
+  for (const group of windGroups) {
+    for (const point of group.points || []) {
+      const dtStr = previewEpochToNaiveString(point.x);
+      setField(dtStr, "Wind Realtime (km/h)", point.y);
+      setField(dtStr, "Wind Realtime Dir", point.directionText);
+    }
+  }
+
+  let rows = Object.values(byDt);
+  for (const r of rows) r._t = parseNaive(r.dateTime);
+  rows = rows.filter((r) => r._t != null).sort((a, b) => a._t - b._t);
+
+  fillPreviewWindGaps(rows);
+
+  for (const r of rows) {
+    if (r["Tide Height (m)"] == null && realTideEvents.length > 0) {
+      const interpolated = interpolatedTideHeightAt(realTideEvents, r._t);
+      if (interpolated != null) r["Tide Height (m)"] = Math.round(interpolated * 100) / 100;
+    }
+    const hourKey = r.dateTime.slice(0, 13).replace("T", " ");
+    if (pressureByHour[hourKey] != null) r["Pressure (hPa)"] = pressureByHour[hourKey];
+    if (sstByHour[hourKey] != null) r["Water Temp (C)"] = sstByHour[hourKey];
+  }
+
+  const tideHeights = realTideEvents.map((e) => e["Tide Height (m)"]);
+  const tideMaxObserved = tideHeights.length ? Math.round(Math.max(...tideHeights) * 100) / 100 : null;
+
+  return { rows, sunTimes: extractPreviewSunTimes(weather), tideMaxObserved };
+}
+
+/** Ports extract_sun_times from fetch_conditions.py — same
+ * {date, firstLight, sunrise, sunset, lastLight} shape buildDayBandPlugin
+ * already expects (see state.data.sunTimes, app.js/live.js/week.js). */
+function extractPreviewSunTimes(weather) {
+  const days = ((weather.forecasts || {}).sunrisesunset || {}).days || [];
+  const out = [];
+  for (const day of days) {
+    const entries = day.entries || [];
+    if (!entries.length) continue;
+    const e = entries[0];
+    const dateStr = (day.dateTime || "").slice(0, 10);
+    if (!dateStr) continue;
+    out.push({
+      date: dateStr,
+      firstLight: e.firstLightDateTime,
+      sunrise: e.riseDateTime,
+      sunset: e.setDateTime,
+      lastLight: e.lastLightDateTime,
+    });
+  }
+  return out;
+}
+
 
 /**
  * Fetches config/locations.json (the fast, directly-editable admin-side

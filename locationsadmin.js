@@ -4,19 +4,15 @@ const GROUPS_FILE_PATH = "config/location_groups.json";
 const BRANCH = "main";
 const WORKFLOW_FILE = "update.yml";
 
-// URL of the willyweather-search Cloudflare Worker (see
-// cloudflare-worker/willyweather-search.js) — deliberately empty until it's
-// actually deployed. The Worker exists purely to keep the WillyWeather API
-// key off this public page (this file is served as-is by GitHub Pages;
-// anyone can view source) while still letting "click map to add location"
-// ask WillyWeather what's really at that spot. Left blank, the candidate
-// popup is simply skipped and clicking the map falls back to today's
-// behavior (a blank, manually-named location at that point) — nothing
-// breaks, it just doesn't get the live suggestions until this is set.
-// Paste in the Worker's own URL after following the deploy steps at the
-// top of cloudflare-worker/willyweather-search.js, e.g.
-// "https://fishingconditions-search.your-subdomain.workers.dev".
-const WILLYWEATHER_SEARCH_WORKER_URL = "fishingconditions-search.oliver-mestdagh.workers.dev";
+// WILLYWEATHER_SEARCH_WORKER_URL, fetchWillyWeatherCandidates,
+// showLocationCandidatePicker, and escapeHtml all now live in charts.js
+// (loaded before this file) — the Location tab's own "click map to
+// preview a spot" feature needed the exact same "click the map, ask
+// WillyWeather what's really there, let the person pick from real
+// candidates" flow this file originated, so it made more sense to share
+// one implementation than maintain two copies that could drift apart. See
+// the "WillyWeather search / candidate picker (shared)" section of
+// charts.js for the moved code and its comments.
 
 /**
  * Same icon shapes as charts.js's typeIconSvg — duplicated here rather than
@@ -593,90 +589,6 @@ async function onSettingsMapClick(lat, lng) {
   } else {
     createNewLocationAt(lat, lng);
   }
-}
-
-/**
- * Calls the willyweather-search Worker's coordinate-search endpoint.
- * Returns an array (possibly empty) on success, or null on any failure
- * (network error, non-OK response, Worker not yet deployed at this URL,
- * malformed response) — null is the signal callers use to fall back to
- * the manual-entry flow rather than getting stuck. Never throws.
- */
-async function fetchWillyWeatherCandidates(lat, lng) {
-  try {
-    const res = await fetch(`${WILLYWEATHER_SEARCH_WORKER_URL}/search?lat=${lat}&lng=${lng}`);
-    if (!res.ok) {
-      console.error("willyweather-search Worker returned", res.status);
-      return null;
-    }
-    const data = await res.json();
-    return Array.isArray(data) ? data : null;
-  } catch (err) {
-    console.error("willyweather-search Worker request failed:", err);
-    return null;
-  }
-}
-
-/**
- * Shows a small modal listing WillyWeather's candidate locations near a
- * map click, and resolves once the admin picks one, chooses to enter a
- * name manually instead, or cancels outright. Built fresh each call and
- * torn down on any exit path — this page has no existing generic modal
- * helper to reuse (checked charts.js/style.css; the only modal patterns
- * there are the full-screen chart preview, a different shape of UI).
- *
- * Resolves to one of:
- *   { action: "pick", candidate }  — admin chose a specific WillyWeather match
- *   { action: "manual" }           — "None of these" — enter a name by hand
- *   { action: "cancel" }           — closed without choosing anything
- */
-function showLocationCandidatePicker(candidates) {
-  return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.className = "ww-candidate-overlay";
-
-    const items = candidates
-      .map(
-        (c, i) => `
-      <button type="button" class="ww-candidate-item" data-candidate-idx="${i}">
-        <span class="ww-candidate-name">${escapeHtml(c.name || "(unnamed)")}</span>
-        <span class="ww-candidate-meta">${escapeHtml([c.region, c.state].filter(Boolean).join(", "))}</span>
-      </button>`
-      )
-      .join("");
-
-    overlay.innerHTML = `
-      <div class="ww-candidate-dialog">
-        <button type="button" class="ww-candidate-close" aria-label="Cancel">&times;</button>
-        <h3 style="margin:0 0 4px;">What's here on WillyWeather?</h3>
-        <p class="footnote" style="margin:0 0 12px;">Pick the real match so weather/tide data resolves correctly from the very first data refresh.</p>
-        <div class="ww-candidate-list">${items}</div>
-        <button type="button" id="wwCandidateManual" class="btn-secondary" style="margin-top:12px;width:100%;">None of these — enter a name manually</button>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-
-    const cleanup = (result) => {
-      overlay.remove();
-      resolve(result);
-    };
-
-    overlay.querySelector(".ww-candidate-close").addEventListener("click", () => cleanup({ action: "cancel" }));
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) cleanup({ action: "cancel" });
-    });
-    overlay.querySelector("#wwCandidateManual").addEventListener("click", () => cleanup({ action: "manual" }));
-    overlay.querySelectorAll(".ww-candidate-item").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const idx = Number(btn.dataset.candidateIdx);
-        cleanup({ action: "pick", candidate: candidates[idx] });
-      });
-    });
-  });
-}
-
-function escapeHtml(str) {
-  return String(str || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 /**

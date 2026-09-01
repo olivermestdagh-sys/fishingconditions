@@ -175,6 +175,35 @@ how to set the Worker up (a free Cloudflare account, no server to run).
 It exists purely so the WillyWeather API key never has to be exposed in
 this site's own public, client-side code.
 
+### Live preview from the Location tab (optional, same Worker)
+
+The Location tab's map has its own "📍 Click map to preview a spot"
+button — separate from Settings' "click to add", and doesn't create or
+save anything. Arm it, click anywhere on the map, and it:
+
+1. Asks the Worker's `/search` endpoint what's nearby (same lookup the
+   Settings map uses), and if there's more than one candidate, shows the
+   same picker to choose between them.
+2. Fetches that WillyWeather location's live forecast via the Worker's
+   `/weather` endpoint, plus pressure and sea-surface-temperature directly
+   from Open-Meteo (no key needed for those), and renders it into the same
+   graph panel a saved location uses — labelled "(preview)".
+
+This is a genuinely live look at conditions for a spot that **isn't**
+saved anywhere — useful for scouting a new spot before deciding whether
+it's worth adding via Settings. It deliberately does **not** show Location
+Condition / Fishing Condition scores (the condition strips at the top of
+the graph render empty) — those need a saved location's own shore/
+threshold config, which doesn't exist yet for a point that's only been
+clicked, not added. Everything else on the graph (temperature, wind,
+rainfall, tide curve with high/low markers, pressure, water temperature,
+sun/moon shading) is real, live data for that exact point.
+
+Requires the same `willyweather-search` Worker as above, redeployed with
+its `/weather` endpoint (see the comment at the top of that file) — if the
+Worker isn't reachable, clicking the map just shows a friendly "couldn't
+load a preview" message rather than breaking anything.
+
 
 
 Week Ahead calculates drive time live, via Google's Routes API,
@@ -459,8 +488,9 @@ this restriction — nothing extra is drawn.
   overwritten automatically by the workflow)
 - `cloudflare-worker/willyweather-search.js` — optional, separate piece of
   infrastructure (not deployed via GitHub Pages) that powers the WillyWeather
-  candidate popup on the Settings map — see "Getting real WillyWeather names
-  via the map" above
+  candidate popup on the Settings map and the Location tab's live preview —
+  see "Getting real WillyWeather names via the map" and "Live preview from
+  the Location tab" above
 
 ## Editing locations from the site itself
 
