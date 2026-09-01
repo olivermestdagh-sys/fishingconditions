@@ -33,4 +33,12 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Update conditions data"
-          file_pattern: "data/conditions.json"
+          # config/locations.json is now ALSO written by fetch_conditions.py
+          # (see the WillyWeather id/name/region/state caching comment at
+          # the top of process_location(), fetch_conditions.py) — each
+          # location's resolved WillyWeather id gets written back here so
+          # every future run can skip search entirely for it. Committing it
+          # alongside data/conditions.json is what makes that cache actually
+          # persist between runs, instead of being rediscovered and thrown
+          # away every single time.
+          file_pattern: "data/conditions.json config/locations.json"
