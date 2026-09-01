@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="style.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
-<body>
+<body class="map-fullpage-body">
 
 <header class="topbar">
   <h1>Olie's Kayak and Surf Fishing Conditions</h1>
@@ -23,25 +23,21 @@
 </nav>
 
 <main>
-  <section class="summary-card" style="padding:10px;">
-    <div id="locationMap" class="location-map"></div>
-    <p class="footnote" style="margin:8px 4px 0;text-align:left;">Tap a marker to select that location — or use the dropdown below.</p>
-  </section>
+  <div id="locationMap" class="location-map-fullpage"></div>
 
-  <section class="picker-row">
-    <label for="locationSelect">Location</label>
-    <select id="locationSelect"></select>
-  </section>
+  <div id="locationHoverPanel" class="location-hover-panel" style="display:none;">
+    <button id="btnCloseHoverPanel" class="location-hover-panel-close" aria-label="Close">&times;</button>
 
-  <section id="summaryCard" class="summary-card">
-    <!-- filled by app.js -->
-  </section>
+    <section id="summaryCard" class="summary-card location-hover-panel-summary">
+      <!-- filled by app.js -->
+    </section>
 
-  <section class="chart-section full-width-chart">
-    <h2>Conditions Graph</h2>
-    <canvas id="conditionsChart" height="220"></canvas>
-    <p class="footnote" style="margin:4px 0 0;text-align:center;">Tap the graph for a bigger view</p>
-  </section>
+    <section class="chart-section location-hover-panel-chart">
+      <h2>Conditions Graph</h2>
+      <canvas id="conditionsChart" height="220"></canvas>
+      <p class="footnote" style="margin:4px 0 0;text-align:center;">Tap the graph for a bigger view</p>
+    </section>
+  </div>
 
   <div id="chartModalOverlay" class="chart-modal-overlay" style="display:none;">
     <button id="btnCloseChartModal" class="chart-modal-close" aria-label="Close">&times;</button>
@@ -49,11 +45,6 @@
       <canvas id="conditionsChartModal"></canvas>
     </div>
   </div>
-
-  <footer class="footnote">
-    Data from <a href="https://www.willyweather.com.au/" target="_blank" rel="noopener">WillyWeather</a>.
-    Refreshed automatically every 30 minutes.
-  </footer>
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
