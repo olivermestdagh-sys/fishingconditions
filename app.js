@@ -182,15 +182,24 @@ function renderLocationMap() {
  * renderLeafletLocationMap call) — fires on every click on open map area
  * (Leaflet doesn't bubble marker clicks up to this handler, so clicking an
  * existing pin still only ever triggers that marker's own onClick, never
- * this). Looks up real WillyWeather candidates near the clicked point
- * (shared fetchWillyWeatherCandidates, charts.js) and either previews the
- * one match directly, lets the person pick between several
+ * this). Gated on canEditLocations() (charts.js's getConnection — same
+ * "ghConnection" localStorage entry the Settings tab's Connect button
+ * writes): without a GitHub connection there's no way to act on a preview
+ * anyway (no "Add as permanent location" button — see
+ * showAddPermanentButton), so an open-map click is simply a no-op for a
+ * visitor who's just viewing the public site, same as it was before this
+ * feature existed at all — only existing markers stay clickable. Looks up
+ * real WillyWeather candidates near the clicked point (shared
+ * fetchWillyWeatherCandidates, charts.js) and either previews the one
+ * match directly, lets the person pick between several
  * (showLocationCandidatePicker, allowManual:false — there's no manual
  * fallback that makes sense here, unlike the Settings tab's own use of
  * this same picker), or shows a friendly "nothing nearby" message if
  * WillyWeather has no match at all.
  */
 async function onLocationMapClickForPreview(lat, lng) {
+  if (!canEditLocations()) return;
+
   const candidates = await fetchWillyWeatherCandidates(lat, lng);
   if (!candidates || candidates.length === 0) {
     showLocationHoverPanel();
