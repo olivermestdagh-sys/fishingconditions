@@ -1,12 +1,19 @@
 const DATA_URL = "data/conditions.json";
 
 // parseNaive, dayKeyOf, formatDayHeading, dirToArrowRotation, windColor, fmtChartTick,
-// buildDayBandPlugin, renderConditionsChart, and CONDITION_COLORS all come from
-// charts.js (loaded before this file).
+// buildDayBandPlugin, renderConditionsChart, CONDITION_COLORS, wireHoldToShowTooltip,
+// setupFullscreenToggle, and setupDragToScroll all come from charts.js (loaded before
+// this file).
 
 let state = { data: null, rowsByLocation: {}, chart: null };
-let lastChartParams = null;
-let modalChart = null;
+
+// Same convention as Week (graphs)' row charts (week-new.js's
+// PIXELS_PER_HOUR) — a genuinely readable, un-squashed width per hour of
+// data, rather than cramming the whole multi-day forecast into one phone-
+// width canvas. Mobile gets a narrower per-hour width than desktop (less
+// screen to spend), same as Week (graphs) does.
+const isMobileDevice = Math.min(window.innerWidth, window.innerHeight) <= 900;
+const PIXELS_PER_HOUR = isMobileDevice ? 16 : 32;
 
 // A location's NAME is no longer unique on its own — the same physical
 // spot can have both a Kayak and a Land based entry. Everywhere a single
@@ -35,9 +42,19 @@ async function init() {
   await loadTideOffsets(state.data.locations);
   renderLocationMap();
 
-  document.getElementById("conditionsChart").addEventListener("click", openChartModal);
-  document.getElementById("btnCloseChartModal").addEventListener("click", closeChartModal);
   document.getElementById("btnCloseHoverPanel").addEventListener("click", hideLocationHoverPanel);
+
+  // Same gesture set as Week (graphs) and Live, all shared from charts.js:
+  // hold 2s to toggle the tooltip, double-tap/double-click to toggle real
+  // fullscreen, and (desktop only — touch already scrolls natively)
+  // click-and-drag to pan the now-horizontally-scrolling graph. Wired once
+  // here rather than per-render — this page reuses the same <canvas> and
+  // frame across every location switch (destroying/recreating the Chart.js
+  // instance each time, never the DOM elements themselves), so wiring
+  // these per-render would stack up duplicate listeners.
+  wireHoldToShowTooltip(() => state.chart, document.getElementById("conditionsChart"));
+  setupFullscreenToggle("locationChartFrame");
+  setupDragToScroll(document.getElementById("locationChartScroll"));
 
   // Restores and shows whichever location was last viewed, rather than
   // starting on a bare map every visit — the selection was already being
@@ -158,19 +175,37 @@ function renderLocation(key) {
 
 function renderCharts(rows, loc) {
   const emptyState = document.getElementById("hoverPanelEmptyState");
-  const chartWrap = document.querySelector(".location-hover-panel-chart-wrap");
+  const frame = document.getElementById("locationChartFrame");
+  const chartWrap = document.getElementById("locationChartWrap");
 
   if (rows.length === 0) {
     if (state.chart) {
       state.chart.destroy();
       state.chart = null;
     }
-    chartWrap.style.display = "none";
+    frame.style.display = "none";
     emptyState.style.display = "block";
     return;
   }
-  chartWrap.style.display = "block";
+  frame.style.display = "block";
   emptyState.style.display = "none";
+
+  // Explicit pixel width, proportional to the real time range being shown
+  // (see PIXELS_PER_HOUR above) — set BEFORE renderConditionsChart runs,
+  // since Chart.js measures its canvas's parent's width at construction
+  // time to decide the canvas's own size (same reason Week (graphs)'s row
+  // charts set their wrapper's width right before rendering into it, not
+  // after). Without this, the graph would render squashed to whatever
+  // narrow width the wrap happened to have first, then never widen even
+  // once this line did run.
+  const totalHours = Math.max(1, (rows[rows.length - 1]._t - rows[0]._t) / 3600000);
+  chartWrap.style.width = Math.round(totalHours * PIXELS_PER_HOUR) + "px";
+  // Scrolling back to the start on every new render (a fresh location, or
+  // the same one re-rendering) — otherwise a location switch could leave
+  // the new graph scrolled to wherever the PREVIOUS location's view
+  // happened to be left, which is disorienting since "now" is always meant
+  // to be near the start of the visible window.
+  document.getElementById("locationChartScroll").scrollLeft = 0;
 
   const sunTimes = (loc && state.data.sunTimes && state.data.sunTimes[loc.name]) || [];
   state.chart = renderConditionsChart({
@@ -183,50 +218,19 @@ function renderCharts(rows, loc) {
     minTideHeight: loc ? loc.minTideHeight : null,
     compact: false,
     tideOffsetMinutes: loc ? loc.tideOffset : null,
-    // The floating panel is a quick-glance preview, not the detailed view
-    // (tapping it opens the full-axes fullscreen modal below for that) —
-    // the °C/km/h axis numbers aren't very readable at this size anyway,
-    // and hiding them frees up real width/height for the plot itself.
+    // The floating panel is a quick-glance view — the °C/km/h axis numbers
+    // aren't very readable at this size anyway, and hiding them frees up
+    // real width/height for the plot itself.
     hideValueAxes: true,
     // Draws the date headings/moon icons INSIDE the plot area instead of
     // reserving a separate strip above it for them — reclaims real
-    // vertical space in this already-compact preview. The fullscreen modal
-    // below doesn't pass this, so it keeps the normal reserved-strip
-    // layout, which has more headroom to spare.
+    // vertical space.
     overlayHeading: true,
+    // This page now drives the tooltip itself (hold-2s, see
+    // wireHoldToShowTooltip in init()) rather than Chart.js's own default
+    // tap-triggered one — same reasoning/pattern as Live and Week (graphs).
+    disableBuiltinEvents: true,
   });
-  // Full axes shown directly here too now, not just once the modal opens —
-  // no more stripped-down "compact" version anywhere on the site. Tapping
-  // still opens the modal (a bigger view), it's just no longer the only
-  // place axes show up.
-  lastChartParams = {
-    rows,
-    sunTimes,
-    tideMaxObserved: loc ? loc.tideMaxObserved : null,
-    minTideHeight: loc ? loc.minTideHeight : null,
-    tideOffsetMinutes: loc ? loc.tideOffset : null,
-  };
-}
-
-function openChartModal() {
-  if (!lastChartParams) return;
-  const overlay = document.getElementById("chartModalOverlay");
-  overlay.style.display = "flex";
-  modalChart = renderConditionsChart({
-    canvas: document.getElementById("conditionsChartModal"),
-    rows: lastChartParams.rows,
-    sunTimes: lastChartParams.sunTimes,
-    existingChart: modalChart,
-    tideMaxObserved: lastChartParams.tideMaxObserved,
-    moonPhases: state.data.moonPhases,
-    minTideHeight: lastChartParams.minTideHeight,
-    compact: false,
-    tideOffsetMinutes: lastChartParams.tideOffsetMinutes,
-  });
-}
-
-function closeChartModal() {
-  document.getElementById("chartModalOverlay").style.display = "none";
 }
 
 init();

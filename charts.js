@@ -2757,3 +2757,63 @@ function setupFullscreenToggle(targetId) {
   document.addEventListener("fullscreenchange", onFullscreenChange);
   document.addEventListener("webkitfullscreenchange", onFullscreenChange);
 }
+
+/**
+ * Click-and-drag-to-pan for desktop (mouse) — grab a horizontally
+ * scrolling chart area anywhere and drag to scroll it, rather than
+ * needing a trackpad/scrollbar. Filtered to e.pointerType === "mouse"
+ * specifically — touch already has native drag-to-scroll on an
+ * overflow-x:auto container, and re-doing it here too would double up
+ * with (and likely fight) that, plus the hold-to-show-tooltip gesture on
+ * the chart itself. A genuine click (not a drag) is left alone — this
+ * only ever engages once the pointer has actually moved past a small
+ * threshold, so a plain click/tap still reaches whatever it would
+ * normally reach (hold-to-show-tooltip's own tap handling, the
+ * double-tap-fullscreen detector).
+ *
+ * Shared (originally written for Week (graphs), week-new.js, which keeps
+ * its own copy rather than switching to this one — moved here mainly so
+ * the Location tab's own horizontally-scrolling graph, app.js, could use
+ * it too without duplicating the logic a second time).
+ */
+function setupDragToScroll(scrollWrap) {
+  const DRAG_THRESHOLD_PX = 6;
+  let isDown = false;
+  let draggedPastThreshold = false;
+  let startX = 0;
+  let startY = 0;
+  let startScrollLeft = 0;
+  let startScrollTop = 0;
+
+  scrollWrap.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "mouse" || e.button !== 0) return;
+    isDown = true;
+    draggedPastThreshold = false;
+    startX = e.clientX;
+    startY = e.clientY;
+    startScrollLeft = scrollWrap.scrollLeft;
+    startScrollTop = scrollWrap.scrollTop;
+  });
+
+  window.addEventListener("pointermove", (e) => {
+    if (!isDown) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (!draggedPastThreshold) {
+      if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD_PX) return;
+      draggedPastThreshold = true;
+      scrollWrap.classList.add("chart-scroll-dragging");
+    }
+    e.preventDefault(); // stop text selection while actively dragging
+    scrollWrap.scrollLeft = startScrollLeft - dx;
+    scrollWrap.scrollTop = startScrollTop - dy;
+  });
+
+  function endDrag() {
+    isDown = false;
+    draggedPastThreshold = false;
+    scrollWrap.classList.remove("chart-scroll-dragging");
+  }
+  window.addEventListener("pointerup", endDrag);
+  window.addEventListener("pointercancel", endDrag);
+}
