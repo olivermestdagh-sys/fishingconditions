@@ -43,8 +43,10 @@ function typeIconSvg(type, size) {
   </svg>`;
 }
 
-const TYPE_OPTIONS = ["Kayak", "Land based"];
-const SHORE_OPTIONS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+// TYPE_OPTIONS and SHORE_OPTIONS now live in charts.js (loaded before this
+// file) — the Location tab's preview scoring needs the same lists to
+// populate its own Shore/Type pickers, so they're shared rather than
+// duplicated. See charts.js's "Preview condition scoring" section.
 
 // Which timing fields apply to each type. Drive time is no longer a static
 // setting here at all — Week Ahead calculates it live from the device's

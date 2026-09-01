@@ -155,6 +155,45 @@ main {
   margin: 0;
 }
 
+/* Shore/Type pickers shown above the graph ONLY while previewing an
+   unsaved map click (see populatePreviewControls/showPreviewControls,
+   app.js) — a real saved location has this config already, so these stay
+   hidden for it. flex-wrap lets the hint line drop to its own row on
+   narrow phones without the two selects themselves ever squashing. */
+.location-hover-panel-preview-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+
+.preview-control-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--grey-500);
+}
+
+.preview-control-select {
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--grey-200);
+  background: var(--white);
+  font-size: 0.82rem;
+  color: #111827;
+}
+
+/* Full-width so it wraps onto its own line under the two selects rather
+   than fighting them for horizontal space — this note is often the
+   longest-running text in the row (see populatePreviewControls). */
+.preview-shore-hint {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+}
+
 /* The whole "graph area" — hint overlay + horizontally-scrolling chart —
    as one fullscreen-able unit (see setupFullscreenToggle, charts.js,
    called on this element's id in app.js), matching how Week (graphs) and
