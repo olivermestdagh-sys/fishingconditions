@@ -458,7 +458,7 @@ function renderUpdatedBanner() {
     return;
   }
   const dt = new Date(state.data.generatedAt);
-  document.getElementById("updated").textContent = `Updated ${dt.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
+  document.getElementById("updated").textContent = `Updated ${dt.toLocaleString([], { dateStyle: "medium", timeStyle: "short", hour12: false })}`;
 }
 
 function renderLocation(key) {
