@@ -3950,15 +3950,15 @@ function computeSchedule(loc, launchStr, homeByStr, driveMinutes) {
 }
 
 const COMPUTED_SESSIONS_STORAGE_KEY = "goodConditionsComputedSessions";
-const SCHEDULE_MODE_STORAGE_KEY = "goodConditionsScheduleMode";
 
 /**
  * Turns a click-drag-release range on a location's own graph into a full
  * schedule, via the SAME computeSchedule() above — this only handles the
  * one extra step computeSchedule doesn't know about: which of its two
  * direct inputs (launch, homeBy) the drag's two endpoints actually
- * correspond to, which depends on which of the two Schedule Mode toggle
- * states is active (see week-new.js's mode toggle):
+ * correspond to, which depends on which of the two arm buttons was used
+ * to start this drag ("+ Fishing times" vs "+ Home to home" — see
+ * week-new.js's onArmScheduleClick):
  *
  *   "fishing" mode — drag spans the actual time AT the fishing spot
  *   ([fishAt, headBack]). dragStartMs converts to launch directly
@@ -4045,15 +4045,6 @@ function loadComputedSessions() {
 
 function persistComputedSessions(list) {
   localStorage.setItem(COMPUTED_SESSIONS_STORAGE_KEY, JSON.stringify(list));
-}
-
-function loadScheduleMode() {
-  const saved = localStorage.getItem(SCHEDULE_MODE_STORAGE_KEY);
-  return saved === "onsite" ? "onsite" : "fishing"; // "fishing" is the default — the more common way to think about a session
-}
-
-function persistScheduleMode(mode) {
-  localStorage.setItem(SCHEDULE_MODE_STORAGE_KEY, mode);
 }
 
 
