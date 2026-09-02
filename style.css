@@ -1719,14 +1719,6 @@ main.wide {
   font-style: italic;
 }
 
-.schedule-mode-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 10px 0;
-  flex-wrap: wrap;
-}
-
 .weeknew-session-time {
   font-size: 0.68rem;
   font-weight: 600;
