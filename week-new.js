@@ -18,9 +18,13 @@
 // from the shared location/type/threshold keys (charts.js), since pinning
 // is specific to this page's layout.
 //
-// Still deliberately does NOT have: hover-preview, click-to-open modal,
-// the old per-tile sticky-content trick, or trip schedule — none of that
-// applies to an always-visible row-per-location layout either.
+// Trip schedule: tapping a qualifying-session chip arms that row for a
+// click-drag-release range selection on its own chart (wireSessionRangeSelect)
+// — the drag is interpreted per the Schedule Mode toggle (fishing time, or
+// home-to-home) and computed via charts.js's computeScheduleFromDragRangeMs,
+// then shown as compact flags on the chart and a chip in the sidebar.
+// Computed sessions persist across reloads and accumulate until removed —
+// this is what lets Week (sessions) eventually retire in favor of this page.
 
 // Detects "this is a phone-sized device" the same way the CSS
 // force-landscape trick in week-new.html does (max-width: 900px) —
@@ -29,6 +33,7 @@
 const isMobileDevice = Math.min(window.innerWidth, window.innerHeight) <= 900;
 
 const DATA_URL = "data/conditions.json";
+const SETTINGS_URL = "config/settings.json";
 // Half the usual scale on mobile — 32px/hour was sized for a desktop-width
 // screen. At that same scale on a phone's much narrower rotated-landscape
 // width, a single day took up nearly the entire visible width on its own,
@@ -46,6 +51,27 @@ let selectedTypes = new Set(["Kayak", "Land based"]);
 let selectedGroups = new Set();
 let selectedDirections = new Set();
 let pinnedOrder = []; // location NAMES, in the order they were pinned — oldest pin first
+
+// Computed (drag-derived) sessions — see charts.js's
+// computeScheduleFromDragRangeMs for how one of these gets built, and the
+// big comment on wireSessionRangeSelect below for the full click-arm/
+// drag-compute flow. Persists across reloads (charts.js's
+// loadComputedSessions/persistComputedSessions), unlike everything else
+// module-level here which is pure in-memory UI state.
+let computedSessions = [];
+
+// "fishing" or "onsite" — see computeScheduleFromDragRangeMs (charts.js)
+// for exactly what each means; persists across reloads same as filters.
+let scheduleMode = "fishing";
+
+// Which row is currently primed for a click-drag-release range selection —
+// null when nothing is armed. Sets/cleared by onSessionTileClick and
+// wireSessionRangeSelect below; checked by BOTH the tooltip-hold gesture
+// and the drag-to-pan gesture so they can get out of the way while a
+// session calculation is actually being dragged out (see the big comment
+// on wireSessionRangeSelect for why this can't just be three independent
+// gesture handlers on the same canvas).
+let armedLocationName = null;
 
 // Chart.js instances currently on screen — one per RENDERED location row
 // (not necessarily every row that exists — see rowVisibilityObserver
@@ -175,6 +201,192 @@ function wireSyncedTooltip(chart, canvas) {
   canvas.addEventListener("pointerleave", clearPressTimer);
 }
 
+/**
+ * Scrolls the shared board so a session's midpoint is centered in the
+ * visible chart area (clamped at either edge of the whole displayed week
+ * — "centered if it can", per the original request; near the very start
+ * or end of the week there just isn't a full half-viewport of track on
+ * one side to center against, so it scrolls as far as it can and stops).
+ * The sidebar's own width doesn't scroll (position:sticky), so it's
+ * subtracted from the visible width up front — otherwise "centered" would
+ * be centered across the WHOLE viewport including the space the sidebar
+ * permanently occupies, not the actual visible chart area.
+ */
+function scrollToCenterSession(session, timelineStart, totalTrackWidth) {
+  const scrollWrap = document.getElementById("weekTimelineScroll");
+  if (!scrollWrap) return;
+  const midMs = (session.from + session.to) / 2;
+  const trackPx = ((midMs - timelineStart) / 3600000) * PIXELS_PER_HOUR;
+  const visibleChartWidth = Math.max(100, scrollWrap.clientWidth - SIDEBAR_WIDTH);
+  const target = trackPx - visibleChartWidth / 2;
+  scrollWrap.scrollLeft = Math.max(0, Math.min(Math.max(0, totalTrackWidth - visibleChartWidth), target));
+}
+
+/**
+ * Only ever ONE row armed at a time — arming a new one disarms whichever
+ * was previously armed first, same "only one X active at a time" pattern
+ * as tooltipsArmed/activeTooltipChart above. Tracks the actual DOM
+ * elements (not just the location name) so it can strip the "armed"
+ * visual state cleanly regardless of which row/chip they belonged to.
+ */
+let armedRow = null;
+let armedChip = null;
+
+function disarmSchedule() {
+  if (armedRow) armedRow.classList.remove("armed-for-schedule");
+  if (armedChip) armedChip.classList.remove("armed");
+  armedLocationName = null;
+  armedRow = null;
+  armedChip = null;
+}
+
+/**
+ * Tapping a qualifying-session chip is the "arm" step of the whole
+ * click-arm-then-drag flow (see wireSessionRangeSelect just below for the
+ * drag half). Scrolls to that session first (friction point 2 from the
+ * original design discussion — a scrollLeft change, NOT a per-row chart
+ * xRange change, since every row deliberately shares one fixed range —
+ * see buildLocationRowElement's own header comment for why that matters),
+ * then arms this row so its NEXT drag-release on the chart computes a
+ * schedule instead of panning/showing the tooltip.
+ *
+ * getRowChart is a () => chart closure rather than the chart directly,
+ * because at the moment this listener is attached, the chart may not
+ * exist yet (deferred/lazy row rendering — see renderChart's own
+ * comment) — reading it lazily, only once actually needed (drag-release,
+ * in wireSessionRangeSelect), always gets whatever the CURRENT chart is.
+ */
+function onSessionTileClick(loc, session, row, chip, getRowChart, canvas, timelineStart, totalTrackWidth) {
+  scrollToCenterSession(session, timelineStart, totalTrackWidth);
+  if (armedLocationName === loc.name) {
+    // Tapping the already-armed row's own chip again is a cancel, not a
+    // re-arm — matches the hold-to-arm tooltip's own "hold again to turn
+    // it back off" convention elsewhere on this page.
+    disarmSchedule();
+    return;
+  }
+  disarmSchedule();
+  armedLocationName = loc.name;
+  armedRow = row;
+  armedChip = chip;
+  row.classList.add("armed-for-schedule");
+  chip.classList.add("armed");
+}
+
+/**
+ * The actual click-drag-release gesture, wired to EVERY row's canvas
+ * (not just the currently-armed one) — each call only ever acts when
+ * armedLocationName matches THIS row's own location, so an unarmed row's
+ * canvas behaves completely normally (tooltip-hold, board pan) regardless
+ * of some OTHER row being armed elsewhere.
+ *
+ * Registered before wireSyncedTooltip specifically so it gets first look
+ * at every pointer event on this canvas: stopImmediatePropagation() below
+ * prevents both wireSyncedTooltip's own listener on this same canvas AND
+ * the whole-board drag-to-pan listener (setupDragToScroll, attached to
+ * the scrollWrap ancestor) from ever seeing that event once armed. This
+ * is the resolution to the very first friction point from the original
+ * design discussion — three gestures (hold-to-tooltip, drag-to-pan,
+ * drag-to-plan) can't coexist as three independent listeners on the same
+ * surface, so arming makes this row's canvas swallow events for its own
+ * gesture and nothing else gets a turn until it's disarmed again.
+ *
+ * Deliberately no live rubber-band preview while dragging — only the
+ * start and release positions matter (computeAndStoreSession runs once,
+ * on release), matching how the feature was actually described: press,
+ * drag, let go, THEN see the computed result.
+ */
+function wireSessionRangeSelect(chart, canvas, loc) {
+  let dragStartXVal = null;
+
+  canvas.addEventListener("pointerdown", (e) => {
+    if (armedLocationName !== loc.name) return; // not this row's turn — let tooltip-hold/board-pan handle it normally
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    dragStartXVal = xValFromEvent(chart, e);
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    if (armedLocationName !== loc.name || dragStartXVal == null) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+  });
+
+  canvas.addEventListener("pointerup", (e) => {
+    if (armedLocationName !== loc.name || dragStartXVal == null) return;
+    e.stopImmediatePropagation();
+    const dragEndXVal = xValFromEvent(chart, e);
+    const startMs = Math.min(dragStartXVal, dragEndXVal);
+    const endMs = Math.max(dragStartXVal, dragEndXVal);
+    dragStartXVal = null;
+    disarmSchedule();
+    // A tap with no real drag (start === end, or too close to mean
+    // anything) isn't a range — treat it as "changed my mind", not as a
+    // zero-length session.
+    if (endMs - startMs < 60000) return;
+    computeAndStoreSession(loc, startMs, endMs);
+  });
+
+  canvas.addEventListener("pointercancel", () => {
+    dragStartXVal = null;
+  });
+}
+
+/**
+ * Resolves live drive time (GPS + Google Routes, charts.js), converts the
+ * drag range into a full schedule for the CURRENT Schedule Mode toggle
+ * state, stores it, and re-renders — a full renderWeekView() rather than
+ * a targeted single-row update, same "just rebuild everything" approach
+ * togglePin/the filter handlers already use elsewhere on this page.
+ */
+async function computeAndStoreSession(loc, dragStartMs, dragEndMs) {
+  const driveMinutes = await getDriveTimeMinutes(loc.lat, loc.lng);
+  const schedule = computeScheduleFromDragRangeMs(scheduleMode, dragStartMs, dragEndMs, loc, driveMinutes);
+  const record = {
+    id: `${loc.name}|${dragStartMs}|${Date.now()}`,
+    locationName: loc.name,
+    ...schedule,
+  };
+  computedSessions.push(record);
+  persistComputedSessions(computedSessions);
+  renderWeekView();
+}
+
+function removeComputedSession(id) {
+  computedSessions = computedSessions.filter((r) => r.id !== id);
+  persistComputedSessions(computedSessions);
+  renderWeekView();
+}
+
+/**
+ * The Schedule Mode toggle — two mutually-exclusive chips (reusing the
+ * existing .loc-chip/.loc-chip.active look, not a new control style),
+ * persisted the same way filters are. Rendered once at startup, not on
+ * every renderWeekView() — the mode itself doesn't depend on filters/data,
+ * just on what the person last chose.
+ */
+function renderScheduleModeChips() {
+  const container = document.getElementById("scheduleModeChips");
+  if (!container) return;
+  const options = [
+    { value: "fishing", label: "Fishing time" },
+    { value: "onsite", label: "Home to home" },
+  ];
+  container.innerHTML = "";
+  for (const { value, label } of options) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "loc-chip" + (scheduleMode === value ? " active" : "");
+    chip.textContent = label;
+    chip.addEventListener("click", () => {
+      scheduleMode = value;
+      persistScheduleMode(scheduleMode);
+      renderScheduleModeChips();
+    });
+    container.appendChild(chip);
+  }
+}
+
 // Lazily builds a row's chart only once that row actually scrolls into
 // view, instead of building every location's chart upfront — with 14+
 // locations each rendering a several-thousand-pixel-wide, high-resolution
@@ -268,6 +480,25 @@ function wireThresholdStepper(id, step, min, max, colorFn) {
 }
 
 async function init() {
+  // Loaded separately from the main data fetch, with its own error handling
+  // — a missing/malformed settings file shouldn't break the rest of the
+  // page, just leave the drive-time-dependent half of a computed session
+  // gracefully unavailable (see computeScheduleFromDragRangeMs's
+  // driveTimeUnavailable handling). Same pattern as week.js's own init().
+  try {
+    const settingsRes = await fetch(SETTINGS_URL, { cache: "no-store" });
+    if (settingsRes.ok) {
+      const settings = await settingsRes.json();
+      googleRoutesApiKey = settings.googleRoutesApiKey || null;
+    }
+  } catch (err) {
+    console.error("Could not load settings.json:", err);
+  }
+
+  computedSessions = loadComputedSessions();
+  scheduleMode = loadScheduleMode();
+  renderScheduleModeChips();
+
   try {
     const res = await fetch(DATA_URL, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -828,11 +1059,20 @@ function renderWeekView() {
 
 /**
  * Builds one location's row: a sticky-left sidebar (name, type/shore, pin
- * star, and a small chip per qualifying session) plus its always-visible
- * conditions graph. Every session this location has in the displayed
- * period is shaded on the SAME chart via sessionSpan (now an array — see
- * charts.js's buildSessionSpanPlugin), rather than each session getting
- * its own separate tile/chart the way the earlier version of this page did.
+ * star, a small chip per qualifying session, and any computed/planned
+ * sessions for this location) plus its always-visible conditions graph.
+ * Every session this location has in the displayed period is shaded on
+ * the SAME chart via sessionSpan (now an array — see charts.js's
+ * buildSessionSpanPlugin), rather than each session getting its own
+ * separate tile/chart the way the earlier version of this page did.
+ *
+ * Tapping a qualifying-session chip arms THIS row for a click-drag-release
+ * schedule calculation (see wireSessionRangeSelect below) — the resulting
+ * computed session is stored (charts.js's persistComputedSessions) and
+ * shown both as compact flags on this row's own chart
+ * (buildComputedSessionMarkersPlugin) and as its own chip here in the
+ * sidebar, so several planned options for the same or different locations
+ * can sit side by side for comparison.
  */
 function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, timelineEnd, totalTrackWidth) {
   const row = document.createElement("div");
@@ -870,6 +1110,21 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
   titleRow.appendChild(titleWrap);
   sidebar.appendChild(titleRow);
 
+  // Declared here (not down where they used to sit, right before being
+  // appended) so the session-chip click handlers just below — created
+  // before the chart itself exists yet, since chart creation is deferred
+  // (see renderChart further down) — can still close over the eventual
+  // canvas/chart via these same variables. A closure captures the
+  // VARIABLE, not its value at closure-creation time, so this is safe
+  // even though rowChartRef is still null when the click handlers below
+  // are wired up.
+  const chartWrap = document.createElement("div");
+  chartWrap.className = "weeknew-row-chart";
+  chartWrap.style.width = "40px"; // placeholder — see the renderChart comment further down for why
+  const canvas = document.createElement("canvas");
+  chartWrap.appendChild(canvas);
+  let rowChartRef = null;
+
   const sessionsWrap = document.createElement("div");
   sessionsWrap.className = "weeknew-row-sessions";
   if (sessions.length === 0) {
@@ -904,26 +1159,26 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
           </div>
         </div>
       `;
+      chip.addEventListener("click", () => {
+        onSessionTileClick(loc, s, row, chip, () => rowChartRef, canvas, timelineStart, totalTrackWidth);
+      });
       sessionsWrap.appendChild(chip);
     }
   }
+
+  // Computed (planned) sessions for THIS location — a separate visual
+  // family from the qualifying-session chips above (see the
+  // .weeknew-computed-session CSS comment for why), each with its own
+  // remove button since these accumulate over time and aren't
+  // auto-recomputed from the conditions data the way qualifying sessions
+  // are.
+  const thisLocComputed = computedSessions.filter((r) => r.locationName === loc.name);
+  for (const record of thisLocComputed) {
+    sessionsWrap.appendChild(buildComputedSessionChip(record));
+  }
+
   sidebar.appendChild(sessionsWrap);
   row.appendChild(sidebar);
-
-  const chartWrap = document.createElement("div");
-  chartWrap.className = "weeknew-row-chart";
-  // NOT set to the real totalTrackWidth yet — that's often several
-  // thousand pixels, and setting it on every row upfront (even ones whose
-  // chart is deferred — see renderChart below) forces the browser to lay
-  // out that many extremely wide boxes immediately on load, which is real
-  // cost independent of Chart.js itself. A small fixed placeholder for
-  // now (not a percentage — .weeknew-row sizes itself to its own content
-  // via width:max-content, so a percentage width here has nothing stable
-  // to resolve against); renderChart expands it to the true width right
-  // before building the chart, once this row is actually about to be shown.
-  chartWrap.style.width = "40px";
-  const canvas = document.createElement("canvas");
-  chartWrap.appendChild(canvas);
   row.appendChild(chartWrap);
 
   const displayRows = locRows.filter((r) => r._t >= timelineStart && r._t <= timelineEnd).sort((a, b) => a._t - b._t);
@@ -952,23 +1207,67 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
       showSunTimes: false,
       compact: true,
       sessionSpan: sessions.map((s) => ({ from: s.from, to: s.to })),
+      computedSessionMarkers: thisLocComputed,
       xRange: { min: timelineStart, max: timelineEnd },
       disableBuiltinEvents: true, // this page drives the tooltip itself — see wireSyncedTooltip below
       showFirstBoxIcons: true, // windvane/fish legend on each row's own first condition-strip box
       tideOffsetMinutes: loc.tideOffset,
     });
+    rowChartRef = rowChart;
     if (rowChart) {
       activeRowCharts.push(rowChart);
+      // Registered BEFORE wireSyncedTooltip specifically — both listen on
+      // the same canvas, and wireSessionRangeSelect needs first refusal
+      // (via stopImmediatePropagation) on any pointer event while this
+      // row is armed, so the tooltip-hold gesture and the whole-board
+      // drag-to-pan gesture never also see that same press. See its own
+      // comment for the full reasoning.
+      wireSessionRangeSelect(rowChart, canvas, loc);
       wireSyncedTooltip(rowChart, canvas);
       // Deliberately no "already armed elsewhere, so show here too" logic
       // — only one row's tooltip is ever showing at a time (see
       // showTooltipOn), and a row that's only just scrolled into view
       // wasn't the one actually tapped/held, so it stays blank until it is.
     }
+    // A full renderWeekView() rebuilds every row from scratch (including
+    // this one), so if THIS location was the one armed before the rebuild
+    // (e.g. right after computing a session), the freshly-created row
+    // needs the visual "armed" state re-applied — it otherwise defaults
+    // to unarmed since armed-ness is a DOM class, not chart state.
+    if (armedLocationName === loc.name) row.classList.add("armed-for-schedule");
   };
 
   return { row, sidebar, chartWrap, renderChart };
 }
+
+/**
+ * One sidebar chip for an already-computed (drag-derived) session — full
+ * text breakdown of every schedule instant that resolved (see
+ * computeScheduleFromDragRangeMs; a null field is simply skipped, not
+ * shown as a blank/placeholder), plus a remove button. Deliberately plain
+ * text here rather than icons — the icon+time compact treatment lives on
+ * the chart itself (buildComputedSessionMarkersPlugin); repeating icons
+ * in this already-narrow sidebar column would mean wrapping constantly.
+ */
+function buildComputedSessionChip(record) {
+  const chip = document.createElement("div");
+  chip.className = "weeknew-computed-session";
+  const fmt = (ms) => fmtNaive(ms, { hour: "2-digit", minute: "2-digit", hour12: false });
+  const parts = SCHEDULE_INSTANT_DISPLAY.filter(({ key }) => record[key] != null).map(({ key, label }) => `${label} ${fmt(record[key])}`);
+  const modeLabel = record.mode === "fishing" ? "Fishing time" : "Home to home";
+  chip.innerHTML = `
+    <div class="weeknew-session-time">${modeLabel}</div>
+    <div class="weeknew-computed-session-line">${parts.join(" · ")}</div>
+    ${record.driveTimeUnavailable ? `<div class="weeknew-computed-session-note">Drive time unavailable — showing what could be calculated without it.</div>` : ""}
+    <button type="button" class="weeknew-computed-session-remove" aria-label="Remove this planned session">×</button>
+  `;
+  chip.querySelector(".weeknew-computed-session-remove").addEventListener("click", (e) => {
+    e.stopPropagation();
+    removeComputedSession(record.id);
+  });
+  return chip;
+}
+
 
 /**
  * Click-and-drag-to-pan for desktop (mouse) — grab the board anywhere

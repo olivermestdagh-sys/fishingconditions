@@ -163,11 +163,15 @@
   </section>
 
   <section class="summary-card week-full-bleed" style="padding:0;overflow:hidden;position:relative;">
+    <div class="schedule-mode-bar">
+      <span class="loc-edit-label" style="margin:0;">Drag range means:</span>
+      <div class="chip-row" id="scheduleModeChips" role="group" aria-label="Schedule drag mode"></div>
+    </div>
     <div id="weekEmptyState" class="empty-state" style="display:none;padding:20px;">No locations match the current filters.</div>
     <div id="weekTimelineScroll" class="week-timeline-scroll">
       <div id="weekTimelineInner" class="week-timeline-inner"></div>
     </div>
-    <p class="footnote" style="margin:6px 10px 10px;text-align:left;">Scroll sideways for the rest of the week. Every location has its own always-visible graph — pinned locations (★) stay at the top.</p>
+    <p class="footnote" style="margin:6px 10px 10px;text-align:left;">Scroll sideways for the rest of the week. Every location has its own always-visible graph — pinned locations (★) stay at the top. Tap a session chip to jump the graph there and arm it for planning, then drag across the graph and release to compute a full schedule for that plan.</p>
   </section>
 
   <footer class="footnote">
