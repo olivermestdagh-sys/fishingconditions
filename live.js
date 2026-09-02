@@ -371,7 +371,7 @@ async function init() {
     liveData = await res.json();
     if (liveData.generatedAt) {
       const dt = new Date(liveData.generatedAt);
-      document.getElementById("updated").textContent = `Updated ${dt.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
+      document.getElementById("updated").textContent = `Updated ${dt.toLocaleString([], { dateStyle: "medium", timeStyle: "short", hour12: false })}`;
     }
     // Awaited — small, fast, local file (not the slow WillyWeather
     // pipeline), so negligible delay; avoids a race where the very first

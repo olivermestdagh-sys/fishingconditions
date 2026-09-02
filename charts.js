@@ -23,7 +23,7 @@ function formatDayHeading(dayKey) {
 }
 
 function fmtChartTick(ms) {
-  return new Intl.DateTimeFormat([], { timeZone: "UTC", hour: "2-digit", minute: "2-digit" }).format(new Date(ms));
+  return new Intl.DateTimeFormat([], { timeZone: "UTC", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(ms));
 }
 
 /**
@@ -2023,7 +2023,7 @@ function buildTooltipCrosshairPlugin(rows) {
         const lines = [];
         const t = row ? row._t : (chart.data.labels && chart.data.labels[index]);
         if (t != null) {
-          lines.push({ text: new Intl.DateTimeFormat([], { timeZone: "UTC", weekday: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(t)), bold: true });
+          lines.push({ text: new Intl.DateTimeFormat([], { timeZone: "UTC", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(t)), bold: true });
         }
         for (const el of active) {
           const ds = chart.data.datasets[el.datasetIndex];
@@ -2970,7 +2970,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
           callbacks: {
             title: (items) =>
               items.length
-                ? new Intl.DateTimeFormat([], { timeZone: "UTC", weekday: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(items[0].parsed.x))
+                ? new Intl.DateTimeFormat([], { timeZone: "UTC", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(items[0].parsed.x))
                 : "",
             // Location/Fishing Condition are drawn as strips, not real
             // datasets, so they don't get their own tooltip line from Chart.js
@@ -3090,7 +3090,11 @@ function groupsMatchFilter(locGroups, selectedGroups) {
 
 function fmtNaive(ms, opts) {
   const d = new Date(ms);
-  return new Intl.DateTimeFormat([], { timeZone: "UTC", ...opts }).format(d);
+  // hour12:false as the DEFAULT (not just something callers remember to
+  // pass) — 24-hour time everywhere on this site now, per Oliver's own
+  // request; opts can still override it if some future caller genuinely
+  // needs 12-hour, but nothing should by default.
+  return new Intl.DateTimeFormat([], { timeZone: "UTC", hour12: false, ...opts }).format(d);
 }
 
 function hourOf(ms) {
