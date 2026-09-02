@@ -231,13 +231,19 @@ function scrollToCenterSession(session, timelineStart, totalTrackWidth) {
  */
 let armedRow = null;
 let armedChip = null;
+let armedCanvas = null;
 
 function disarmSchedule() {
   if (armedRow) armedRow.classList.remove("armed-for-schedule");
   if (armedChip) armedChip.classList.remove("armed");
+  // Restored to "" (the CSS default, effectively "auto") rather than left
+  // at "none" — an unarmed row's canvas should scroll normally again,
+  // same as it always could before this row was ever armed.
+  if (armedCanvas) armedCanvas.style.touchAction = "";
   armedLocationName = null;
   armedRow = null;
   armedChip = null;
+  armedCanvas = null;
 }
 
 /**
@@ -249,6 +255,14 @@ function disarmSchedule() {
  * see buildLocationRowElement's own header comment for why that matters),
  * then arms this row so its NEXT drag-release on the chart computes a
  * schedule instead of panning/showing the tooltip.
+ *
+ * Sets this canvas's touch-action to "none" as part of arming — on a
+ * touch device, the browser's native "drag on a scrollable area pans it"
+ * behavior is decided from touch-action, not from whether JS later calls
+ * preventDefault(), so this has to happen here (synchronously, at arm
+ * time) rather than only inside wireSessionRangeSelect's own pointerdown
+ * handler, which by itself was consistently losing the very first touch
+ * of a drag to the board's native horizontal scroll.
  *
  * getRowChart is a () => chart closure rather than the chart directly,
  * because at the moment this listener is attached, the chart may not
@@ -269,8 +283,10 @@ function onSessionTileClick(loc, session, row, chip, getRowChart, canvas, timeli
   armedLocationName = loc.name;
   armedRow = row;
   armedChip = chip;
+  armedCanvas = canvas;
   row.classList.add("armed-for-schedule");
   chip.classList.add("armed");
+  canvas.style.touchAction = "none";
 }
 
 /**
@@ -291,12 +307,17 @@ function onSessionTileClick(loc, session, row, chip, getRowChart, canvas, timeli
  * surface, so arming makes this row's canvas swallow events for its own
  * gesture and nothing else gets a turn until it's disarmed again.
  *
- * Deliberately no live rubber-band preview while dragging — only the
- * start and release positions matter (computeAndStoreSession runs once,
- * on release), matching how the feature was actually described: press,
- * drag, let go, THEN see the computed result.
- */
-/**
+ * stopImmediatePropagation alone isn't enough on a touch device, though:
+ * mobile browsers decide whether a touch gesture is a native scroll
+ * BEFORE JS's own event handlers necessarily get a meaningful chance to
+ * stop it, based on the touched element's CSS touch-action, not on
+ * preventDefault() alone. onSessionTileClick sets this canvas's
+ * touch-action to "none" the moment it arms (and disarmSchedule restores
+ * it), so a touch-drag here never gets interpreted as "scroll the board
+ * sideways" in the first place — this is genuinely necessary in addition
+ * to, not instead of, the stopImmediatePropagation/preventDefault calls
+ * below.
+ *
  * dragPreview is a small mutable {hoverXVal, dragStartXVal} object — see
  * buildSessionDragPreviewPlugin (charts.js) for how it's actually drawn.
  * Owned by buildLocationRowElement (one per row, created fresh on every
@@ -1276,10 +1297,18 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
     }
     // A full renderWeekView() rebuilds every row from scratch (including
     // this one), so if THIS location was the one armed before the rebuild
-    // (e.g. right after computing a session), the freshly-created row
-    // needs the visual "armed" state re-applied — it otherwise defaults
-    // to unarmed since armed-ness is a DOM class, not chart state.
-    if (armedLocationName === loc.name) row.classList.add("armed-for-schedule");
+    // (e.g. a filter changed while a row was still armed, before any
+    // drag happened), the freshly-created row/canvas need the "armed"
+    // state — and its touch-action override — re-applied to the NEW
+    // elements; armedRow/armedCanvas are updated to point at them too, so
+    // a later disarmSchedule() acts on what's actually on screen rather
+    // than on nodes this rebuild just destroyed.
+    if (armedLocationName === loc.name) {
+      row.classList.add("armed-for-schedule");
+      canvas.style.touchAction = "none";
+      armedRow = row;
+      armedCanvas = canvas;
+    }
   };
 
   return { row, sidebar, chartWrap, renderChart };

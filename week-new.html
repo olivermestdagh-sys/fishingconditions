@@ -114,6 +114,9 @@
       <span class="schedule-toggle-hint" id="filtersToggleHint">▸ tap to show</span>
     </div>
     <div class="filters-content collapsed" id="filtersContent">
+    <label style="display:block;margin:0 0 6px;">Drag range means:</label>
+    <div class="chip-row" id="scheduleModeChips" role="group" aria-label="Schedule drag mode" style="margin-bottom:12px;"></div>
+
     <p class="footnote" style="margin:0 0 12px;text-align:left;">
       Every hourly forecast row that sits inside a run of consecutive hours meeting the thresholds below (evaluated per location).
     </p>
@@ -163,10 +166,6 @@
   </section>
 
   <section class="summary-card week-full-bleed" style="padding:0;overflow:hidden;position:relative;">
-    <div class="schedule-mode-bar">
-      <span class="loc-edit-label" style="margin:0;">Drag range means:</span>
-      <div class="chip-row" id="scheduleModeChips" role="group" aria-label="Schedule drag mode"></div>
-    </div>
     <div id="weekEmptyState" class="empty-state" style="display:none;padding:20px;">No locations match the current filters.</div>
     <div id="weekTimelineScroll" class="week-timeline-scroll">
       <div id="weekTimelineInner" class="week-timeline-inner"></div>
