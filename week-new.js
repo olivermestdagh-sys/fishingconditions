@@ -65,7 +65,7 @@ let computedSessions = [];
 let scheduleMode = "fishing";
 
 // Which row is currently primed for a click-drag-release range selection —
-// null when nothing is armed. Sets/cleared by onSessionTileClick and
+// null when nothing is armed. Sets/cleared by onArmScheduleClick and
 // wireSessionRangeSelect below; checked by BOTH the tooltip-hold gesture
 // and the drag-to-pan gesture so they can get out of the way while a
 // session calculation is actually being dragged out (see the big comment
@@ -265,14 +265,14 @@ function disarmSchedule() {
 }
 
 /**
- * Tapping a qualifying-session chip is the "arm" step of the whole
- * click-arm-then-drag flow (see wireSessionRangeSelect just below for the
- * drag half). Scrolls to that session first (friction point 2 from the
- * original design discussion — a scrollLeft change, NOT a per-row chart
- * xRange change, since every row deliberately shares one fixed range —
- * see buildLocationRowElement's own header comment for why that matters),
- * then arms this row so its NEXT drag-release on the chart computes a
- * schedule instead of panning/showing the tooltip.
+ * Arms a row for the click-arm-then-drag flow (see wireSessionRangeSelect
+ * just below for the drag half) — triggered by the "+ Fishing times"
+ * button at the top of a location's session list, NOT by tapping an
+ * individual qualifying-session chip (those just scroll to that
+ * session — see scrollToCenterSession's own call site). Arming isn't
+ * tied to any particular session's time window, so there's nothing to
+ * scroll to here; it just readies THIS row's chart for whatever range
+ * the person drags out next, wherever they're currently looking.
  *
  * Sets this canvas's touch-action to "none" as part of arming — on a
  * touch device, the browser's native "drag on a scrollable area pans it"
@@ -288,22 +288,21 @@ function disarmSchedule() {
  * comment) — reading it lazily, only once actually needed (drag-release,
  * in wireSessionRangeSelect), always gets whatever the CURRENT chart is.
  */
-function onSessionTileClick(loc, session, row, chip, getRowChart, canvas, timelineStart, totalTrackWidth) {
-  scrollToCenterSession(session, timelineStart, totalTrackWidth);
+function onArmScheduleClick(loc, row, addBtn, getRowChart, canvas) {
   if (armedLocationName === loc.name) {
-    // Tapping the already-armed row's own chip again is a cancel, not a
-    // re-arm — matches the hold-to-arm tooltip's own "hold again to turn
-    // it back off" convention elsewhere on this page.
+    // Tapping the already-armed row's own "+ Fishing times" button again
+    // is a cancel, not a re-arm — matches the hold-to-arm tooltip's own
+    // "hold again to turn it back off" convention elsewhere on this page.
     disarmSchedule();
     return;
   }
   disarmSchedule();
   armedLocationName = loc.name;
   armedRow = row;
-  armedChip = chip;
+  armedChip = addBtn;
   armedCanvas = canvas;
   row.classList.add("armed-for-schedule");
-  chip.classList.add("armed");
+  addBtn.classList.add("armed");
   canvas.style.touchAction = "none";
   // See disarmSchedule's comment for why the scroll container itself
   // (not just this canvas) gets locked — belt-and-suspenders against the
@@ -337,7 +336,7 @@ function onSessionTileClick(loc, session, row, chip, getRowChart, canvas, timeli
  * mobile browsers decide whether a touch gesture is a native scroll
  * BEFORE JS's own event handlers necessarily get a meaningful chance to
  * stop it, based on the touched element's CSS touch-action, not on
- * preventDefault() alone. onSessionTileClick sets this canvas's
+ * preventDefault() alone. onArmScheduleClick sets this canvas's
  * touch-action to "none" the moment it arms (and disarmSchedule restores
  * it), so a touch-drag here never gets interpreted as "scroll the board
  * sideways" in the first place — this is genuinely necessary in addition
@@ -1210,8 +1209,23 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
 
   const sessionsWrap = document.createElement("div");
   sessionsWrap.className = "weeknew-row-sessions";
+
+  // "+ Fishing times" — the arm step of the click-arm-then-drag flow (see
+  // onArmScheduleClick/wireSessionRangeSelect). Always first in the list,
+  // regardless of how many qualifying/computed sessions this location
+  // has (including zero) — arming isn't tied to any particular session,
+  // so it doesn't need one to exist first.
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "weeknew-add-fishing-times";
+  addBtn.textContent = "+ Fishing times";
+  addBtn.addEventListener("click", () => {
+    onArmScheduleClick(loc, row, addBtn, () => rowChartRef, canvas);
+  });
+  sessionsWrap.appendChild(addBtn);
+
   if (sessions.length === 0) {
-    sessionsWrap.innerHTML = `<p class="footnote weeknew-no-session">No qualifying session in this period.</p>`;
+    sessionsWrap.insertAdjacentHTML("beforeend", `<p class="footnote weeknew-no-session">No qualifying session in this period.</p>`);
   } else {
     for (const s of sessions) {
       const timeLabel = `${fmtNaive(s.from, { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(s.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
@@ -1242,8 +1256,11 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
           </div>
         </div>
       `;
+      // Just scrolls the board to center this session now — arming moved
+      // to the dedicated "+ Fishing times" button above, so tapping a
+      // qualifying-session chip is purely navigational.
       chip.addEventListener("click", () => {
-        onSessionTileClick(loc, s, row, chip, () => rowChartRef, canvas, timelineStart, totalTrackWidth);
+        scrollToCenterSession(s, timelineStart, totalTrackWidth);
       });
       sessionsWrap.appendChild(chip);
     }
