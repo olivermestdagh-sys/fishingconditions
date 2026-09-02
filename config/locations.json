@@ -24,8 +24,7 @@
     ],
     "locationGroup": "Western Port",
     "locationGroups": [
-      "Western Port",
-      "Western"
+      "Western Port"
     ],
     "tideOffset": 0,
     "willyweatherId": 13803,
@@ -52,8 +51,7 @@
     ],
     "locationGroup": "Western Port",
     "locationGroups": [
-      "Western Port",
-      "Eastern"
+      "Western Port"
     ],
     "willyweatherId": 35583,
     "willyweatherName": "Corinella Boat Ramp",
@@ -79,8 +77,7 @@
     ],
     "locationGroup": "Western Port",
     "locationGroups": [
-      "Western Port",
-      "Eastern"
+      "Western Port"
     ],
     "willyweatherId": 11954,
     "willyweatherName": "Coronet Bay",
@@ -106,9 +103,7 @@
     ],
     "locationGroup": "Western Port",
     "locationGroups": [
-      "Western Port",
-      "Southern",
-      "Western"
+      "Western Port"
     ],
     "willyweatherId": 27168,
     "willyweatherName": "Flinders Pier",
@@ -160,8 +155,7 @@
     ],
     "locationGroup": "Western Port",
     "locationGroups": [
-      "Western Port",
-      "Western"
+      "Western Port"
     ],
     "willyweatherId": 31737,
     "willyweatherName": "Hastings Jetty",
@@ -223,8 +217,7 @@
     ],
     "locationGroup": "Western Port",
     "locationGroups": [
-      "Western Port",
-      "Eastern"
+      "Western Port"
     ],
     "tideOffset": 30,
     "willyweatherId": 31713,
@@ -251,8 +244,7 @@
     ],
     "locationGroup": "Port Phillip",
     "locationGroups": [
-      "Port Phillip",
-      "Eastern"
+      "Port Phillip"
     ],
     "willyweatherId": 35618,
     "willyweatherName": "Mornington Pier",
@@ -278,8 +270,7 @@
     ],
     "locationGroup": "Port Phillip",
     "locationGroups": [
-      "Port Phillip",
-      "Eastern"
+      "Port Phillip"
     ],
     "willyweatherId": 23948,
     "willyweatherName": "Patterson River Entrance",
@@ -305,9 +296,7 @@
     ],
     "locationGroup": "Port Phillip",
     "locationGroups": [
-      "Port Phillip",
-      "Eastern",
-      "Southern"
+      "Port Phillip"
     ],
     "willyweatherId": 35608,
     "willyweatherName": "Rosebud Pier",
@@ -333,9 +322,7 @@
     ],
     "locationGroup": "Port Phillip",
     "locationGroups": [
-      "Port Phillip",
-      "Eastern",
-      "Southern"
+      "Port Phillip"
     ],
     "willyweatherId": 31834,
     "willyweatherName": "Safety Beach Boat Ramp",
@@ -361,9 +348,7 @@
     ],
     "locationGroup": "Port Phillip",
     "locationGroups": [
-      "Port Phillip",
-      "Eastern",
-      "Southern"
+      "Port Phillip"
     ],
     "willyweatherId": 35607,
     "willyweatherName": "Sorrento Pier",
@@ -389,8 +374,7 @@
     ],
     "locationGroup": "Western Port",
     "locationGroups": [
-      "Western Port",
-      "Western"
+      "Western Port"
     ],
     "willyweatherId": 35584,
     "willyweatherName": "Stony Point Boat Ramp",
@@ -416,8 +400,7 @@
     ],
     "locationGroup": "Western Port",
     "locationGroups": [
-      "Western Port",
-      "Northern"
+      "Western Port"
     ],
     "willyweatherId": 31734,
     "willyweatherName": "Warneet Boat Ramp",
@@ -443,8 +426,7 @@
     ],
     "locationGroup": "Port Phillip",
     "locationGroups": [
-      "Port Phillip",
-      "Northern"
+      "Port Phillip"
     ],
     "willyweatherId": 27141,
     "willyweatherName": "Williamstown Beach",
