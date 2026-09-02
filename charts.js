@@ -27,6 +27,29 @@ function fmtChartTick(ms) {
 }
 
 /**
+ * X-AXIS TICK LABELS ONLY — deliberately separate from fmtChartTick above,
+ * which stays exactly as it is for its OTHER callers (tide extrema
+ * markers, sunrise/sunset labels) that still want exact HH:MM precision,
+ * not just the hour. This one is just the bare hour, two digits, no
+ * minutes, no colon — per Oliver's own request.
+ *
+ * Uses 1-24 rather than the more usual 0-23: midnight reads as "24" (the
+ * closing hour of the day it belongs to on this chart, immediately after
+ * "23") rather than "00" (which would visually read as the OPENING hour
+ * of the day that's about to start) — same convention some rail
+ * timetables use for a day's last hour. "00" never appears anywhere on
+ * this axis. If this reads wrong once it's actually on screen, it's a
+ * one-line revert (just drop the `=== 0 ? 24 :` swap below) — flagging
+ * this explicitly since "should midnight be 00 or 24" was a real,
+ * debatable interpretation of the request, not an obvious one.
+ */
+function fmtAxisHourTick(ms) {
+  const hour = new Date(ms).getUTCHours(); // naive-UTC convention, same as every other time helper here
+  const displayHour = hour === 0 ? 24 : hour;
+  return String(displayHour).padStart(2, "0");
+}
+
+/**
  * Small self-contained SVG icon for a location type — used on window
  * cards, the location dropdown, and the Live page's type picker. Hand-drawn
  * shapes, no external image assets, consistent with everything else on
@@ -2895,7 +2918,19 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
           // reason to invent a second, near-identical flag just to cover
           // the x-axis as well once that became true too.
           display: !compact && !hideValueAxes,
-          ticks: { maxTicksLimit: 10, callback: (value) => fmtChartTick(value) },
+          // stepSize is exactly one hour in ms — a candidate tick at every
+          // hour boundary within the visible range, not Chart.js's default
+          // "nice round numbers" spacing. autoSkip:false forces every one
+          // of those candidates to actually render rather than Chart.js
+          // thinning them out to fit — Oliver explicitly asked for every
+          // hour, so on a multi-day view this axis will genuinely be
+          // dense; that's the deliberate trade-off of what was asked for,
+          // not an oversight (autoSkip:true + a real crowding problem is
+          // the one-setting revert if it turns out too cluttered in
+          // practice). maxTicksLimit no longer does anything once
+          // autoSkip is off, so it's dropped rather than left in place
+          // pretending to still matter.
+          ticks: { stepSize: 3600000, autoSkip: false, callback: (value) => fmtAxisHourTick(value) },
           grid: { color: "rgba(0,0,0,0.05)" },
         },
         // Each axis's min is pushed well below any realistic data value on
