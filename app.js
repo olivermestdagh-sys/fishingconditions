@@ -75,7 +75,13 @@ async function init() {
   // frame across every location switch (destroying/recreating the Chart.js
   // instance each time, never the DOM elements themselves), so wiring
   // these per-render would stack up duplicate listeners.
-  wireHoldToShowTooltip(() => state.chart, document.getElementById("conditionsChart"), { suppressQuickTap: true });
+  // No suppressQuickTap here (see wireHoldToShowTooltip's own doc comment,
+  // charts.js) — was previously set true, making a quick tap a no-op even
+  // while armed, which is exactly the bug Oliver reported: once you'd
+  // held to arm the tooltip, clicking elsewhere on the graph did nothing.
+  // Now matches Live/Week (graphs): hold 2s to arm, then a plain tap
+  // moves the tooltip to wherever you tap next.
+  wireHoldToShowTooltip(() => state.chart, document.getElementById("conditionsChart"));
   setupFullscreenToggle("locationChartFrame");
   setupDragToScroll(document.getElementById("locationChartScroll"));
 
@@ -553,9 +559,7 @@ function renderCharts(rows, loc, sunTimesOverride) {
     // renderConditionsChart's own legend-toggle-on-click listener — every
     // OTHER thing compact:true would normally also change (hiding axes,
     // skipping buildAxisUnitLabelsPlugin) is already independently covered
-    // by hideValueAxes below, so this has no other effect here. Needed so
-    // a plain single click/tap on this graph is a genuine no-op, matching
-    // suppressQuickTap below for the tooltip gesture.
+    // by hideValueAxes below, so this has no other effect here.
     compact: true,
     tideOffsetMinutes: loc ? loc.tideOffset : null,
     // The floating panel is a quick-glance view — the °C/km/h axis numbers
