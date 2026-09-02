@@ -318,6 +318,78 @@ function drawFishIcon(ctx, cx, cy, size) {
   ctx.restore();
 }
 
+/**
+ * Three small canvas-drawn glyphs for the computed-session markers below
+ * (buildComputedSessionMarkersPlugin) — same hand-drawn-shape, no-external-
+ * asset approach as drawWindsockIcon/drawFishIcon above. Deliberately only
+ * three shapes cover all seven schedule instants (see the ICON_FOR_INSTANT
+ * mapping just below the plugin): Home covers leaveHome/homeBy, Car covers
+ * arrive/driveHome, Boat covers launch/headBack — the instant's TEXT label
+ * still disambiguates which specific one it is, so reusing a shape for two
+ * instants doesn't lose any information, it just keeps the total icon
+ * vocabulary small.
+ */
+function drawHomeIcon(ctx, cx, cy, size) {
+  ctx.save();
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - size * 0.9);
+  ctx.lineTo(cx + size * 0.85, cy - size * 0.15);
+  ctx.lineTo(cx + size * 0.6, cy - size * 0.15);
+  ctx.lineTo(cx + size * 0.6, cy + size * 0.75);
+  ctx.lineTo(cx - size * 0.6, cy + size * 0.75);
+  ctx.lineTo(cx - size * 0.6, cy - size * 0.15);
+  ctx.lineTo(cx - size * 0.85, cy - size * 0.15);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(cx - size * 0.18, cy + size * 0.15, size * 0.36, size * 0.6);
+  ctx.restore();
+}
+
+function drawCarIcon(ctx, cx, cy, size) {
+  ctx.save();
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.moveTo(cx - size, cy + size * 0.5);
+  ctx.lineTo(cx - size, cy);
+  ctx.lineTo(cx - size * 0.55, cy - size * 0.55);
+  ctx.lineTo(cx + size * 0.55, cy - size * 0.55);
+  ctx.lineTo(cx + size, cy);
+  ctx.lineTo(cx + size, cy + size * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.arc(cx - size * 0.5, cy + size * 0.5, size * 0.22, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + size * 0.5, cy + size * 0.5, size * 0.22, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawBoatIcon(ctx, cx, cy, size) {
+  ctx.save();
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.moveTo(cx - size, cy + size * 0.3);
+  ctx.quadraticCurveTo(cx, cy + size * 0.75, cx + size, cy + size * 0.3);
+  ctx.lineTo(cx + size * 0.8, cy + size * 0.3);
+  ctx.lineTo(cx - size * 0.8, cy + size * 0.3);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = size * 0.14;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy + size * 0.3);
+  ctx.lineTo(cx, cy - size * 0.85);
+  ctx.moveTo(cx, cy - size * 0.6);
+  ctx.lineTo(cx + size * 0.6, cy - size * 0.3);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false) {
   const stripHeight = isMobile ? 11 : 14;
   const rowGap = isMobile ? 2 : 3;
@@ -2599,6 +2671,88 @@ function bucketRowsHourly(rows) {
 // band or a warning threshold like the other overlay lines on this chart.
 const SESSION_SPAN_COLOR = "#16a34a";
 
+/**
+ * Which icon-draw function and short label go with each of the seven
+ * schedule instants computeScheduleFromDragRangeMs can produce. Order
+ * here is also draw/label order (chronological through a session).
+ */
+const SCHEDULE_INSTANT_DISPLAY = [
+  { key: "leaveHomeMs", label: "Leave", icon: drawHomeIcon, color: "#0f766e" },
+  { key: "arriveMs", label: "Arrive", icon: drawCarIcon, color: "#0f766e" },
+  { key: "launchMs", label: "Launch", icon: drawBoatIcon, color: "#0f766e" },
+  { key: "fishAtMs", label: "Fishing", icon: drawFishIcon, color: "#0f766e" },
+  { key: "headBackMs", label: "Head back", icon: drawBoatIcon, color: "#0f766e" },
+  { key: "driveHomeMs", label: "Driving", icon: drawCarIcon, color: "#0f766e" },
+  { key: "homeByMs", label: "Home", icon: drawHomeIcon, color: "#0f766e" },
+];
+
+// A small fixed palette so several computed sessions on the same chart stay
+// visually distinguishable from each other without needing the person to
+// track which color means what — it's purely "these all belong together",
+// not a legend that needs decoding.
+const COMPUTED_SESSION_COLORS = ["#0f766e", "#7c3aed", "#b45309", "#be123c", "#0369a1"];
+
+/**
+ * Draws each computed (drag-derived) session's schedule instants as small
+ * compact flags — a short tick, a tiny icon, and a HH:MM label — rather
+ * than full-height dashed lines with long text labels (buildSessionSpanPlugin
+ * above). Kept deliberately lightweight since a single session already has
+ * up to seven of these, and more than one computed session can be showing
+ * on the same row at once (that's the whole point — comparing options).
+ * A record with a field that's null (see computeScheduleFromDragRangeMs —
+ * happens when live drive time genuinely couldn't be resolved) just skips
+ * that one flag rather than showing a wrong or placeholder time.
+ */
+function buildComputedSessionMarkersPlugin(records) {
+  const validRecords = (records || []).filter((r) => r != null);
+  return {
+    id: "computedSessionMarkers",
+    afterDatasetsDraw(chart) {
+      if (!validRecords.length) return;
+      const { ctx, chartArea, scales } = chart;
+      if (!chartArea || !scales.x) return;
+      const { top } = chartArea;
+      const FLAG_TICK_H = 10;
+      const ICON_SIZE = 6;
+      validRecords.forEach((record, recordIdx) => {
+        const color = COMPUTED_SESSION_COLORS[recordIdx % COMPUTED_SESSION_COLORS.length];
+        for (const { key, label, icon } of SCHEDULE_INSTANT_DISPLAY) {
+          const t = record[key];
+          if (t == null) continue;
+          if (t < scales.x.min || t > scales.x.max) continue;
+          const x = scales.x.getPixelForValue(t);
+          ctx.save();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(x, top);
+          ctx.lineTo(x, top + FLAG_TICK_H);
+          ctx.stroke();
+          // Icon draw functions above are all black/white-fill by design
+          // (matching drawFishIcon's existing convention) — tint via a
+          // save/restore + globalCompositeOperation trick would be
+          // overkill here, so instead each icon gets a small colored dot
+          // behind it (cheap, reliable) rather than trying to recolor the
+          // icon's own path fills per record.
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(x, top + FLAG_TICK_H + ICON_SIZE + 1, ICON_SIZE + 3, 0, Math.PI * 2);
+          ctx.globalAlpha = 0.16;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          icon(ctx, x, top + FLAG_TICK_H + ICON_SIZE + 1, ICON_SIZE);
+          ctx.font = "700 8px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillStyle = color;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          ctx.fillText(`${label} ${fmtNaive(t, { hour: "2-digit", minute: "2-digit", hour12: false })}`, x, top + FLAG_TICK_H + ICON_SIZE * 2 + 4);
+          ctx.restore();
+        }
+      });
+    },
+  };
+}
+
 function buildSessionSpanPlugin(spans) {
   // Accepts an ARRAY of {from,to} spans now, not just one — a single
   // location's row can have more than one qualifying session across the
@@ -2665,7 +2819,7 @@ function buildSessionSpanPlugin(spans) {
   };
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes, hideValueAxes = false, overlayHeading = false }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, computedSessionMarkers, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes, hideValueAxes = false, overlayHeading = false }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -2845,6 +2999,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
     plugins: [
       buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHeading, showSunTimes, overlayHeading),
       buildSessionSpanPlugin(sessionSpanList),
+      buildComputedSessionMarkersPlugin(computedSessionMarkers),
       buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons),
       buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime),
       buildTideExtremaPlugin(rows),
@@ -3684,6 +3839,114 @@ function computeSchedule(loc, launchStr, homeByStr, driveMinutes) {
     driveMinutes,
   };
 }
+
+const COMPUTED_SESSIONS_STORAGE_KEY = "goodConditionsComputedSessions";
+const SCHEDULE_MODE_STORAGE_KEY = "goodConditionsScheduleMode";
+
+/**
+ * Turns a click-drag-release range on a location's own graph into a full
+ * schedule, via the SAME computeSchedule() above — this only handles the
+ * one extra step computeSchedule doesn't know about: which of its two
+ * direct inputs (launch, homeBy) the drag's two endpoints actually
+ * correspond to, which depends on which of the two Schedule Mode toggle
+ * states is active (see week-new.js's mode toggle):
+ *
+ *   "fishing" mode — drag spans the actual time AT the fishing spot
+ *   ([fishAt, headBack]). dragStartMs converts to launch directly
+ *   (launch = fishAt − timeToSpot, no drive time needed); dragEndMs
+ *   converts to homeBy but DOES need drive time (homeBy = headBack +
+ *   packUp + timeFromSpot + driveMinutes).
+ *
+ *   "onsite" mode — drag spans leaving home to being back home
+ *   ([leaveHome, homeBy]). dragEndMs IS homeBy directly, no conversion;
+ *   dragStartMs needs drive time to become launch (launch = leaveHome +
+ *   driveMinutes + setUp).
+ *
+ * Either way, exactly one endpoint is direct and one needs driveMinutes —
+ * never both, never neither. Works entirely in absolute milliseconds
+ * (not the wrapped minutes-since-midnight computeSchedule itself uses)
+ * so a session that crosses midnight, or markers drawn days apart on a
+ * multi-day chart, stay unambiguous — computeSchedule's HH:MM strings are
+ * fine for a single instant read off a form, but lose which calendar day
+ * they belong to, which matters here since results get positioned back
+ * onto the actual timeline (buildComputedSessionMarkersPlugin).
+ *
+ * Every field below can independently end up null if it depends on drive
+ * time and drive time is genuinely unavailable (GPS denied, no Google
+ * Routes key configured, a failed lookup) — NOT an all-or-nothing failure,
+ * since whichever endpoint IS direct (and everything computeSchedule
+ * derives from it without needing drive time — e.g. arrive/fishAt from a
+ * direct launch) still has a real answer worth showing.
+ */
+function computeScheduleFromDragRangeMs(mode, dragStartMs, dragEndMs, loc, driveMinutes) {
+  const setUpMs = (timeToMinutes(loc.setUp) || 0) * 60000;
+  const timeToSpotMs = (timeToMinutes(loc.timeToSpot) || 0) * 60000;
+  const packUpMs = (timeToMinutes(loc.packUp) || 0) * 60000;
+  const timeFromSpotMs = (timeToMinutes(loc.timeFromSpot) || 0) * 60000;
+  const driveMs = driveMinutes == null ? null : driveMinutes * 60000;
+
+  const launchMs = mode === "fishing" ? dragStartMs - timeToSpotMs : driveMs == null ? null : dragStartMs + driveMs + setUpMs;
+  const homeByMs = mode === "fishing" ? (driveMs == null ? null : dragEndMs + packUpMs + timeFromSpotMs + driveMs) : dragEndMs;
+
+  const arriveMs = launchMs == null ? null : launchMs - setUpMs;
+  const fishAtMs = launchMs == null ? null : launchMs + timeToSpotMs;
+  const driveHomeMs = homeByMs == null || driveMs == null ? null : homeByMs - driveMs;
+  const headBackMs = driveHomeMs == null ? null : driveHomeMs - packUpMs - timeFromSpotMs;
+  const leaveHomeMs = arriveMs == null || driveMs == null ? null : arriveMs - driveMs;
+  const fishingTimeMins = headBackMs == null || fishAtMs == null ? null : (headBackMs - fishAtMs) / 60000;
+
+  return {
+    mode,
+    dragStartMs,
+    dragEndMs,
+    leaveHomeMs,
+    arriveMs,
+    launchMs,
+    fishAtMs,
+    headBackMs,
+    driveHomeMs,
+    homeByMs,
+    fishingTimeMins,
+    fishingTimeNegative: fishingTimeMins != null && fishingTimeMins < 0,
+    driveTimeUnavailable: driveMs == null,
+  };
+}
+
+/**
+ * Computed (drag-derived) sessions persist in localStorage — matching this
+ * page's whole "weigh up different options" use case, this is meant to
+ * survive a reload, not reset the moment the phone locks or the tab
+ * closes. Pruned on load (not on every save) to whatever's still within
+ * the last day — a computed session for a slot that's already well in
+ * the past isn't useful to keep comparing against, and letting them pile
+ * up indefinitely would eventually clutter every graph that touches an
+ * old date range.
+ */
+function loadComputedSessions() {
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(COMPUTED_SESSIONS_STORAGE_KEY) || "null");
+  } catch {
+    saved = null;
+  }
+  if (!Array.isArray(saved)) return [];
+  const cutoff = nowInNaiveEncoding() - 86400000;
+  return saved.filter((r) => r && (r.homeByMs != null ? r.homeByMs : r.dragEndMs) >= cutoff);
+}
+
+function persistComputedSessions(list) {
+  localStorage.setItem(COMPUTED_SESSIONS_STORAGE_KEY, JSON.stringify(list));
+}
+
+function loadScheduleMode() {
+  const saved = localStorage.getItem(SCHEDULE_MODE_STORAGE_KEY);
+  return saved === "onsite" ? "onsite" : "fishing"; // "fishing" is the default — the more common way to think about a session
+}
+
+function persistScheduleMode(mode) {
+  localStorage.setItem(SCHEDULE_MODE_STORAGE_KEY, mode);
+}
+
 
 /**
  * Replaces Chart.js's default "tap anywhere to show the tooltip" behavior

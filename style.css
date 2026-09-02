@@ -1650,6 +1650,81 @@ main.wide {
   border-radius: 8px;
   padding: 6px 8px;
   background: rgba(22, 163, 74, 0.06);
+  cursor: pointer;
+}
+
+/* Tapped state while a chip's own row is primed for click-drag-release —
+   see wireSessionRangeSelect/onSessionTileClick in week-new.js. Same
+   accent color as the computed-session chart markers/sidebar entries
+   below, so it reads as "one connected feature" rather than an unrelated
+   highlight. */
+.weeknew-session-chip.armed {
+  border-color: #0f766e;
+  background: rgba(15, 118, 110, 0.12);
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.25);
+}
+
+/* The row whose chart is currently primed for a drag — crosshair cursor is
+   the main functional cue (this is the only state where a drag on this
+   specific chart means something other than pan-the-board), the outline
+   is a secondary at-a-glance one for anyone scanning down a long list of
+   rows to see which is currently armed. */
+.weeknew-row.armed-for-schedule .weeknew-row-chart {
+  cursor: crosshair;
+  outline: 2px solid #0f766e;
+  outline-offset: -2px;
+}
+
+/* A computed (drag-derived) schedule, persisted and shown alongside the
+   auto-detected "qualifying session" chips above — deliberately a
+   different accent (teal, matching the on-chart markers) so the two kinds
+   of chip are never confused: qualifying-session chips are the site's own
+   automatic read of the conditions data, computed-session chips are a
+   specific plan the person built by hand and can come back to compare. */
+.weeknew-computed-session {
+  border: 1px solid #0f766e;
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: rgba(15, 118, 110, 0.07);
+  position: relative;
+}
+
+.weeknew-computed-session .weeknew-session-time {
+  color: #0f766e;
+  padding-right: 16px; /* room for the remove button below, so it never overlaps the time text */
+}
+
+.weeknew-computed-session-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: none;
+  border: none;
+  color: var(--grey-400);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 2px;
+}
+
+.weeknew-computed-session-line {
+  font-size: 0.66rem;
+  color: var(--grey-700);
+  line-height: 1.5;
+}
+
+.weeknew-computed-session-note {
+  font-size: 0.6rem;
+  color: var(--grey-400);
+  font-style: italic;
+}
+
+.schedule-mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 0;
+  flex-wrap: wrap;
 }
 
 .weeknew-session-time {
