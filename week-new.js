@@ -240,6 +240,24 @@ function disarmSchedule() {
   // at "none" — an unarmed row's canvas should scroll normally again,
   // same as it always could before this row was ever armed.
   if (armedCanvas) armedCanvas.style.touchAction = "";
+  // touch-action alone on the canvas turned out not to be enough on real
+  // phones — this page's mobile layout rotates the whole <body> -90deg
+  // (the force-landscape trick in week-new.html), and under that
+  // transform the browser's own touch-action-based scroll-vs-gesture
+  // decision doesn't reliably line up with the canvas the person is
+  // actually touching (same rotated-coordinate-space class of issue as
+  // xValFromEvent's own comment in charts.js). Directly locking the
+  // scroll CONTAINER itself — overflow:hidden, which blocks user-driven
+  // scrolling outright regardless of touch-action — is a harder
+  // guarantee that doesn't depend on that logic working correctly.
+  // scrollLeft/scrollTop are preserved while hidden and restored the
+  // instant overflow goes back to auto, so this doesn't visibly move the
+  // board at all, just freezes it in place for the duration of the drag.
+  const scrollWrap = document.getElementById("weekTimelineScroll");
+  if (scrollWrap) {
+    scrollWrap.style.overflow = "";
+    scrollWrap.style.touchAction = "";
+  }
   armedLocationName = null;
   armedRow = null;
   armedChip = null;
@@ -287,6 +305,14 @@ function onSessionTileClick(loc, session, row, chip, getRowChart, canvas, timeli
   row.classList.add("armed-for-schedule");
   chip.classList.add("armed");
   canvas.style.touchAction = "none";
+  // See disarmSchedule's comment for why the scroll container itself
+  // (not just this canvas) gets locked — belt-and-suspenders against the
+  // rotated-mobile-layout touch-action quirk.
+  const scrollWrap = document.getElementById("weekTimelineScroll");
+  if (scrollWrap) {
+    scrollWrap.style.overflow = "hidden";
+    scrollWrap.style.touchAction = "none";
+  }
 }
 
 /**
