@@ -44,6 +44,7 @@ let moonPhasesData = {};
 let selectedLocations = new Set();
 let selectedTypes = new Set(["Kayak", "Land based"]);
 let selectedGroups = new Set();
+let selectedDirections = new Set();
 let pinnedOrder = []; // location NAMES, in the order they were pinned — oldest pin first
 
 // Chart.js instances currently on screen — one per RENDERED location row
@@ -277,7 +278,7 @@ async function init() {
     moonPhasesData = data.moonPhases || {};
     if (data.generatedAt) {
       const dt = new Date(data.generatedAt);
-      document.getElementById("updated").textContent = `Updated ${dt.toLocaleString([], { dateStyle: "medium", timeStyle: "short", hour12: false })}`;
+      document.getElementById("updated").textContent = `Updated ${dt.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
     }
     // Awaited — small, fast, local file (not the slow WillyWeather
     // pipeline), so negligible delay; avoids a race where the very first
@@ -328,14 +329,15 @@ async function init() {
   selectedTypes = Array.isArray(savedTypes) && savedTypes.length ? new Set(savedTypes) : new Set(["Kayak", "Land based"]);
 
   // Location Group defaults to EMPTY — the opposite of selectedLocations
-  // above, and deliberately so: this filter is AND-style tag matching
-  // (see groupsMatchFilter in charts.js) where checking a chip ADDS a
-  // requirement rather than including a category, so no chips checked
-  // correctly means no requirement applied yet (show everything), not
-  // "select every group" the way Location/Type default to. Defaulting to
-  // all-checked here — the naive parallel to those other two filters —
-  // would mean a location needs literally every group that currently
-  // exists just to show up on a fresh visit.
+  // above, and deliberately so: this filter is opt-in OR-style tag
+  // matching (see groupsMatchFilter in charts.js) where checking a chip
+  // ADDS AN ACCEPTABLE OPTION rather than including a category, so no
+  // chips checked correctly means no requirement applied yet (show
+  // everything), not "select every group" the way Location/Type default
+  // to. Defaulting to all-checked here — the naive parallel to those
+  // other two filters — would mean a location needs to carry whichever
+  // single group happens to be the only one that exists just to show up
+  // on a fresh visit.
   let savedGroups = null;
   try {
     savedGroups = JSON.parse(localStorage.getItem(GROUP_FILTER_STORAGE_KEY) || "null");
@@ -344,6 +346,17 @@ async function init() {
   }
   const allGroups = Array.from(new Set(allLocations.flatMap((l) => locationGroupsOf(l))));
   selectedGroups = new Set(Array.isArray(savedGroups) ? savedGroups.filter((g) => allGroups.includes(g)) : []);
+
+  // Direction defaults to EMPTY for the same reason Location Group does
+  // (see groupsMatchFilter/directionsMatchFilter in charts.js) — it's an
+  // opt-in OR-style facet, not a select-all-by-default category filter.
+  let savedDirections = null;
+  try {
+    savedDirections = JSON.parse(localStorage.getItem(DIRECTION_FILTER_STORAGE_KEY) || "null");
+  } catch {
+    savedDirections = null;
+  }
+  selectedDirections = new Set(Array.isArray(savedDirections) ? savedDirections.filter((d) => CARDINAL_DIRECTIONS.includes(d)) : []);
 
   let savedThresholds = null;
   try {
@@ -361,32 +374,52 @@ async function init() {
   // pattern as the saved-locations filter above.
   pinnedOrder = loadPinnedOrder().filter((n) => allNames.includes(n));
 
-  // Cross-filtering: changing Type narrows which Location Group AND which
-  // Location chips are even offered; changing Group narrows which
-  // Location chips are offered, in turn — see charts.js's renderGroupChips/
-  // renderLocationChips for the full reasoning (same approach here, just
-  // via this page's own pin-aware renderLocationChipsWithPins instead of
-  // the shared renderLocationChips).
+  // Cross-filtering: changing Type narrows which Location Group, Direction,
+  // AND Location chips are even offered; changing Group narrows which
+  // Direction and Location chips are offered; changing Direction narrows
+  // which Group and Location chips are offered — see charts.js's
+  // renderGroupChips/renderDirectionChips/renderLocationChips for the full
+  // reasoning (same approach here, just via this page's own pin-aware
+  // renderLocationChipsWithPins instead of the shared renderLocationChips).
+  function refreshGroupChips() {
+    renderGroupChips(allLocations, selectedGroups, onGroupFilterChanged, selectedTypes, selectedDirections);
+  }
+  function refreshDirectionChips() {
+    renderDirectionChips(allLocations, selectedDirections, onDirectionFilterChanged, selectedTypes, selectedGroups);
+  }
   function onGroupFilterChanged() {
+    refreshDirectionChips(); // Group narrows which Direction tiles are offered, in turn
+    renderLocationChipsWithPins();
+    renderWeekView();
+  }
+  function onDirectionFilterChanged() {
+    refreshGroupChips(); // Direction narrows which Group chips are offered, in turn
     renderLocationChipsWithPins();
     renderWeekView();
   }
   function onTypeFilterChanged() {
-    renderGroupChips(allLocations, selectedGroups, onGroupFilterChanged, selectedTypes);
+    refreshGroupChips();
+    refreshDirectionChips();
     renderLocationChipsWithPins();
     renderWeekView();
   }
 
   renderLocationChipsWithPins();
   renderTypeChips(selectedTypes, onTypeFilterChanged);
-  renderGroupChips(allLocations, selectedGroups, onGroupFilterChanged, selectedTypes);
+  refreshGroupChips();
+  refreshDirectionChips();
   document.getElementById("btnLocAll").addEventListener("click", () => {
-    // Selects every CURRENTLY OFFERED (narrowed by Type+Group) location,
-    // not literally every location regardless of the active filters —
-    // matches what's actually shown as a chip right now.
+    // Selects every CURRENTLY OFFERED (narrowed by Type+Group+Direction)
+    // location, not literally every location regardless of the active
+    // filters — matches what's actually shown as a chip right now.
     selectedLocations = new Set(
       allLocations
-        .filter((l) => selectedTypes.has(l.type) && groupsMatchFilter(locationGroupsOf(l), selectedGroups))
+        .filter(
+          (l) =>
+            selectedTypes.has(l.type) &&
+            groupsMatchFilter(locationGroupsOf(l), selectedGroups) &&
+            directionsMatchFilter(l.shore, selectedDirections)
+        )
         .map((l) => l.name)
     );
     persistSelectedLocations(selectedLocations);
@@ -414,8 +447,8 @@ async function init() {
  * The star and the chip's own select/deselect are separate click targets
  * (the star calls stopPropagation) so tapping one never triggers the other.
  *
- * Narrowed by the current Type and Location Group filters — same
- * "restrict which chips are offered, don't touch what's actually
+ * Narrowed by the current Type, Location Group, and Direction filters —
+ * same "restrict which chips are offered, don't touch what's actually
  * selected" approach as charts.js's own renderLocationChips.
  */
 function renderLocationChipsWithPins() {
@@ -425,6 +458,7 @@ function renderLocationChipsWithPins() {
   for (const loc of allLocations) {
     if (!selectedTypes.has(loc.type)) continue;
     if (!groupsMatchFilter(locationGroupsOf(loc), selectedGroups)) continue;
+    if (!directionsMatchFilter(loc.shore, selectedDirections)) continue;
     if (seenNames.has(loc.name)) continue;
     seenNames.add(loc.name);
 
@@ -497,7 +531,8 @@ function computeLocationRows() {
     (loc) =>
       selectedLocations.has(loc.name) &&
       selectedTypes.has(loc.type) &&
-      groupsMatchFilter(locationGroupsOf(loc), selectedGroups)
+      groupsMatchFilter(locationGroupsOf(loc), selectedGroups) &&
+      directionsMatchFilter(loc.shore, selectedDirections)
   );
   const ordered = sortLocationsForDisplay(filtered);
 

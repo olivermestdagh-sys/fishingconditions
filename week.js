@@ -11,6 +11,7 @@ let moonPhasesData = {};
 let selectedLocations = new Set();
 let selectedTypes = new Set(["Kayak", "Land based"]);
 let selectedGroups = new Set();
+let selectedDirections = new Set();
 let currentTile = null;
 let modalChart = null;
 let previewChart = null;
@@ -88,7 +89,7 @@ async function init() {
     moonPhasesData = data.moonPhases || {};
     if (data.generatedAt) {
       const dt = new Date(data.generatedAt);
-      document.getElementById("updated").textContent = `Updated ${dt.toLocaleString([], { dateStyle: "medium", timeStyle: "short", hour12: false })}`;
+      document.getElementById("updated").textContent = `Updated ${dt.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
     }
     // Awaited — small, fast, local file (not the slow WillyWeather
     // pipeline), so negligible delay; avoids a race where the very first
@@ -137,14 +138,15 @@ async function init() {
   selectedTypes = Array.isArray(savedTypes) && savedTypes.length ? new Set(savedTypes) : new Set(["Kayak", "Land based"]);
 
   // Location Group defaults to EMPTY — the opposite of selectedLocations
-  // above, and deliberately so: this filter is AND-style tag matching
-  // (see groupsMatchFilter in charts.js) where checking a chip ADDS a
-  // requirement rather than including a category, so no chips checked
-  // correctly means no requirement applied yet (show everything), not
-  // "select every group" the way Location/Type default to. Defaulting to
-  // all-checked here — the naive parallel to those other two filters —
-  // would mean a location needs literally every group that currently
-  // exists just to show up on a fresh visit.
+  // above, and deliberately so: this filter is opt-in OR-style tag
+  // matching (see groupsMatchFilter in charts.js) where checking a chip
+  // ADDS AN ACCEPTABLE OPTION rather than including a category, so no
+  // chips checked correctly means no requirement applied yet (show
+  // everything), not "select every group" the way Location/Type default
+  // to. Defaulting to all-checked here — the naive parallel to those
+  // other two filters — would mean a location needs to carry whichever
+  // single group happens to be the only one that exists just to show up
+  // on a fresh visit.
   let savedGroups = null;
   try {
     savedGroups = JSON.parse(localStorage.getItem(GROUP_FILTER_STORAGE_KEY) || "null");
@@ -153,6 +155,17 @@ async function init() {
   }
   const allGroups = Array.from(new Set(allLocations.flatMap((l) => locationGroupsOf(l))));
   selectedGroups = new Set(Array.isArray(savedGroups) ? savedGroups.filter((g) => allGroups.includes(g)) : []);
+
+  // Direction defaults to EMPTY for the same reason Location Group does
+  // (see groupsMatchFilter/directionsMatchFilter in charts.js) — it's an
+  // opt-in OR-style facet, not a select-all-by-default category filter.
+  let savedDirections = null;
+  try {
+    savedDirections = JSON.parse(localStorage.getItem(DIRECTION_FILTER_STORAGE_KEY) || "null");
+  } catch {
+    savedDirections = null;
+  }
+  selectedDirections = new Set(Array.isArray(savedDirections) ? savedDirections.filter((d) => CARDINAL_DIRECTIONS.includes(d)) : []);
 
   let savedThresholds = null;
   try {
@@ -186,37 +199,58 @@ async function init() {
   document.getElementById("launchTime").addEventListener("input", persistTripTimes);
   document.getElementById("homeBy").addEventListener("input", persistTripTimes);
 
-  // Cross-filtering: changing Type narrows which Location Group AND which
-  // Location chips are even offered (a chip for a group/location with no
-  // match for the currently-selected type(s) is just noise); changing
-  // Group narrows which Location chips are offered, in turn. This only
-  // changes which chips are OFFERED, not what's actually selected — a
-  // location/group that temporarily disappears stays in its Set exactly
-  // as it was, so changing Type/Group back brings it back with whatever
-  // checked state it had before, rather than resetting it.
+  // Cross-filtering: changing Type narrows which Location Group, Direction,
+  // AND Location chips are even offered (a chip for a group/direction/
+  // location with no match for the currently-selected type(s) is just
+  // noise); changing Group narrows which Direction and Location chips are
+  // offered; changing Direction narrows which Group and Location chips are
+  // offered. This only changes which chips are OFFERED, not what's
+  // actually selected — a location/group/direction that temporarily
+  // disappears stays in its Set exactly as it was, so changing a filter
+  // back brings it back with whatever checked state it had before, rather
+  // than resetting it.
   function refreshLocationChips() {
-    renderLocationChips(allLocations, selectedLocations, renderWeekView, selectedTypes, selectedGroups);
+    renderLocationChips(allLocations, selectedLocations, renderWeekView, selectedTypes, selectedGroups, selectedDirections);
+  }
+  function refreshGroupChips() {
+    renderGroupChips(allLocations, selectedGroups, onGroupFilterChanged, selectedTypes, selectedDirections);
+  }
+  function refreshDirectionChips() {
+    renderDirectionChips(allLocations, selectedDirections, onDirectionFilterChanged, selectedTypes, selectedGroups);
   }
   function onGroupFilterChanged() {
+    refreshDirectionChips(); // Group narrows which Direction tiles are offered, in turn
+    refreshLocationChips();
+    renderWeekView();
+  }
+  function onDirectionFilterChanged() {
+    refreshGroupChips(); // Direction narrows which Group chips are offered, in turn
     refreshLocationChips();
     renderWeekView();
   }
   function onTypeFilterChanged() {
-    renderGroupChips(allLocations, selectedGroups, onGroupFilterChanged, selectedTypes);
+    refreshGroupChips();
+    refreshDirectionChips();
     refreshLocationChips();
     renderWeekView();
   }
 
   refreshLocationChips();
   renderTypeChips(selectedTypes, onTypeFilterChanged);
-  renderGroupChips(allLocations, selectedGroups, onGroupFilterChanged, selectedTypes);
+  refreshGroupChips();
+  refreshDirectionChips();
   document.getElementById("btnLocAll").addEventListener("click", () => {
-    // Selects every CURRENTLY OFFERED (narrowed by Type+Group) location,
-    // not literally every location regardless of the active filters —
-    // matches what's actually shown as a chip right now.
+    // Selects every CURRENTLY OFFERED (narrowed by Type+Group+Direction)
+    // location, not literally every location regardless of the active
+    // filters — matches what's actually shown as a chip right now.
     selectedLocations = new Set(
       allLocations
-        .filter((l) => selectedTypes.has(l.type) && groupsMatchFilter(locationGroupsOf(l), selectedGroups))
+        .filter(
+          (l) =>
+            selectedTypes.has(l.type) &&
+            groupsMatchFilter(locationGroupsOf(l), selectedGroups) &&
+            directionsMatchFilter(l.shore, selectedDirections)
+        )
         .map((l) => l.name)
     );
     persistSelectedLocations(selectedLocations);
@@ -262,6 +296,7 @@ function computeWeekTiles() {
   // locationGroups regardless of type (see fetch_conditions.py), so this
   // doesn't need to vary by type.
   const groupsByName = new Map(allLocations.map((l) => [l.name, locationGroupsOf(l)]));
+  const shoreByName = new Map(allLocations.map((l) => [l.name, l.shore]));
 
   const byLocation = {};
   for (const r of allRows) {
@@ -271,6 +306,7 @@ function computeWeekTiles() {
     if (!selectedTypes.has(type)) continue;
     const groups = groupsByName.get(name) || [UNGROUPED_LABEL];
     if (!groupsMatchFilter(groups, selectedGroups)) continue;
+    if (!directionsMatchFilter(shoreByName.get(name), selectedDirections)) continue;
     const key = `${name}::${type}`;
     (byLocation[key] || (byLocation[key] = [])).push(r);
   }
