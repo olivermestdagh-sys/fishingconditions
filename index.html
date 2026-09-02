@@ -1,10 +1,96 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="weeknew-force-landscape">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Olie's Kayak and Surf Fishing Conditions – Week (sessions)</title>
+<title>Olie's Kayak and Surf Fishing Conditions – Week Ahead</title>
 <link rel="stylesheet" href="style.css" />
+<script>
+  // Belt-and-suspenders companion to the CSS rotate-for-landscape trick in
+  // style.css (search for "weeknew-force-landscape" there for the full
+  // explanation of why this exists instead of screen.orientation.lock()).
+  // The CSS alone uses 100vh/100vw, which is where this technique most
+  // often breaks on REAL phones: mobile Safari and mobile Chrome both
+  // resize the visible viewport as their address bar shows/hides while
+  // scrolling, and `vh`/`vw` have a long, inconsistent history across
+  // browsers/versions of referring to the *largest possible* viewport
+  // (bar hidden) rather than the *currently visible* one (bar shown) —
+  // so a size computed from them can end up taller/wider than what's
+  // actually on screen, which reads as "nothing happened" rather than a
+  // clean rotation. window.innerWidth/innerHeight don't have that
+  // ambiguity — they always reflect the actual current viewport — so this
+  // runs immediately (before any data fetch, before charts.js/week.js
+  // even load) and sets the rotated size in real pixels instead, then
+  // redoes it on resize/orientationchange so it keeps tracking correctly
+  // as the address bar shows/hides or the phone is actually turned.
+  // offsetTop is only relative to an element's nearest POSITIONED
+  // ancestor, not the page as a whole — and there's a position:relative
+  // section between #weekTimelineScroll and <body> here (the summary-card
+  // wrapping it), so reading scrollWrap.offsetTop directly gives its
+  // offset within THAT section, not the true distance down from the top
+  // of the (rotated) page. Walking the whole offsetParent chain up to
+  // body and summing each segment's own offsetTop gives the real
+  // cumulative distance, regardless of how many positioned ancestors sit
+  // in between.
+  function getOffsetTopWithinBody(el) {
+    var top = 0;
+    var node = el;
+    while (node && node !== document.body) {
+      top += node.offsetTop || 0;
+      node = node.offsetParent;
+    }
+    return top;
+  }
+
+  function applyForceLandscapeSizing() {
+    var isPhoneWidth = window.matchMedia("(max-width: 900px)").matches;
+    var isPortrait = window.matchMedia("(orientation: portrait)").matches;
+    var body = document.body;
+    if (!body) return;
+    var scrollWrap = document.getElementById("weekTimelineScroll");
+    if (isPhoneWidth && isPortrait) {
+      body.style.width = window.innerHeight + "px";
+      body.style.height = window.innerWidth + "px";
+      body.style.top = window.innerHeight + "px";
+
+      // Also size the timeline board — and each location row inside it —
+      // to the ACTUAL space available in the rotated layout, instead of
+      // approximating with another vw/vh guess (the previous 65vw board
+      // cap left less room than a single row's own graph needs, forcing a
+      // second, awkward scroll just to see that row's own top/bottom).
+      // offsetTop/offsetHeight reflect an element's position in its own
+      // normal, PRE-rotation document flow — exactly the axis that still
+      // means "top to bottom" here, since the whole body (including this
+      // measurement) rotates as one rigid unit; only how it's painted on
+      // screen changes, not the relative layout within it.
+      if (scrollWrap) {
+        var available = window.innerWidth - getOffsetTopWithinBody(scrollWrap) - 40; // ~40px for the footer line below the board
+        if (available > 60) {
+          scrollWrap.style.maxHeight = available + "px";
+          // Each row's graph gets nearly that same height, so ONE row
+          // fills the visible board — scrolling moves cleanly to the next
+          // location instead of first needing to scroll around inside a
+          // single row just to see all of it. Read by .weeknew-row-chart
+          // in style.css, with a plain 300px fallback for anything that
+          // doesn't set this (desktop, or JS disabled).
+          document.documentElement.style.setProperty("--weeknew-mobile-row-height", (available - 20) + "px");
+        }
+      }
+    } else {
+      // Not phone-portrait (already landscape, or a wide/desktop window) —
+      // clear every inline override so the normal (untransformed) CSS
+      // layout applies, exactly as it would with no JS at all.
+      body.style.width = "";
+      body.style.height = "";
+      body.style.top = "";
+      if (scrollWrap) scrollWrap.style.maxHeight = "";
+      document.documentElement.style.removeProperty("--weeknew-mobile-row-height");
+    }
+  }
+  document.addEventListener("DOMContentLoaded", applyForceLandscapeSizing);
+  window.addEventListener("resize", applyForceLandscapeSizing);
+  window.addEventListener("orientationchange", applyForceLandscapeSizing);
+</script>
 </head>
 <body>
 
@@ -14,10 +100,9 @@
 </header>
 
 <nav class="tabnav">
-  <a href="live.html">Live</a>
-  <a href="index.html" class="active">Week (sessions)</a>
-  <a href="week-new.html">Week (graphs)</a>
+  <a href="index.html" class="active">Week Ahead</a>
   <a href="conditions.html">Location</a>
+  <a href="live.html">Live</a>
   <a href="locations.html">Settings</a>
 </nav>
 
@@ -31,50 +116,29 @@
     <p class="footnote" style="margin:0 0 12px;text-align:left;">
       Every hourly forecast row that sits inside a run of consecutive hours meeting the thresholds below (evaluated per location).
     </p>
-    <div class="thresholds-and-times-wrap">
+    <div class="filter-row thresholds-row">
       <div>
-        <div class="filter-row thresholds-row">
-          <div>
-            <label for="minCondition">Min Condition rating</label>
-            <div class="rating-stepper">
-              <button type="button" class="rating-stepper-btn" id="minConditionDown" aria-label="Decrease min condition rating">−</button>
-              <div class="condition-badge rating-stepper-badge" id="minConditionBadge">3.0</div>
-              <button type="button" class="rating-stepper-btn" id="minConditionUp" aria-label="Increase min condition rating">+</button>
-              <input type="hidden" id="minCondition" min="1" max="5" value="3" />
-            </div>
-          </div>
-          <div>
-            <label for="minHours">Min consecutive hours</label>
-            <div class="rating-stepper">
-              <button type="button" class="rating-stepper-btn" id="minHoursDown" aria-label="Decrease min consecutive hours">−</button>
-              <div class="condition-badge rating-stepper-badge rating-stepper-badge-neutral" id="minHoursBadge">3.0</div>
-              <button type="button" class="rating-stepper-btn" id="minHoursUp" aria-label="Increase min consecutive hours">+</button>
-              <input type="hidden" id="minHours" min="1" max="24" value="3" />
-            </div>
-          </div>
+        <label for="minCondition">Min Condition rating</label>
+        <div class="rating-stepper">
+          <button type="button" class="rating-stepper-btn" id="minConditionDown" aria-label="Decrease min condition rating">−</button>
+          <div class="condition-badge rating-stepper-badge" id="minConditionBadge">3.0</div>
+          <button type="button" class="rating-stepper-btn" id="minConditionUp" aria-label="Increase min condition rating">+</button>
+          <input type="hidden" id="minCondition" min="1" max="5" value="3" />
         </div>
-        <p class="footnote" style="margin:8px 0 0;text-align:left;">
-          "Min consecutive hours" is a genuine clock-duration minimum — matches the session lengths below.
-        </p>
       </div>
-
       <div>
-        <label class="loc-edit-label" style="display:block;margin:0 0 6px;">Trip times</label>
-        <div class="filter-row">
-          <div>
-            <label for="launchTime">Launch Time</label>
-            <input type="time" id="launchTime" />
-          </div>
-          <div>
-            <label for="homeBy">Home By</label>
-            <input type="time" id="homeBy" />
-          </div>
+        <label for="minHours">Min consecutive hours</label>
+        <div class="rating-stepper">
+          <button type="button" class="rating-stepper-btn" id="minHoursDown" aria-label="Decrease min consecutive hours">−</button>
+          <div class="condition-badge rating-stepper-badge rating-stepper-badge-neutral" id="minHoursBadge">3.0</div>
+          <button type="button" class="rating-stepper-btn" id="minHoursUp" aria-label="Increase min consecutive hours">+</button>
+          <input type="hidden" id="minHours" min="1" max="24" value="3" />
         </div>
-        <p class="footnote" style="margin:8px 0 0;text-align:left;">
-          Set these to see fishing/drive time worked out when you tap a session below.
-        </p>
       </div>
     </div>
+    <p class="footnote" style="margin:8px 0 0;text-align:left;">
+      "Min consecutive hours" is a genuine clock-duration minimum — matches the session lengths below.
+    </p>
 
     <label style="display:block;margin:14px 0 6px;">Type</label>
     <div id="typeChips" class="chip-row"></div>
@@ -92,35 +156,18 @@
         <button type="button" id="btnLocNone" class="chip-action">None</button>
       </div>
     </div>
+    <p class="footnote" style="margin:0 0 6px;text-align:left;">Tap ☆ to pin a location to the top of the list below.</p>
     <div id="locationChips" class="chip-row"></div>
     </div>
   </section>
 
   <section class="summary-card week-full-bleed" style="padding:0;overflow:hidden;position:relative;">
-    <div id="weekEmptyState" class="empty-state" style="display:none;padding:20px;">No sessions meet the criteria.</div>
+    <div id="weekEmptyState" class="empty-state" style="display:none;padding:20px;">No locations match the current filters.</div>
     <div id="weekTimelineScroll" class="week-timeline-scroll">
       <div id="weekTimelineInner" class="week-timeline-inner"></div>
     </div>
-    <p class="footnote" style="margin:6px 10px 10px;text-align:left;">Scroll sideways for the rest of the week. Tap a tile for details.</p>
-
-    <div id="chartModalOverlay" class="week-chart-modal-overlay" style="display:none;">
-      <button id="btnCloseChartModal" class="chart-modal-close" aria-label="Close">&times;</button>
-      <div class="week-chart-modal-inner">
-        <div class="week-chart-modal-chart-wrap">
-          <canvas id="weekChartModal"></canvas>
-        </div>
-        <div id="weekScheduleContainer"></div>
-      </div>
-    </div>
+    <p class="footnote" style="margin:6px 10px 10px;text-align:left;">Scroll sideways for the rest of the week. Every location has its own always-visible graph — pinned locations (★) stay at the top. Tap a session chip to jump the graph there and arm it for planning, then drag across the graph and release to compute a full schedule for that plan.</p>
   </section>
-
-  <div id="weekHoverPreview" class="week-hover-preview" style="display:none;">
-    <button id="btnClosePreview" class="chart-modal-close week-preview-close" aria-label="Close">&times;</button>
-    <div class="week-hover-preview-chart-wrap">
-      <canvas id="weekPreviewChart"></canvas>
-    </div>
-    <div id="weekPreviewScheduleContainer"></div>
-  </div>
 
   <footer class="footnote">
     Data from <a href="https://www.willyweather.com.au/" target="_blank" rel="noopener">WillyWeather</a>.

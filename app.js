@@ -25,11 +25,11 @@ let state = {
 // has no data.
 let defaultEmptyStateText = "";
 
-// Same convention as Week (graphs)' row charts (week-new.js's
+// Same convention as Week Ahead's row charts (week.js's
 // PIXELS_PER_HOUR) — a genuinely readable, un-squashed width per hour of
 // data, rather than cramming the whole multi-day forecast into one phone-
 // width canvas. Mobile gets a narrower per-hour width than desktop (less
-// screen to spend), same as Week (graphs) does.
+// screen to spend), same as Week Ahead does.
 const isMobileDevice = Math.min(window.innerWidth, window.innerHeight) <= 900;
 const PIXELS_PER_HOUR = isMobileDevice ? 16 : 32;
 
@@ -67,7 +67,7 @@ async function init() {
   document.getElementById("previewTypeSelect").addEventListener("change", recalcPreviewCondition);
   document.getElementById("btnAddPreviewAsLocation").addEventListener("click", onAddPreviewAsLocation);
 
-  // Same gesture set as Week (graphs) and Live, all shared from charts.js:
+  // Same gesture set as Week Ahead and Live, all shared from charts.js:
   // hold 2s to toggle the tooltip, double-tap/double-click to toggle real
   // fullscreen, and (desktop only — touch already scrolls natively)
   // click-and-drag to pan the now-horizontally-scrolling graph. Wired once
@@ -79,7 +79,7 @@ async function init() {
   // charts.js) — was previously set true, making a quick tap a no-op even
   // while armed, which is exactly the bug Oliver reported: once you'd
   // held to arm the tooltip, clicking elsewhere on the graph did nothing.
-  // Now matches Live/Week (graphs): hold 2s to arm, then a plain tap
+  // Now matches Live/Week Ahead: hold 2s to arm, then a plain tap
   // moves the tooltip to wherever you tap next.
   wireHoldToShowTooltip(() => state.chart, document.getElementById("conditionsChart"));
   setupFullscreenToggle("locationChartFrame");
@@ -515,7 +515,7 @@ function renderCharts(rows, loc, sunTimesOverride) {
   // (explicit pixel width proportional to the real time range — see
   // PIXELS_PER_HOUR above), set BEFORE renderConditionsChart runs, since
   // Chart.js measures its canvas's parent's width at construction time to
-  // decide the canvas's own size (same reason Week (graphs)'s row charts
+  // decide the canvas's own size (same reason Week Ahead's row charts
   // set their wrapper's width right before rendering into it, not after).
   // Desktop instead shows the whole graph with no scrolling at all —
   // clearing any previous inline width here lets it fall back to CSS's
@@ -529,7 +529,7 @@ function renderCharts(rows, loc, sunTimesOverride) {
     chartWrap.style.width = "";
   }
   // Force layout before Chart.js measures this canvas — same reasoning,
-  // and same fix, as week-new.js's own "void built.chartWrap.offsetHeight"
+  // and same fix, as week.js's own "void built.chartWrap.offsetHeight"
   // before rendering into a row: a canvas can measure as zero/stale size
   // if Chart.js reads it before the browser has actually settled layout,
   // which the frame.style.display and chartWrap.style.width changes just
@@ -572,7 +572,7 @@ function renderCharts(rows, loc, sunTimesOverride) {
     overlayHeading: true,
     // This page now drives the tooltip itself (hold-2s, see
     // wireHoldToShowTooltip in init()) rather than Chart.js's own default
-    // tap-triggered one — same reasoning/pattern as Live and Week (graphs).
+    // tap-triggered one — same reasoning/pattern as Live and Week Ahead.
     disableBuiltinEvents: true,
   });
 }

@@ -2053,7 +2053,7 @@ function buildTooltipCrosshairPlugin(rows) {
     // afterDatasetsDraw, not afterDraw — drawn after the lines/points but
     // (for pages using Chart.js's own native tooltip) still before that
     // tooltip's own afterDraw-hooked rendering, so this never paints over
-    // it. Callers that manually drive the tooltip (Live, Week (graphs) —
+    // it. Callers that manually drive the tooltip (Live, Week Ahead —
     // see disableBuiltinEvents/wireHoldToShowTooltip) disable the native
     // tooltip entirely (plugins.tooltip.enabled:false below) and rely on
     // THIS plugin to draw the whole box itself — Chart.js's own tooltip
@@ -2471,7 +2471,7 @@ function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHea
           // those are already using their own ends of the chart.
           //
           // Skippable via showSunTimes=false — added for Week Ahead's
-          // row-per-location graphs (week-new.js), where the shared
+          // row-per-location graphs (week.js), where the shared
           // timeline header above every row already shows sunrise/sunset
           // times once; repeating them inside each row's own (now several-
           // days-wide) chart added visual noise without new information.
@@ -2505,7 +2505,7 @@ function buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHea
         }
 
         // Skippable via showDayHeading=false — added for Week Ahead's
-        // embedded per-tile graphs (week-new.js), where the date (and the
+        // embedded per-tile graphs (week.js), where the date (and the
         // moon phase below) are already shown once in the shared timeline
         // header above every tile, and again in the tile's own small info
         // row — repeating both a third time, per day-band, inside a chart
@@ -2791,7 +2791,7 @@ function buildComputedSessionMarkersPlugin(records) {
 
 /**
  * Live feedback for the click-drag-release gesture itself (wireSessionRangeSelect,
- * week-new.js) — a getPreviewState() closure rather than a plain value
+ * week.js) — a getPreviewState() closure rather than a plain value
  * because this plugin is built ONCE per row at chart-creation time, but
  * the drag state changes on every pointermove afterwards; reading it
  * fresh at each redraw (the caller calls chart.draw() on every
@@ -3086,7 +3086,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
 
   // xRange lets a caller lock this chart's x-axis to two exact timestamps
   // rather than the first/last row it happens to have data for — used by
-  // Week Ahead's embedded per-tile graphs (week-new.js) so the chart's own
+  // Week Ahead's embedded per-tile graphs (week.js) so the chart's own
   // time-to-pixel scale matches PIXELS_PER_HOUR exactly and lines up with
   // the shared timeline's day/night shading and hour ticks sitting behind
   // it. Every other caller doesn't pass this, so falls back to the actual
@@ -3125,7 +3125,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       // interaction entirely (an empty events list means nothing native
       // triggers it) — for callers that want to drive the tooltip
       // themselves via chart.tooltip.setActiveElements() instead (Week
-      // Ahead's hold-to-show-tooltip behavior — see week-new.js). This
+      // Ahead's hold-to-show-tooltip behavior — see week.js). This
       // has to happen at chart CONSTRUCTION time: Chart.js reads
       // options.events once, when it first binds its own internal
       // listeners, so mutating it after the chart already exists doesn't
@@ -3265,7 +3265,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
         },
         tooltip: {
           // Disabled entirely for callers that manually drive the
-          // tooltip (disableBuiltinEvents — Live, Week (graphs)) — see
+          // tooltip (disableBuiltinEvents — Live, Week Ahead) — see
           // buildTooltipCrosshairPlugin for why: Chart.js's own tooltip
           // rendering proved unreliable when triggered by an externally
           // set active element rather than a genuine hover, so those
@@ -3958,7 +3958,7 @@ const COMPUTED_SESSIONS_STORAGE_KEY = "goodConditionsComputedSessions";
  * direct inputs (launch, homeBy) the drag's two endpoints actually
  * correspond to, which depends on which of the two arm buttons was used
  * to start this drag ("+ Fishing times" vs "+ Home to home" — see
- * week-new.js's onArmScheduleClick):
+ * week.js's onArmScheduleClick):
  *
  *   "fishing" mode — drag spans the actual time AT the fishing spot
  *   ([fishAt, headBack]). dragStartMs converts to launch directly
@@ -4164,12 +4164,12 @@ function xValFromEvent(chart, e) {
 
 /**
  * fresh set of duplicate listeners to that same canvas on every render.
- * Callers whose canvas genuinely is recreated each time (Week (graphs),
+ * Callers whose canvas genuinely is recreated each time (Week Ahead,
  * a fresh canvas per row) can just pass a trivial () => chart closure.
  *
  * opts.suppressQuickTap (default false): when true, a plain quick tap
  * NEVER does anything, even while armed from a previous hold. Normally
- * (every current caller — Live, Week (graphs), the Location tab) a quick
+ * (every current caller — Live, Week Ahead, the Location tab) a quick
  * tap while armed moves the tooltip to the new position, matching
  * Chart.js's own default tap behavior — this exists as an opt-out for
  * some future page that genuinely wants a plain tap to be a no-op under
@@ -4262,12 +4262,12 @@ function wireHoldToShowTooltip(getChart, canvas, opts = {}) {
  * Double-tap (or double-click, for free — the same detector handles mouse
  * pointers too) the element with id === targetId to toggle real browser
  * fullscreen on it. Used for "the frame that contains the graph(s)" on
- * both Week (graphs) (#weekTimelineScroll) and Live (#liveChartFrame).
+ * both Week Ahead (#weekTimelineScroll) and Live (#liveChartFrame).
  *
  * Fullscreen + a genuine user gesture is also the only context in which
  * screen.orientation.lock() can ever succeed — neither API can fire
  * outside a real user gesture, which is why a page needing a landscape
- * view on load at all (Week (graphs)) has to fall back to a CSS rotation
+ * view on load at all (Week Ahead) has to fall back to a CSS rotation
  * trick instead; this double-tap gives both APIs a real gesture to work
  * with, so the orientation lock attempted here has a genuine chance of
  * working, on top of fullscreen itself hiding the browser's own address
@@ -4382,7 +4382,7 @@ function setupFullscreenToggle(targetId) {
  * normally reach (hold-to-show-tooltip's own tap handling, the
  * double-tap-fullscreen detector).
  *
- * Shared (originally written for Week (graphs), week-new.js, which keeps
+ * Shared (originally written for Week Ahead, week.js, which keeps
  * its own copy rather than switching to this one — moved here mainly so
  * the Location tab's own horizontally-scrolling graph, app.js, could use
  * it too without duplicating the logic a second time).

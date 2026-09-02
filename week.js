@@ -1,8 +1,46 @@
+// Week Ahead — row-per-location layout. Every location passing the
+// Location/Type filters gets its own always-visible conditions graph,
+// spanning the SAME fixed [timelineStart, timelineEnd] range as every
+// other row (a deliberate choice — a per-row/per-tile range that depends
+// on that row's own context is what caused "long sessions stretch the
+// layout" and "things don't quite line up" problems in an earlier version
+// of this page).
+// Any qualifying session(s) for a location are shaded on top of its
+// always-visible graph via the shared session-span plugin (charts.js),
+// which supports more than one span per chart — a location can have
+// zero, one, or several separate qualifying windows across the displayed
+// period.
+//
+// Locations can be pinned (star icon, in both the filter chips and each
+// row's own header) to float to the top of the list, ahead of the
+// unpinned locations below — a lighter-weight alternative to full
+// drag-and-drop reordering. Pin state persists in localStorage, separate
+// from the shared location/type/threshold keys (charts.js), since pinning
+// is specific to this page's layout.
+//
+// Trip schedule: the "+ Fishing times" / "+ Home to home" buttons at the
+// top of a location's session list arm that row for a click-drag-release
+// range selection on its own chart (wireSessionRangeSelect) — which
+// button was used decides how the drag is interpreted, computed via
+// charts.js's computeScheduleFromDragRangeMs, then shown as compact flags
+// on the chart and a chip in the sidebar. Computed sessions persist
+// across reloads and accumulate until removed.
+
+// Detects "this is a phone-sized device" the same way the CSS
+// force-landscape trick in index.html does (max-width: 900px) —
+// checked against the SHORTER of the two dimensions so it's
+// orientation-independent (a phone rotated to landscape is still a phone).
+const isMobileDevice = Math.min(window.innerWidth, window.innerHeight) <= 900;
+
 const DATA_URL = "data/conditions.json";
 const SETTINGS_URL = "config/settings.json";
-const PIXELS_PER_HOUR = 32;
-const MIN_TILE_WIDTH = 240;
-const LANE_GAP = 10; // minimum pixel gap required between two tiles sharing a lane
+// Half the usual scale on mobile — 32px/hour was sized for a desktop-width
+// screen. At that same scale on a phone's much narrower rotated-landscape
+// width, a single day took up nearly the entire visible width on its own,
+// leaving almost no surrounding context and forcing far more horizontal
+// scrolling per day than made sense for the smaller screen.
+const PIXELS_PER_HOUR = isMobileDevice ? 16 : 32;
+const SIDEBAR_WIDTH = 220; // px — the frozen left-hand column showing each row's location name/pin/sessions
 
 let allRows = [];
 let allLocations = [];
@@ -12,26 +50,466 @@ let selectedLocations = new Set();
 let selectedTypes = new Set(["Kayak", "Land based"]);
 let selectedGroups = new Set();
 let selectedDirections = new Set();
-let currentTile = null;
-let modalChart = null;
-let previewChart = null;
-let hoverShowTimer = null;
-let previewPinned = false;
-let dayLabelsForStickyScroll = []; // rebuilt each render() — see the horizontal-sticky scroll handler below
+let pinnedOrder = []; // location NAMES, in the order they were pinned — oldest pin first
 
-// Hover-capable devices (desktop, trackpad) get a small floating preview on
-// hover instead — lets you see the graph while still seeing every other
-// session, since it doesn't cover the timeline the way the full modal does.
-// Touch-only devices don't have a real hover state at all, so they keep the
-// tap-to-open modal instead.
-const supportsHover = typeof window.matchMedia === "function" && window.matchMedia("(hover: hover)").matches;
+// Computed (drag-derived) sessions — see charts.js's
+// computeScheduleFromDragRangeMs for how one of these gets built, and the
+// big comment on wireSessionRangeSelect below for the full click-arm/
+// drag-compute flow. Persists across reloads (charts.js's
+// loadComputedSessions/persistComputedSessions), unlike everything else
+// module-level here which is pure in-memory UI state.
+let computedSessions = [];
+
+// Which row is currently primed for a click-drag-release range selection —
+// null when nothing is armed. Sets/cleared by onArmScheduleClick and
+// wireSessionRangeSelect below; checked by BOTH the tooltip-hold gesture
+// and the drag-to-pan gesture so they can get out of the way while a
+// session calculation is actually being dragged out (see the big comment
+// on wireSessionRangeSelect for why this can't just be three independent
+// gesture handlers on the same canvas).
+let armedLocationName = null;
+
+// "fishing" or "onsite" — which of the row's two arm buttons ("+ Fishing
+// times" / "+ Home to home") was used to arm it. No longer a persisted
+// global setting (see computeScheduleFromDragRangeMs's own comment,
+// charts.js) — it's picked fresh every time by which button is tapped,
+// since which one makes sense can genuinely differ session to session.
+let armedMode = null;
+
+// Chart.js instances currently on screen — one per RENDERED location row
+// (not necessarily every row that exists — see rowVisibilityObserver
+// below). Torn down and rebuilt every renderWeekView() call. Chart.js
+// doesn't garbage-collect an instance just because its canvas left the
+// DOM, so these must be destroyed explicitly or every re-render leaks
+// whatever was already built.
+let activeRowCharts = [];
+
+// Deliberately module-level, not per-row — only ONE row's tooltip is ever
+// showing at a time (see showTooltipOn below), and which one that is can
+// change without needing to re-hold: a quick tap on a DIFFERENT row, while
+// armed, moves it there instead of adding a second one.
+let tooltipsArmed = false;
+let activeTooltipChart = null;
+
+/**
+ * Fully hides a chart's tooltip. No opacity juggling needed —
+ * buildTooltipCrosshairPlugin (charts.js) draws the whole tooltip itself,
+ * straight from getActiveElements(), so clearing that (and repainting) is
+ * all this needs to do.
+ */
+function clearTooltip(chart) {
+  chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+  chart.draw();
+}
+
+/**
+ * Shows the tooltip on exactly one chart — the one just held/tapped —
+ * clearing it from every OTHER currently-rendered row first, so switching
+ * between graphs never leaves more than one tooltip box on screen at once.
+ */
+function showTooltipOn(chart, xVal) {
+  activeTooltipChart = chart;
+  for (const c of activeRowCharts) {
+    if (c === chart) continue;
+    clearTooltip(c);
+  }
+  const xScale = chart.scales.x;
+  if (!xScale) return;
+  // Element lookup done directly from the data (nearestIndexForXVal +
+  // elementsAtIndex, in charts.js) rather than via
+  // chart.getElementsAtEventForMode with a reconstructed clientX — that
+  // reconstruction (rect.left + a logical pixel value) breaks under this
+  // page's mobile force-landscape rotation, where the canvas's internal
+  // drawing buffer and its rotated VISUAL bounding rect end up with their
+  // width/height axes effectively swapped. See xValFromEvent in charts.js
+  // for the full explanation (same underlying issue, on the input side).
+  const index = nearestIndexForXVal(chart, xVal);
+  const elements = elementsAtIndex(chart, index);
+  if (elements.length === 0) return;
+  const px = xScale.getPixelForValue(xVal);
+  const chartArea = chart.chartArea;
+  const py = chartArea ? (chartArea.top + chartArea.bottom) / 2 : 0;
+  chart.tooltip.setActiveElements(elements, { x: px, y: py });
+  chart.draw();
+}
+
+function hideAllTooltips() {
+  activeTooltipChart = null;
+  for (const c of activeRowCharts) {
+    clearTooltip(c);
+  }
+}
+
+/**
+ * Same hold-for-2s gesture as charts.js's shared wireHoldToShowTooltip,
+ * but able to move the tooltip to a DIFFERENT row's graph on a quick tap
+ * without needing to re-hold there first — kept as its own page-local
+ * version rather than generalizing the shared one, since "any graph can
+ * take over from any other" isn't something Live (a single chart) has any
+ * use for. Holding again ANYWHERE while armed disarms it everywhere,
+ * regardless of which row currently has it.
+ */
+function wireSyncedTooltip(chart, canvas) {
+  const HOLD_MS = 2000;
+  const MOVE_CANCEL_PX = 10;
+  let pressTimer = null;
+  let pressStartX = 0;
+  let pressStartY = 0;
+
+  function xValAt(e) {
+    // xValFromEvent (charts.js) — prefers e.offsetX (unaffected by this
+    // page's mobile rotation) with a rect-based fallback for browsers
+    // where offsetX isn't reliably populated on touch events.
+    return xValFromEvent(chart, e);
+  }
+
+  function clearPressTimer() {
+    if (pressTimer != null) {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    pressStartX = e.clientX;
+    pressStartY = e.clientY;
+    clearPressTimer();
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      if (tooltipsArmed) {
+        tooltipsArmed = false;
+        hideAllTooltips();
+      } else {
+        tooltipsArmed = true;
+        showTooltipOn(chart, xValAt(e));
+      }
+    }, HOLD_MS);
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    if (pressTimer == null) return;
+    const dx = e.clientX - pressStartX;
+    const dy = e.clientY - pressStartY;
+    if (Math.sqrt(dx * dx + dy * dy) > MOVE_CANCEL_PX) clearPressTimer();
+  });
+
+  canvas.addEventListener("pointerup", (e) => {
+    const firedAsHold = pressTimer == null;
+    clearPressTimer();
+    if (firedAsHold) return; // the timer callback above already handled this press
+    if (tooltipsArmed) showTooltipOn(chart, xValAt(e)); // quick tap while armed — shows here, moving it off whichever row had it before
+  });
+
+  canvas.addEventListener("pointercancel", clearPressTimer);
+  canvas.addEventListener("pointerleave", clearPressTimer);
+}
+
+/**
+ * Scrolls the shared board so a session's midpoint is centered in the
+ * visible chart area (clamped at either edge of the whole displayed week
+ * — "centered if it can", per the original request; near the very start
+ * or end of the week there just isn't a full half-viewport of track on
+ * one side to center against, so it scrolls as far as it can and stops).
+ * The sidebar's own width doesn't scroll (position:sticky), so it's
+ * subtracted from the visible width up front — otherwise "centered" would
+ * be centered across the WHOLE viewport including the space the sidebar
+ * permanently occupies, not the actual visible chart area.
+ */
+function scrollToCenterSession(session, timelineStart, totalTrackWidth) {
+  const scrollWrap = document.getElementById("weekTimelineScroll");
+  if (!scrollWrap) return;
+  const midMs = (session.from + session.to) / 2;
+  const trackPx = ((midMs - timelineStart) / 3600000) * PIXELS_PER_HOUR;
+  const visibleChartWidth = Math.max(100, scrollWrap.clientWidth - SIDEBAR_WIDTH);
+  const target = trackPx - visibleChartWidth / 2;
+  scrollWrap.scrollLeft = Math.max(0, Math.min(Math.max(0, totalTrackWidth - visibleChartWidth), target));
+}
+
+/**
+ * Only ever ONE row armed at a time — arming a new one disarms whichever
+ * was previously armed first, same "only one X active at a time" pattern
+ * as tooltipsArmed/activeTooltipChart above. Tracks the actual DOM
+ * elements (not just the location name) so it can strip the "armed"
+ * visual state cleanly regardless of which row/chip they belonged to.
+ */
+let armedRow = null;
+let armedChip = null;
+let armedCanvas = null;
+
+function disarmSchedule() {
+  if (armedRow) armedRow.classList.remove("armed-for-schedule");
+  if (armedChip) armedChip.classList.remove("armed");
+  // Restored to "" (the CSS default, effectively "auto") rather than left
+  // at "none" — an unarmed row's canvas should scroll normally again,
+  // same as it always could before this row was ever armed.
+  if (armedCanvas) armedCanvas.style.touchAction = "";
+  // touch-action alone on the canvas turned out not to be enough on real
+  // phones — this page's mobile layout rotates the whole <body> -90deg
+  // (the force-landscape trick in index.html), and under that
+  // transform the browser's own touch-action-based scroll-vs-gesture
+  // decision doesn't reliably line up with the canvas the person is
+  // actually touching (same rotated-coordinate-space class of issue as
+  // xValFromEvent's own comment in charts.js). Directly locking the
+  // scroll CONTAINER itself — overflow:hidden, which blocks user-driven
+  // scrolling outright regardless of touch-action — is a harder
+  // guarantee that doesn't depend on that logic working correctly.
+  // scrollLeft/scrollTop are preserved while hidden and restored the
+  // instant overflow goes back to auto, so this doesn't visibly move the
+  // board at all, just freezes it in place for the duration of the drag.
+  const scrollWrap = document.getElementById("weekTimelineScroll");
+  if (scrollWrap) {
+    scrollWrap.style.overflow = "";
+    scrollWrap.style.touchAction = "";
+  }
+  armedLocationName = null;
+  armedMode = null;
+  armedRow = null;
+  armedChip = null;
+  armedCanvas = null;
+}
+
+/**
+ * Arms a row for the click-arm-then-drag flow (see wireSessionRangeSelect
+ * just below for the drag half) — triggered by one of the two "+ Fishing
+ * times" / "+ Home to home" buttons at the top of a location's session
+ * list (mode is just whichever of those two was clicked), NOT by tapping
+ * an individual qualifying-session chip (those just scroll to that
+ * session — see scrollToCenterSession's own call site). Arming isn't
+ * tied to any particular session's time window, so there's nothing to
+ * scroll to here; it just readies THIS row's chart for whatever range
+ * the person drags out next, wherever they're currently looking.
+ *
+ * Sets this canvas's touch-action to "none" as part of arming — on a
+ * touch device, the browser's native "drag on a scrollable area pans it"
+ * behavior is decided from touch-action, not from whether JS later calls
+ * preventDefault(), so this has to happen here (synchronously, at arm
+ * time) rather than only inside wireSessionRangeSelect's own pointerdown
+ * handler, which by itself was consistently losing the very first touch
+ * of a drag to the board's native horizontal scroll.
+ *
+ * getRowChart is a () => chart closure rather than the chart directly,
+ * because at the moment this listener is attached, the chart may not
+ * exist yet (deferred/lazy row rendering — see renderChart's own
+ * comment) — reading it lazily, only once actually needed (drag-release,
+ * in wireSessionRangeSelect), always gets whatever the CURRENT chart is.
+ */
+function onArmScheduleClick(loc, row, btn, mode, getRowChart, canvas) {
+  if (armedLocationName === loc.name && armedMode === mode) {
+    // Tapping the already-armed row's own button again (the SAME mode)
+    // is a cancel, not a re-arm — matches the hold-to-arm tooltip's own
+    // "hold again to turn it back off" convention elsewhere on this page.
+    disarmSchedule();
+    return;
+  }
+  // Covers both "arming a fresh row" and "switching this row's OWN mode"
+  // (tapping the other button while already armed) — either way, start
+  // clean rather than trying to patch the previous armed state in place.
+  disarmSchedule();
+  armedLocationName = loc.name;
+  armedMode = mode;
+  armedRow = row;
+  armedChip = btn;
+  armedCanvas = canvas;
+  row.classList.add("armed-for-schedule");
+  btn.classList.add("armed");
+  canvas.style.touchAction = "none";
+  // See disarmSchedule's comment for why the scroll container itself
+  // (not just this canvas) gets locked — belt-and-suspenders against the
+  // rotated-mobile-layout touch-action quirk.
+  const scrollWrap = document.getElementById("weekTimelineScroll");
+  if (scrollWrap) {
+    scrollWrap.style.overflow = "hidden";
+    scrollWrap.style.touchAction = "none";
+  }
+}
+
+/**
+ * The actual click-drag-release gesture, wired to EVERY row's canvas
+ * (not just the currently-armed one) — each call only ever acts when
+ * armedLocationName matches THIS row's own location, so an unarmed row's
+ * canvas behaves completely normally (tooltip-hold, board pan) regardless
+ * of some OTHER row being armed elsewhere.
+ *
+ * Registered before wireSyncedTooltip specifically so it gets first look
+ * at every pointer event on this canvas: stopImmediatePropagation() below
+ * prevents both wireSyncedTooltip's own listener on this same canvas AND
+ * the whole-board drag-to-pan listener (setupDragToScroll, attached to
+ * the scrollWrap ancestor) from ever seeing that event once armed. This
+ * is the resolution to the very first friction point from the original
+ * design discussion — three gestures (hold-to-tooltip, drag-to-pan,
+ * drag-to-plan) can't coexist as three independent listeners on the same
+ * surface, so arming makes this row's canvas swallow events for its own
+ * gesture and nothing else gets a turn until it's disarmed again.
+ *
+ * stopImmediatePropagation alone isn't enough on a touch device, though:
+ * mobile browsers decide whether a touch gesture is a native scroll
+ * BEFORE JS's own event handlers necessarily get a meaningful chance to
+ * stop it, based on the touched element's CSS touch-action, not on
+ * preventDefault() alone. onArmScheduleClick sets this canvas's
+ * touch-action to "none" the moment it arms (and disarmSchedule restores
+ * it), so a touch-drag here never gets interpreted as "scroll the board
+ * sideways" in the first place — this is genuinely necessary in addition
+ * to, not instead of, the stopImmediatePropagation/preventDefault calls
+ * below.
+ *
+ * dragPreview is a small mutable {hoverXVal, dragStartXVal} object — see
+ * buildSessionDragPreviewPlugin (charts.js) for how it's actually drawn.
+ * Owned by buildLocationRowElement (one per row, created fresh on every
+ * renderWeekView), passed in here so this function can update it live and
+ * the plugin can read it live, without either side needing to know about
+ * Chart.js internals or re-create anything mid-gesture.
+ */
+function wireSessionRangeSelect(chart, canvas, loc, dragPreview) {
+  let dragStartXVal = null;
+
+  canvas.addEventListener("pointerdown", (e) => {
+    if (armedLocationName !== loc.name) return; // not this row's turn — let tooltip-hold/board-pan handle it normally
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    dragStartXVal = xValFromEvent(chart, e);
+    dragPreview.dragStartXVal = dragStartXVal;
+    dragPreview.hoverXVal = dragStartXVal;
+    chart.draw();
+  });
+
+  // Fires on every hover, not just while actually dragging (no button
+  // pressed yet) — this is the "hovering over the armed graph shows the
+  // time under the mouse" half of the gesture, before any press has
+  // happened. Once a drag IS in progress (dragStartXVal set), the same
+  // updated hoverXVal is also what the plugin uses as the live end of the
+  // shaded range.
+  canvas.addEventListener("pointermove", (e) => {
+    if (armedLocationName !== loc.name) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    dragPreview.hoverXVal = xValFromEvent(chart, e);
+    chart.draw();
+  });
+
+  canvas.addEventListener("pointerup", (e) => {
+    if (armedLocationName !== loc.name || dragStartXVal == null) return;
+    e.stopImmediatePropagation();
+    const dragEndXVal = xValFromEvent(chart, e);
+    const startMs = Math.min(dragStartXVal, dragEndXVal);
+    const endMs = Math.max(dragStartXVal, dragEndXVal);
+    const modeUsed = armedMode; // captured before disarmSchedule() clears it below
+    dragStartXVal = null;
+    dragPreview.dragStartXVal = null;
+    dragPreview.hoverXVal = null;
+    disarmSchedule();
+    // A tap with no real drag (start === end, or too close to mean
+    // anything) isn't a range — treat it as "changed my mind", not as a
+    // zero-length session.
+    if (endMs - startMs < 60000) {
+      chart.draw(); // clears the now-stale preview shading/label
+      return;
+    }
+    computeAndStoreSession(loc, startMs, endMs, modeUsed);
+  });
+
+  canvas.addEventListener("pointercancel", () => {
+    dragStartXVal = null;
+    dragPreview.dragStartXVal = null;
+    dragPreview.hoverXVal = null;
+    chart.draw();
+  });
+}
+
+/**
+ * Resolves live drive time (GPS + Google Routes, charts.js), converts the
+ * drag range into a full schedule for whichever arm button started this
+ * drag ("+ Fishing times" vs "+ Home to home" — see onArmScheduleClick),
+ * stores it, and re-renders — a full renderWeekView() rather than a
+ * targeted single-row update, same "just rebuild everything" approach
+ * togglePin/the filter handlers already use elsewhere on this page.
+ *
+ * Stores BOTH locationName and locationType — a location can have
+ * separate Kayak and Land based entries sharing the same name but
+ * different setUp/timeToSpot/packUp/timeFromSpot values, so a schedule
+ * computed for one literally isn't correct for the other; scoping by name
+ * alone would show the exact same computed markers on both of that
+ * location's rows, which is what caused the duplicate-looking overlapping
+ * labels on an unrelated row below the one actually being planned.
+ */
+async function computeAndStoreSession(loc, dragStartMs, dragEndMs, mode) {
+  const driveMinutes = await getDriveTimeMinutes(loc.lat, loc.lng);
+  const schedule = computeScheduleFromDragRangeMs(mode, dragStartMs, dragEndMs, loc, driveMinutes);
+  const record = {
+    id: `${loc.name}|${loc.type}|${dragStartMs}|${Date.now()}`,
+    locationName: loc.name,
+    locationType: loc.type,
+    ...schedule,
+  };
+  computedSessions.push(record);
+  persistComputedSessions(computedSessions);
+  renderWeekView();
+}
+
+function removeComputedSession(id) {
+  computedSessions = computedSessions.filter((r) => r.id !== id);
+  persistComputedSessions(computedSessions);
+  renderWeekView();
+}
+
+// Lazily builds a row's chart only once that row actually scrolls into
+// view, instead of building every location's chart upfront — with 14+
+// locations each rendering a several-thousand-pixel-wide, high-resolution
+// canvas, building all of them synchronously on load was measured taking
+// over a second of blocking main-thread work even on a fast desktop, and
+// far longer on mobile (Chart.js scales canvas resolution by
+// devicePixelRatio, typically 2–3 on phones, multiplying that cost
+// several times over). One observer per renderWeekView() call — reset
+// (disconnected) at the start of every render alongside activeRowCharts,
+// since it's watching DOM elements that are about to be thrown away.
+let rowVisibilityObserver = null;
+// Plain-scroll-event fallback for the same job — see the comment where
+// this is wired up in renderWeekView for why IntersectionObserver alone
+// wasn't reliable enough on its own. Tracked so the old listener can be
+// removed before a new one is attached on the next render, same reason
+// rowVisibilityObserver gets disconnected rather than left to pile up.
+let rowVisibilityScrollTarget = null;
+let rowVisibilityScrollHandler = null;
+
+const PINNED_LOCATIONS_STORAGE_KEY = "goodConditionsPinnedLocationsNew";
+
+function loadPinnedOrder() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PINNED_LOCATIONS_STORAGE_KEY) || "null");
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistPinnedOrder() {
+  localStorage.setItem(PINNED_LOCATIONS_STORAGE_KEY, JSON.stringify(pinnedOrder));
+}
+
+/**
+ * Pinning is keyed by location NAME, not (name, type) — matching how the
+ * existing location filter chips already work (one chip per physical
+ * spot, deduped across its Kayak/Land based entries). Pinning "Corinella
+ * Boat Ramp" floats BOTH its Kayak and Land based rows to the top
+ * together, rather than needing to pin each type separately.
+ */
+function togglePin(name) {
+  const idx = pinnedOrder.indexOf(name);
+  if (idx === -1) {
+    pinnedOrder.push(name);
+  } else {
+    pinnedOrder.splice(idx, 1);
+  }
+  persistPinnedOrder();
+  renderLocationChipsWithPins();
+  renderWeekView();
+}
 
 /**
  * Turns a hidden number input into a stepper: a circular badge (styled
- * like the Location/Fishing rating circles on session tiles) showing the
+ * like the Location/Fishing rating circles on session rows) showing the
  * current value, with +/− buttons either side. For Min Condition, the
  * badge is colored via conditionColor() — the exact same function that
- * colors those tile badges — so a "3.0" here looks like a "3.0" would
+ * colors those row badges — so a "3.0" here looks like a "3.0" would
  * anywhere else on the page. Min consecutive hours isn't a 1-5 condition
  * rating, so colorFn is null there — same badge shape, fixed neutral color
  * (see .rating-stepper-badge-neutral), purely for visual consistency.
@@ -68,7 +546,9 @@ function wireThresholdStepper(id, step, min, max, colorFn) {
 async function init() {
   // Loaded separately from the main data fetch, with its own error handling
   // — a missing/malformed settings file shouldn't break the rest of the
-  // page, just leave the drive-time feature gracefully unavailable.
+  // page, just leave the drive-time-dependent half of a computed session
+  // gracefully unavailable (see computeScheduleFromDragRangeMs's
+  // driveTimeUnavailable handling). Same pattern as week.js's own init().
   try {
     const settingsRes = await fetch(SETTINGS_URL, { cache: "no-store" });
     if (settingsRes.ok) {
@@ -78,6 +558,8 @@ async function init() {
   } catch (err) {
     console.error("Could not load settings.json:", err);
   }
+
+  computedSessions = loadComputedSessions();
 
   try {
     const res = await fetch(DATA_URL, { cache: "no-store" });
@@ -93,7 +575,7 @@ async function init() {
     }
     // Awaited — small, fast, local file (not the slow WillyWeather
     // pipeline), so negligible delay; avoids a race where the very first
-    // render below could happen before tideOffset had been merged in.
+    // row renders below could happen before tideOffset had been merged in.
     await loadTideOffsets(allLocations);
   } catch (err) {
     document.getElementById("updated").textContent = "Could not load data — has the site run its first update yet?";
@@ -114,8 +596,10 @@ async function init() {
   });
 
   // Locations/types filters and Min Condition/Min Hours thresholds persist
-  // across visits (same localStorage keys, via charts.js), so they don't
-  // reset every time you come back to the page.
+  // across visits (same localStorage keys as week.js, via charts.js) —
+  // shared with the original Week Ahead page on purpose, since they're the
+  // same underlying settings, not a separate copy for this page. Pin
+  // order (below) is its own separate key, specific to this page's layout.
   let saved = null;
   try {
     saved = JSON.parse(localStorage.getItem(LOC_FILTER_STORAGE_KEY) || "null");
@@ -178,40 +662,18 @@ async function init() {
     if (savedThresholds.minHours != null) document.getElementById("minHours").value = savedThresholds.minHours;
   }
 
-  // Launch Time / Home By persist across visits (same localStorage key as
-  // ever) — used here only to work out fishing/drive time when a tile's
-  // chart is opened, not to filter which sessions show.
-  let savedTripTimes = null;
-  try {
-    savedTripTimes = JSON.parse(localStorage.getItem(TRIP_TIMES_STORAGE_KEY) || "null");
-  } catch {
-    savedTripTimes = null;
-  }
-  if (savedTripTimes) {
-    document.getElementById("launchTime").value = savedTripTimes.launch || "";
-    document.getElementById("homeBy").value = savedTripTimes.homeBy || "";
-  }
-  const persistTripTimes = () => {
-    const launch = document.getElementById("launchTime").value;
-    const homeBy = document.getElementById("homeBy").value;
-    localStorage.setItem(TRIP_TIMES_STORAGE_KEY, JSON.stringify({ launch, homeBy }));
-  };
-  document.getElementById("launchTime").addEventListener("input", persistTripTimes);
-  document.getElementById("homeBy").addEventListener("input", persistTripTimes);
+  // Drop any pinned name that no longer exists in the data (a location was
+  // renamed/removed in Settings since the last visit) — same defensive
+  // pattern as the saved-locations filter above.
+  pinnedOrder = loadPinnedOrder().filter((n) => allNames.includes(n));
 
   // Cross-filtering: changing Type narrows which Location Group, Direction,
-  // AND Location chips are even offered (a chip for a group/direction/
-  // location with no match for the currently-selected type(s) is just
-  // noise); changing Group narrows which Direction and Location chips are
-  // offered; changing Direction narrows which Group and Location chips are
-  // offered. This only changes which chips are OFFERED, not what's
-  // actually selected — a location/group/direction that temporarily
-  // disappears stays in its Set exactly as it was, so changing a filter
-  // back brings it back with whatever checked state it had before, rather
-  // than resetting it.
-  function refreshLocationChips() {
-    renderLocationChips(allLocations, selectedLocations, renderWeekView, selectedTypes, selectedGroups, selectedDirections);
-  }
+  // AND Location chips are even offered; changing Group narrows which
+  // Direction and Location chips are offered; changing Direction narrows
+  // which Group and Location chips are offered — see charts.js's
+  // renderGroupChips/renderDirectionChips/renderLocationChips for the full
+  // reasoning (same approach here, just via this page's own pin-aware
+  // renderLocationChipsWithPins instead of the shared renderLocationChips).
   function refreshGroupChips() {
     renderGroupChips(allLocations, selectedGroups, onGroupFilterChanged, selectedTypes, selectedDirections);
   }
@@ -220,22 +682,22 @@ async function init() {
   }
   function onGroupFilterChanged() {
     refreshDirectionChips(); // Group narrows which Direction tiles are offered, in turn
-    refreshLocationChips();
+    renderLocationChipsWithPins();
     renderWeekView();
   }
   function onDirectionFilterChanged() {
     refreshGroupChips(); // Direction narrows which Group chips are offered, in turn
-    refreshLocationChips();
+    renderLocationChipsWithPins();
     renderWeekView();
   }
   function onTypeFilterChanged() {
     refreshGroupChips();
     refreshDirectionChips();
-    refreshLocationChips();
+    renderLocationChipsWithPins();
     renderWeekView();
   }
 
-  refreshLocationChips();
+  renderLocationChipsWithPins();
   renderTypeChips(selectedTypes, onTypeFilterChanged);
   refreshGroupChips();
   refreshDirectionChips();
@@ -254,98 +716,172 @@ async function init() {
         .map((l) => l.name)
     );
     persistSelectedLocations(selectedLocations);
-    refreshLocationChips();
+    renderLocationChipsWithPins();
     renderWeekView();
   });
   document.getElementById("btnLocNone").addEventListener("click", () => {
     selectedLocations = new Set();
     persistSelectedLocations(selectedLocations);
-    refreshLocationChips();
+    renderLocationChipsWithPins();
     renderWeekView();
   });
+
   wireThresholdStepper("minCondition", 0.1, 1, 5, conditionColor);
   wireThresholdStepper("minHours", 1, 1, 24, null);
-  document.getElementById("btnCloseChartModal").addEventListener("click", closeChartModal);
-  document.getElementById("btnClosePreview").addEventListener("click", unpinHoverPreview);
-  // Click anywhere outside a PINNED preview (and not on a tile, which has
-  // its own click handling) closes it — standard "click outside" popover
-  // behaviour, so there's always a way out besides the close button.
-  document.addEventListener("click", (e) => {
-    if (!previewPinned) return;
-    const preview = document.getElementById("weekHoverPreview");
-    if (preview.contains(e.target) || e.target.closest(".week-tile")) return;
-    unpinHoverPreview();
-  });
-
-  document.getElementById("weekTimelineScroll").addEventListener("scroll", updateStickyDayLabels);
 
   renderWeekView();
 }
 
 /**
- * Groups rows by (location, type), computes qualifying windows for each via
- * the shared computeWindowsForLocation(), and collapses each session down
- * to ONE tile — a session spanning several days would otherwise produce a
- * separate window object per day it touches, but a Gantt-style timeline
- * shows a session's span directly as its own width, so it only needs
- * showing once, not once per day.
+ * Same idea as charts.js's shared renderLocationChips, but with a pin/star
+ * button on each chip too — kept as its own page-local copy rather than
+ * extending the shared function, so week.js (and any other page using the
+ * shared chips) is completely unaffected by this page's pinning feature.
+ * The star and the chip's own select/deselect are separate click targets
+ * (the star calls stopPropagation) so tapping one never triggers the other.
+ *
+ * Narrowed by the current Type, Location Group, and Direction filters —
+ * same "restrict which chips are offered, don't touch what's actually
+ * selected" approach as charts.js's own renderLocationChips.
  */
-function computeWeekTiles() {
-  // Name -> groups lookup, built once per call from allLocations — every
-  // output entry for the same location name carries the same
-  // locationGroups regardless of type (see fetch_conditions.py), so this
-  // doesn't need to vary by type.
-  const groupsByName = new Map(allLocations.map((l) => [l.name, locationGroupsOf(l)]));
-  const shoreByName = new Map(allLocations.map((l) => [l.name, l.shore]));
+function renderLocationChipsWithPins() {
+  const container = document.getElementById("locationChips");
+  container.innerHTML = "";
+  const seenNames = new Set();
+  for (const loc of allLocations) {
+    if (!selectedTypes.has(loc.type)) continue;
+    if (!groupsMatchFilter(locationGroupsOf(loc), selectedGroups)) continue;
+    if (!directionsMatchFilter(loc.shore, selectedDirections)) continue;
+    if (seenNames.has(loc.name)) continue;
+    seenNames.add(loc.name);
 
-  const byLocation = {};
-  for (const r of allRows) {
-    const name = r["Location Name"];
-    const type = r["Type"];
-    if (!selectedLocations.has(name)) continue;
-    if (!selectedTypes.has(type)) continue;
-    const groups = groupsByName.get(name) || [UNGROUPED_LABEL];
-    if (!groupsMatchFilter(groups, selectedGroups)) continue;
-    if (!directionsMatchFilter(shoreByName.get(name), selectedDirections)) continue;
-    const key = `${name}::${type}`;
-    (byLocation[key] || (byLocation[key] = [])).push(r);
+    const chip = document.createElement("span");
+    chip.className = "loc-chip weeknew-chip" + (selectedLocations.has(loc.name) ? " active" : "");
+
+    const star = document.createElement("button");
+    star.type = "button";
+    star.className = "weeknew-pin-btn" + (pinnedOrder.includes(loc.name) ? " pinned" : "");
+    star.setAttribute("aria-label", pinnedOrder.includes(loc.name) ? `Unpin ${loc.name}` : `Pin ${loc.name} to top`);
+    star.textContent = pinnedOrder.includes(loc.name) ? "★" : "☆";
+    star.addEventListener("click", (e) => {
+      e.stopPropagation();
+      togglePin(loc.name);
+    });
+    chip.appendChild(star);
+
+    const label = document.createElement("button");
+    label.type = "button";
+    label.className = "weeknew-chip-label";
+    label.textContent = loc.name;
+    label.addEventListener("click", () => {
+      if (selectedLocations.has(loc.name)) {
+        selectedLocations.delete(loc.name);
+      } else {
+        selectedLocations.add(loc.name);
+      }
+      persistSelectedLocations(selectedLocations);
+      chip.classList.toggle("active");
+      renderWeekView();
+    });
+    chip.appendChild(label);
+
+    container.appendChild(chip);
   }
+}
 
+/**
+ * Pinned locations first (in the order they were pinned), then everything
+ * else in their normal default order — which is simply the order
+ * locations already appear in config/locations.json (i.e. whatever order
+ * is already maintained via the Settings page), not a new sort invented
+ * here. Array.prototype.sort is stable, so within each group (pinned /
+ * unpinned) relative order is otherwise preserved.
+ */
+function sortLocationsForDisplay(locationEntries) {
+  const pinned = [];
+  const rest = [];
+  for (const loc of locationEntries) {
+    if (pinnedOrder.includes(loc.name)) pinned.push(loc); else rest.push(loc);
+  }
+  pinned.sort((a, b) => pinnedOrder.indexOf(a.name) - pinnedOrder.indexOf(b.name));
+  return [...pinned, ...rest];
+}
+
+/**
+ * One entry per (location, type) that passes the current filters, each
+ * with its own list of qualifying sessions (zero, one, or several) within
+ * the displayed period — computed the same way as the old Week Ahead page
+ * (computeWindowsForLocation, shared in charts.js), just no longer
+ * collapsed into "one tile per session"; here every session for the same
+ * location lands on that location's single row.
+ */
+function computeLocationRows() {
+  const nowLocal = new Date();
   const minCondition = Number(document.getElementById("minCondition").value) || 1;
   const minHours = Number(document.getElementById("minHours").value) || 1;
-  const nowLocal = new Date();
 
-  const tiles = [];
-  for (const key in byLocation) {
-    const locRows = byLocation[key];
+  const filtered = allLocations.filter(
+    (loc) =>
+      selectedLocations.has(loc.name) &&
+      selectedTypes.has(loc.type) &&
+      groupsMatchFilter(locationGroupsOf(loc), selectedGroups) &&
+      directionsMatchFilter(loc.shore, selectedDirections)
+  );
+  const ordered = sortLocationsForDisplay(filtered);
+
+  return ordered.map((loc) => {
+    const locRows = allRows.filter((r) => r["Location Name"] === loc.name && r["Type"] === loc.type);
     const windows = computeWindowsForLocation(locRows, minCondition, minHours);
     const seenSpans = new Set();
+    const sessions = [];
     for (const w of windows) {
       if (naiveMsToLocalDate(w.to) < nowLocal) continue; // already finished
       const spanKey = `${w.from}::${w.to}`;
       if (seenSpans.has(spanKey)) continue; // same session, different day-anchor duplicate
       seenSpans.add(spanKey);
-      tiles.push({
+      sessions.push({
         ...w,
         avgCondition: average(locRows, "Condition", w.from, w.to),
         avgFishingCondition: average(locRows, "Fishing Condition", w.from, w.to),
-        avgTemp: average(locRows, "Temp Forecast (C)", w.from, w.to),
-        avgWind: average(locRows, "Wind Forecast (km/h)", w.from, w.to),
-        avgRain: average(locRows, "Rainfall Probability (%)", w.from, w.to),
+        tempRange: rangeOf(locRows, "Temp Forecast (C)", w.from, w.to),
+        windRange: rangeOf(locRows, "Wind Forecast (km/h)", w.from, w.to),
+        maxRain: maxOf(locRows, "Rainfall Probability (%)", w.from, w.to),
       });
     }
-  }
-  return tiles;
+    return { loc, locRows, sessions };
+  });
+}
+
+/**
+ * Small sunrise/sunset marker (tick + time label) drawn in the shared
+ * timeline header — unchanged from the earlier per-tile version of this
+ * page.
+ */
+function buildSunMarker(x, timeLabel) {
+  const wrap = document.createElement("div");
+  wrap.className = "week-sun-marker";
+  wrap.style.left = x + "px";
+  wrap.innerHTML = `<div class="week-sun-tick"></div><div class="week-sun-label">${timeLabel}</div>`;
+  return wrap;
 }
 
 function renderWeekView() {
-  const tiles = computeWeekTiles();
+  for (const c of activeRowCharts) c.destroy();
+  activeRowCharts = [];
+  if (rowVisibilityObserver) rowVisibilityObserver.disconnect();
+  if (rowVisibilityScrollTarget) {
+    rowVisibilityScrollTarget.removeEventListener("scroll", rowVisibilityScrollHandler);
+    window.removeEventListener("resize", rowVisibilityScrollHandler);
+    rowVisibilityScrollTarget = null;
+    rowVisibilityScrollHandler = null;
+  }
+
+  const locationRows = computeLocationRows();
   const emptyState = document.getElementById("weekEmptyState");
   const scrollWrap = document.getElementById("weekTimelineScroll");
   const inner = document.getElementById("weekTimelineInner");
-  dayLabelsForStickyScroll = [];
 
-  if (tiles.length === 0) {
+  if (locationRows.length === 0) {
     emptyState.style.display = "block";
     scrollWrap.style.display = "none";
     inner.innerHTML = "";
@@ -354,43 +890,53 @@ function renderWeekView() {
   emptyState.style.display = "none";
   scrollWrap.style.display = "block";
 
-  // Timeline spans from the start of today through the latest tile's end —
-  // no point showing hours already behind us on a page called Week Ahead.
+  // Every row shares this SAME [timelineStart, timelineEnd] range — this
+  // is what fixes the earlier per-tile version's "long sessions stretch
+  // things" and "doesn't line up" problems: there's no per-row width/range
+  // math left to get subtly wrong, every row (and the header above them)
+  // is exactly the same width. timelineEnd is simply however far the
+  // fetched data actually reaches (data.forecastDays' worth, in practice),
+  // not something computed per-tile.
   const nowMs = nowInNaiveEncoding();
   const timelineStart = dateOnly(nowMs);
-  const timelineEnd = Math.max(...tiles.map((t) => t.to));
+  const maxRowT = allRows.length ? Math.max(...allRows.map((r) => r._t)) : timelineStart + 86400000;
+  const timelineEnd = Math.max(timelineStart + 86400000, maxRowT);
   const totalHours = (timelineEnd - timelineStart) / 3600000;
   const totalTrackWidth = Math.max(1, totalHours) * PIXELS_PER_HOUR;
 
-  // Each tile's pixel position/size is computed up front (and clamped to
-  // MIN_TILE_WIDTH, since a card needs real room for its photo/badges/stats
-  // regardless of how short the session actually was) — the lane-packing
-  // below works off these RENDERED pixel bounds, not raw time, since two
-  // tiles that don't truly overlap in time could still visually overlap on
-  // screen once a short one gets padded out to the minimum width.
-  const positioned = tiles.map((t) => {
-    const clampedFrom = Math.max(t.from, timelineStart);
-    const leftPx = ((clampedFrom - timelineStart) / 3600000) * PIXELS_PER_HOUR;
-    const naturalWidthPx = ((t.to - clampedFrom) / 3600000) * PIXELS_PER_HOUR;
-    const widthPx = Math.max(MIN_TILE_WIDTH, naturalWidthPx);
-    return { ...t, leftPx, widthPx, rightPx: leftPx + widthPx };
-  });
-
-  const lanes = packIntoLanes(positioned);
-
   inner.innerHTML = "";
+  inner.style.width = SIDEBAR_WIDTH + totalTrackWidth + "px";
 
-  // Sun times aren't per-location on this shared timeline — pick any one
+  // Sun times aren't per-location on the shared header — pick any one
   // location's data as representative (Victorian locations are close
-  // enough together that sunrise/sunset times barely differ day to day),
-  // rather than trying to show a different day/night pattern per lane.
+  // enough together that sunrise/sunset times barely differ day to day).
   const sunTimesEntry = Object.values(sunTimesData).find((arr) => arr && arr.length) || [];
   const sunByDate = new Map(sunTimesEntry.map((s) => [s.date, s]));
 
-  // Header: day-boundary gridlines, date labels, moon phase per day, hour
-  // marks, and sunrise/sunset markers — sticky so the date stays visible
-  // at the top of the box regardless of how far down you've scrolled
-  // through the lanes below.
+  // Header row: a blank spacer the width of the sidebar (nothing to freeze
+  // there — the day/hour ticks scroll horizontally in sync with the chart
+  // columns beneath them, which is exactly what should happen), then the
+  // existing day-boundary/date/moon/hour-tick/sunrise-sunset content,
+  // unchanged from the old per-tile version. Sticky to the top of
+  // weekTimelineScroll's own scroll (position:sticky — see style.css)
+  // regardless of how many location rows you've scrolled past below.
+  const headerRow = document.createElement("div");
+  headerRow.className = "weeknew-header-row";
+
+  const headerSpacer = document.createElement("div");
+  headerSpacer.className = "weeknew-header-spacer";
+  // The gesture hints live here specifically — top-left, above the first
+  // location's name and before the first day column — rather than
+  // floating over the graphs themselves, which is where they'd otherwise
+  // sit right on top of the data being described.
+  headerSpacer.innerHTML = `
+    <div class="graph-gesture-hint" aria-hidden="true">
+      <div>Double-tap toggles full screen</div>
+      <div>Hold for 2s to toggle data point</div>
+    </div>
+  `;
+  headerRow.appendChild(headerSpacer);
+
   const headerTrack = document.createElement("div");
   headerTrack.className = "week-track week-header-track";
   headerTrack.style.width = totalTrackWidth + "px";
@@ -400,9 +946,6 @@ function renderWeekView() {
     const dayEndPx = Math.min(totalTrackWidth, leftPx + 24 * PIXELS_PER_HOUR);
     const dateKey = new Date(dayMs).toISOString().slice(0, 10);
 
-    // Same alternating day tint as the lanes below, applied here too so
-    // the header visually connects to its own column beneath it, not just
-    // to the lanes on their own.
     const dayColor = DAY_COLORS[dayIdx % DAY_COLORS.length];
     const dayTint = document.createElement("div");
     dayTint.className = "week-header-day-tint";
@@ -418,17 +961,10 @@ function renderWeekView() {
 
     const label = document.createElement("div");
     label.className = "week-day-label";
-    label.style.left = leftPx + "px";
-    label.dataset.dayLeft = leftPx;
-    label.dataset.dayEnd = dayEndPx;
+    label.style.left = leftPx + 4 + "px";
     label.textContent = fmtNaive(dayMs, { weekday: "short", day: "numeric", month: "short" });
     headerTrack.appendChild(label);
-    dayLabelsForStickyScroll.push(label);
 
-    // Moon phase sits right after the date label (not centred in the day's
-    // span) — reuses the exact same drawMoonIcon() canvas-drawing routine
-    // the main charts use, on a small dedicated canvas, rather than
-    // re-implementing that geometry as SVG/DOM.
     const moonInfo = moonPhasesData[dateKey];
     const skipPositions = [];
     if (moonInfo && moonInfo.illumination != null) {
@@ -445,11 +981,6 @@ function renderWeekView() {
       headerTrack.appendChild(moonCanvas);
     }
 
-    // Sunrise/sunset — explicit markers at their real times. Collected
-    // first (before the generic hour ticks below) so the hour-tick loop
-    // can skip anything that would land too close to one of these (or the
-    // moon icon above) and collide, now that everything lives on the same
-    // single line.
     const sun = sunByDate.get(dateKey);
     if (sun) {
       if (sun.sunrise != null) {
@@ -464,9 +995,6 @@ function renderWeekView() {
       }
     }
 
-    // Hour marks every 3 hours through the day — skipped wherever one
-    // would land close enough to the moon icon or a sunrise/sunset marker
-    // to collide with it, since those take precedence over a generic tick.
     const MIN_GAP_PX = 34;
     for (let h = 3; h < 24; h += 3) {
       const hourLeftPx = leftPx + h * PIXELS_PER_HOUR;
@@ -491,513 +1019,418 @@ function renderWeekView() {
     nowLine.style.left = nowLeftPx + "px";
     headerTrack.appendChild(nowLine);
   }
-  inner.appendChild(headerTrack);
 
-  // Lanes sit inside their own wrapper so a single shading overlay — night
-  // and twilight bands, matching the main charts' own colours — can be
-  // drawn ONCE behind all of them, rather than duplicated per lane.
-  const lanesWrap = document.createElement("div");
-  lanesWrap.className = "week-lanes-wrap";
-  lanesWrap.style.width = totalTrackWidth + "px";
+  headerRow.appendChild(headerTrack);
+  inner.appendChild(headerRow);
 
-  const shading = document.createElement("div");
-  shading.className = "week-shading-overlay";
-  let dayIndex = 0;
-  for (let dayMs = timelineStart; dayMs <= timelineEnd; dayMs += 86400000, dayIndex++) {
-    const leftPx = ((dayMs - timelineStart) / 3600000) * PIXELS_PER_HOUR;
-    const dayEndPx = Math.min(totalTrackWidth, leftPx + 24 * PIXELS_PER_HOUR);
+  // One row per location — sidebar (name/pin/sessions, frozen to the left
+  // edge via position:sticky while the chart beside it scrolls) + a chart
+  // spanning the full [timelineStart, timelineEnd] range, identically
+  // sized/positioned on every row.
+  //
+  // Every row's DOM is built and attached immediately, but each row's
+  // chartWrap starts at a tiny placeholder width (see buildLocationRowElement)
+  // rather than its true, often-several-thousand-pixel width — expanding
+  // every row to full width upfront, even ones far below the fold, is
+  // real browser layout cost independent of Chart.js itself. Both the
+  // width expansion AND the actual Chart.js chart are deferred until the
+  // row scrolls into view (via IntersectionObserver below). Building
+  // every row's chart eagerly on load measured at over a second of
+  // blocking main-thread work even on a fast desktop, before accounting
+  // for a real phone's slower CPU and Chart.js scaling canvas resolution
+  // by devicePixelRatio (typically 2–3 on mobile, multiplying that cost
+  // several times over) — exactly the kind of load-time cost this avoids.
+  //
+  // The SIDEBAR, not the row itself, is what gets observed for
+  // visibility — the row's own width is temporarily tiny (see above)
+  // until rendered, which would otherwise make its intersection depend on
+  // horizontal scroll position too (a row parked at x:[0,40] only
+  // "intersects" a root whose visible x-range happens to include that,
+  // e.g. scrolled near day 1 — wrong the moment you've scrolled sideways
+  // to look at day 4). The sidebar is pinned to the visible left edge via
+  // position:sticky regardless of horizontal scroll, so its intersection
+  // reflects vertical scroll position only, exactly what "is this
+  // location currently being looked at" should mean here.
+  const rowBuilds = locationRows.map((entry) => buildLocationRowElement(entry, timelineStart, timelineEnd, totalTrackWidth));
+  for (const { row } of rowBuilds) inner.appendChild(row);
 
-    // Alternating day tint, from the same palette used elsewhere on the
-    // site for day-grouped content — appended first so it sits behind the
-    // night/twilight shading below (plain DOM order controls stacking
-    // here, there's no z-index fight to worry about). Added for every day
-    // regardless of whether sun data is available for it, unlike the
-    // night/twilight bands below which need real sunrise/sunset times.
-    const dayColor = DAY_COLORS[dayIndex % DAY_COLORS.length];
-    shading.appendChild(buildShadeBand(leftPx, dayEndPx, dayColor.bg));
+  const builtBySidebar = new Map(rowBuilds.map(({ sidebar, chartWrap, renderChart }) => [sidebar, { chartWrap, renderChart, rendered: false }]));
 
-    const sun = sunByDate.get(dayKeyOf(new Date(dayMs).toISOString()));
-    if (!sun) continue;
-    const xFirstLight = sun.firstLight != null ? leftPx + ((parseNaive(sun.firstLight) - dayMs) / 3600000) * PIXELS_PER_HOUR : null;
-    const xSunrise = sun.sunrise != null ? leftPx + ((parseNaive(sun.sunrise) - dayMs) / 3600000) * PIXELS_PER_HOUR : null;
-    const xSunset = sun.sunset != null ? leftPx + ((parseNaive(sun.sunset) - dayMs) / 3600000) * PIXELS_PER_HOUR : null;
-    const xLastLight = sun.lastLight != null ? leftPx + ((parseNaive(sun.lastLight) - dayMs) / 3600000) * PIXELS_PER_HOUR : null;
+  function renderIfNeeded(sidebar) {
+    const built = builtBySidebar.get(sidebar);
+    if (!built || built.rendered) return;
+    built.rendered = true;
+    if (rowVisibilityObserver) rowVisibilityObserver.unobserve(sidebar); // only ever needs to render once
+    // Force layout before Chart.js measures this row's canvas — same
+    // reasoning as the old all-at-once version (see the removed comment
+    // this replaced): a canvas can measure as zero/stale size if Chart.js
+    // reads it before the browser has actually settled layout.
+    void built.chartWrap.offsetHeight;
+    built.renderChart();
+  }
 
-    if (xFirstLight != null) {
-      shading.appendChild(buildShadeBand(leftPx, xFirstLight, NIGHT_BAND_COLOR));
-      if (xSunrise != null) shading.appendChild(buildShadeBand(xFirstLight, xSunrise, TWILIGHT_BAND_COLOR));
-    } else if (xSunrise != null) {
-      shading.appendChild(buildShadeBand(leftPx, xSunrise, NIGHT_BAND_COLOR));
-    }
-    if (xLastLight != null) {
-      if (xSunset != null) shading.appendChild(buildShadeBand(xSunset, xLastLight, TWILIGHT_BAND_COLOR));
-      shading.appendChild(buildShadeBand(xLastLight, dayEndPx, NIGHT_BAND_COLOR));
-    } else if (xSunset != null) {
-      shading.appendChild(buildShadeBand(xSunset, dayEndPx, NIGHT_BAND_COLOR));
+  // IntersectionObserver is the primary mechanism — efficient, and it's
+  // what all the earlier testing for this feature was verified against.
+  // But it turned out not to fire reliably in every real scroll scenario
+  // on a real device (confirmed on a Samsung S21 — rows beyond the
+  // initially-visible few stayed permanently blank on scroll, not just
+  // slow to appear), so a plain 'scroll'-event fallback below acts as a
+  // safety net that doesn't depend on IntersectionObserver working at
+  // all — whichever one actually fires first renders a row; renderIfNeeded's
+  // own `rendered` flag stops the other from doing anything redundant.
+  rowVisibilityObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) renderIfNeeded(entry.target);
+      }
+    },
+    { root: scrollWrap, rootMargin: "400px 0px 400px 0px", threshold: 0 }
+  );
+  for (const { sidebar } of rowBuilds) rowVisibilityObserver.observe(sidebar);
+
+  // Manual fallback: on every scroll (and resize — covers the
+  // enter/exit-fullscreen transition, which can resize the board
+  // dramatically without necessarily firing a 'scroll' event on its own),
+  // check every not-yet-rendered row's actual position against the
+  // scroll container's current visible bounds directly, with the same
+  // rootMargin-equivalent buffer as the observer above. rAF-throttled so
+  // this doesn't run on every single scroll event, just once per frame.
+  let fallbackScheduled = false;
+  function checkVisibleRowsManually() {
+    fallbackScheduled = false;
+    const rootRect = scrollWrap.getBoundingClientRect();
+    for (const [sidebar, built] of builtBySidebar) {
+      if (built.rendered) continue;
+      const rect = sidebar.getBoundingClientRect();
+      const verticallyVisible = rect.bottom > rootRect.top - 400 && rect.top < rootRect.bottom + 400;
+      if (verticallyVisible) renderIfNeeded(sidebar);
     }
   }
-  lanesWrap.appendChild(shading);
-
-  // One lane per row of non-overlapping tiles — NOT one row per location.
-  // A lane can (and usually will) contain tiles from several different
-  // locations, since all that matters for sharing a lane is that their
-  // time spans don't visually collide.
-  for (const lane of lanes) {
-    const laneEl = document.createElement("div");
-    laneEl.className = "week-track week-lane";
-    laneEl.style.width = totalTrackWidth + "px";
-    if (nowLeftPx >= 0 && nowLeftPx <= totalTrackWidth) {
-      const nowLine = document.createElement("div");
-      nowLine.className = "week-now-line";
-      nowLine.style.left = nowLeftPx + "px";
-      laneEl.appendChild(nowLine);
-    }
-    for (const t of lane) {
-      laneEl.appendChild(buildTileElement(t));
-    }
-    lanesWrap.appendChild(laneEl);
+  function scheduleFallbackCheck() {
+    if (fallbackScheduled) return;
+    fallbackScheduled = true;
+    requestAnimationFrame(checkVisibleRowsManually);
   }
-  inner.appendChild(lanesWrap);
-  updateStickyDayLabels(); // position labels correctly right away if the view re-renders while already scrolled
+  rowVisibilityScrollHandler = scheduleFallbackCheck;
+  rowVisibilityScrollTarget = scrollWrap;
+  scrollWrap.addEventListener("scroll", rowVisibilityScrollHandler, { passive: true });
+  window.addEventListener("resize", rowVisibilityScrollHandler);
+  checkVisibleRowsManually(); // catch whatever's already visible immediately, don't wait for the first scroll/resize
 }
 
-function buildShadeBand(xStart, xEnd, color) {
-  const band = document.createElement("div");
-  band.className = "week-shade-band";
-  band.style.left = xStart + "px";
-  band.style.width = Math.max(0, xEnd - xStart) + "px";
-  band.style.background = color;
-  return band;
-}
-
-function buildSunMarker(x, timeLabel) {
-  const wrap = document.createElement("div");
-  wrap.className = "week-sun-marker";
-  wrap.style.left = x + "px";
-  wrap.innerHTML = `<div class="week-sun-tick"></div><div class="week-sun-label">${timeLabel}</div>`;
-  return wrap;
-}
 
 /**
- * Greedy interval packing: sorted by left edge, each tile goes into the
- * first lane where it doesn't collide with that lane's last-placed tile
- * (with LANE_GAP of breathing room), or a new lane if none fit — the same
- * algorithm calendar apps use to stack overlapping events into columns,
- * applied here to rows instead since this timeline runs horizontally.
+ * Builds one location's row: a sticky-left sidebar (name, type/shore, pin
+ * star, a small chip per qualifying session, and any computed/planned
+ * sessions for this location) plus its always-visible conditions graph.
+ * Every session this location has in the displayed period is shaded on
+ * the SAME chart via sessionSpan (now an array — see charts.js's
+ * buildSessionSpanPlugin), rather than each session getting its own
+ * separate tile/chart the way the earlier version of this page did.
+ *
+ * Tapping a qualifying-session chip arms THIS row for a click-drag-release
+ * schedule calculation (see wireSessionRangeSelect below) — the resulting
+ * computed session is stored (charts.js's persistComputedSessions) and
+ * shown both as compact flags on this row's own chart
+ * (buildComputedSessionMarkersPlugin) and as its own chip here in the
+ * sidebar, so several planned options for the same or different locations
+ * can sit side by side for comparison.
  */
-/**
- * Manually keeps each day's date label pinned to the visible left edge of
- * the timeline for as long as any part of that day is still on screen,
- * then lets it scroll away naturally once its own day has fully passed —
- * exactly what CSS position:sticky is meant for, but a genuine, confirmed
- * browser quirk in this specific nested layout (a sticky element inside
- * another absolutely-positioned wrapper, itself inside the header row)
- * stopped position:sticky from engaging at all here, for reasons that
- * held up under direct testing but didn't resolve to a fixable single
- * cause. This reproduces the same visual behavior directly instead of
- * relying on it: each label's true (unscrolled) position is clamped to
- * [its day's own start, its day's own end minus its own width], and the
- * clamped result naturally scrolls out of view once the scroll position
- * moves past it — no special-case "un-stick" logic needed for that part.
- */
-function updateStickyDayLabels() {
-  const scrollLeft = document.getElementById("weekTimelineScroll").scrollLeft;
-  for (const label of dayLabelsForStickyScroll) {
-    const dayLeft = Number(label.dataset.dayLeft);
-    const dayEnd = Number(label.dataset.dayEnd);
-    const maxLeft = Math.max(dayLeft, dayEnd - label.offsetWidth);
-    const desired = Math.min(Math.max(scrollLeft, dayLeft), maxLeft);
-    label.style.transform = `translateX(${desired - dayLeft}px)`;
-  }
-}
+function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, timelineEnd, totalTrackWidth) {
+  const row = document.createElement("div");
+  row.className = "weeknew-row";
 
-function packIntoLanes(positionedTiles) {
-  const sorted = [...positionedTiles].sort((a, b) => a.leftPx - b.leftPx);
-  const lanes = []; // each lane: { lastRight: px, tiles: [...] }
-  for (const t of sorted) {
-    let placedLane = lanes.find((lane) => t.leftPx >= lane.lastRight + LANE_GAP);
-    if (!placedLane) {
-      placedLane = { lastRight: -Infinity, tiles: [] };
-      lanes.push(placedLane);
-    }
-    placedLane.tiles.push(t);
-    placedLane.lastRight = t.rightPx;
-  }
-  return lanes.map((lane) => lane.tiles);
-}
+  const sidebar = document.createElement("div");
+  sidebar.className = "weeknew-row-sidebar";
+  // Per-location Kayak/Land based photo, reused from the two shared
+  // images rather than a separate icon set. Lighter wash (0.65) than a
+  // full-opacity overlay so the photo still shows through, per feedback
+  // that a heavier wash looked too washed-out.
+  const photoUrl = loc.type === "Kayak" ? "images/type-kayak.jpg" : "images/type-landbased.jpg";
+  sidebar.style.backgroundImage = `linear-gradient(rgba(255,255,255,0.65), rgba(255,255,255,0.65)), url(${photoUrl})`;
 
-function buildTileElement(t) {
-  const timeLabel = `${fmtNaive(t.from, { hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(t.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
-  const photoUrl = t.type === "Kayak" ? "images/type-kayak.jpg" : "images/type-landbased.jpg";
+  const isPinned = pinnedOrder.includes(loc.name);
+  const star = document.createElement("button");
+  star.type = "button";
+  star.className = "weeknew-pin-btn" + (isPinned ? " pinned" : "");
+  star.setAttribute("aria-label", isPinned ? `Unpin ${loc.name}` : `Pin ${loc.name} to top`);
+  star.textContent = isPinned ? "★" : "☆";
+  star.addEventListener("click", () => togglePin(loc.name));
 
-  const tile = document.createElement("div");
-  tile.className = "week-tile";
-  tile.style.left = t.leftPx + "px";
-  tile.style.width = t.widthPx + "px";
-  tile.title = `${t.locationName} (${t.type}) — ${timeLabel}`;
-  tile.setAttribute("role", "button");
-  tile.setAttribute("tabindex", "0");
-
-  const bg = document.createElement("div");
-  bg.className = "week-tile-bg";
-  bg.style.backgroundImage = `linear-gradient(rgba(255,255,255,0.88), rgba(255,255,255,0.88)), url(${photoUrl})`;
-  tile.appendChild(bg);
-
-  // Content lives in its own inner wrapper, sticky within the tile's own
-  // bounds — as you scroll the timeline horizontally, this stays pinned to
-  // the visible left edge for as long as any part of the tile is still on
-  // screen, and only scrolls away once the tile itself has fully scrolled
-  // past. Native position:sticky nested inside an absolutely-positioned
-  // parent does exactly this: it's bounded by that parent's own width, not
-  // free to drift past either edge of the tile.
-  const content = document.createElement("div");
-  content.className = "week-tile-content";
-  content.innerHTML = `
-    <div class="week-tile-header">
-      <div>
-        <div class="window-loc">${t.locationName}</div>
-        <div class="window-sub">${t.type} · shore ${t.shore || "–"}</div>
-        <div class="window-sub">${timeLabel} · ${t.hoursLabel}h</div>
-      </div>
-      <div class="badge-stack">
-        <div class="badge-item">
-          <div class="condition-badge" style="background:${conditionColor(t.avgCondition)}">${t.avgCondition != null ? t.avgCondition.toFixed(1) : "–"}</div>
-          <div class="badge-label">Location</div>
-        </div>
-        <div class="badge-item">
-          <div class="condition-badge" style="background:${conditionColor(t.avgFishingCondition)}">${t.avgFishingCondition != null ? t.avgFishingCondition.toFixed(1) : "–"}</div>
-          <div class="badge-label">Fishing</div>
-        </div>
-      </div>
-    </div>
-    <div class="stat-grid week-tile-stats">
-      <div class="stat">
-        <div class="label">Temp</div>
-        <div class="value">${t.avgTemp != null ? t.avgTemp.toFixed(1) + "°" : "–"}</div>
-      </div>
-      <div class="stat">
-        <div class="label">Wind</div>
-        <div class="value">${t.avgWind != null ? Math.round(t.avgWind) + " km/h" : "–"}</div>
-      </div>
-      <div class="stat">
-        <div class="label">Rain</div>
-        <div class="value">${t.avgRain != null ? Math.round(t.avgRain) + "%" : "–"}</div>
-      </div>
-    </div>
+  const titleWrap = document.createElement("div");
+  titleWrap.className = "weeknew-row-title";
+  titleWrap.innerHTML = `
+    <div class="window-loc">${loc.name}</div>
+    <div class="window-sub">${loc.type} · shore ${loc.shore || "–"}</div>
   `;
-  tile.appendChild(content);
 
-  if (supportsHover) {
-    tile.addEventListener("mouseenter", () => {
-      clearTimeout(hoverShowTimer);
-      hoverShowTimer = setTimeout(() => showHoverPreview(t, tile), 250);
+  const titleRow = document.createElement("div");
+  titleRow.className = "weeknew-row-title-line";
+  titleRow.appendChild(star);
+  titleRow.appendChild(titleWrap);
+  sidebar.appendChild(titleRow);
+
+  // Declared here (not down where they used to sit, right before being
+  // appended) so the session-chip click handlers just below — created
+  // before the chart itself exists yet, since chart creation is deferred
+  // (see renderChart further down) — can still close over the eventual
+  // canvas/chart via these same variables. A closure captures the
+  // VARIABLE, not its value at closure-creation time, so this is safe
+  // even though rowChartRef is still null when the click handlers below
+  // are wired up.
+  const chartWrap = document.createElement("div");
+  chartWrap.className = "weeknew-row-chart";
+  chartWrap.style.width = "40px"; // placeholder — see the renderChart comment further down for why
+  const canvas = document.createElement("canvas");
+  chartWrap.appendChild(canvas);
+  let rowChartRef = null;
+
+  const sessionsWrap = document.createElement("div");
+  sessionsWrap.className = "weeknew-row-sessions";
+
+  // "+ Fishing times" / "+ Home to home" — the arm step of the
+  // click-arm-then-drag flow (see onArmScheduleClick/wireSessionRangeSelect),
+  // one button per Schedule Mode (see computeScheduleFromDragRangeMs,
+  // charts.js, for what each actually means). Always first in the list,
+  // regardless of how many qualifying/computed sessions this location
+  // has (including zero) — arming isn't tied to any particular session,
+  // so neither button needs one to exist first. No longer a separate
+  // persisted "mode" setting (that used to live in the Thresholds &
+  // filters panel) — picking a button IS picking the mode, fresh each
+  // time, since which one makes sense can genuinely differ per session.
+  const addBtnsRow = document.createElement("div");
+  addBtnsRow.className = "weeknew-add-buttons-row";
+  for (const { mode, label } of [
+    { mode: "fishing", label: "+ Fishing times" },
+    { mode: "onsite", label: "+ Home to home" },
+  ]) {
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "weeknew-add-fishing-times";
+    addBtn.textContent = label;
+    addBtn.addEventListener("click", () => {
+      onArmScheduleClick(loc, row, addBtn, mode, () => rowChartRef, canvas);
     });
-    tile.addEventListener("mouseleave", () => {
-      clearTimeout(hoverShowTimer);
-      if (!previewPinned) hideHoverPreview();
-    });
-    tile.addEventListener("click", () => pinHoverPreview(t, tile));
+    addBtnsRow.appendChild(addBtn);
+  }
+  sessionsWrap.appendChild(addBtnsRow);
+
+  if (sessions.length === 0) {
+    sessionsWrap.insertAdjacentHTML("beforeend", `<p class="footnote weeknew-no-session">No qualifying session in this period.</p>`);
   } else {
-    tile.addEventListener("click", () => selectTile(t));
-    tile.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectTile(t); }
+    for (const s of sessions) {
+      const timeLabel = `${fmtNaive(s.from, { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(s.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+      const chip = document.createElement("div");
+      chip.className = "weeknew-session-chip";
+      chip.innerHTML = `
+        <div class="weeknew-session-time">${timeLabel} · ${s.hoursLabel}h</div>
+        <div class="badge-stack">
+          <div class="badge-item">
+            <div class="condition-badge" style="background:${conditionColor(s.avgCondition)}">${s.avgCondition != null ? s.avgCondition.toFixed(1) : "–"}</div>
+            <div class="badge-label">Loc</div>
+          </div>
+          <div class="badge-item">
+            <div class="condition-badge" style="background:${conditionColor(s.avgFishingCondition)}">${s.avgFishingCondition != null ? s.avgFishingCondition.toFixed(1) : "–"}</div>
+            <div class="badge-label">Fish</div>
+          </div>
+          <div class="badge-item">
+            <div class="condition-badge weeknew-range-badge" style="background:#ea580c">${s.tempRange ? `${Math.round(s.tempRange.min)}–${Math.round(s.tempRange.max)}°` : "–"}</div>
+            <div class="badge-label">Temp</div>
+          </div>
+          <div class="badge-item">
+            <div class="condition-badge weeknew-range-badge" style="background:#0ea5e9">${s.windRange ? `${Math.round(s.windRange.min)}–${Math.round(s.windRange.max)}` : "–"}</div>
+            <div class="badge-label">Wind</div>
+          </div>
+          <div class="badge-item">
+            <div class="condition-badge weeknew-range-badge" style="background:#64748b">${s.maxRain != null ? `${Math.round(s.maxRain)}%` : "–"}</div>
+            <div class="badge-label">Rain</div>
+          </div>
+        </div>
+      `;
+      // Just scrolls the board to center this session now — arming moved
+      // to the dedicated "+ Fishing times" button above, so tapping a
+      // qualifying-session chip is purely navigational.
+      chip.addEventListener("click", () => {
+        scrollToCenterSession(s, timelineStart, totalTrackWidth);
+      });
+      sessionsWrap.appendChild(chip);
+    }
+  }
+
+  // Computed (planned) sessions for THIS location — a separate visual
+  // family from the qualifying-session chips above (see the
+  // .weeknew-computed-session CSS comment for why), each with its own
+  // remove button since these accumulate over time and aren't
+  // auto-recomputed from the conditions data the way qualifying sessions
+  // are. Scoped by locationType as well as locationName — a location can
+  // have separate Kayak/Land based entries sharing the same name but
+  // different setUp/timeToSpot/packUp/timeFromSpot, so a session computed
+  // for one type genuinely doesn't apply to the other's row.
+  const thisLocComputed = computedSessions.filter((r) => r.locationName === loc.name && r.locationType === loc.type);
+  for (const record of thisLocComputed) {
+    sessionsWrap.appendChild(buildComputedSessionChip(record));
+  }
+
+  sidebar.appendChild(sessionsWrap);
+  row.appendChild(sidebar);
+  row.appendChild(chartWrap);
+
+  const displayRows = locRows.filter((r) => r._t >= timelineStart && r._t <= timelineEnd).sort((a, b) => a._t - b._t);
+
+  // Mutable, read live by buildSessionDragPreviewPlugin on every redraw —
+  // see wireSessionRangeSelect for how this gets updated as the person
+  // hovers/drags on this row's own canvas.
+  const dragPreview = { hoverXVal: null, dragStartXVal: null };
+
+  // Chart creation is deferred to a returned function, called by
+  // renderWeekView only AFTER this row has been appended to the document
+  // — see the comment above the two-pass loop in renderWeekView for why.
+  const renderChart = () => {
+    chartWrap.style.width = totalTrackWidth + "px"; // now expand to the row's real (wide) width, right before Chart.js needs to measure it
+    if (displayRows.length === 0) return;
+    const rowChart = renderConditionsChart({
+      canvas,
+      rows: displayRows,
+      sunTimes: sunTimesData[loc.name] || [],
+      existingChart: null,
+      tideMaxObserved: loc.tideMaxObserved,
+      minTideHeight: loc.minTideHeight,
+      // Same reasoning as the earlier per-tile version: the date/moon are
+      // already shown once in the shared header above every row, so
+      // repeating them per row (now potentially many days wide) would
+      // just be clutter. Same for sunrise/sunset — the header's own
+      // markers are the shared reference point; repeating them inside
+      // each row's chart just adds noise across a now-multi-day-wide graph.
+      moonPhases: null,
+      showDayHeading: false,
+      showSunTimes: false,
+      compact: true,
+      sessionSpan: sessions.map((s) => ({ from: s.from, to: s.to })),
+      computedSessionMarkers: thisLocComputed,
+      dragPreviewState: () => dragPreview,
+      xRange: { min: timelineStart, max: timelineEnd },
+      disableBuiltinEvents: true, // this page drives the tooltip itself — see wireSyncedTooltip below
+      showFirstBoxIcons: true, // windvane/fish legend on each row's own first condition-strip box
+      tideOffsetMinutes: loc.tideOffset,
     });
-  }
-  return tile;
-}
-
-/**
- * Small floating chart preview shown on hover (desktop only — see
- * supportsHover above) — deliberately NOT the full modal, so every other
- * session tile stays visible while you're looking at this one's graph.
- * Positioned near the hovered tile, flipped above/below/left/right as
- * needed to stay on screen. Clicking the tile "pins" this same preview
- * open and interactive (see pinHoverPreview) instead of it closing the
- * moment the mouse moves away.
- */
-function renderPreviewContent(t, tileEl) {
-  const dayRows = computeGraphRows(t);
-  if (dayRows.length === 0) return false;
-
-  const matchedLoc = allLocations.find((l) => l.name === t.locationName && l.type === t.type);
-  const preview = document.getElementById("weekHoverPreview");
-
-  const tileRect = tileEl.getBoundingClientRect();
-  const previewWidth = 840;
-  const previewHeight = 690;
-  let left = tileRect.left;
-  let top = tileRect.bottom + 8;
-  if (top + previewHeight > window.innerHeight) top = tileRect.top - previewHeight - 8;
-  if (top < 10) top = 10; // taller preview than the viewport itself — pin to the top rather than go negative
-  if (left + previewWidth > window.innerWidth) left = window.innerWidth - previewWidth - 10;
-  if (left < 10) left = 10;
-  preview.style.left = left + "px";
-  preview.style.top = top + "px";
-  preview.style.display = "block";
-  void preview.offsetHeight; // force a reflow before Chart.js measures the now-visible container, or it can measure a stale (zero/hidden) size
-
-  // The chart renders immediately, synchronously — it must NOT wait on the
-  // schedule below, whose drive-time lookup depends on GPS and a network
-  // call and can legitimately take many seconds (or effectively hang
-  // without location permission granted). Gating the graph itself behind
-  // that would mean it simply doesn't appear for a long time, which is a
-  // worse problem than the one this used to work around — that was
-  // actually a real bug in the chart's own heading-text sizing (now fixed
-  // directly in charts.js), not a container-timing issue that needed the
-  // chart delayed to work around.
-  previewChart = renderConditionsChart({
-    canvas: document.getElementById("weekPreviewChart"),
-    rows: dayRows,
-    sunTimes: sunTimesData[t.locationName] || [],
-    existingChart: previewChart,
-    locationName: t.locationName,
-    tideMaxObserved: matchedLoc ? matchedLoc.tideMaxObserved : null,
-    moonPhases: moonPhasesData,
-    minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
-    compact: false, // full axes on both hover and pinned — no stripped-down "quick glance" version
-    sessionSpan: { from: t.from, to: t.to },
-    tideOffsetMinutes: matchedLoc ? matchedLoc.tideOffset : null,
-  });
-
-  renderWeekSchedule(matchedLoc, "weekPreviewScheduleContainer").then(() => {
-    // Safety net, not the primary fix: if the schedule's later-arriving
-    // content does change the preview's height enough to add/remove a
-    // scrollbar, this catches any resulting width change.
-    if (previewChart) previewChart.resize();
-  });
-  return true;
-}
-
-function showHoverPreview(t, tileEl) {
-  if (previewPinned) return; // a different session is deliberately pinned open — a stray hover shouldn't replace it
-  renderPreviewContent(t, tileEl); // full axes, same as pinned — hover shows the proper graph, not a stripped-down version
-}
-
-/**
- * Clicking a tile while its preview is showing (or even without hovering
- * first, on a slower click) pins that same preview open and interactive —
- * pointer-events re-enabled (see .week-hover-preview.pinned), a close
- * button appears, and it no longer closes just because the mouse moved
- * away. Clicking a DIFFERENT tile while one is pinned switches the pin to
- * that new session instead of requiring an explicit close first.
- */
-function pinHoverPreview(t, tileEl) {
-  if (!renderPreviewContent(t, tileEl)) return;
-  previewPinned = true;
-  document.getElementById("weekHoverPreview").classList.add("pinned");
-}
-
-function unpinHoverPreview() {
-  previewPinned = false;
-  document.getElementById("weekHoverPreview").classList.remove("pinned");
-  hideHoverPreview();
-}
-
-function hideHoverPreview() {
-  document.getElementById("weekHoverPreview").style.display = "none";
-}
-
-let weekScheduleRenderToken = 0;
-
-/**
- * Works out which stretch of rows a session's graph should cover — NOT
- * just that calendar day, but the session's own full duration, since a
- * session can run for many hours or even span several days. The range is
- * anchored to a meaningful day/night boundary rather than an arbitrary
- * clock time:
- *   - session starts in daylight -> start the graph at the PRIOR sunset
- *     (the previous evening's, since today's own sunset hasn't happened
- *     yet if the session is starting during the day)
- *   - session starts at night -> start the graph at the PRIOR sunrise
- *     (today's, if the session starts in the evening after today's
- *     sunrise already happened; yesterday's, if it's starting in the
- *     pre-dawn hours before today's sunrise)
- * Falls back to the session's own start time if sun data isn't available
- * for that day, rather than guessing.
- */
-function computeGraphRows(t) {
-  const sunTimesForLocation = sunTimesData[t.locationName] || [];
-  const sunByDate = new Map(sunTimesForLocation.map((s) => [s.date, s]));
-
-  const startDateKey = new Date(t.from).toISOString().slice(0, 10);
-  const sun = sunByDate.get(startDateKey);
-
-  let graphStart = t.from;
-  if (sun && sun.sunrise != null && sun.sunset != null) {
-    const sunriseMs = parseNaive(sun.sunrise);
-    const sunsetMs = parseNaive(sun.sunset);
-    const isDaytime = t.from >= sunriseMs && t.from < sunsetMs;
-
-    if (isDaytime) {
-      const prevDateKey = new Date(t.from - 86400000).toISOString().slice(0, 10);
-      const prevSun = sunByDate.get(prevDateKey);
-      graphStart = prevSun && prevSun.sunset != null ? parseNaive(prevSun.sunset) : sunriseMs;
-    } else if (t.from < sunriseMs) {
-      const prevDateKey = new Date(t.from - 86400000).toISOString().slice(0, 10);
-      const prevSun = sunByDate.get(prevDateKey);
-      graphStart = prevSun && prevSun.sunrise != null ? parseNaive(prevSun.sunrise) : sunsetMs;
-    } else {
-      graphStart = sunriseMs;
+    rowChartRef = rowChart;
+    if (rowChart) {
+      activeRowCharts.push(rowChart);
+      // Registered BEFORE wireSyncedTooltip specifically — both listen on
+      // the same canvas, and wireSessionRangeSelect needs first refusal
+      // (via stopImmediatePropagation) on any pointer event while this
+      // row is armed, so the tooltip-hold gesture and the whole-board
+      // drag-to-pan gesture never also see that same press. See its own
+      // comment for the full reasoning.
+      wireSessionRangeSelect(rowChart, canvas, loc, dragPreview);
+      wireSyncedTooltip(rowChart, canvas);
+      // Deliberately no "already armed elsewhere, so show here too" logic
+      // — only one row's tooltip is ever showing at a time (see
+      // showTooltipOn), and a row that's only just scrolled into view
+      // wasn't the one actually tapped/held, so it stays blank until it is.
     }
-  }
-
-  // Same reasoning, mirrored, for the end of the range — matches the Live
-  // page's own graph: the start reaches back through one full opposite-type
-  // period (day/night) before the session begins, so the end reaches
-  // forward through one full opposite-type period after it finishes, for
-  // balanced context on both sides rather than stopping abruptly the
-  // moment the session itself ends.
-  const endDateKey = new Date(t.to).toISOString().slice(0, 10);
-  const endSun = sunByDate.get(endDateKey);
-
-  let graphEnd = t.to;
-  if (endSun && endSun.sunrise != null && endSun.sunset != null) {
-    const endSunriseMs = parseNaive(endSun.sunrise);
-    const endSunsetMs = parseNaive(endSun.sunset);
-    const endIsDaytime = t.to >= endSunriseMs && t.to < endSunsetMs;
-
-    if (endIsDaytime) {
-      const nextDateKey = new Date(t.to + 86400000).toISOString().slice(0, 10);
-      const nextSun = sunByDate.get(nextDateKey);
-      graphEnd = nextSun && nextSun.sunrise != null ? parseNaive(nextSun.sunrise) : endSunsetMs;
-    } else if (t.to < endSunriseMs) {
-      graphEnd = endSunsetMs;
-    } else {
-      const nextDateKey = new Date(t.to + 86400000).toISOString().slice(0, 10);
-      const nextSun = sunByDate.get(nextDateKey);
-      graphEnd = nextSun && nextSun.sunset != null ? parseNaive(nextSun.sunset) : endSunriseMs;
+    // A full renderWeekView() rebuilds every row from scratch (including
+    // this one), so if THIS location was the one armed before the rebuild
+    // (e.g. a filter changed while a row was still armed, before any
+    // drag happened), the freshly-created row/canvas need the "armed"
+    // state — and its touch-action override — re-applied to the NEW
+    // elements; armedRow/armedCanvas are updated to point at them too, so
+    // a later disarmSchedule() acts on what's actually on screen rather
+    // than on nodes this rebuild just destroyed.
+    if (armedLocationName === loc.name) {
+      row.classList.add("armed-for-schedule");
+      canvas.style.touchAction = "none";
+      armedRow = row;
+      armedCanvas = canvas;
     }
-  }
-
-  return allRows
-    .filter((r) => r["Location Name"] === t.locationName && r["Type"] === t.type && r._t >= graphStart && r._t <= graphEnd)
-    .sort((a, b) => a._t - b._t);
-}
-
-function selectTile(t) {
-  currentTile = t;
-
-  const dayRows = computeGraphRows(t);
-  if (dayRows.length === 0) return;
-
-  const matchedLoc = allLocations.find((l) => l.name === t.locationName && l.type === t.type);
-  const overlay = document.getElementById("chartModalOverlay");
-  overlay.style.display = "flex";
-  void overlay.offsetHeight; // force a reflow before Chart.js measures the now-visible container, or it can measure a stale (zero/hidden) size
-
-  // Renders immediately — must not wait on the schedule below, whose
-  // drive-time lookup depends on GPS and a network call and can
-  // legitimately take a long time (or hang without location permission
-  // granted). See the matching comment in renderPreviewContent for why
-  // that was tried and reverted: gating the graph on that lookup made it
-  // simply not appear for a long time, which is worse than the sizing
-  // issue it was meant to prevent — one that turned out to be a real bug
-  // in the chart's own heading-text handling, fixed directly in charts.js.
-  modalChart = renderConditionsChart({
-    canvas: document.getElementById("weekChartModal"),
-    rows: dayRows,
-    sunTimes: sunTimesData[t.locationName] || [],
-    existingChart: modalChart,
-    locationName: t.locationName,
-    tideMaxObserved: matchedLoc ? matchedLoc.tideMaxObserved : null,
-    moonPhases: moonPhasesData,
-    minTideHeight: matchedLoc ? matchedLoc.minTideHeight : null,
-    compact: false,
-    sessionSpan: { from: t.from, to: t.to },
-    tideOffsetMinutes: matchedLoc ? matchedLoc.tideOffset : null,
-  });
-
-  renderWeekSchedule(matchedLoc, "weekScheduleContainer").then(() => {
-    if (modalChart) modalChart.resize();
-  });
-}
-
-/**
- * Fishing time / drive time — uses computeSchedule()/getDriveTimeMinutes()
- * from charts.js, and the Launch Time / Home By inputs above. Shared
- * between the modal and the hover preview (different containerId per
- * caller) — both show the same schedule info, not just the modal.
- */
-async function renderWeekSchedule(loc, containerId) {
-  const container = document.getElementById(containerId);
-  const myToken = ++weekScheduleRenderToken;
-
-  const launchStr = document.getElementById("launchTime").value;
-  const homeByStr = document.getElementById("homeBy").value;
-
-  if (!launchStr || !homeByStr) {
-    container.innerHTML = `<p class="footnote" style="margin:14px 0 0;text-align:left;">Set Launch Time and Home By in Thresholds &amp; filters above to see fishing/drive time for this session.</p>`;
-    return;
-  }
-  if (!loc) {
-    container.innerHTML = "";
-    return;
-  }
-
-  container.innerHTML = `<p class="footnote" style="margin:14px 0 0;text-align:left;">Calculating drive time…</p>`;
-
-  const driveMinutes = await getDriveTimeMinutes(loc.lat, loc.lng);
-
-  if (myToken !== weekScheduleRenderToken) return; // a newer tile was tapped/hovered meanwhile — discard this stale result
-
-  const schedule = computeSchedule(loc, launchStr, homeByStr, driveMinutes);
-
-  if (!schedule) {
-    container.innerHTML = "";
-    return;
-  }
-
-  const toggleId = containerId + "FishingTimeToggle";
-  const wrapId = containerId + "TimelineWrap";
-  const hintId = containerId + "ToggleHint";
-
-  if (schedule.driveTimeUnavailable) {
-    container.innerHTML = `
-      <label class="loc-edit-label" style="display:block;margin:16px 0 8px;">Trip schedule — ${loc.name}</label>
-      <p class="footnote" style="margin:0;text-align:left;">
-        Drive time isn't available right now (location access denied, or the
-        drive-time lookup isn't set up yet), so Leave Home / Head Back / Drive
-        Home can't be calculated. What we do know: Arrive ${schedule.arrive},
-        Launch ${schedule.launch}, Fish at ${schedule.fishAt}, Home by ${schedule.homeBy}.
-      </p>
-    `;
-    return;
-  }
-
-  container.innerHTML = `
-    <label class="loc-edit-label" style="display:block;margin:16px 0 8px;">Trip schedule — ${loc.name}</label>
-    <div class="schedule-fishing-time ${schedule.fishingTimeNegative ? "negative" : ""}" id="${toggleId}" role="button" tabindex="0">
-      Fishing time: <strong>${schedule.fishingTime}</strong>
-      <span class="schedule-toggle-hint" id="${hintId}">▸ tap for times</span>
-      ${schedule.fishingTimeNegative ? "<br>times don't add up, check Launch Time / Home By against this location's timings" : ""}
-    </div>
-    <div class="schedule-timeline collapsed" id="${wrapId}">
-      <div class="schedule-step"><span class="schedule-time">${schedule.leaveHome}</span><span class="schedule-label">Leave Home</span></div>
-      <div class="schedule-step"><span class="schedule-time">${schedule.arrive}</span><span class="schedule-label">Arrive</span></div>
-      <div class="schedule-step"><span class="schedule-time">${schedule.launch}</span><span class="schedule-label">Launch</span></div>
-      <div class="schedule-step"><span class="schedule-time">${schedule.fishAt}</span><span class="schedule-label">Fish at</span></div>
-      <div class="schedule-step"><span class="schedule-time">${schedule.headBack}</span><span class="schedule-label">Head Back</span></div>
-      <div class="schedule-step"><span class="schedule-time">${schedule.driveHome}</span><span class="schedule-label">Drive Home</span></div>
-      <div class="schedule-step"><span class="schedule-time">${schedule.homeBy}</span><span class="schedule-label">Home By</span></div>
-    </div>
-    <p class="footnote" style="margin:8px 0 0;text-align:left;">Drive time: ~${schedule.driveMinutes} min each way, from your current location.</p>
-  `;
-
-  const toggle = document.getElementById(toggleId);
-  const wrap = document.getElementById(wrapId);
-  const hint = document.getElementById(hintId);
-  const toggleFn = () => {
-    const nowCollapsed = wrap.classList.toggle("collapsed");
-    hint.textContent = nowCollapsed ? "▸ tap for times" : "▾ hide times";
   };
-  toggle.addEventListener("click", toggleFn);
-  toggle.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFn(); }
-  });
+
+  return { row, sidebar, chartWrap, renderChart };
 }
 
-function closeChartModal() {
-  document.getElementById("chartModalOverlay").style.display = "none";
+/**
+ * One sidebar chip for an already-computed (drag-derived) session — full
+ * text breakdown of every schedule instant that resolved (see
+ * computeScheduleFromDragRangeMs; a null field is simply skipped, not
+ * shown as a blank/placeholder), plus a remove button. Deliberately plain
+ * text here rather than icons — the icon+time compact treatment lives on
+ * the chart itself (buildComputedSessionMarkersPlugin); repeating icons
+ * in this already-narrow sidebar column would mean wrapping constantly.
+ */
+function buildComputedSessionChip(record) {
+  const chip = document.createElement("div");
+  chip.className = "weeknew-computed-session";
+  const fmt = (ms) => fmtNaive(ms, { hour: "2-digit", minute: "2-digit", hour12: false });
+  const parts = SCHEDULE_INSTANT_DISPLAY.filter(({ key }) => record[key] != null).map(({ key, label }) => `${label} ${fmt(record[key])}`);
+  const modeLabel = record.mode === "fishing" ? "Fishing time" : "Home to home";
+  chip.innerHTML = `
+    <div class="weeknew-session-time">${modeLabel}</div>
+    <div class="weeknew-computed-session-line">${parts.join(" · ")}</div>
+    ${record.driveTimeUnavailable ? `<div class="weeknew-computed-session-note">Drive time unavailable — showing what could be calculated without it.</div>` : ""}
+    <button type="button" class="weeknew-computed-session-remove" aria-label="Remove this planned session">×</button>
+  `;
+  chip.querySelector(".weeknew-computed-session-remove").addEventListener("click", (e) => {
+    e.stopPropagation();
+    removeComputedSession(record.id);
+  });
+  return chip;
+}
+
+
+/**
+ * Click-and-drag-to-pan for desktop (mouse) — grab the board anywhere
+ * (background, a chart, the sidebar) and drag to scroll it, rather than
+ * needing a trackpad/scrollbar. Filtered to e.pointerType === "mouse"
+ * specifically — touch already has native drag-to-scroll, and re-doing
+ * it here too would double up with (and likely fight) that, plus the
+ * hold-to-show-tooltip gesture on each chart. A genuine click (not a
+ * drag) is left alone — this only ever engages once the pointer has
+ * actually moved past a small threshold, so a plain click still reaches
+ * whatever it would normally reach (a pin button, the fullscreen
+ * double-tap detector, hold-to-show-tooltip's own tap handling).
+ */
+function setupDragToScroll(scrollWrap) {
+  const DRAG_THRESHOLD_PX = 6;
+  let isDown = false;
+  let draggedPastThreshold = false;
+  let startX = 0;
+  let startY = 0;
+  let startScrollLeft = 0;
+  let startScrollTop = 0;
+
+  scrollWrap.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "mouse" || e.button !== 0) return;
+    isDown = true;
+    draggedPastThreshold = false;
+    startX = e.clientX;
+    startY = e.clientY;
+    startScrollLeft = scrollWrap.scrollLeft;
+    startScrollTop = scrollWrap.scrollTop;
+  });
+
+  window.addEventListener("pointermove", (e) => {
+    if (!isDown) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (!draggedPastThreshold) {
+      if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD_PX) return;
+      draggedPastThreshold = true;
+      scrollWrap.classList.add("weeknew-dragging");
+    }
+    e.preventDefault(); // stop text selection while actively dragging
+    scrollWrap.scrollLeft = startScrollLeft - dx;
+    scrollWrap.scrollTop = startScrollTop - dy;
+  });
+
+  function endDrag() {
+    isDown = false;
+    draggedPastThreshold = false;
+    scrollWrap.classList.remove("weeknew-dragging");
+  }
+  window.addEventListener("pointerup", endDrag);
+  window.addEventListener("pointercancel", endDrag);
 }
 
 init();
+setupFullscreenToggle("weekTimelineScroll");
+setupDragToScroll(document.getElementById("weekTimelineScroll"));
