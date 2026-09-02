@@ -466,8 +466,10 @@ this restriction — nothing extra is drawn.
 
 - `live.html`/`live.js` — the Live page (GPS-matched to your nearest tracked
   location, shows a 24-hours-back/24-hours-forward graph), `index.html`/`week.js` —
-  Week Ahead (the site's home page — a horizontal timeline of upcoming
-  sessions across every tracked location), `conditions.html` — the
+  Week Ahead (the site's home page — a row per tracked location, each with its
+  own always-visible conditions graph and qualifying sessions shaded on it;
+  "+ Fishing times"/"+ Home to home" arms a row for a click-drag-release trip
+  schedule calculation against that graph), `conditions.html` — the
   per-location table/graph view, `locations.html` — the locations editor,
   `style.css`, `app.js`, `locationsadmin.js`, `charts.js` (shared charting
   code used by `app.js`, `week.js`, and `live.js`) — the

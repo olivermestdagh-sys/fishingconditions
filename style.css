@@ -217,7 +217,7 @@ main {
 
 /* The whole "graph area" — hint overlay + horizontally-scrolling chart —
    as one fullscreen-able unit (see setupFullscreenToggle, charts.js,
-   called on this element's id in app.js), matching how Week (graphs) and
+   called on this element's id in app.js), matching how Week Ahead and
    Live both do it. Chart.js's own responsive:true/maintainAspectRatio:
    false logic sizes the canvas to fill its immediate parent — if that
    parent's height were intrinsic (sized to its own content, which
@@ -295,7 +295,7 @@ main {
 
 /* Deliberately NOT width:100% — set to an explicit pixel width by app.js
    (proportional to the real time range being shown, same PIXELS_PER_HOUR
-   convention as Week (graphs)'s row charts), so the graph renders at a
+   convention as Week Ahead's row charts), so the graph renders at a
    genuinely readable size instead of being squashed to fit the phone's
    width. min-width:100% is only the fallback for the brief moment before
    that JS runs, so it doesn't flash at 0 width first. */
@@ -1591,11 +1591,9 @@ main.wide {
   width: 220px;
   background: var(--white);
   /* Per-location Kayak/Land based photo (backgroundImage set inline, per
-     row, in week-new.js — this is just the shared positioning/sizing, the
-     same regardless of which specific image a given row loads). Same
-     cover/center/no-repeat treatment as Week (sessions)' own tiles (see
-     .week-tile-bg) — one full-bleed photo behind the row's content rather
-     than a small corner mark, matching how it already looks there. */
+     row, in week.js — this is just the shared positioning/sizing, the
+     same regardless of which specific image a given row loads). Full-bleed
+     photo behind the row's content rather than a small corner mark. */
   background-repeat: no-repeat;
   background-position: center;
   background-size: cover;
@@ -1654,7 +1652,7 @@ main.wide {
 }
 
 /* Wraps the two arm buttons ("+ Fishing times" / "+ Home to home") side
-   by side on one line — see week-new.js's buildLocationRowElement. */
+   by side on one line — see week.js's buildLocationRowElement. */
 .weeknew-add-buttons-row {
   display: flex;
   gap: 6px;
@@ -1662,7 +1660,7 @@ main.wide {
 
 /* The "+ Fishing times" / "+ Home to home" arm buttons — deliberately NOT
    styled like the green qualifying-session chips above (which are just
-   informational/navigational now — see week-new.js), so they read as
+   informational/navigational now — see week.js), so they read as
    their own distinct action: a dashed border and the same teal accent
    used everywhere else this feature shows up (computed-session chips,
    chart markers). */
@@ -1681,7 +1679,7 @@ main.wide {
 }
 
 /* Tapped state while a row is primed for click-drag-release — see
-   wireSessionRangeSelect/onArmScheduleClick in week-new.js. Same accent
+   wireSessionRangeSelect/onArmScheduleClick in week.js. Same accent
    color as the computed-session chart markers/sidebar entries below, so
    it reads as "one connected feature" rather than an unrelated
    highlight. Shared between the qualifying-session chips (no longer
@@ -1758,7 +1756,7 @@ main.wide {
 
 .weeknew-session-chip .badge-stack {
   gap: 4px;
-  /* Forced single-line (see "Loc"/"Fish" label shortening in week-new.js,
+  /* Forced single-line (see "Loc"/"Fish" label shortening in week.js,
      and the tighter sizing below) rather than wrapping into a second
      row — a wrapped second row for just one badge (Rain) read as visually
      unbalanced and made chip height inconsistent depending on how many
@@ -1813,7 +1811,7 @@ main.wide {
 .weeknew-session-chip .badge-label {
   font-size: 0.56rem;
   /* Truncates a label that's still wider than its column at this size —
-     shortening LOCATION/FISHING to LOC/FISH (see week-new.js) already
+     shortening LOCATION/FISHING to LOC/FISH (see week.js) already
      covers the normal case; this is the same safety net as the badge
      value above, for anything unexpectedly long. */
   white-space: nowrap;
@@ -1832,7 +1830,7 @@ main.wide {
   position: relative;
   flex: 0 0 auto;
   /* --weeknew-mobile-row-height is set by the inline script in
-     week-new.html, on phone-portrait devices only — measured against the
+     index.html, on phone-portrait devices only — measured against the
      actual space available in the rotated layout, so a row's graph fills
      the visible board without needing a second scroll just to see its own
      top/bottom. Falls back to the original fixed 300px wherever that
@@ -1916,7 +1914,7 @@ main.wide {
    real (now-landscape) viewport rather than a simulated one.
 
    Scoped to html.weeknew-force-landscape specifically — a class only
-   week-new.html's own <html> tag carries (see week-new.html) — so this
+   index.html's own <html> tag carries (see index.html) — so this
    has zero effect on every other page; none of them opted into it. */
 @media screen and (max-width: 900px) and (orientation: portrait) {
   html.weeknew-force-landscape {
@@ -1949,7 +1947,7 @@ main.wide {
     margin-right: calc(50% - 50vh);
   }
   html.weeknew-force-landscape .week-timeline-scroll {
-    max-height: 65vw; /* fallback only — week-new.html's inline script overrides this with a precisely measured pixel value once it runs */
+    max-height: 65vw; /* fallback only — index.html's inline script overrides this with a precisely measured pixel value once it runs */
   }
 
   /* The chrome above the timeline board (title bar, nav tabs, filters
@@ -1988,7 +1986,7 @@ main.wide {
   }
 }
 
-/* Double-tap-to-fullscreen (see week-new.js's setupFullscreenToggle) —
+/* Double-tap-to-fullscreen (see week.js's setupFullscreenToggle) —
    toggles real browser fullscreen on #weekTimelineScroll itself, rather
    than relying purely on the CSS rotation trick above. Fullscreen
    elements render in the browser's own "top layer", explicitly exempt
@@ -2010,7 +2008,7 @@ main.wide {
    this block does nothing — same self-adjusting behavior as the base
    force-landscape trick.
    !important on max-height overrides the small inline pixel value
-   week-new.html's sizing script sets for the NON-fullscreen layout
+   index.html's sizing script sets for the NON-fullscreen layout
    (computed to fit alongside the header/nav/filters chrome) — that
    number has nothing to do with fullscreen, where this element is the
    only thing on screen. */
@@ -2035,12 +2033,12 @@ main.wide {
   }
 }
 
-/* Desktop click-and-drag-to-pan (week-new.js's setupDragToScroll) — grab
+/* Desktop click-and-drag-to-pan (week.js's setupDragToScroll) — grab
    cursor invites the drag; grabbing cursor (added/removed by JS while a
    drag is actually in progress) confirms it's happening. Both are inert
    on touch devices (no cursor to show), so no separate mobile/desktop
    scoping needed there — but scoped to html.weeknew-force-landscape
-   (present unconditionally on week-new.html, regardless of screen size —
+   (present unconditionally on index.html, regardless of screen size —
    only the rotation behavior itself is gated by screen size) so the OLD
    Week Ahead page, which shares this same .week-timeline-scroll class but
    has no drag-to-scroll JS at all, doesn't show a misleading grab cursor. */
