@@ -991,12 +991,21 @@ function showLocationCandidatePicker(candidates, opts = {}) {
 
 const OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
 const OPEN_METEO_MARINE_URL = "https://marine-api.open-meteo.com/v1/marine";
-// Deliberately shorter than fetch_conditions.py's own FORECAST_DAYS
-// default (6) — a preview doesn't need the full week the scheduled
-// pipeline pulls, and every preview call spends real, metered WillyWeather
-// quota on demand (unlike the scheduled pipeline's fixed 3-hourly cost),
-// so there's a genuine reason to keep it modest.
-const PREVIEW_FORECAST_DAYS = 4;
+// Matches fetch_conditions.py's own FORECAST_DAYS default (6) — this used
+// to be deliberately shorter (4) on the theory that a preview call should
+// spend less metered WillyWeather quota than the scheduled pipeline does,
+// but that reasoning didn't actually hold up: WillyWeather's `days`
+// parameter just changes the SIZE of one response, not how many calls get
+// made, so 4 vs 6 days costs practically the same per click. Left
+// inconsistent otherwise for no real reason, which is exactly what Oliver
+// noticed (a preview showing 4 days next to saved locations' 6).
+//
+// NOTE this can't actually track FORECAST_DAYS automatically if Oliver
+// changes that via the GitHub Actions env var — this file is static
+// client-side JS with no build step, it has no way to read a workflow
+// env var at all. If FORECAST_DAYS ever changes, this constant needs
+// updating by hand to match.
+const PREVIEW_FORECAST_DAYS = 6;
 
 /**
  * The whole preview data pipeline for one clicked point: WillyWeather

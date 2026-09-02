@@ -21,6 +21,19 @@
  *       [{ id, name, region, state, lat, lng }, ...]
  *     `limit` is optional, defaults to 8, capped at 15 — this endpoint is
  *     for a human to visually pick from a short list, not for bulk data.
+ *     IMPORTANT (confirmed against WillyWeather's own docs): the lat/lng
+ *     form can only ever return ZERO or ONE entry — WillyWeather's own
+ *     coordinate search returns a single closest match, not several
+ *     nearby candidates to choose between, unlike the text-query form.
+ *     The array shape here is kept the same for both anyway (so the
+ *     browser side only handles one response shape either way), but a map
+ *     click will never actually trigger the "pick one of several" UI —
+ *     only a text-query search (locationsadmin.js's manual-name fallback)
+ *     realistically can.
+ *
+ *       [{ id, name, region, state, lat, lng }, ...]
+ *     `limit` is optional, defaults to 8, capped at 15 — this endpoint is
+ *     for a human to visually pick from a short list, not for bulk data.
  *
  *   GET /weather?id=<willyweatherId>&days=<n>
  *     Proxies WillyWeather's own locations/{id}/weather.json for exactly
@@ -32,10 +45,10 @@
  *     rows, so the shape has to stay close to WillyWeather's own. Powers
  *     the Location tab's "click map to preview a spot" feature — a live
  *     look at an UNSAVED point's conditions, no location config needed.
- *     `days` is optional, defaults to 4, capped at 6 (a preview doesn't
- *     need the full week the scheduled pipeline pulls, and every call
- *     here spends real WillyWeather quota on demand rather than once per
- *     3-hour scheduled run like everything else does).
+ *     `days` is optional, defaults to 6 (matching fetch_conditions.py's
+ *     own FORECAST_DAYS default), capped at 6 — the client (charts.js's
+ *     PREVIEW_FORECAST_DAYS) always passes this explicitly, so the default
+ *     here is really just a fallback for a malformed/missing request.
  *
  * DEPLOYING THIS (one-time — see also the README.md section this links
  * from):
@@ -69,8 +82,16 @@
 
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 15;
-const DEFAULT_WEATHER_DAYS = 4;
+const DEFAULT_WEATHER_DAYS = 6;
 const MAX_WEATHER_DAYS = 6;
+// WillyWeather's coordinate search needs an explicit search radius
+// (its `range` parameter, paired with a `units` declaration) or it
+// rejects the request outright — see the range/units comment on the
+// lat/lng branch below for how that was actually pinned down. 25km
+// comfortably covers "which real beach/ramp/river mouth is this map
+// click nearest to" for this site's whole Port Phillip/Western Port
+// coverage area without pulling in matches from an entirely different bay.
+const DEFAULT_SEARCH_RANGE_KM = 25;
 
 export default {
   async fetch(request, env) {
@@ -111,9 +132,20 @@ export default {
         `https://api.willyweather.com.au/v2/${env.WILLYWEATHER_API_KEY}/search.json` +
         `?query=${encodeURIComponent(query)}&limit=${limit}`;
     } else if (lat && lng && isFiniteNumber(lat) && isFiniteNumber(lng)) {
+      // WillyWeather's coordinate search requires a `range` value plus a
+      // `units` declaration for it — confirmed via THREE rounds of live
+      // 400 errors: "distance is a mandatory field" (missing entirely),
+      // then "distance parameter has an invalid value" (present as
+      // `distance`, which isn't a real option), then finally WillyWeather
+      // spelling out its actual valid options directly: lat, limit, lng,
+      // query, range, units. "distance" in the first two error messages
+      // was WillyWeather describing the CONCEPT, not the parameter's real
+      // name — worth remembering next time an error here looks solved but
+      // isn't; take the API's own error text over an assumed match to its
+      // own wording.
       upstreamUrl =
         `https://api.willyweather.com.au/v2/${env.WILLYWEATHER_API_KEY}/search.json` +
-        `?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&limit=${limit}`;
+        `?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&range=${DEFAULT_SEARCH_RANGE_KM}&units=distance:km&limit=${limit}`;
     } else {
       return jsonResponse({ error: "Provide either ?query=<text> or ?lat=<n>&lng=<n>." }, 400, env);
     }
@@ -122,20 +154,42 @@ export default {
     try {
       const upstreamRes = await fetch(upstreamUrl, { headers: { "Content-Type": "application/json" } });
       if (!upstreamRes.ok) {
-        console.error(`WillyWeather search returned ${upstreamRes.status}`);
-        return jsonResponse({ error: "WillyWeather search failed upstream." }, 502, env);
+        // Includes the upstream status/body snippet directly in the
+        // response — never the API key itself, just WillyWeather's own
+        // complaint (invalid key, rate limit, bad params, etc.) — so
+        // whoever's debugging this can read the real cause straight out
+        // of the browser's Network tab instead of hunting through
+        // Cloudflare's own log UI, which doesn't reliably surface a
+        // Worker's console.error() text in one place.
+        const bodyText = await upstreamRes.text().catch(() => "");
+        console.error(`WillyWeather search returned ${upstreamRes.status}: ${bodyText.slice(0, 300)}`);
+        return jsonResponse({ error: "WillyWeather search failed upstream.", status: upstreamRes.status, detail: bodyText.slice(0, 300) }, 502, env);
       }
       upstreamData = await upstreamRes.json();
     } catch (err) {
       console.error("WillyWeather search request failed:", err);
-      return jsonResponse({ error: "WillyWeather search request failed." }, 502, env);
+      return jsonResponse({ error: "WillyWeather search request failed.", detail: String(err) }, 502, env);
     }
 
-    // WillyWeather's response is already close to what the browser needs —
-    // this just strips it down to exactly the fields locationsadmin.js's
-    // candidate popup actually displays/stores, rather than passing
-    // through whatever else WillyWeather's response happens to include.
-    const candidates = (Array.isArray(upstreamData) ? upstreamData : [])
+    // WillyWeather's two search modes return genuinely different shapes —
+    // confirmed against WillyWeather's own docs (not guessed): "Search By
+    // Query" returns a plain array of candidates, but "Search By
+    // Coordinates" returns a SINGLE object ({ location: {...}, units:
+    // {...} }) — there is no "several nearby candidates" available from a
+    // raw lat/lng at all, only WillyWeather's own single closest match.
+    // Normalized to always-an-array here so the browser side (candidate
+    // picker / fetchWillyWeatherCandidates, charts.js) only ever has to
+    // handle one shape regardless of which search mode ran — a coordinate
+    // search's "array" is just zero or one entries, meaning the picker UI
+    // for choosing between several candidates is only ever actually shown
+    // for a text-query search (locationsadmin.js's manual-name fallback),
+    // never for a map click.
+    const rawEntries = query ? (Array.isArray(upstreamData) ? upstreamData : []) : upstreamData && upstreamData.location ? [upstreamData.location] : [];
+
+    // This just strips WillyWeather's response down to exactly the fields
+    // the candidate popup actually displays/stores, rather than passing
+    // through whatever else the response happens to include.
+    const candidates = rawEntries
       .map((entry) => ({
         id: entry.id,
         name: entry.name,
@@ -189,14 +243,15 @@ async function handleWeather(url, env) {
   try {
     const upstreamRes = await fetch(upstreamUrl, { headers: { "Content-Type": "application/json" } });
     if (!upstreamRes.ok) {
-      console.error(`WillyWeather weather.json returned ${upstreamRes.status}`);
-      return jsonResponse({ error: "WillyWeather weather lookup failed upstream." }, 502, env);
+      const bodyText = await upstreamRes.text().catch(() => "");
+      console.error(`WillyWeather weather.json returned ${upstreamRes.status}: ${bodyText.slice(0, 300)}`);
+      return jsonResponse({ error: "WillyWeather weather lookup failed upstream.", status: upstreamRes.status, detail: bodyText.slice(0, 300) }, 502, env);
     }
     const upstreamData = await upstreamRes.json();
     return jsonResponse(upstreamData, 200, env);
   } catch (err) {
     console.error("WillyWeather weather.json request failed:", err);
-    return jsonResponse({ error: "WillyWeather weather lookup request failed." }, 502, env);
+    return jsonResponse({ error: "WillyWeather weather lookup request failed.", detail: String(err) }, 502, env);
   }
 }
 
