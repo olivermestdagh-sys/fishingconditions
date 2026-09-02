@@ -60,10 +60,6 @@ let pinnedOrder = []; // location NAMES, in the order they were pinned — oldes
 // module-level here which is pure in-memory UI state.
 let computedSessions = [];
 
-// "fishing" or "onsite" — see computeScheduleFromDragRangeMs (charts.js)
-// for exactly what each means; persists across reloads same as filters.
-let scheduleMode = "fishing";
-
 // Which row is currently primed for a click-drag-release range selection —
 // null when nothing is armed. Sets/cleared by onArmScheduleClick and
 // wireSessionRangeSelect below; checked by BOTH the tooltip-hold gesture
@@ -72,6 +68,13 @@ let scheduleMode = "fishing";
 // on wireSessionRangeSelect for why this can't just be three independent
 // gesture handlers on the same canvas).
 let armedLocationName = null;
+
+// "fishing" or "onsite" — which of the row's two arm buttons ("+ Fishing
+// times" / "+ Home to home") was used to arm it. No longer a persisted
+// global setting (see computeScheduleFromDragRangeMs's own comment,
+// charts.js) — it's picked fresh every time by which button is tapped,
+// since which one makes sense can genuinely differ session to session.
+let armedMode = null;
 
 // Chart.js instances currently on screen — one per RENDERED location row
 // (not necessarily every row that exists — see rowVisibilityObserver
@@ -259,6 +262,7 @@ function disarmSchedule() {
     scrollWrap.style.touchAction = "";
   }
   armedLocationName = null;
+  armedMode = null;
   armedRow = null;
   armedChip = null;
   armedCanvas = null;
@@ -266,9 +270,10 @@ function disarmSchedule() {
 
 /**
  * Arms a row for the click-arm-then-drag flow (see wireSessionRangeSelect
- * just below for the drag half) — triggered by the "+ Fishing times"
- * button at the top of a location's session list, NOT by tapping an
- * individual qualifying-session chip (those just scroll to that
+ * just below for the drag half) — triggered by one of the two "+ Fishing
+ * times" / "+ Home to home" buttons at the top of a location's session
+ * list (mode is just whichever of those two was clicked), NOT by tapping
+ * an individual qualifying-session chip (those just scroll to that
  * session — see scrollToCenterSession's own call site). Arming isn't
  * tied to any particular session's time window, so there's nothing to
  * scroll to here; it just readies THIS row's chart for whatever range
@@ -288,21 +293,25 @@ function disarmSchedule() {
  * comment) — reading it lazily, only once actually needed (drag-release,
  * in wireSessionRangeSelect), always gets whatever the CURRENT chart is.
  */
-function onArmScheduleClick(loc, row, addBtn, getRowChart, canvas) {
-  if (armedLocationName === loc.name) {
-    // Tapping the already-armed row's own "+ Fishing times" button again
+function onArmScheduleClick(loc, row, btn, mode, getRowChart, canvas) {
+  if (armedLocationName === loc.name && armedMode === mode) {
+    // Tapping the already-armed row's own button again (the SAME mode)
     // is a cancel, not a re-arm — matches the hold-to-arm tooltip's own
     // "hold again to turn it back off" convention elsewhere on this page.
     disarmSchedule();
     return;
   }
+  // Covers both "arming a fresh row" and "switching this row's OWN mode"
+  // (tapping the other button while already armed) — either way, start
+  // clean rather than trying to patch the previous armed state in place.
   disarmSchedule();
   armedLocationName = loc.name;
+  armedMode = mode;
   armedRow = row;
-  armedChip = addBtn;
+  armedChip = btn;
   armedCanvas = canvas;
   row.classList.add("armed-for-schedule");
-  addBtn.classList.add("armed");
+  btn.classList.add("armed");
   canvas.style.touchAction = "none";
   // See disarmSchedule's comment for why the scroll container itself
   // (not just this canvas) gets locked — belt-and-suspenders against the
@@ -383,6 +392,7 @@ function wireSessionRangeSelect(chart, canvas, loc, dragPreview) {
     const dragEndXVal = xValFromEvent(chart, e);
     const startMs = Math.min(dragStartXVal, dragEndXVal);
     const endMs = Math.max(dragStartXVal, dragEndXVal);
+    const modeUsed = armedMode; // captured before disarmSchedule() clears it below
     dragStartXVal = null;
     dragPreview.dragStartXVal = null;
     dragPreview.hoverXVal = null;
@@ -394,7 +404,7 @@ function wireSessionRangeSelect(chart, canvas, loc, dragPreview) {
       chart.draw(); // clears the now-stale preview shading/label
       return;
     }
-    computeAndStoreSession(loc, startMs, endMs);
+    computeAndStoreSession(loc, startMs, endMs, modeUsed);
   });
 
   canvas.addEventListener("pointercancel", () => {
@@ -407,9 +417,10 @@ function wireSessionRangeSelect(chart, canvas, loc, dragPreview) {
 
 /**
  * Resolves live drive time (GPS + Google Routes, charts.js), converts the
- * drag range into a full schedule for the CURRENT Schedule Mode toggle
- * state, stores it, and re-renders — a full renderWeekView() rather than
- * a targeted single-row update, same "just rebuild everything" approach
+ * drag range into a full schedule for whichever arm button started this
+ * drag ("+ Fishing times" vs "+ Home to home" — see onArmScheduleClick),
+ * stores it, and re-renders — a full renderWeekView() rather than a
+ * targeted single-row update, same "just rebuild everything" approach
  * togglePin/the filter handlers already use elsewhere on this page.
  *
  * Stores BOTH locationName and locationType — a location can have
@@ -420,9 +431,9 @@ function wireSessionRangeSelect(chart, canvas, loc, dragPreview) {
  * location's rows, which is what caused the duplicate-looking overlapping
  * labels on an unrelated row below the one actually being planned.
  */
-async function computeAndStoreSession(loc, dragStartMs, dragEndMs) {
+async function computeAndStoreSession(loc, dragStartMs, dragEndMs, mode) {
   const driveMinutes = await getDriveTimeMinutes(loc.lat, loc.lng);
-  const schedule = computeScheduleFromDragRangeMs(scheduleMode, dragStartMs, dragEndMs, loc, driveMinutes);
+  const schedule = computeScheduleFromDragRangeMs(mode, dragStartMs, dragEndMs, loc, driveMinutes);
   const record = {
     id: `${loc.name}|${loc.type}|${dragStartMs}|${Date.now()}`,
     locationName: loc.name,
@@ -438,35 +449,6 @@ function removeComputedSession(id) {
   computedSessions = computedSessions.filter((r) => r.id !== id);
   persistComputedSessions(computedSessions);
   renderWeekView();
-}
-
-/**
- * The Schedule Mode toggle — two mutually-exclusive chips (reusing the
- * existing .loc-chip/.loc-chip.active look, not a new control style),
- * persisted the same way filters are. Rendered once at startup, not on
- * every renderWeekView() — the mode itself doesn't depend on filters/data,
- * just on what the person last chose.
- */
-function renderScheduleModeChips() {
-  const container = document.getElementById("scheduleModeChips");
-  if (!container) return;
-  const options = [
-    { value: "fishing", label: "Fishing time" },
-    { value: "onsite", label: "Home to home" },
-  ];
-  container.innerHTML = "";
-  for (const { value, label } of options) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "loc-chip" + (scheduleMode === value ? " active" : "");
-    chip.textContent = label;
-    chip.addEventListener("click", () => {
-      scheduleMode = value;
-      persistScheduleMode(scheduleMode);
-      renderScheduleModeChips();
-    });
-    container.appendChild(chip);
-  }
 }
 
 // Lazily builds a row's chart only once that row actually scrolls into
@@ -578,8 +560,6 @@ async function init() {
   }
 
   computedSessions = loadComputedSessions();
-  scheduleMode = loadScheduleMode();
-  renderScheduleModeChips();
 
   try {
     const res = await fetch(DATA_URL, { cache: "no-store" });
@@ -1210,19 +1190,32 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
   const sessionsWrap = document.createElement("div");
   sessionsWrap.className = "weeknew-row-sessions";
 
-  // "+ Fishing times" — the arm step of the click-arm-then-drag flow (see
-  // onArmScheduleClick/wireSessionRangeSelect). Always first in the list,
+  // "+ Fishing times" / "+ Home to home" — the arm step of the
+  // click-arm-then-drag flow (see onArmScheduleClick/wireSessionRangeSelect),
+  // one button per Schedule Mode (see computeScheduleFromDragRangeMs,
+  // charts.js, for what each actually means). Always first in the list,
   // regardless of how many qualifying/computed sessions this location
   // has (including zero) — arming isn't tied to any particular session,
-  // so it doesn't need one to exist first.
-  const addBtn = document.createElement("button");
-  addBtn.type = "button";
-  addBtn.className = "weeknew-add-fishing-times";
-  addBtn.textContent = "+ Fishing times";
-  addBtn.addEventListener("click", () => {
-    onArmScheduleClick(loc, row, addBtn, () => rowChartRef, canvas);
-  });
-  sessionsWrap.appendChild(addBtn);
+  // so neither button needs one to exist first. No longer a separate
+  // persisted "mode" setting (that used to live in the Thresholds &
+  // filters panel) — picking a button IS picking the mode, fresh each
+  // time, since which one makes sense can genuinely differ per session.
+  const addBtnsRow = document.createElement("div");
+  addBtnsRow.className = "weeknew-add-buttons-row";
+  for (const { mode, label } of [
+    { mode: "fishing", label: "+ Fishing times" },
+    { mode: "onsite", label: "+ Home to home" },
+  ]) {
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "weeknew-add-fishing-times";
+    addBtn.textContent = label;
+    addBtn.addEventListener("click", () => {
+      onArmScheduleClick(loc, row, addBtn, mode, () => rowChartRef, canvas);
+    });
+    addBtnsRow.appendChild(addBtn);
+  }
+  sessionsWrap.appendChild(addBtnsRow);
 
   if (sessions.length === 0) {
     sessionsWrap.insertAdjacentHTML("beforeend", `<p class="footnote weeknew-no-session">No qualifying session in this period.</p>`);

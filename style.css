@@ -1653,22 +1653,31 @@ main.wide {
   cursor: pointer;
 }
 
-/* The "+ Fishing times" arm button — deliberately NOT styled like the
-   green qualifying-session chips above (which are just informational/
-   navigational now — see week-new.js), so it reads as its own distinct
-   action: a dashed border and the same teal accent used everywhere else
-   this feature shows up (computed-session chips, chart markers). */
+/* Wraps the two arm buttons ("+ Fishing times" / "+ Home to home") side
+   by side on one line — see week-new.js's buildLocationRowElement. */
+.weeknew-add-buttons-row {
+  display: flex;
+  gap: 6px;
+}
+
+/* The "+ Fishing times" / "+ Home to home" arm buttons — deliberately NOT
+   styled like the green qualifying-session chips above (which are just
+   informational/navigational now — see week-new.js), so they read as
+   their own distinct action: a dashed border and the same teal accent
+   used everywhere else this feature shows up (computed-session chips,
+   chart markers). */
 .weeknew-add-fishing-times {
   border: 1px dashed #0f766e;
   border-radius: 8px;
   padding: 6px 8px;
   background: none;
   color: #0f766e;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 600;
   cursor: pointer;
-  text-align: left;
-  width: 100%;
+  text-align: center;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 /* Tapped state while a row is primed for click-drag-release — see
