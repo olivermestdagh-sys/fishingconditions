@@ -296,7 +296,15 @@ function onSessionTileClick(loc, session, row, chip, getRowChart, canvas, timeli
  * on release), matching how the feature was actually described: press,
  * drag, let go, THEN see the computed result.
  */
-function wireSessionRangeSelect(chart, canvas, loc) {
+/**
+ * dragPreview is a small mutable {hoverXVal, dragStartXVal} object — see
+ * buildSessionDragPreviewPlugin (charts.js) for how it's actually drawn.
+ * Owned by buildLocationRowElement (one per row, created fresh on every
+ * renderWeekView), passed in here so this function can update it live and
+ * the plugin can read it live, without either side needing to know about
+ * Chart.js internals or re-create anything mid-gesture.
+ */
+function wireSessionRangeSelect(chart, canvas, loc, dragPreview) {
   let dragStartXVal = null;
 
   canvas.addEventListener("pointerdown", (e) => {
@@ -304,12 +312,23 @@ function wireSessionRangeSelect(chart, canvas, loc) {
     e.stopImmediatePropagation();
     e.preventDefault();
     dragStartXVal = xValFromEvent(chart, e);
+    dragPreview.dragStartXVal = dragStartXVal;
+    dragPreview.hoverXVal = dragStartXVal;
+    chart.draw();
   });
 
+  // Fires on every hover, not just while actually dragging (no button
+  // pressed yet) — this is the "hovering over the armed graph shows the
+  // time under the mouse" half of the gesture, before any press has
+  // happened. Once a drag IS in progress (dragStartXVal set), the same
+  // updated hoverXVal is also what the plugin uses as the live end of the
+  // shaded range.
   canvas.addEventListener("pointermove", (e) => {
-    if (armedLocationName !== loc.name || dragStartXVal == null) return;
+    if (armedLocationName !== loc.name) return;
     e.stopImmediatePropagation();
     e.preventDefault();
+    dragPreview.hoverXVal = xValFromEvent(chart, e);
+    chart.draw();
   });
 
   canvas.addEventListener("pointerup", (e) => {
@@ -319,16 +338,24 @@ function wireSessionRangeSelect(chart, canvas, loc) {
     const startMs = Math.min(dragStartXVal, dragEndXVal);
     const endMs = Math.max(dragStartXVal, dragEndXVal);
     dragStartXVal = null;
+    dragPreview.dragStartXVal = null;
+    dragPreview.hoverXVal = null;
     disarmSchedule();
     // A tap with no real drag (start === end, or too close to mean
     // anything) isn't a range — treat it as "changed my mind", not as a
     // zero-length session.
-    if (endMs - startMs < 60000) return;
+    if (endMs - startMs < 60000) {
+      chart.draw(); // clears the now-stale preview shading/label
+      return;
+    }
     computeAndStoreSession(loc, startMs, endMs);
   });
 
   canvas.addEventListener("pointercancel", () => {
     dragStartXVal = null;
+    dragPreview.dragStartXVal = null;
+    dragPreview.hoverXVal = null;
+    chart.draw();
   });
 }
 
@@ -338,13 +365,22 @@ function wireSessionRangeSelect(chart, canvas, loc) {
  * state, stores it, and re-renders — a full renderWeekView() rather than
  * a targeted single-row update, same "just rebuild everything" approach
  * togglePin/the filter handlers already use elsewhere on this page.
+ *
+ * Stores BOTH locationName and locationType — a location can have
+ * separate Kayak and Land based entries sharing the same name but
+ * different setUp/timeToSpot/packUp/timeFromSpot values, so a schedule
+ * computed for one literally isn't correct for the other; scoping by name
+ * alone would show the exact same computed markers on both of that
+ * location's rows, which is what caused the duplicate-looking overlapping
+ * labels on an unrelated row below the one actually being planned.
  */
 async function computeAndStoreSession(loc, dragStartMs, dragEndMs) {
   const driveMinutes = await getDriveTimeMinutes(loc.lat, loc.lng);
   const schedule = computeScheduleFromDragRangeMs(scheduleMode, dragStartMs, dragEndMs, loc, driveMinutes);
   const record = {
-    id: `${loc.name}|${dragStartMs}|${Date.now()}`,
+    id: `${loc.name}|${loc.type}|${dragStartMs}|${Date.now()}`,
     locationName: loc.name,
+    locationType: loc.type,
     ...schedule,
   };
   computedSessions.push(record);
@@ -1171,8 +1207,11 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
   // .weeknew-computed-session CSS comment for why), each with its own
   // remove button since these accumulate over time and aren't
   // auto-recomputed from the conditions data the way qualifying sessions
-  // are.
-  const thisLocComputed = computedSessions.filter((r) => r.locationName === loc.name);
+  // are. Scoped by locationType as well as locationName — a location can
+  // have separate Kayak/Land based entries sharing the same name but
+  // different setUp/timeToSpot/packUp/timeFromSpot, so a session computed
+  // for one type genuinely doesn't apply to the other's row.
+  const thisLocComputed = computedSessions.filter((r) => r.locationName === loc.name && r.locationType === loc.type);
   for (const record of thisLocComputed) {
     sessionsWrap.appendChild(buildComputedSessionChip(record));
   }
@@ -1182,6 +1221,11 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
   row.appendChild(chartWrap);
 
   const displayRows = locRows.filter((r) => r._t >= timelineStart && r._t <= timelineEnd).sort((a, b) => a._t - b._t);
+
+  // Mutable, read live by buildSessionDragPreviewPlugin on every redraw —
+  // see wireSessionRangeSelect for how this gets updated as the person
+  // hovers/drags on this row's own canvas.
+  const dragPreview = { hoverXVal: null, dragStartXVal: null };
 
   // Chart creation is deferred to a returned function, called by
   // renderWeekView only AFTER this row has been appended to the document
@@ -1208,6 +1252,7 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
       compact: true,
       sessionSpan: sessions.map((s) => ({ from: s.from, to: s.to })),
       computedSessionMarkers: thisLocComputed,
+      dragPreviewState: () => dragPreview,
       xRange: { min: timelineStart, max: timelineEnd },
       disableBuiltinEvents: true, // this page drives the tooltip itself — see wireSyncedTooltip below
       showFirstBoxIcons: true, // windvane/fish legend on each row's own first condition-strip box
@@ -1222,7 +1267,7 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
       // row is armed, so the tooltip-hold gesture and the whole-board
       // drag-to-pan gesture never also see that same press. See its own
       // comment for the full reasoning.
-      wireSessionRangeSelect(rowChart, canvas, loc);
+      wireSessionRangeSelect(rowChart, canvas, loc, dragPreview);
       wireSyncedTooltip(rowChart, canvas);
       // Deliberately no "already armed elsewhere, so show here too" logic
       // — only one row's tooltip is ever showing at a time (see

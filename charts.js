@@ -2694,14 +2694,24 @@ const COMPUTED_SESSION_COLORS = ["#0f766e", "#7c3aed", "#b45309", "#be123c", "#0
 
 /**
  * Draws each computed (drag-derived) session's schedule instants as small
- * compact flags — a short tick, a tiny icon, and a HH:MM label — rather
- * than full-height dashed lines with long text labels (buildSessionSpanPlugin
+ * compact flags — a tick, a tiny icon, and a HH:MM label — rather than
+ * full-height dashed lines with long text labels (buildSessionSpanPlugin
  * above). Kept deliberately lightweight since a single session already has
  * up to seven of these, and more than one computed session can be showing
  * on the same row at once (that's the whole point — comparing options).
  * A record with a field that's null (see computeScheduleFromDragRangeMs —
  * happens when live drive time genuinely couldn't be resolved) just skips
  * that one flag rather than showing a wrong or placeholder time.
+ *
+ * Labels are collision-avoided: gathered across EVERY record together
+ * (not per-record in isolation — two different computed sessions with
+ * markers close in time need to avoid each other just as much as two
+ * instants within the same session do), sorted chronologically, then
+ * swept left-to-right assigning each one the shallowest vertical "tier"
+ * that doesn't collide with whatever's already been placed at that tier.
+ * A tick mark's length grows to match wherever its own label actually
+ * landed, so a pushed-down label still reads as connected to its instant
+ * on the timeline rather than floating.
  */
 function buildComputedSessionMarkersPlugin(records) {
   const validRecords = (records || []).filter((r) => r != null);
@@ -2712,8 +2722,11 @@ function buildComputedSessionMarkersPlugin(records) {
       const { ctx, chartArea, scales } = chart;
       if (!chartArea || !scales.x) return;
       const { top } = chartArea;
-      const FLAG_TICK_H = 10;
       const ICON_SIZE = 6;
+      const TIER_HEIGHT = 20; // vertical space each collision-avoidance tier takes
+      const LABEL_GAP_PX = 8; // minimum breathing room required between two labels' bounding boxes
+
+      const markers = [];
       validRecords.forEach((record, recordIdx) => {
         const color = COMPUTED_SESSION_COLORS[recordIdx % COMPUTED_SESSION_COLORS.length];
         for (const { key, label, icon } of SCHEDULE_INSTANT_DISPLAY) {
@@ -2721,34 +2734,129 @@ function buildComputedSessionMarkersPlugin(records) {
           if (t == null) continue;
           if (t < scales.x.min || t > scales.x.max) continue;
           const x = scales.x.getPixelForValue(t);
-          ctx.save();
-          ctx.strokeStyle = color;
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.moveTo(x, top);
-          ctx.lineTo(x, top + FLAG_TICK_H);
-          ctx.stroke();
-          // Icon draw functions above are all black/white-fill by design
-          // (matching drawFishIcon's existing convention) — tint via a
-          // save/restore + globalCompositeOperation trick would be
-          // overkill here, so instead each icon gets a small colored dot
-          // behind it (cheap, reliable) rather than trying to recolor the
-          // icon's own path fills per record.
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          ctx.arc(x, top + FLAG_TICK_H + ICON_SIZE + 1, ICON_SIZE + 3, 0, Math.PI * 2);
-          ctx.globalAlpha = 0.16;
-          ctx.fill();
-          ctx.globalAlpha = 1;
-          icon(ctx, x, top + FLAG_TICK_H + ICON_SIZE + 1, ICON_SIZE);
-          ctx.font = "700 8px -apple-system, BlinkMacSystemFont, sans-serif";
-          ctx.fillStyle = color;
-          ctx.textAlign = "center";
-          ctx.textBaseline = "top";
-          ctx.fillText(`${label} ${fmtNaive(t, { hour: "2-digit", minute: "2-digit", hour12: false })}`, x, top + FLAG_TICK_H + ICON_SIZE * 2 + 4);
-          ctx.restore();
+          const text = `${label} ${fmtNaive(t, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+          markers.push({ x, text, icon, color });
         }
       });
+      if (!markers.length) return;
+      markers.sort((a, b) => a.x - b.x);
+
+      ctx.save();
+      ctx.font = "700 8px -apple-system, BlinkMacSystemFont, sans-serif";
+      // tierRightEdge[i] = the rightmost pixel already claimed at tier i by
+      // whatever was placed there most recently (markers are processed in
+      // x-order, so "most recently" is always the nearest one to the left).
+      const tierRightEdge = [];
+      for (const marker of markers) {
+        const halfWidth = ctx.measureText(marker.text).width / 2;
+        let tier = 0;
+        while (tierRightEdge[tier] != null && marker.x - halfWidth < tierRightEdge[tier] + LABEL_GAP_PX) {
+          tier++;
+        }
+        tierRightEdge[tier] = marker.x + halfWidth;
+        marker.tier = tier;
+      }
+
+      for (const { x, text, icon, color, tier } of markers) {
+        const iconCy = top + ICON_SIZE + 3 + tier * TIER_HEIGHT;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, iconCy - ICON_SIZE - 1);
+        ctx.stroke();
+        // Icon draw functions above are all black/white-fill by design
+        // (matching drawFishIcon's existing convention) — tint via a
+        // save/restore + globalCompositeOperation trick would be
+        // overkill here, so instead each icon gets a small colored dot
+        // behind it (cheap, reliable) rather than trying to recolor the
+        // icon's own path fills per record.
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, iconCy, ICON_SIZE + 3, 0, Math.PI * 2);
+        ctx.globalAlpha = 0.16;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        icon(ctx, x, iconCy, ICON_SIZE);
+        ctx.font = "700 8px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillStyle = color;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(text, x, iconCy + ICON_SIZE + 3);
+      }
+      ctx.restore();
+    },
+  };
+}
+
+/**
+ * Live feedback for the click-drag-release gesture itself (wireSessionRangeSelect,
+ * week-new.js) — a getPreviewState() closure rather than a plain value
+ * because this plugin is built ONCE per row at chart-creation time, but
+ * the drag state changes on every pointermove afterwards; reading it
+ * fresh at each redraw (the caller calls chart.draw() on every
+ * pointermove while armed) means one plugin instance can serve the whole
+ * gesture rather than rebuilding the chart mid-drag.
+ *
+ * getPreviewState() returns null (or an object with hoverXVal null) when
+ * this row isn't currently armed/being interacted with, in which case
+ * this draws nothing at all — same shape either way, so the caller never
+ * needs to add/remove this plugin, just let it return nothing to draw.
+ */
+function buildSessionDragPreviewPlugin(getPreviewState) {
+  return {
+    id: "sessionDragPreview",
+    afterDatasetsDraw(chart) {
+      const state = getPreviewState ? getPreviewState() : null;
+      if (!state || state.hoverXVal == null) return;
+      const { ctx, chartArea, scales } = chart;
+      if (!chartArea || !scales.x) return;
+      const { top, bottom } = chartArea;
+      ctx.save();
+      // Shaded range for the drag in progress — only while an actual drag
+      // (pointer down) is underway, not during the plain pre-drag hover.
+      if (state.dragStartXVal != null) {
+        const fromVal = Math.min(state.dragStartXVal, state.hoverXVal);
+        const toVal = Math.max(state.dragStartXVal, state.hoverXVal);
+        const xA = scales.x.getPixelForValue(Math.max(fromVal, scales.x.min));
+        const xB = scales.x.getPixelForValue(Math.min(toVal, scales.x.max));
+        if (xB > xA) {
+          ctx.fillStyle = "rgba(15, 118, 110, 0.18)";
+          ctx.fillRect(xA, top, xB - xA, bottom - top);
+        }
+      }
+      // The hover time itself — shown under the mouse the whole time this
+      // row is armed, whether or not a drag is currently in progress, so
+      // there's always a readable answer to "what time am I about to
+      // start/end this at".
+      const x = scales.x.getPixelForValue(state.hoverXVal);
+      if (x >= chartArea.left && x <= chartArea.right) {
+        ctx.strokeStyle = "#0f766e";
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, bottom);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        const label = fmtNaive(state.hoverXVal, { hour: "2-digit", minute: "2-digit", hour12: false });
+        ctx.font = "700 10px -apple-system, BlinkMacSystemFont, sans-serif";
+        const textWidth = ctx.measureText(label).width;
+        const boxPad = 5;
+        const boxH = 15;
+        const boxY = top + 2;
+        let boxX = x - textWidth / 2 - boxPad;
+        // Clamped to stay inside the plot area rather than running off the
+        // edge when hovering right at the start/end of the visible range.
+        boxX = Math.max(chartArea.left, Math.min(chartArea.right - (textWidth + boxPad * 2), boxX));
+        ctx.fillStyle = "#0f766e";
+        ctx.fillRect(boxX, boxY, textWidth + boxPad * 2, boxH);
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillText(label, boxX + boxPad, boxY + 3);
+      }
+      ctx.restore();
     },
   };
 }
@@ -2819,7 +2927,7 @@ function buildSessionSpanPlugin(spans) {
   };
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, computedSessionMarkers, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes, hideValueAxes = false, overlayHeading = false }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, computedSessionMarkers, dragPreviewState, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes, hideValueAxes = false, overlayHeading = false }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -3000,6 +3108,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       buildDayBandPlugin(rows, sunTimes, locationName, moonPhases, showDayHeading, showSunTimes, overlayHeading),
       buildSessionSpanPlugin(sessionSpanList),
       buildComputedSessionMarkersPlugin(computedSessionMarkers),
+      buildSessionDragPreviewPlugin(dragPreviewState),
       buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons),
       buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime),
       buildTideExtremaPlugin(rows),
