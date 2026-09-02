@@ -1653,12 +1653,33 @@ main.wide {
   cursor: pointer;
 }
 
-/* Tapped state while a chip's own row is primed for click-drag-release —
-   see wireSessionRangeSelect/onSessionTileClick in week-new.js. Same
-   accent color as the computed-session chart markers/sidebar entries
-   below, so it reads as "one connected feature" rather than an unrelated
-   highlight. */
-.weeknew-session-chip.armed {
+/* The "+ Fishing times" arm button — deliberately NOT styled like the
+   green qualifying-session chips above (which are just informational/
+   navigational now — see week-new.js), so it reads as its own distinct
+   action: a dashed border and the same teal accent used everywhere else
+   this feature shows up (computed-session chips, chart markers). */
+.weeknew-add-fishing-times {
+  border: 1px dashed #0f766e;
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: none;
+  color: #0f766e;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+/* Tapped state while a row is primed for click-drag-release — see
+   wireSessionRangeSelect/onArmScheduleClick in week-new.js. Same accent
+   color as the computed-session chart markers/sidebar entries below, so
+   it reads as "one connected feature" rather than an unrelated
+   highlight. Shared between the qualifying-session chips (no longer
+   armable themselves, but kept here in case a future caller reuses this
+   class) and the add-button, which IS what actually gets it now. */
+.weeknew-session-chip.armed,
+.weeknew-add-fishing-times.armed {
   border-color: #0f766e;
   background: rgba(15, 118, 110, 0.12);
   box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.25);
