@@ -562,10 +562,10 @@
     "types": [
       {
         "type": "Kayak",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
+        "setUp": "00:20",
+        "packUp": "00:20",
+        "timeToSpot": "00:05",
+        "timeFromSpot": "00:05"
       }
     ],
     "lat": -28.18676843321961,
@@ -574,6 +574,9 @@
     "willyweatherId": 30385,
     "willyweatherName": "Terranora Creek - Kennedy Drive Boat Ramp",
     "willyweatherRegion": "Far North Coast",
-    "willyweatherState": "NSW"
+    "willyweatherState": "NSW",
+    "locationGroups": [
+      "Gold Coast"
+    ]
   }
 ]
