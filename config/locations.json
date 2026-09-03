@@ -577,6 +577,7 @@
     "willyweatherState": "NSW",
     "locationGroups": [
       "Gold Coast"
-    ]
+    ],
+    "tideMaxObserved": 1.68
   }
 ]
