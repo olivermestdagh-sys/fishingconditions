@@ -33,7 +33,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3884,
     "lng": 145.1245,
-    "tideMaxObserved": 2.98
+    "tideMaxObserved": 2.97
   },
   {
     "name": "Corinella Boat Ramp, VIC",
@@ -59,7 +59,7 @@
     "willyweatherState": "VIC",
     "lat": -38.4079,
     "lng": 145.4234,
-    "tideMaxObserved": 2.86
+    "tideMaxObserved": 2.84
   },
   {
     "name": "Coronet Bay, VIC 3984",
@@ -85,7 +85,7 @@
     "willyweatherState": "VIC",
     "lat": -38.4348,
     "lng": 145.4426,
-    "tideMaxObserved": 2.86
+    "tideMaxObserved": 2.84
   },
   {
     "name": "Flinders Pier, VIC",
@@ -111,7 +111,7 @@
     "willyweatherState": "VIC",
     "lat": -38.4758,
     "lng": 145.0286,
-    "tideMaxObserved": 2.69
+    "tideMaxObserved": 2.67
   },
   {
     "name": "Gunnamatta Beach, VIC",
@@ -137,7 +137,7 @@
     "willyweatherState": "VIC",
     "lat": -38.457,
     "lng": 144.8687,
-    "tideMaxObserved": 1.66
+    "tideMaxObserved": 1.64
   },
   {
     "name": "Hastings Jetty, VIC",
@@ -163,7 +163,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3082,
     "lng": 145.1991,
-    "tideMaxObserved": 2.98
+    "tideMaxObserved": 2.97
   },
   {
     "name": "Kilcunda, VIC 3995",
@@ -189,7 +189,7 @@
     "willyweatherState": "VIC",
     "lat": -38.5492,
     "lng": 145.4754,
-    "tideMaxObserved": 2.69
+    "tideMaxObserved": 2.67
   },
   {
     "name": "Lang Lang Boat Ramp, VIC",
@@ -226,7 +226,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3052,
     "lng": 145.5214,
-    "tideMaxObserved": 3.2
+    "tideMaxObserved": 3.17
   },
   {
     "name": "Mornington Pier, VIC",
@@ -356,7 +356,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3357,
     "lng": 144.7459,
-    "tideMaxObserved": 1.66
+    "tideMaxObserved": 1.64
   },
   {
     "name": "Stony Point Boat Ramp, VIC",
@@ -382,7 +382,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3744,
     "lng": 145.2224,
-    "tideMaxObserved": 2.98
+    "tideMaxObserved": 2.97
   },
   {
     "name": "Warneet Boat Ramp, VIC",
@@ -408,7 +408,7 @@
     "willyweatherState": "VIC",
     "lat": -38.2275,
     "lng": 145.3066,
-    "tideMaxObserved": 2.98
+    "tideMaxObserved": 2.97
   },
   {
     "name": "Williamstown Beach, VIC",
@@ -507,7 +507,7 @@
     "willyweatherState": "VIC",
     "lat": -37.8859,
     "lng": 147.9875,
-    "tideMaxObserved": 1.28
+    "tideMaxObserved": 1.29
   },
   {
     "name": "Cape Woolamai Beach",
@@ -526,7 +526,7 @@
     "locationGroups": [
       "South Beaches"
     ],
-    "tideMaxObserved": 2.69,
+    "tideMaxObserved": 2.67,
     "willyweatherId": 11840,
     "willyweatherName": "Cape Woolamai",
     "willyweatherRegion": "Gippsland",
@@ -578,6 +578,6 @@
     "locationGroups": [
       "Gold Coast"
     ],
-    "tideMaxObserved": 1.68
+    "tideMaxObserved": 1.73
   }
 ]
