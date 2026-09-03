@@ -555,5 +555,25 @@
     "locationGroups": [
       "Mallacoota"
     ]
+  },
+  {
+    "name": "Terranora Creek - Kennedy Drive Boat Ramp",
+    "shore": "NE",
+    "types": [
+      {
+        "type": "Kayak",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ],
+    "lat": -28.18676843321961,
+    "lng": 153.53226184844974,
+    "tidal": true,
+    "willyweatherId": 30385,
+    "willyweatherName": "Terranora Creek - Kennedy Drive Boat Ramp",
+    "willyweatherRegion": "Far North Coast",
+    "willyweatherState": "NSW"
   }
 ]
