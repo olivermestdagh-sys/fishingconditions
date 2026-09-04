@@ -71,9 +71,23 @@
           // fills the visible board — scrolling moves cleanly to the next
           // location instead of first needing to scroll around inside a
           // single row just to see all of it. Read by .weeknew-row-chart
-          // in style.css, with a plain 300px fallback for anything that
+          // in style.css, with a 339px fallback for anything that
           // doesn't set this (desktop, or JS disabled).
-          document.documentElement.style.setProperty("--weeknew-mobile-row-height", (available - 20) + "px");
+          //
+          // The extra "- 39" (beyond the existing "- 20") reserves room
+          // for buildConditionStripsPlugin's two condition-strip rows
+          // (charts.js's renderConditionsChart, layout.padding.bottom) —
+          // unlike the OTHER two chart frames that needed this same 39px
+          // (.location-hover-panel-chart-frame, .live-chart-frame, both
+          // in style.css), there's no spare screen space to just GROW
+          // into here: `available` is already the full visible board,
+          // by design, so adding 39px on top would force exactly the
+          // "second scroll just to see this row's own top/bottom" bug
+          // this whole calculation exists to avoid. Trimming height
+          // instead of growing it is the only option that keeps "one row
+          // fills the board" true while still giving the strips their
+          // own space — the graph itself just ends up a little shorter.
+          document.documentElement.style.setProperty("--weeknew-mobile-row-height", (available - 20 - 39) + "px");
         }
       }
     } else {

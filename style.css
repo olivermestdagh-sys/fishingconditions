@@ -225,9 +225,18 @@ main {
    would grow without bound on every resize tick (the exact bug already
    fixed once on the Live tab) — this fixed, explicit height is what
    prevents that, same principle as every other chart-wrap on this site. */
+/* height: the base chart itself needs (378px scaled to 302px, see below)
+   PLUS 39px reserved for buildConditionStripsPlugin's two condition-strip
+   rows (charts.js's renderConditionsChart, layout.padding.bottom) — that
+   39px has to be genuinely EXTRA canvas height, not squeezed out of the
+   302px the chart already needed, or the data lines just get compressed
+   closer to the new, higher bottom edge instead of clearing the strips
+   (this is exactly what happened the first time the strip-dipping issue
+   was "fixed": reserving the padding without also growing this height
+   made it worse, not better). 302 + 39 = 341. */
 .location-hover-panel-chart-frame {
   position: relative;
-  height: 302px; /* desktop / tablet — 378px scaled down ~20% (378*0.8=302.4) */
+  height: 341px;
 }
 
 /* Same 900px threshold as isMobileDevice in app.js (Math.min(innerWidth,
@@ -236,12 +245,16 @@ main {
    reacts to live window resizes a media query wouldn't need JS for) but
    are meant to agree on "is this a phone" in practice. Keep them in sync
    if either threshold ever changes. Mobile gets a further ~20% off the
-   already-reduced desktop height (302px), per request — desktop doesn't,
-   since "show the whole graph, no scrolling" was specifically a desktop
-   ask, not a further height cut. */
+   already-reduced desktop height (302px, before the +39 strip reservation
+   below), per request — desktop doesn't, since "show the whole graph, no
+   scrolling" was specifically a desktop ask, not a further height cut.
+   242 + 39 = 281 (same +39 strip reservation as the desktop rule above —
+   mobile's own strip rows are actually a few px shorter, see
+   buildConditionStripsPlugin, so this over-reserves slightly here, which
+   is harmless: spare blank space, not a mismatch in the other direction). */
 @media (max-width: 900px) {
   .location-hover-panel-chart-frame {
-    height: 242px; /* 302 * 0.8 = 241.6 */
+    height: 281px;
   }
 }
 
@@ -1833,9 +1846,15 @@ main.wide {
      index.html, on phone-portrait devices only — measured against the
      actual space available in the rotated layout, so a row's graph fills
      the visible board without needing a second scroll just to see its own
-     top/bottom. Falls back to the original fixed 300px wherever that
-     variable isn't set (desktop, or JS disabled). */
-  min-height: var(--weeknew-mobile-row-height, 300px);
+     top/bottom (that JS already accounts for the same +39px reserved
+     strip space this fallback does — see its own comment). Falls back to
+     339px (the original 300px + 39px reserved for
+     buildConditionStripsPlugin's two condition-strip rows — see the
+     matching +39 on .location-hover-panel-chart-frame/.live-chart-frame
+     above for why that has to be added height, not padding carved out of
+     the existing 300px) wherever that variable isn't set (desktop, or JS
+     disabled). */
+  min-height: var(--weeknew-mobile-row-height, 339px);
   padding: 4px 6px;
 }
 
@@ -2146,7 +2165,14 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
    this site for exactly this reason. */
 .live-chart-frame {
   position: relative;
-  height: 380px;
+  /* 380px base + 39px reserved for buildConditionStripsPlugin's two
+     condition-strip rows (charts.js's renderConditionsChart,
+     layout.padding.bottom) — that 39px has to be genuinely EXTRA canvas
+     height, not squeezed out of the 380px the chart already needed, or
+     the data lines just get compressed closer to the new, higher bottom
+     edge instead of clearing the strips. Same reasoning as the matching
+     +39 on .location-hover-panel-chart-frame above. */
+  height: 419px;
   margin-bottom: 4px;
 }
 
