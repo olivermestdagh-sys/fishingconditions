@@ -252,19 +252,19 @@ main {
   background: var(--white);
 }
 
-/* Pinned to this frame's own top-right corner (not the page/viewport, and
-   not nested inside the horizontally-scrolling div below it) so it always
-   reads in the same spot regardless of how far the chart's been scrolled
-   sideways, and stays visible even once actually fullscreen (it's a
-   descendant of the fullscreen target above, unlike a plain page-level
-   overlay would be). Same positioning as Live's own .graph-gesture-hint
-   (.live-chart-frame .graph-gesture-hint) — this is that same shared
-   element/class, just under a different frame. */
-.location-hover-panel-chart-frame .graph-gesture-hint {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  z-index: 5;
+/* No longer positioned over the chart frame — the .graph-gesture-hint
+   element moved out of #locationChartFrame and into
+   .location-hover-panel-heading-row instead (conditions.html), right
+   after the location name, so it reads as part of the title area rather
+   than floating on top of the graph. That row's own flex layout (gap:10px)
+   handles the placement; margin-left:auto pushes it to the row's right
+   edge (matching where it used to sit visually) rather than crowding
+   right up against the title text. Live's own .graph-gesture-hint
+   (.live-chart-frame .graph-gesture-hint, further below) is a completely
+   separate rule and unaffected by this — Live didn't get this same move. */
+.location-hover-panel-heading-row .graph-gesture-hint {
+  margin-left: auto;
+  text-align: right;
 }
 
 /* Fills the frame above regardless of its current size (normal or
