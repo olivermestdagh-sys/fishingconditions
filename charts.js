@@ -3183,23 +3183,38 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       // heading/moon icon INSIDE the plot area instead of in this reserved
       // strip above it, specifically to reclaim the space this padding
       // would otherwise set aside. See buildDayBandPlugin.
-      // Bottom padding reserves exactly the vertical space
-      // buildConditionStripsPlugin needs for its two condition-strip rows
-      // (stripHeight*2 + rowGap + bottomMargin, mirrored here from that
-      // function's own numbers — if those ever change, this needs to
-      // match), plus a few px of breathing room. Without this, the
-      // strips are drawn INSIDE the same plot area the data lines use
-      // (that used to be deliberate — see buildConditionStripsPlugin's
-      // own comment — but in practice the tide/rainfall curves are often
-      // low enough to visually dip under the strips, which reads as a
-      // rendering glitch rather than an intentional overlap). Reserving
-      // this space instead shrinks the plot area so every data line's
-      // own Y-scale naturally clears the strip zone, same as the top
-      // padding already does for the day-heading strip above.
+      // Bottom padding reserves vertical space for
+      // buildConditionStripsPlugin's two condition-strip rows, so the
+      // data lines' own Y-scale clears the strip zone instead of ever
+      // rendering into it — same principle as the top padding already
+      // reserving space for the day-heading strip above.
+      //
+      // Flat 39px regardless of isMobile (mobile's actual strip rows are
+      // a few px shorter — see buildConditionStripsPlugin's own
+      // stripHeight/rowGap — so this over-reserves slightly there, which
+      // is harmless: a few extra px of blank space, not a mismatch in
+      // the other direction). Kept as one flat number specifically so it
+      // can't drift out of sync with the CSS values below it depends on.
+      //
+      // THIS PADDING ALONE ONLY MOVES THE PROBLEM, IT DOESN'T FIX IT: it
+      // shrinks the plot area within whatever total canvas height the
+      // page's CSS gives it, which compresses every data line CLOSER to
+      // the new (higher) bottom edge — for a value that only had a
+      // little headroom to begin with, shrinking the available height
+      // can push it INTO the now-higher strip zone rather than clear of
+      // it (this is exactly what happened the first time this was
+      // "fixed": it visibly got worse, not better). The other, equally
+      // required half of this fix is in each page's CSS: the fixed chart
+      // frame height (.location-hover-panel-chart-frame,
+      // .live-chart-frame, .weeknew-row-chart) needs to grow by this
+      // same 39px, so the plot area's OWN usable height stays exactly
+      // what it was before this reservation existed, and the 39px is
+      // genuinely NEW space appended below it for the strips — not
+      // carved out of space the data was already using.
       layout: {
         padding: {
           top: overlayHeading ? 8 : showDayHeading || moonPhases ? 40 : 8,
-          bottom: 4 + (isMobile ? 11 : 14) * 2 + (isMobile ? 2 : 3) + 4,
+          bottom: 39,
         },
         autoPadding: false,
       },
