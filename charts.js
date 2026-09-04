@@ -393,7 +393,6 @@ function drawBoatIcon(ctx, cx, cy, size) {
 function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false) {
   const stripHeight = isMobile ? 11 : 14;
   const rowGap = isMobile ? 2 : 3;
-  const bottomMargin = 4; // small gap above the axis line itself
 
   return {
     id: "conditionStrips",
@@ -424,8 +423,21 @@ function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false) {
       const xScale = scales.x;
       const { left, right, bottom } = chartArea;
 
-      const fishStripTop = bottom - bottomMargin - stripHeight;
-      const locStripTop = fishStripTop - rowGap - stripHeight;
+      // Anchored DOWNWARD from chartArea's bottom edge, into the
+      // layout.padding.bottom reserved below it (renderConditionsChart) —
+      // NOT upward into the plot area itself, which is what this
+      // function used to do (and is exactly what let the data lines
+      // dip under/behind the strips in the first place: reserving
+      // padding without ALSO moving the strips' own draw position into
+      // that padding just shrinks the plot area while the strips keep
+      // drawing in the same relative spot, changing nothing). Custom
+      // plugin drawing isn't clipped to chartArea by Chart.js — the day-
+      // heading text/moon icon above (buildDayBandPlugin, "top - 16"/
+      // "top - 28") already prove this same padding-zone-drawing pattern
+      // works, just on the opposite edge.
+      const topMarginInPadding = 2; // small gap between the plot area and the first strip
+      const locStripTop = bottom + topMarginInPadding;
+      const fishStripTop = locStripTop + stripHeight + rowGap;
 
       ctx.save();
       ctx.fillStyle = "rgba(255, 255, 255, 0.72)";
