@@ -1622,7 +1622,7 @@ main.wide {
      stretching the CHART taller too ("funny" extra height) whenever a
      row had 4+ session chips. overflow:hidden is a safety net; the actual
      scrolling happens one level in, on .weeknew-row-sessions specifically. */
-  max-height: var(--weeknew-mobile-row-height, 300px);
+  max-height: var(--weeknew-mobile-row-height, 339px);
   overflow: hidden;
 }
 
@@ -1853,11 +1853,19 @@ main.wide {
      matching +39 on .location-hover-panel-chart-frame/.live-chart-frame
      above for why that has to be added height, not padding carved out of
      the existing 300px) wherever that variable isn't set (desktop, or JS
-     disabled). */
+     disabled).
+     .weeknew-row-sidebar's own max-height uses this SAME variable and
+     MUST use the same fallback number — it exists specifically to stop a
+     location with many session chips from stretching this chart taller
+     than intended (.weeknew-row defaults to align-items:stretch), and a
+     mismatched fallback silently breaks that: this element renders at
+     339px but the sidebar caps itself at whatever ITS fallback says,
+     leaving a gap between them that flex then has to stretch across —
+     which is exactly the "gaps introduced" bug this comment is now
+     here to prevent a repeat of. */
   min-height: var(--weeknew-mobile-row-height, 339px);
   padding: 4px 6px;
 }
-
 .weeknew-row-chart canvas {
   /* Same Chart.js responsive:true pattern used everywhere else on the
      site — a sized, position:relative wrapper with the canvas absolutely
