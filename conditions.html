@@ -30,6 +30,10 @@
     <section class="chart-section location-hover-panel-chart">
       <div class="location-hover-panel-heading-row">
         <h2 id="hoverPanelLocationName">&nbsp;</h2>
+        <div class="graph-gesture-hint" aria-hidden="true">
+          <div>Double-tap to expand</div>
+          <div>Hold for 2s to toggle data point</div>
+        </div>
       </div>
       <p id="hoverPanelPreviewNote" class="footnote" style="display:none;margin:0 0 8px;">Preview only — live WillyWeather/Open-Meteo forecast for this exact point, not a saved location. Condition scoring below is calculated from the Shore/Type you set, not a saved config.</p>
       <div id="hoverPanelPreviewControls" class="location-hover-panel-preview-controls" style="display:none;">
@@ -44,10 +48,6 @@
       <button type="button" id="btnAddPreviewAsLocation" class="btn-secondary location-preview-add-btn" style="display:none;">➕ Add as permanent location</button>
       <p id="previewAddStatus" class="footnote" style="display:none;margin:0 0 10px;"></p>
       <div id="locationChartFrame" class="location-hover-panel-chart-frame">
-        <div class="graph-gesture-hint" aria-hidden="true">
-          <div>Double-tap to expand</div>
-          <div>Hold for 2s to toggle data point</div>
-        </div>
         <div id="locationChartScroll" class="location-hover-panel-chart-scroll">
           <div id="locationChartWrap" class="location-hover-panel-chart-wrap">
             <canvas id="conditionsChart"></canvas>

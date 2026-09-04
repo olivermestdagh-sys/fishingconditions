@@ -397,10 +397,15 @@ function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false) {
 
   return {
     id: "conditionStrips",
-    // Drawn INSIDE the plot area, anchored to its bottom edge — deliberately
-    // overlapping whatever data lines happen to be low at that point, rather
-    // than reserving separate space below the graph. A semi-opaque backing
-    // behind each strip keeps it legible against anything crossing behind it.
+    // Drawn INSIDE the plot area, anchored to its bottom edge — the
+    // caller (renderConditionsChart) reserves exactly this much space via
+    // layout.padding.bottom, so "inside the plot area" no longer means
+    // "overlapping the data lines" the way it originally did; the data's
+    // own Y-scale is squeezed to sit entirely above this strip zone
+    // instead. A semi-opaque backing behind each strip is kept anyway, as
+    // a second line of defense for anything that still reaches this low
+    // (a marker/label right at an axis edge, say), not as the primary
+    // legibility mechanism it used to be.
     //
     // Hooked to afterDatasetsDraw, NOT afterDraw — the built-in tooltip
     // plugin also draws in afterDraw, and Chart.js doesn't guarantee our
@@ -3178,7 +3183,26 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       // heading/moon icon INSIDE the plot area instead of in this reserved
       // strip above it, specifically to reclaim the space this padding
       // would otherwise set aside. See buildDayBandPlugin.
-      layout: { padding: { top: overlayHeading ? 8 : showDayHeading || moonPhases ? 40 : 8 }, autoPadding: false },
+      // Bottom padding reserves exactly the vertical space
+      // buildConditionStripsPlugin needs for its two condition-strip rows
+      // (stripHeight*2 + rowGap + bottomMargin, mirrored here from that
+      // function's own numbers — if those ever change, this needs to
+      // match), plus a few px of breathing room. Without this, the
+      // strips are drawn INSIDE the same plot area the data lines use
+      // (that used to be deliberate — see buildConditionStripsPlugin's
+      // own comment — but in practice the tide/rainfall curves are often
+      // low enough to visually dip under the strips, which reads as a
+      // rendering glitch rather than an intentional overlap). Reserving
+      // this space instead shrinks the plot area so every data line's
+      // own Y-scale naturally clears the strip zone, same as the top
+      // padding already does for the day-heading strip above.
+      layout: {
+        padding: {
+          top: overlayHeading ? 8 : showDayHeading || moonPhases ? 40 : 8,
+          bottom: 4 + (isMobile ? 11 : 14) * 2 + (isMobile ? 2 : 3) + 4,
+        },
+        autoPadding: false,
+      },
       interaction: { mode: "index", intersect: false },
       scales: {
         x: {
