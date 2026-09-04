@@ -435,7 +435,7 @@ function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false) {
       // heading text/moon icon above (buildDayBandPlugin, "top - 16"/
       // "top - 28") already prove this same padding-zone-drawing pattern
       // works, just on the opposite edge.
-      const topMarginInPadding = 2; // small gap between the plot area and the first strip
+      const topMarginInPadding = 0; // flush against the plot area — safe now that strips are guaranteed to never overlap data (see the comment above), so there's no longer a reason to leave any gap here
       const locStripTop = bottom + topMarginInPadding;
       const fishStripTop = locStripTop + stripHeight + rowGap;
 
@@ -3223,9 +3223,16 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       // what it was before this reservation existed, and the 39px is
       // genuinely NEW space appended below it for the strips — not
       // carved out of space the data was already using.
+      // Top padding is small (4px) for the compact/no-heading case —
+      // just enough that a marker sitting right at an axis's max value
+      // doesn't get clipped by the canvas edge, not a deliberate visual
+      // gap. Reduced from an earlier 8px after feedback that even that
+      // read as a noticeable gap above the plot once the bottom-side
+      // strip overlap was actually fixed — with nothing left to visually
+      // compensate for, a smaller top margin reads as more correct.
       layout: {
         padding: {
-          top: overlayHeading ? 8 : showDayHeading || moonPhases ? 40 : 8,
+          top: overlayHeading ? 4 : showDayHeading || moonPhases ? 40 : 4,
           bottom: 39,
         },
         autoPadding: false,
