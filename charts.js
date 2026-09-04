@@ -3210,12 +3210,23 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       // rendering into it — same principle as the top padding already
       // reserving space for the day-heading strip above.
       //
-      // Flat 39px regardless of isMobile (mobile's actual strip rows are
-      // a few px shorter — see buildConditionStripsPlugin's own
-      // stripHeight — so this over-reserves slightly there, which is
-      // harmless: a few extra px of blank space, not a mismatch in the
-      // other direction). Kept as one flat number specifically so it
-      // can't drift out of sync with the CSS values below it depends on.
+      // EXACT match to what the strips actually use — stripHeight*2,
+      // isMobile-aware (28px desktop, 22px mobile) — NOT a flat safe
+      // over-estimate anymore. An earlier version of this reserved a
+      // flat 39px "to be safe" regardless of isMobile, on the theory
+      // that a little extra reserved-but-unused space was harmless.
+      // Confirmed directly against the live rendered canvas (pixel-
+      // sampling the actual output) that it wasn't harmless: the strips
+      // only ever filled 28px of that reserved 39, leaving an 11px band
+      // of literally transparent canvas between the bottom of the
+      // strips and the edge of the chart frame — a second, genuinely
+      // real gap, distinct from (and found after) the chart-to-strip
+      // gap this same reservation was originally built to fix. Kept
+      // isMobile-aware now specifically because being exact matters more
+      // than being simple — the CSS values this depends on
+      // (.location-hover-panel-chart-frame, .live-chart-frame,
+      // .weeknew-row-chart, and index.html's mobile row-height script)
+      // all have matching desktop/mobile numbers now for the same reason.
       //
       // THIS PADDING ALONE ONLY MOVES THE PROBLEM, IT DOESN'T FIX IT: it
       // shrinks the plot area within whatever total canvas height the
@@ -3228,10 +3239,10 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       // required half of this fix is in each page's CSS: the fixed chart
       // frame height (.location-hover-panel-chart-frame,
       // .live-chart-frame, .weeknew-row-chart) needs to grow by this
-      // same 39px, so the plot area's OWN usable height stays exactly
-      // what it was before this reservation existed, and the 39px is
-      // genuinely NEW space appended below it for the strips — not
-      // carved out of space the data was already using.
+      // same reserved amount, so the plot area's OWN usable height stays
+      // exactly what it was before this reservation existed, and the
+      // reserved space is genuinely NEW space appended below it for the
+      // strips — not carved out of space the data was already using.
       // Top padding is small (4px) for the compact/no-heading case —
       // just enough that a marker sitting right at an axis's max value
       // doesn't get clipped by the canvas edge, not a deliberate visual
@@ -3243,7 +3254,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       layout: {
         padding: {
           top: overlayHeading ? 2 : showDayHeading || moonPhases ? 40 : 2,
-          bottom: 39,
+          bottom: isMobile ? 22 : 28,
         },
         autoPadding: false,
       },
