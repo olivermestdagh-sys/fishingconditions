@@ -3257,10 +3257,16 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
           ticks: { stepSize: 3600000, autoSkip: false, callback: (value) => fmtAxisHourTick(value) },
           grid: { color: "rgba(0,0,0,0.05)" },
         },
-        // Each axis's min is pushed well below any realistic data value on
-        // purpose — it compresses real data into the upper 60-70% of the
-        // chart, leaving genuine clear space at the bottom for the condition
-        // strips rather than the strips having to overlap low readings.
+        // Each axis's min used to be pushed well below any realistic data
+        // value specifically to leave clear space at the bottom for the
+        // condition strips — no longer needed for that now that the
+        // strips draw in their own reserved padding.bottom zone instead
+        // of inside the plot area (buildConditionStripsPlugin) — so
+        // yRain's min is a real 0 now, meaning 0% rainfall correctly sits
+        // right at the very bottom rather than floating above it.
+        // yTemp/yWind keep a small negative floor (-5) below their real
+        // minimum (0°C-ish, 0 km/h) purely as a little visual breathing
+        // room, not because anything below them needs the space anymore.
         // No axis title here (display:false) — a rotated Chart.js title
         // reserves a full extra margin column on the left/right regardless
         // of how short the text is. A compact "°C"/"km/h" label is drawn
@@ -3268,7 +3274,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
         // below, using space already reserved for the day heading rather
         // than adding new margin.
         yTemp: { position: "left", min: -5, max: 40, display: !compact && !hideValueAxes, title: { display: false } },
-        yRain: { display: false, min: -10, max: 100 },
+        yRain: { display: false, min: 0, max: 100 },
         yWind: { position: "right", min: -5, max: 50, display: !compact && !hideValueAxes, grid: { drawOnChartArea: false }, title: { display: false } },
         yTide: {
           // Always hidden — the filled tide shape on the chart already
