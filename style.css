@@ -1864,7 +1864,25 @@ main.wide {
      which is exactly the "gaps introduced" bug this comment is now
      here to prevent a repeat of. */
   min-height: var(--weeknew-mobile-row-height, 339px);
-  padding: 4px 6px;
+  /* NOT padding — Chart.js's own responsive-resize logic reads this
+     element's clientHeight/clientWidth and subtracts ITS OWN padding
+     from that when deciding what pixel size to make the canvas's actual
+     drawing buffer, even though the canvas (position:absolute, inset via
+     top/left:0 + width/height:100%!important below) visually fills the
+     FULL box regardless of this padding, ignoring it entirely for layout
+     purposes. The result was a canvas whose displayed CSS size and whose
+     internal Chart.js-managed pixel size disagreed by exactly this
+     padding amount (confirmed directly in the browser: 4px top + 4px
+     bottom here meant Chart.js sized its internal chartArea math for an
+     8px-shorter canvas than what was actually on screen, stretched to
+     fill the gap) — which is exactly the "gap above/below the chart"
+     bug that kept resurfacing no matter how the internal chart padding
+     numbers were tuned, since the actual cause was outside the chart
+     entirely. If visual breathing room around a row's chart is wanted
+     later, add it as margin on a DIFFERENT element, not padding on this
+     one — this one has to stay at 0 so Chart.js's own measurement of it
+     matches what's actually displayed. */
+  padding: 0;
 }
 .weeknew-row-chart canvas {
   /* Same Chart.js responsive:true pattern used everywhere else on the
