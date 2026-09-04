@@ -392,7 +392,12 @@ function drawBoatIcon(ctx, cx, cy, size) {
 
 function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false) {
   const stripHeight = isMobile ? 11 : 14;
-  const rowGap = isMobile ? 2 : 3;
+  // 0, not a few px — the two strips sit directly touching now, per
+  // feedback that even a small gap between them (and between the plot
+  // area and the first strip) read as visually wrong once the actual
+  // overlap bug was fixed. Each strip's own fill color still tells them
+  // apart with no seam needed.
+  const rowGap = 0;
 
   return {
     id: "conditionStrips",
@@ -401,10 +406,7 @@ function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false) {
     // layout.padding.bottom, so "inside the plot area" no longer means
     // "overlapping the data lines" the way it originally did; the data's
     // own Y-scale is squeezed to sit entirely above this strip zone
-    // instead. A semi-opaque backing behind each strip is kept anyway, as
-    // a second line of defense for anything that still reaches this low
-    // (a marker/label right at an axis edge, say), not as the primary
-    // legibility mechanism it used to be.
+    // instead.
     //
     // Hooked to afterDatasetsDraw, NOT afterDraw — the built-in tooltip
     // plugin also draws in afterDraw, and Chart.js doesn't guarantee our
@@ -439,9 +441,16 @@ function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false) {
       const locStripTop = bottom + topMarginInPadding;
       const fishStripTop = locStripTop + stripHeight + rowGap;
 
+      // Backing rect flush with the strips themselves (no +/-px overshoot
+      // into the plot area or past the last strip) — it used to reach 2px
+      // into the plot area specifically to stay legible behind data lines
+      // that could still be crossing right at that edge; now that overlap
+      // is geometrically impossible, extending into the plot area at all
+      // just reads as an extra sliver of gap between the chart and the
+      // strips, which is exactly what this was meant to stop.
       ctx.save();
       ctx.fillStyle = "rgba(255, 255, 255, 0.72)";
-      ctx.fillRect(left, locStripTop - 2, right - left, (fishStripTop + stripHeight) - locStripTop + 4);
+      ctx.fillRect(left, locStripTop, right - left, fishStripTop + stripHeight - locStripTop);
       ctx.restore();
 
       const drawStrip = (field, label, stripTop, iconDrawFn) => {
@@ -3203,9 +3212,9 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       //
       // Flat 39px regardless of isMobile (mobile's actual strip rows are
       // a few px shorter — see buildConditionStripsPlugin's own
-      // stripHeight/rowGap — so this over-reserves slightly there, which
-      // is harmless: a few extra px of blank space, not a mismatch in
-      // the other direction). Kept as one flat number specifically so it
+      // stripHeight — so this over-reserves slightly there, which is
+      // harmless: a few extra px of blank space, not a mismatch in the
+      // other direction). Kept as one flat number specifically so it
       // can't drift out of sync with the CSS values below it depends on.
       //
       // THIS PADDING ALONE ONLY MOVES THE PROBLEM, IT DOESN'T FIX IT: it
@@ -3226,13 +3235,14 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       // Top padding is small (4px) for the compact/no-heading case —
       // just enough that a marker sitting right at an axis's max value
       // doesn't get clipped by the canvas edge, not a deliberate visual
-      // gap. Reduced from an earlier 8px after feedback that even that
-      // read as a noticeable gap above the plot once the bottom-side
-      // strip overlap was actually fixed — with nothing left to visually
-      // compensate for, a smaller top margin reads as more correct.
+      // gap. Reduced twice now — 8px, then 4px, now 2px — after feedback
+      // each time that even a small margin still read as a gap above the
+      // plot once the bottom-side strip overlap was actually fixed; 2px
+      // is close to as tight as this can go while still keeping SOME
+      // clearance for a marker sitting right at an axis's max value.
       layout: {
         padding: {
-          top: overlayHeading ? 4 : showDayHeading || moonPhases ? 40 : 4,
+          top: overlayHeading ? 2 : showDayHeading || moonPhases ? 40 : 2,
           bottom: 39,
         },
         autoPadding: false,
