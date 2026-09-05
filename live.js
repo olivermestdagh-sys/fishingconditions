@@ -376,16 +376,23 @@ function renderForLocation(loc) {
   const sunTimes = (liveData.sunTimes && liveData.sunTimes[loc.name]) || [];
 
   const canvas = document.getElementById("liveChart");
-  // On mobile: natural, un-squashed per-hour width (same PIXELS_PER_HOUR
-  // convention as week.js) instead of forcing the full 48-hour window
-  // into one phone-width canvas — #liveChartScroll (style.css) is what
-  // actually makes this scrollable; a canvas width alone does nothing
-  // without that wrapper. Desktop is untouched (100%, fills the frame
+  // Sets the WRAPPER's width, not the canvas's own — confirmed directly
+  // (inspecting a live chart) that setting the canvas's own width doesn't
+  // actually work: Chart.js's own responsive resize logic runs after
+  // renderConditionsChart below and silently resets the canvas back down
+  // to match its parent, discarding this every time. Making the PARENT
+  // wide instead and letting Chart.js's normal "fill 100% of my
+  // container" behavior do the work is the only way this actually holds
+  // — same reasoning as week.js's #weekTimelineInner. On mobile: natural,
+  // un-squashed per-hour width (same PIXELS_PER_HOUR convention as
+  // week.js) instead of forcing the full 48-hour window into one
+  // phone-width canvas. Desktop is untouched (100%, fills the frame
   // exactly, no scrolling — there was never a "squashed" complaint there).
+  const wideInner = document.getElementById("liveChartWideInner");
   if (isMobileDevice) {
-    canvas.style.width = 48 * PIXELS_PER_HOUR + "px";
+    wideInner.style.width = 48 * PIXELS_PER_HOUR + "px";
   } else {
-    canvas.style.width = "100%";
+    wideInner.style.width = "100%";
   }
 
   liveChart = renderConditionsChart({

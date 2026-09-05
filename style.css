@@ -2455,16 +2455,38 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
   touch-action: pan-x;
 }
 
+/* The actual width-establishing element — NOT the canvas itself (see the
+   long comment on .live-chart-frame canvas below for why that approach
+   was tried first and doesn't work). live.js sets this element's width
+   directly: 100% on desktop (matches .live-chart-scroll's own width
+   exactly, so nothing scrolls, unchanged from before any of this
+   existed) or an explicit wide pixel value on mobile. Normal flow (not
+   position:absolute) so its real width is what makes .live-chart-scroll's
+   own scrollable area the right size — same reasoning as week.js's own
+   #weekTimelineInner. height:100% so IT fills .live-chart-scroll
+   vertically, which the canvas then fills in turn.
+   */
+.live-chart-wide-inner {
+  height: 100%;
+}
+
 .live-chart-frame canvas {
   display: block;
+  width: 100% !important;
   height: 100% !important;
-  /* width intentionally not forced here — live.js sets it directly via
-     inline style: 100% on desktop (fills the frame exactly, unchanged
-     from before this scroll wrapper existed) or an explicit wide pixel
-     value on mobile (natural, un-squashed per-hour spacing, scrollable —
-     see renderForLocation's isMobileDevice branch). Normal flow now (not
-     position:absolute) specifically so its real width is what makes
-     .live-chart-scroll's own scrollable area the right size. */
+  /* ALWAYS 100% — of .live-chart-wide-inner, not of .live-chart-scroll or
+     the frame itself. This used to be left unset here, with live.js
+     setting the canvas's OWN width directly (100% desktop, an explicit
+     wide pixel value on mobile) — confirmed, by directly inspecting a
+     live chart, that this never actually worked: Chart.js's own
+     responsive resize logic runs after renderConditionsChart creates the
+     chart and resets the canvas back down to match its parent's width
+     regardless of what was set beforehand, discarding the wide value
+     silently every time. Chart.js is always going to win that fight, on
+     every render — the only way to actually get a wide canvas through
+     Chart.js's own responsive behavior is to make its PARENT
+     (.live-chart-wide-inner) wide instead, and let Chart.js's normal
+     "fill 100% of my container" logic do the rest. */
 }
 
 .live-chart-frame:fullscreen,
