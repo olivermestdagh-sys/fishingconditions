@@ -163,18 +163,18 @@ function makeArrowCanvas(color, filled = true) {
   return canvas;
 }
 
-// Deliberately obvious this time — a clear, unmissable tint, not a
-// subtle one. Two prior attempts (0.055/0 → 0.08/0.03 → 0.15/0.05) each
-// turned out to still be indistinguishable from plain white on the
-// actual deployed page, confirmed directly by the person looking at it
-// (not just by pixel-sampling the canvas, which only proves content is
-// technically THERE, not that it's visually registering as anything).
-// 0.3/0.12 is intentionally strong enough that there's no ambiguity left
-// about whether it's visible — if this STILL doesn't show up, the day-
-// band color isn't the actual thing being perceived as a gap, and the
-// investigation needs to look elsewhere entirely rather than nudging
-// this same number a fourth time.
-const DAY_BAND_COLORS = ["rgba(31, 78, 120, 0.3)", "rgba(31, 78, 120, 0.12)"];
+// A modest, tasteful tint — both non-zero (the original had the second
+// at literal 0, invisible by design on alternating days). An earlier
+// round pushed this all the way to 0.3/0.12 as a deliberate, unmissable
+// diagnostic test, on the theory that the "gap" was this tint being too
+// faint to register. It wasn't: even at 0.3 the person still saw plain
+// white, which turned out to mean the real cause was elsewhere entirely
+// (yTemp/yWind's axis max being hugely oversized relative to real data —
+// see those scale definitions below — leaving the top of the chart
+// structurally empty of any BOLD content regardless of this tint).
+// Settled back to a subtle level now that this isn't doing the load-
+// bearing work it was being tested for.
+const DAY_BAND_COLORS = ["rgba(31, 78, 120, 0.06)", "rgba(31, 78, 120, 0.02)"];
 const NIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.10)";
 const TWILIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.05)";
 
@@ -3303,18 +3303,30 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
         // of inside the plot area (buildConditionStripsPlugin) — so
         // yRain's min is a real 0 now, meaning 0% rainfall correctly sits
         // right at the very bottom rather than floating above it.
-        // yTemp/yWind keep a small negative floor (-5) below their real
+        // yTemp/yWind keep a small negative floor (-2) below their real
         // minimum (0°C-ish, 0 km/h) purely as a little visual breathing
         // room, not because anything below them needs the space anymore.
+        // Their MAX values were 40/50 until this point — hugely oversized
+        // relative to what real conditions ever reach (confirmed against
+        // actual plotted data: temp routinely tops out in the high teens,
+        // wind in the high 30s at most, even in fairly active weather),
+        // which meant the top third-to-half of the chart's vertical space
+        // was structurally empty almost all the time — no data was ever
+        // going to reach up there, regardless of anything else drawn
+        // nearby (the day-band tint, the strips, none of that changes
+        // this). 32/45 still leave real headroom above anything observed
+        // so far without clipping a genuinely hot day or a strong blow,
+        // but give both curves a realistic chance to actually use the
+        // space they're drawn in, rather than permanently riding low.
         // No axis title here (display:false) — a rotated Chart.js title
         // reserves a full extra margin column on the left/right regardless
         // of how short the text is. A compact "°C"/"km/h" label is drawn
         // directly at the top of each axis instead, by buildAxisUnitLabelsPlugin
         // below, using space already reserved for the day heading rather
         // than adding new margin.
-        yTemp: { position: "left", min: -5, max: 40, display: !compact && !hideValueAxes, title: { display: false } },
+        yTemp: { position: "left", min: -2, max: 32, display: !compact && !hideValueAxes, title: { display: false } },
         yRain: { display: false, min: 0, max: 100 },
-        yWind: { position: "right", min: -5, max: 50, display: !compact && !hideValueAxes, grid: { drawOnChartArea: false }, title: { display: false } },
+        yWind: { position: "right", min: -2, max: 45, display: !compact && !hideValueAxes, grid: { drawOnChartArea: false }, title: { display: false } },
         yTide: {
           // Always hidden — the filled tide shape on the chart already
           // conveys high/low visually; a numeric axis for it isn't needed,
