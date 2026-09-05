@@ -169,6 +169,12 @@ function renderLocationMap() {
 
   const map = renderLeafletLocationMap("locationMap", points, { onMapClick: onLocationMapClickForPreview });
   if (!map) return;
+  // Personal catch-history waypoints (data/personal-spots.gpx) — an extra
+  // layer over the tracked-location pins above, only for whoever has a
+  // GitHub connection set up (see loadAndRenderPersonalSpots's own comment
+  // for exactly what that does and doesn't gate). Fire-and-forget: this
+  // page's own map/location rendering doesn't need to wait on it.
+  loadAndRenderPersonalSpots(map);
   // Popup content only exists in the DOM once a popup actually opens (up
   // until then it's just an HTML string Leaflet is holding onto), so its
   // buttons have to be wired here rather than up front.

@@ -903,6 +903,121 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
   return map;
 }
 
+// --- Personal fishing-spot waypoints (GPX) ----------------------------------
+//
+// The site owner's own private catch history — spots logged over time in a
+// chartplotter/phone app (Lowrance, C-MAP Embark, etc.) and exported as a
+// standard GPX file — shown as an extra layer over the Location tab's map,
+// gated behind having a GitHub connection set up (see loadAndRenderPersonalSpots).
+
+// One style per distinct <sym> value found in the initial GPX export.
+// "Different icon per sym" here means color/size/border varies by sym, not
+// a different SILHOUETTE — see loadAndRenderPersonalSpots's own comment for
+// why, at this data's actual scale (2500+ points), real distinct icon
+// shapes would trade away meaningful rendering performance to get.
+const PERSONAL_SPOT_SYM_STYLES = {
+  bigfish: { color: "#7f1d1d", fillColor: "#dc2626", radius: 6, weight: 1.5 },
+  "circle,yellow": { color: "#854d0e", fillColor: "#eab308", radius: 4, weight: 1 },
+  "circle,aqua": { color: "#155e75", fillColor: "#22d3ee", radius: 4, weight: 1 },
+  "circle,green": { color: "#14532d", fillColor: "#4ade80", radius: 4, weight: 1 },
+  flagbuoy: { color: "#000000", fillColor: "#f97316", radius: 6, weight: 2 },
+};
+// Whatever a FUTURE re-exported GPX might use that isn't one of the above —
+// exact same sym property, gpx files people export later aren't guaranteed
+// to only ever use these five, and an unstyled/invisible marker for an
+// unrecognized sym would be a confusing silent failure.
+const PERSONAL_SPOT_DEFAULT_STYLE = { color: "#374151", fillColor: "#9ca3af", radius: 4, weight: 1 };
+
+/**
+ * Parses a GPX file's <wpt> waypoints into plain {lat, lon, name, desc, sym}
+ * objects, using the browser's own built-in DOMParser rather than a
+ * third-party XML/GPX library — GPX is just XML, and this only ever needs
+ * <wpt> plus four of its child tags, not the full GPX spec (routes, tracks,
+ * extensions, etc., all ignored). Returns [] (not an exception) for
+ * anything that fails to parse, since a malformed or empty file should mean
+ * "nothing to show", not a page-breaking error.
+ */
+function parseGpxWaypoints(gpxText) {
+  try {
+    const doc = new DOMParser().parseFromString(gpxText, "application/xml");
+    if (doc.querySelector("parsererror")) return [];
+    const waypoints = [];
+    for (const wpt of doc.querySelectorAll("wpt")) {
+      const lat = parseFloat(wpt.getAttribute("lat"));
+      const lon = parseFloat(wpt.getAttribute("lon"));
+      if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
+      waypoints.push({
+        lat,
+        lon,
+        name: wpt.querySelector("name")?.textContent || "",
+        desc: wpt.querySelector("desc")?.textContent || "",
+        sym: wpt.querySelector("sym")?.textContent || "",
+      });
+    }
+    return waypoints;
+  } catch (err) {
+    console.error("Could not parse GPX:", err);
+    return [];
+  }
+}
+
+/**
+ * Loads data/personal-spots.gpx (a plain GPX file — replace it with a fresh
+ * export any time to update what's shown, no conversion step needed) and
+ * plots every waypoint on an already-created Leaflet map.
+ *
+ * Gated behind getConnection() — the SAME GitHub personal access token
+ * already used for admin/write actions on Settings, not a new or separate
+ * token. IMPORTANT CAVEAT, worth understanding clearly: this only gates
+ * whether the JS chooses to RENDER the data — it does not, and on a static
+ * GitHub Pages site CANNOT, restrict who can fetch data/personal-spots.gpx
+ * directly. That file sits in the same public repo as everything else on
+ * this site; anyone who knows or guesses the path can still download it
+ * with a plain HTTP request, connection or no connection. This is a "don't
+ * clutter the map with 2500+ personal points for random visitors" gate, not
+ * genuine access control — there's no server here able to enforce one. If
+ * these points need to be genuinely private, they can't live in this
+ * repo at all.
+ *
+ * Rendered as Leaflet circleMarkers on a dedicated canvas renderer
+ * (L.canvas()), deliberately NOT the custom SVG divIcon pins
+ * (buildMapPinDivIcon) used for tracked fishing LOCATIONS elsewhere on this
+ * same map. At this data's actual scale, building and painting a couple
+ * thousand individual HTML/SVG elements would be meaningfully heavier than
+ * Leaflet's own canvas-rendered circles, which are built for exactly this
+ * point count.
+ */
+async function loadAndRenderPersonalSpots(map) {
+  if (!getConnection()) return;
+
+  let gpxText;
+  try {
+    const res = await fetch("data/personal-spots.gpx", { cache: "no-store" });
+    if (!res.ok) return; // file not uploaded yet — nothing to show, not an error
+    gpxText = await res.text();
+  } catch (err) {
+    console.error("Could not load personal-spots.gpx:", err);
+    return;
+  }
+
+  const waypoints = parseGpxWaypoints(gpxText);
+  if (waypoints.length === 0) return;
+
+  const renderer = L.canvas({ padding: 0.5 });
+  for (const wp of waypoints) {
+    const style = PERSONAL_SPOT_SYM_STYLES[wp.sym] || PERSONAL_SPOT_DEFAULT_STYLE;
+    const marker = L.circleMarker([wp.lat, wp.lon], {
+      renderer,
+      radius: style.radius,
+      color: style.color,
+      weight: style.weight,
+      fillColor: style.fillColor,
+      fillOpacity: 0.85,
+    }).addTo(map);
+    if (wp.name) marker.bindTooltip(wp.name, { direction: "top" });
+  }
+}
+
 // --- GitHub read/write (shared) ---------------------------------------------
 //
 // Originally lived only in locationsadmin.js (the Settings tab's own
