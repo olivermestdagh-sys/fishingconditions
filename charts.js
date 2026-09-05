@@ -832,6 +832,22 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
     map.on("click", (e) => opts.onMapClick(e.latlng.lat, e.latlng.lng));
   }
 
+  // Leaflet sizes its internal tile grid ONCE, from the container's
+  // dimensions at the exact moment L.map() was called above — it has no
+  // way to know the container later changed size unless explicitly told
+  // via invalidateSize(). On mobile specifically, the browser's address
+  // bar is commonly still fully expanded at page-load time and collapses
+  // a moment later (a well-documented, ordinary mobile browser behavior),
+  // which — on this page's fullscreen map layout (.map-fullpage-body,
+  // height:100dvh) — silently leaves the map sized for the SMALLER,
+  // address-bar-still-showing viewport even after the real one grows.
+  // The short delay catches that one-time settle shortly after load; the
+  // resize/orientationchange listeners catch it happening again later
+  // (rotating the device, or the address bar toggling on scroll).
+  setTimeout(() => map.invalidateSize(), 300);
+  window.addEventListener("resize", () => map.invalidateSize());
+  window.addEventListener("orientationchange", () => map.invalidateSize());
+
   return map;
 }
 
