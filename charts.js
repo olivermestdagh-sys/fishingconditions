@@ -163,16 +163,18 @@ function makeArrowCanvas(color, filled = true) {
   return canvas;
 }
 
-// Both non-zero now — the second used to be literally 0 (fully
-// transparent), which combined with the first's very faint 0.055 alpha
-// made the alternating-day background look like empty white space at a
-// glance rather than a deliberate subtle pattern (confirmed by pixel-
-// sampling the actual rendered canvas: real, non-zero-alpha pixels were
-// present across the whole width, just too faint to register visually).
-// Both stay comfortably below NIGHT_BAND_COLOR's 0.10 so day-band tinting
-// never reads as more prominent than the night/twilight shading it's
-// meant to sit behind.
-const DAY_BAND_COLORS = ["rgba(31, 78, 120, 0.08)", "rgba(31, 78, 120, 0.03)"];
+// Deliberately obvious this time — a clear, unmissable tint, not a
+// subtle one. Two prior attempts (0.055/0 → 0.08/0.03 → 0.15/0.05) each
+// turned out to still be indistinguishable from plain white on the
+// actual deployed page, confirmed directly by the person looking at it
+// (not just by pixel-sampling the canvas, which only proves content is
+// technically THERE, not that it's visually registering as anything).
+// 0.3/0.12 is intentionally strong enough that there's no ambiguity left
+// about whether it's visible — if this STILL doesn't show up, the day-
+// band color isn't the actual thing being perceived as a gap, and the
+// investigation needs to look elsewhere entirely rather than nudging
+// this same number a fourth time.
+const DAY_BAND_COLORS = ["rgba(31, 78, 120, 0.3)", "rgba(31, 78, 120, 0.12)"];
 const NIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.10)";
 const TWILIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.05)";
 
