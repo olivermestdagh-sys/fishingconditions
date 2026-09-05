@@ -112,6 +112,48 @@ main {
   text-align: center;
 }
 
+/* The Live tab's "you are here" marker (buildCurrentPositionDivIcon,
+   charts.js) — a small solid dot with an expanding, fading ring animated
+   around it, the standard "current location" treatment on most map apps.
+   Deliberately not a teardrop pin like the fishing-location markers (see
+   that function's own comment for why): this needs to read as a
+   different KIND of marker at a glance, not just a different color of
+   the same shape. */
+.current-position-marker {
+  position: relative;
+  width: 22px;
+  height: 22px;
+}
+
+.current-position-dot {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #2563eb;
+  border: 2px solid white;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.4);
+}
+
+.current-position-pulse {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(37, 99, 235, 0.35);
+  animation: current-position-pulse-anim 2s infinite;
+}
+
+@keyframes current-position-pulse-anim {
+  0% { transform: scale(0.55); opacity: 0.8; }
+  70% { transform: scale(2); opacity: 0; }
+  100% { opacity: 0; }
+}
+
 /* Floating summary+graph panel, shown over the map on marker click — a
    bottom-sheet, the familiar "tap a map pin, details slide up" pattern
    from Google/Apple Maps, since this site is mobile-first and that's the
@@ -189,6 +231,72 @@ main {
      32px wide) sitting over this same row. */
   padding-right: 36px;
   margin-bottom: 4px;
+}
+
+/* Live tab's own heading row (live.html) additionally carries the
+   condition/temp/wind/tide stats and the Home By timing control — all
+   crammed onto the same line as the location name, per request, rather
+   than each living in its own stacked section below. align-items:center
+   (not baseline, the shared rule's default above) since this row mixes
+   badges/inputs/buttons of very different heights, which look better
+   vertically centered against each other than baseline-aligned; flex-wrap
+   since there's no realistic width (especially on mobile) that fits a
+   title + five stats + a time input + a button on a single visual line
+   without wrapping — the wrapping is expected and fine, "same line" here
+   means "one flex container", not "guaranteed no wrap". */
+.live-heading-row {
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.live-inline-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Same colors/meaning as the standalone .condition-badge elsewhere on the
+   site, just sized down to fit inline next to a heading rather than in
+   its own card — 44px there would dwarf the title text next to it here. */
+.live-inline-badge {
+  min-width: 28px;
+  height: 28px;
+  font-size: 0.78rem;
+  padding: 0 6px;
+}
+
+.live-inline-stat {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--grey-700);
+  white-space: nowrap;
+}
+
+.live-inline-timings {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.live-inline-timings label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--grey-500);
+}
+
+.live-inline-timings input[type="time"] {
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--grey-200);
+  font-size: 0.85rem;
+}
+
+.live-inline-timings button {
+  padding: 6px 12px;
+  font-size: 0.8rem;
 }
 
 /* ID selector, not ".location-hover-panel-heading-row h2" — deliberately,

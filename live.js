@@ -262,9 +262,9 @@ function selectLocationAndType(name, preferredType) {
 
 function renderSummary(loc, rows, now) {
   const card = document.getElementById("liveSummaryCard");
-  card.style.display = "block";
+  card.style.display = "flex";
   if (rows.length === 0) {
-    card.innerHTML = `<div class="empty-state">No data yet for this location.</div>`;
+    card.innerHTML = `<span class="live-inline-stat">No data yet</span>`;
     return;
   }
   const tempRt = lastNonNullAtOrBefore(rows, "Temp Realtime (C)", now);
@@ -277,35 +277,16 @@ function renderSummary(loc, rows, now) {
   const conditionVal = conditionRow ? conditionRow["Condition"] : null;
   const fishingVal = fishingRow ? fishingRow["Fishing Condition"] : null;
 
+  // Compact inline versions of the same badges/stats that used to live in
+  // their own stacked card — same data, same condition-badge colors, just
+  // small enough to sit directly on the heading row next to the location
+  // name (see live.html's .live-heading-row) rather than below it.
   card.innerHTML = `
-    <div class="badge-stack" style="margin-bottom:10px;">
-      <div class="badge-item">
-        <div class="condition-badge" style="background:${conditionVal != null ? (CONDITION_COLORS[Math.round(conditionVal)] || "var(--cond-none)") : "var(--cond-none)"}">
-          ${conditionVal != null ? conditionVal + "/5" : "–"}
-        </div>
-        <div class="badge-label">Location</div>
-      </div>
-      <div class="badge-item">
-        <div class="condition-badge" style="background:${fishingVal != null ? (CONDITION_COLORS[Math.round(fishingVal)] || "var(--cond-none)") : "var(--cond-none)"}">
-          ${fishingVal != null ? fishingVal + "/5" : "–"}
-        </div>
-        <div class="badge-label">Fishing</div>
-      </div>
-    </div>
-    <div class="stat-grid">
-      <div class="stat">
-        <div class="label">Temp (realtime)</div>
-        <div class="value">${tempRt ? tempRt["Temp Realtime (C)"] + "°" : "–"}</div>
-      </div>
-      <div class="stat">
-        <div class="label">Wind (realtime)</div>
-        <div class="value">${windRt ? Math.round(windRt["Wind Realtime (km/h)"]) + " km/h" : "–"}</div>
-      </div>
-      <div class="stat">
-        <div class="label">Tide</div>
-        <div class="value">${tideRow ? tideRow["Tide Status"] : "–"}${tideHeightRow ? " " + tideHeightRow["Tide Height (m)"] + "m" : ""}</div>
-      </div>
-    </div>
+    <span class="condition-badge live-inline-badge" title="Location condition" style="background:${conditionVal != null ? (CONDITION_COLORS[Math.round(conditionVal)] || "var(--cond-none)") : "var(--cond-none)"}">${conditionVal != null ? conditionVal : "–"}</span>
+    <span class="condition-badge live-inline-badge" title="Fishing condition" style="background:${fishingVal != null ? (CONDITION_COLORS[Math.round(fishingVal)] || "var(--cond-none)") : "var(--cond-none)"}">${fishingVal != null ? fishingVal : "–"}</span>
+    <span class="live-inline-stat">${tempRt ? tempRt["Temp Realtime (C)"] + "°" : "–"}</span>
+    <span class="live-inline-stat">${windRt ? Math.round(windRt["Wind Realtime (km/h)"]) + " km/h" : "–"}</span>
+    <span class="live-inline-stat">${tideRow ? tideRow["Tide Status"] : "–"}${tideHeightRow ? " " + tideHeightRow["Tide Height (m)"] + "m" : ""}</span>
   `;
 }
 
