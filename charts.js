@@ -163,7 +163,16 @@ function makeArrowCanvas(color, filled = true) {
   return canvas;
 }
 
-const DAY_BAND_COLORS = ["rgba(31, 78, 120, 0.055)", "rgba(31, 78, 120, 0)"];
+// Both non-zero now — the second used to be literally 0 (fully
+// transparent), which combined with the first's very faint 0.055 alpha
+// made the alternating-day background look like empty white space at a
+// glance rather than a deliberate subtle pattern (confirmed by pixel-
+// sampling the actual rendered canvas: real, non-zero-alpha pixels were
+// present across the whole width, just too faint to register visually).
+// Both stay comfortably below NIGHT_BAND_COLOR's 0.10 so day-band tinting
+// never reads as more prominent than the night/twilight shading it's
+// meant to sit behind.
+const DAY_BAND_COLORS = ["rgba(31, 78, 120, 0.08)", "rgba(31, 78, 120, 0.03)"];
 const NIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.10)";
 const TWILIGHT_BAND_COLOR = "rgba(15, 23, 42, 0.05)";
 
