@@ -101,6 +101,21 @@ main {
   bottom: 0;
   max-height: 75%;
   overflow-y: auto;
+  /* Explicit, not left to the default "auto" — this panel nests a
+     horizontally-scrolling chart area (.location-hover-panel-chart-scroll,
+     below) inside a vertically-scrolling one (this element). Relying on
+     overflow-y/overflow-x properties alone to sort out which element a
+     given touch gesture belongs to is a known-unreliable pattern on
+     mobile — a swipe intended to scroll THIS panel down/up, if it starts
+     on the chart underneath, can get captured by the chart's own
+     horizontal-scroll handling instead of bubbling up, especially on
+     iOS Safari, leaving the panel effectively stuck (map visible
+     underneath, rest of the panel's content unreachable — exactly the
+     "can't scroll" symptom this fixes). touch-action:pan-y tells the
+     browser's compositor, before any scroll-bubbling logic even runs,
+     that a touch anywhere in this panel should be interpreted as a
+     vertical pan on THIS element specifically. */
+  touch-action: pan-y;
   background: var(--white);
   border-radius: 16px 16px 0 0;
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.25);
@@ -306,6 +321,14 @@ main {
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
+  /* The other half of the touch-action:pan-y on .location-hover-panel
+     above — this element only ever needs to handle horizontal panning
+     (the chart's own left-right scroll), so it explicitly disclaims
+     vertical panning rather than leaving it to overflow-y:hidden alone
+     to imply that. Without this, a vertical swipe starting here could
+     get captured by this element instead of bubbling up to the panel's
+     own vertical scroll, which is exactly the bug this pairs with fixing. */
+  touch-action: pan-x;
   cursor: grab;
 }
 
