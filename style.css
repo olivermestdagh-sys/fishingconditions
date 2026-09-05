@@ -90,6 +90,42 @@ main {
   height: 100%;
 }
 
+/* Live tab's own wrapper around its map (#liveMap) — NOT the same thing
+   as .location-map-fullpage above, which is shared with the Location
+   tab's map and must stay untouched by anything Live-specific. On
+   desktop this is just a transparent pass-through (100%/100%, identical
+   to what .location-map-fullpage already does on its own) — the mobile
+   behavor below is the only reason this wrapper exists at all. */
+.live-map-scroll-wrap {
+  width: 100%;
+  height: 100%;
+}
+
+/* Same 900px threshold used everywhere else on the site for "is this a
+   phone" (app.js's isMobileDevice, the various chart-frame breakpoints).
+   Shrinks the map's own height (freeing vertical space for the
+   collapsible panel below/over it) while making it WIDER than the
+   viewport instead of narrower to match — deliberately, per request,
+   rather than just showing a smaller slice of the same-width map. The
+   map itself (#liveMap, sized via the descendant selector below) becomes
+   wide enough that this wrapper's own overflow-x:auto is what reveals the
+   rest of it, a horizontal scroll/pan gesture — genuinely additional to,
+   not a replacement for, Leaflet's own built-in drag-to-pan/zoom, which
+   still works exactly as before on whatever's currently in view. */
+@media (max-width: 900px) {
+  .live-map-scroll-wrap {
+    height: 32vh;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+  }
+  .live-map-scroll-wrap #liveMap {
+    width: 220%;
+    height: 100%;
+  }
+}
+
 /* Small floating banner over the Live tab's map, shown while GPS is still
    resolving or failed entirely — before there's any matched location to
    open a proper hover panel for. Hidden (display:none, set in JS) once a
@@ -245,14 +281,27 @@ main {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  background: none;
+  background: var(--white);
   border: none;
-  padding: 0 36px 0 0; /* right padding clears .location-hover-panel-close, same reasoning as .location-hover-panel-heading-row above */
+  padding: 8px 36px 8px 0; /* right padding clears .location-hover-panel-close, same reasoning as .location-hover-panel-heading-row above; top/bottom now genuinely padding rather than 0, since this sticks and needs to look like a proper bar, not just inline text, once content is scrolled under it */
   margin: 0 0 4px;
   text-align: left;
   cursor: pointer;
   font: inherit;
   color: inherit;
+  /* Stays visible while the expanded content below it (ratings, timings,
+     the chart) scrolls past underneath — .location-hover-panel is this
+     button's nearest scrolling ancestor (overflow-y:auto), so top:0 sticks
+     it there once scrolled that far. Needs its own opaque background
+     (var(--white), same as the panel's) since without one, scrolled
+     content would show through/behind it instead of being properly
+     covered — sticky elements don't get an opaque backing for free.
+     z-index above the expanded content's own default stacking so it's
+     genuinely ON TOP while stuck, not just visually coincidentally above
+     it. */
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 
 .live-hover-chevron {
