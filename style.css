@@ -90,6 +90,28 @@ main {
   height: 100%;
 }
 
+/* Small floating banner over the Live tab's map, shown while GPS is still
+   resolving or failed entirely — before there's any matched location to
+   open a proper hover panel for. Hidden (display:none, set in JS) once a
+   location's been matched and its panel opens; the panel itself takes
+   over as the page's main content at that point. Sits above the map
+   (z-index) but well below the hover panel's own 2000, since the panel —
+   once open — should always be able to cover it. */
+.live-gps-status {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 500;
+  background: var(--white);
+  padding: 8px 16px;
+  border-radius: 999px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  font-size: 0.85rem;
+  max-width: 90%;
+  text-align: center;
+}
+
 /* Floating summary+graph panel, shown over the map on marker click — a
    bottom-sheet, the familiar "tap a map pin, details slide up" pattern
    from Google/Apple Maps, since this site is mobile-first and that's the

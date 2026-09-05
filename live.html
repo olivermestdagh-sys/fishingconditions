@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Olie's Kayak and Surf Fishing Conditions – Live</title>
 <link rel="stylesheet" href="style.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
-<body>
+<body class="map-fullpage-body">
 
 <header class="topbar">
   <h1>Olie's Kayak and Surf Fishing Conditions</h1>
@@ -21,55 +22,52 @@
 </nav>
 
 <main>
-  <section class="summary-card" id="gpsStatus">
-    <div class="empty-state">Finding your location…</div>
-  </section>
+  <div id="liveMap" class="location-map-fullpage"></div>
+  <div id="liveGpsStatus" class="live-gps-status">Finding your location…</div>
 
-  <section class="picker-row" id="manualPickerRow" style="display:none;">
-    <label for="manualLocationSelect">Not this spot?</label>
-    <select id="manualLocationSelect"></select>
-  </section>
+  <div id="liveHoverPanel" class="location-hover-panel" style="display:none;">
+    <button id="btnCloseLiveHoverPanel" class="location-hover-panel-close" aria-label="Close">&times;</button>
 
-  <section id="typePickerSection" style="display:none;">
-    <div id="typePicker" class="type-photo-row"></div>
-  </section>
-
-  <section id="summaryCard" class="summary-card" style="display:none;">
-    <!-- filled by live.js -->
-  </section>
-
-  <section class="summary-card" id="timingsSection">
-    <label class="loc-edit-label" style="display:block;margin:0 0 10px;">Work out when to stop fishing</label>
-    <div class="filter-row">
-      <div>
-        <label for="homeByTime">Home By</label>
-        <input type="time" id="homeByTime" />
+    <section class="chart-section location-hover-panel-chart">
+      <div class="location-hover-panel-heading-row">
+        <h2 id="liveHoverPanelLocationName">&nbsp;</h2>
+        <div class="graph-gesture-hint" aria-hidden="true">
+          <div>Double-tap toggles full screen</div>
+          <div>Hold for 2s to toggle data point</div>
+        </div>
       </div>
-    </div>
-    <button id="btnUpdateTimings" class="btn-primary" style="margin-top:12px;">Update timings</button>
-    <p id="timingsStatus" class="footnote" style="margin:10px 0 0;text-align:left;"></p>
-  </section>
+      <p id="liveHoverPanelSub" class="summary-sub" style="margin:0 0 10px;"></p>
 
-  <section class="chart-section full-width-chart" id="liveChartSection" style="display:none;">
-    <h2>Last 24 hours &rarr; next 24 hours</h2>
-    <div id="liveChartFrame" class="live-chart-frame">
-      <div class="graph-gesture-hint" aria-hidden="true">
-        <div>Double-tap toggles full screen</div>
-        <div>Hold for 2s to toggle data point</div>
-      </div>
-      <div id="liveChartScroll" class="live-chart-scroll">
-        <canvas id="liveChart"></canvas>
-      </div>
-    </div>
-  </section>
+      <section id="typePickerSection" style="display:none;margin:0 0 12px;">
+        <div id="typePicker" class="type-photo-row"></div>
+      </section>
 
-  <footer class="footnote">
-    Data from <a href="https://www.willyweather.com.au/" target="_blank" rel="noopener">WillyWeather</a>.
-    Refreshed automatically every 30 minutes. Location matched to your device's GPS.
-  </footer>
+      <div id="liveSummaryCard" style="display:none;"></div>
+
+      <section id="timingsSection" style="margin:14px 0 0;">
+        <label class="loc-edit-label" style="display:block;margin:0 0 10px;">Work out when to stop fishing</label>
+        <div class="filter-row">
+          <div>
+            <label for="homeByTime">Home By</label>
+            <input type="time" id="homeByTime" />
+          </div>
+        </div>
+        <button id="btnUpdateTimings" class="btn-primary" style="margin-top:12px;">Update timings</button>
+        <p id="timingsStatus" class="footnote" style="margin:10px 0 0;text-align:left;"></p>
+      </section>
+
+      <div id="liveChartFrame" class="live-chart-frame" style="margin-top:14px;">
+        <div id="liveChartScroll" class="live-chart-scroll">
+          <canvas id="liveChart"></canvas>
+        </div>
+      </div>
+      <p id="liveHoverPanelEmptyState" class="empty-state" style="display:none;">No data yet for this location.</p>
+    </section>
+  </div>
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="charts.js"></script>
 <script src="live.js"></script>
 </body>
