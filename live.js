@@ -191,6 +191,10 @@ function renderLiveMap(gpsPosition) {
   if (map && gpsPosition) {
     map.setView([gpsPosition.lat, gpsPosition.lng], 13);
   }
+  // Same personal catch-history layer as the Location tab (charts.js) —
+  // gated the same way (getConnection()), same caveats apply (see that
+  // function's own comment).
+  if (map) loadAndRenderPersonalSpots(map);
 }
 
 // Whether the panel's expanded content (ratings, timings, chart) is
