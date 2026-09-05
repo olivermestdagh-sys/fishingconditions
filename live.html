@@ -29,32 +29,40 @@
     <button id="btnCloseLiveHoverPanel" class="location-hover-panel-close" aria-label="Close">&times;</button>
 
     <section class="chart-section location-hover-panel-chart">
-      <div class="location-hover-panel-heading-row live-heading-row">
-        <h2 id="liveHoverPanelLocationName">&nbsp;</h2>
-        <div id="liveSummaryCard" class="live-inline-stats" style="display:none;"></div>
-        <div class="live-inline-timings">
-          <label for="homeByTime">Home By</label>
-          <input type="time" id="homeByTime" />
-          <button id="btnUpdateTimings" class="btn-primary">Update</button>
+      <button type="button" id="liveHoverPanelBanner" class="live-hover-banner" aria-expanded="false">
+        <div>
+          <h2 id="liveHoverPanelLocationName">&nbsp;</h2>
+          <p id="liveHoverPanelDistance" class="summary-sub" style="margin:0;"></p>
         </div>
-        <div class="graph-gesture-hint" aria-hidden="true">
-          <div>Double-tap toggles full screen</div>
-          <div>Hold for 2s to toggle data point</div>
-        </div>
-      </div>
-      <p id="liveHoverPanelSub" class="summary-sub" style="margin:0 0 6px;"></p>
-      <p id="timingsStatus" class="footnote" style="margin:0 0 10px;text-align:left;"></p>
+        <span id="liveHoverPanelChevron" class="live-hover-chevron" aria-hidden="true">▾</span>
+      </button>
 
-      <section id="typePickerSection" style="display:none;margin:0 0 12px;">
-        <div id="typePicker" class="type-photo-row"></div>
-      </section>
-
-      <div id="liveChartFrame" class="live-chart-frame" style="margin-top:6px;">
-        <div id="liveChartScroll" class="live-chart-scroll">
-          <canvas id="liveChart"></canvas>
+      <div id="liveHoverPanelExpanded" style="display:none;">
+        <div class="location-hover-panel-heading-row live-heading-row" style="padding-right:0;margin-top:10px;">
+          <div id="liveSummaryCard" class="live-inline-stats" style="display:none;"></div>
+          <div class="live-inline-timings">
+            <label for="homeByTime">Home By</label>
+            <input type="time" id="homeByTime" />
+            <button id="btnUpdateTimings" class="btn-primary">Update</button>
+          </div>
+          <div class="graph-gesture-hint" aria-hidden="true">
+            <div>Double-tap toggles full screen</div>
+            <div>Hold for 2s to toggle data point</div>
+          </div>
         </div>
+        <p id="timingsStatus" class="footnote" style="margin:0 0 10px;text-align:left;"></p>
+
+        <section id="typePickerSection" style="display:none;margin:0 0 12px;">
+          <div id="typePicker" class="type-photo-row"></div>
+        </section>
+
+        <div id="liveChartFrame" class="live-chart-frame" style="margin-top:6px;">
+          <div id="liveChartScroll" class="live-chart-scroll">
+            <canvas id="liveChart"></canvas>
+          </div>
+        </div>
+        <p id="liveHoverPanelEmptyState" class="empty-state" style="display:none;">No data yet for this location.</p>
       </div>
-      <p id="liveHoverPanelEmptyState" class="empty-state" style="display:none;">No data yet for this location.</p>
     </section>
   </div>
 </main>

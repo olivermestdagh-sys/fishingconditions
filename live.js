@@ -193,12 +193,55 @@ function renderLiveMap(gpsPosition) {
   }
 }
 
+// Whether the panel's expanded content (ratings, timings, chart) is
+// currently showing, vs just the collapsed name+distance banner. Reset to
+// false whenever a genuinely NEW location is selected (see
+// selectLocationAndType) — "when first getting a location, only show the
+// banner" applies fresh each time a different spot is picked, not just
+// the very first one all session.
+let isPanelExpanded = false;
+// Whether renderForLocation (which builds both the summary badges AND the
+// Chart.js chart) has actually run yet for whatever's currently in
+// currentLoc. Deliberately deferred until the panel is actually expanded,
+// not run eagerly the moment a location is selected — building a chart
+// into a canvas that's sitting inside a display:none container measures
+// as zero width/height (a real, previously-hit bug elsewhere on this
+// site), so rendering only happens once the container is actually
+// visible, in setPanelExpanded below.
+let hasRenderedExpandedContentForCurrentLoc = false;
+
 function showLiveHoverPanel() {
   document.getElementById("liveHoverPanel").style.display = "block";
 }
 
 function hideLiveHoverPanel() {
   document.getElementById("liveHoverPanel").style.display = "none";
+  // Collapses for next time, regardless of whether the SAME marker gets
+  // tapped again afterward (selectLocationAndType's own "same location"
+  // branch wouldn't otherwise reset this) — closing the panel should
+  // always mean "start fresh, collapsed" the next time it opens.
+  setPanelExpanded(false);
+}
+
+function setPanelExpanded(expanded) {
+  isPanelExpanded = expanded;
+  document.getElementById("liveHoverPanelExpanded").style.display = expanded ? "block" : "none";
+  document.getElementById("liveHoverPanelChevron").textContent = expanded ? "▴" : "▾";
+  document.getElementById("liveHoverPanelBanner").setAttribute("aria-expanded", expanded ? "true" : "false");
+  if (expanded && currentLoc && !hasRenderedExpandedContentForCurrentLoc) {
+    hasRenderedExpandedContentForCurrentLoc = true;
+    renderForLocation(currentLoc);
+  }
+}
+
+function updateDistanceDisplay(loc) {
+  const el = document.getElementById("liveHoverPanelDistance");
+  if (currentGpsPosition && loc.lat != null && loc.lng != null) {
+    const d = distanceKm(currentGpsPosition.lat, currentGpsPosition.lng, loc.lat, loc.lng);
+    el.textContent = `${d.toFixed(1)}km away`;
+  } else {
+    el.textContent = "";
+  }
 }
 
 function renderTypePicker(availableTypes, selectedType, onSelect) {
@@ -227,7 +270,7 @@ function renderTypePicker(availableTypes, selectedType, onSelect) {
 // actually show — defaults to Kayak when available (per the site owner's
 // stated preference), falling back to whichever type IS available for
 // locations that don't have a Kayak option at all. Opens (or keeps open)
-// the hover panel and updates its heading — the map-click equivalent of
+// the hover panel and updates its banner — the map-click equivalent of
 // tapping a marker on the Location tab.
 function selectLocationAndType(name, preferredType) {
   const variants = (liveData.locations || []).filter((l) => l.name === name);
@@ -254,10 +297,20 @@ function selectLocationAndType(name, preferredType) {
   setTimingsStatus("");
 
   document.getElementById("liveHoverPanelLocationName").textContent = loc.name;
-  document.getElementById("liveHoverPanelSub").textContent = `${loc.type} · shore faces ${loc.shore}`;
+  updateDistanceDisplay(loc);
   showLiveHoverPanel();
 
-  renderForLocation(loc);
+  if (isNewLocation) {
+    // A genuinely new spot always starts collapsed — see the ask this
+    // implements: "when first getting a location only show the banner".
+    hasRenderedExpandedContentForCurrentLoc = false;
+    setPanelExpanded(false);
+  } else if (isPanelExpanded) {
+    // Same spot, just switched Kayak/Land based type, and the panel's
+    // already open — refresh what's showing immediately rather than
+    // making the person re-expand to see the type they just picked.
+    renderForLocation(loc);
+  }
 }
 
 function renderSummary(loc, rows, now) {
@@ -406,6 +459,7 @@ async function init() {
   }
   document.getElementById("btnUpdateTimings").addEventListener("click", updateTimings);
   document.getElementById("btnCloseLiveHoverPanel").addEventListener("click", hideLiveHoverPanel);
+  document.getElementById("liveHoverPanelBanner").addEventListener("click", () => setPanelExpanded(!isPanelExpanded));
   // Wired once here, not inside renderForLocation — that function reuses
   // this same persistent <canvas> across every location switch and
   // re-render (destroying and recreating the Chart.js instance each time,
@@ -441,15 +495,18 @@ async function init() {
   // trigger a SECOND permission prompt if something else on the page
   // (e.g. a later "Update timings" click) also asks; that action does its
   // own fresh read regardless, since position may have moved on since.
-  const position = await requestGpsPosition();
-  if (!position) {
+  // Assigned to the SHARED currentGpsPosition (charts.js) rather than a
+  // local variable — updateDistanceDisplay needs it later too, whenever a
+  // DIFFERENT marker gets tapped after this initial match, not just here.
+  currentGpsPosition = await requestGpsPosition();
+  if (!currentGpsPosition) {
     setGpsStatus(`Couldn't get your location — showing all tracked spots. Tap one on the map to view it.`);
     renderLiveMap(null);
     return;
   }
 
-  const match = findNearestLocation(locations, position.lat, position.lng);
-  renderLiveMap(position);
+  const match = findNearestLocation(locations, currentGpsPosition.lat, currentGpsPosition.lng);
+  renderLiveMap(currentGpsPosition);
   if (!match) {
     setGpsStatus(`Got your location, but no configured spots have coordinates yet.`);
     return;
