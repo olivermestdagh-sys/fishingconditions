@@ -3264,7 +3264,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       // clearance for a marker sitting right at an axis's max value.
       layout: {
         padding: {
-          top: overlayHeading ? 2 : showDayHeading || moonPhases ? 40 : 2,
+          top: overlayHeading ? 0 : showDayHeading || moonPhases ? 40 : 0,
           bottom: isMobile ? 22 : 28,
         },
         autoPadding: false,
