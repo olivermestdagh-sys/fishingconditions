@@ -675,7 +675,6 @@ const MAP_PIN_STYLES = {
   landBased: { fill: "#854F0B", light: "#FAEEDA" },
   both: { fill: "#534AB7", light: "#EEEDFE" },
   home: { fill: "#15803D", light: "#DCFCE7" },
-  currentPosition: { fill: "#DC2626", light: "#FEE2E2" },
 };
 
 function kayakGlyphSvg(color, cx, cy, scale) {
@@ -713,20 +712,11 @@ function houseGlyphSvg(color, cx, cy, scale) {
   `;
 }
 
-// Same convention as the glyphs above — used for the Live page's "you are
-// here" marker (see renderLiveMap in live.js), the one pin that doesn't
-// represent any fishing location OR the home address, just the device's
-// own current GPS position. A plain dot rather than an activity icon,
-// since there's no "activity" to depict — just a position.
-function dotGlyphSvg(color, cx, cy, scale) {
-  return `<circle cx="${cx}" cy="${cy}" r="${6 * scale}" fill="${color}" stroke="white" stroke-width="${2 * scale}"/>`;
-}
 
 function buildMapPinIconHtml(kind) {
   const { fill, light } = MAP_PIN_STYLES[kind] || MAP_PIN_STYLES.kayak;
   let glyph;
   if (kind === "home") glyph = houseGlyphSvg(fill, 17, 16, 1);
-  else if (kind === "currentPosition") glyph = dotGlyphSvg(fill, 17, 16, 1);
   else if (kind === "landBased") glyph = rodGlyphSvg(fill, 17, 16, 1);
   else if (kind === "both") glyph = kayakGlyphSvg(fill, 12.5, 16, 0.62) + rodGlyphSvg(fill, 21.5, 16, 0.62);
   else glyph = kayakGlyphSvg(fill, 17, 16, 1);
@@ -741,10 +731,13 @@ function buildMapPinIconHtml(kind) {
 
 /**
  * A Leaflet divIcon (arbitrary HTML/SVG rather than an image file) for
- * the given kind — "kayak", "landBased", or "both". className resets
- * Leaflet's own default icon CSS (which otherwise adds a background/
- * border meant for its default image-based marker and would clash with
- * a custom SVG one) — see the .location-map-pin rule in style.css.
+ * the given kind — "kayak", "landBased", "both", or "home". className
+ * resets Leaflet's own default icon CSS (which otherwise adds a
+ * background/border meant for its default image-based marker and would
+ * clash with a custom SVG one) — see the .location-map-pin rule in
+ * style.css. NOT used for "currentPosition" — see
+ * buildCurrentPositionDivIcon below for why that one needs a genuinely
+ * different shape, not just a recolored pin.
  */
 function buildMapPinDivIcon(kind) {
   return L.divIcon({
@@ -754,6 +747,34 @@ function buildMapPinDivIcon(kind) {
     iconAnchor: [17, 44],
     popupAnchor: [0, -40],
     tooltipAnchor: [0, -38],
+  });
+}
+
+/**
+ * The "you are here" marker (Live page — see renderLiveMap in live.js) —
+ * deliberately NOT a buildMapPinDivIcon variant. It used to just be the
+ * same 34x44 teardrop pin silhouette recolored red with a small dot glyph
+ * inside (dotGlyphSvg, above), which at a glance read as "another
+ * fishing-spot pin", not "this one is different, it's you" — genuinely
+ * easy to miss among a map full of real teardrop pins. This is the
+ * standard "blue dot with a pulsing halo" treatment instead (Google Maps
+ * and similar all use some version of this) — a small circle rather than
+ * a pin shape at all, so it's immediately readable as a different KIND of
+ * marker, not just a different color of the same one. CSS animation
+ * lives in style.css (.current-position-pulse).
+ */
+function buildCurrentPositionDivIcon() {
+  return L.divIcon({
+    html: `
+      <div class="current-position-marker">
+        <div class="current-position-pulse"></div>
+        <div class="current-position-dot"></div>
+      </div>
+    `,
+    className: "current-position-icon-wrapper",
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+    tooltipAnchor: [0, -11],
   });
 }
 
@@ -803,7 +824,11 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
   const bounds = [];
   for (const p of valid) {
     bounds.push([p.lat, p.lng]);
-    const marker = L.marker([p.lat, p.lng], { icon: buildMapPinDivIcon(p.iconKind || "kayak") }).addTo(map);
+    // "currentPosition" gets the distinct pulsing-dot marker
+    // (buildCurrentPositionDivIcon) instead of a teardrop pin — see that
+    // function's own comment for why.
+    const icon = p.iconKind === "currentPosition" ? buildCurrentPositionDivIcon() : buildMapPinDivIcon(p.iconKind || "kayak");
+    const marker = L.marker([p.lat, p.lng], { icon }).addTo(map);
     if (p.label) marker.bindTooltip(p.label, { direction: "top" });
     if (p.popupHtml) marker.bindPopup(p.popupHtml);
     if (p.onClick) marker.on("click", p.onClick);
