@@ -45,11 +45,6 @@
         <label for="homeByTime">Home By</label>
         <input type="time" id="homeByTime" />
       </div>
-      <div>
-        <label for="homeAddress">Home address</label>
-        <input type="text" id="homeAddress" placeholder="e.g. 12 Smith St, Melbourne VIC"
-          style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
-      </div>
     </div>
     <button id="btnUpdateTimings" class="btn-primary" style="margin-top:12px;">Update timings</button>
     <p id="timingsStatus" class="footnote" style="margin:10px 0 0;text-align:left;"></p>
@@ -62,7 +57,9 @@
         <div>Double-tap toggles full screen</div>
         <div>Hold for 2s to toggle data point</div>
       </div>
-      <canvas id="liveChart"></canvas>
+      <div id="liveChartScroll" class="live-chart-scroll">
+        <canvas id="liveChart"></canvas>
+      </div>
     </div>
   </section>
 

@@ -2259,12 +2259,34 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
   }
 }
 
-.live-chart-frame canvas {
+/* Wraps the canvas so it can be wider than the frame and scrolled
+   horizontally on mobile (see live.js's renderForLocation) — NOT the
+   canvas itself, since a canvas with position:absolute (the OLD, direct
+   .live-chart-frame canvas rule below) is taken out of normal flow and
+   doesn't contribute to a parent's scrollable width at all, no matter how
+   wide it's set — this wrapper is what actually establishes a scrollable
+   area, matching the same pattern week.js's own #weekTimelineScroll/
+   #weekTimelineInner already uses for the same reason. */
+.live-chart-scroll {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100% !important;
+  inset: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+}
+
+.live-chart-frame canvas {
+  display: block;
   height: 100% !important;
+  /* width intentionally not forced here — live.js sets it directly via
+     inline style: 100% on desktop (fills the frame exactly, unchanged
+     from before this scroll wrapper existed) or an explicit wide pixel
+     value on mobile (natural, un-squashed per-hour spacing, scrollable —
+     see renderForLocation's isMobileDevice branch). Normal flow now (not
+     position:absolute) specifically so its real width is what makes
+     .live-chart-scroll's own scrollable area the right size. */
 }
 
 .live-chart-frame:fullscreen,
