@@ -233,6 +233,35 @@ main {
   margin-bottom: 4px;
 }
 
+/* The Live tab's collapsed banner — the only thing shown for a location
+   right when it's first matched/selected (see setPanelExpanded in
+   live.js), before the person taps it to reveal ratings/timings/the
+   chart underneath. A real <button> (full width, no default button
+   styling) rather than a div with a click handler, so it's a proper,
+   keyboard-and-screen-reader-accessible toggle, not just a div that
+   happens to respond to clicks. */
+.live-hover-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0 36px 0 0; /* right padding clears .location-hover-panel-close, same reasoning as .location-hover-panel-heading-row above */
+  margin: 0 0 4px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.live-hover-chevron {
+  font-size: 1.3rem;
+  color: var(--grey-400, #9ca3af);
+  flex: 0 0 auto;
+  margin-left: 10px;
+}
+
 /* Live tab's own heading row (live.html) additionally carries the
    condition/temp/wind/tide stats and the Home By timing control — all
    crammed onto the same line as the location name, per request, rather
