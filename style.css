@@ -120,12 +120,20 @@ main {
   border-radius: 16px 16px 0 0;
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.25);
   padding: 18px 16px 20px;
-  /* Above Leaflet's own internal panes (its highest, tooltipPane/popupPane,
-     cap out around 650/700) so the panel visually sits ON TOP of the map
-     and any markers under it, not partially behind them — but still well
-     below chart-modal-overlay's 10000, so tapping the graph inside this
-     panel to open the full-screen view still correctly draws over it. */
-  z-index: 1000;
+  /* 2000, not 1000 — Leaflet's own control container
+     (.leaflet-top/.leaflet-bottom, holding the zoom +/- buttons and
+     attribution) uses z-index:1000 BY DEFAULT in leaflet.css. 1000 here
+     used to be an exact tie with that, which CSS resolves by paint/DOM
+     order, not by "which one should logically win" — meaning if anything
+     inside Leaflet's control layer repaints after this panel does (which
+     can happen once tiles finish loading and the map settles a moment
+     after initial page load), it could end up visually on top despite
+     the "equal" z-index, covering the panel entirely with no way to
+     interact with it underneath. 2000 clears that tie outright, while
+     staying well below chart-modal-overlay's 10000, so tapping the graph
+     inside this panel to open the full-screen view still correctly
+     draws over it. */
+  z-index: 2000;
 }
 
 /* Higher specificity than the shared ".chart-section, .table-section"
