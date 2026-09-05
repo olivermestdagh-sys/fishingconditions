@@ -675,6 +675,7 @@ const MAP_PIN_STYLES = {
   landBased: { fill: "#854F0B", light: "#FAEEDA" },
   both: { fill: "#534AB7", light: "#EEEDFE" },
   home: { fill: "#15803D", light: "#DCFCE7" },
+  currentPosition: { fill: "#DC2626", light: "#FEE2E2" },
 };
 
 function kayakGlyphSvg(color, cx, cy, scale) {
@@ -712,10 +713,20 @@ function houseGlyphSvg(color, cx, cy, scale) {
   `;
 }
 
+// Same convention as the glyphs above — used for the Live page's "you are
+// here" marker (see renderLiveMap in live.js), the one pin that doesn't
+// represent any fishing location OR the home address, just the device's
+// own current GPS position. A plain dot rather than an activity icon,
+// since there's no "activity" to depict — just a position.
+function dotGlyphSvg(color, cx, cy, scale) {
+  return `<circle cx="${cx}" cy="${cy}" r="${6 * scale}" fill="${color}" stroke="white" stroke-width="${2 * scale}"/>`;
+}
+
 function buildMapPinIconHtml(kind) {
   const { fill, light } = MAP_PIN_STYLES[kind] || MAP_PIN_STYLES.kayak;
   let glyph;
   if (kind === "home") glyph = houseGlyphSvg(fill, 17, 16, 1);
+  else if (kind === "currentPosition") glyph = dotGlyphSvg(fill, 17, 16, 1);
   else if (kind === "landBased") glyph = rodGlyphSvg(fill, 17, 16, 1);
   else if (kind === "both") glyph = kayakGlyphSvg(fill, 12.5, 16, 0.62) + rodGlyphSvg(fill, 21.5, 16, 0.62);
   else glyph = kayakGlyphSvg(fill, 17, 16, 1);

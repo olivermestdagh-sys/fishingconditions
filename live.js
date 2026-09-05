@@ -18,13 +18,12 @@ let currentLocationName = null;
 let currentType = null;
 let currentLoc = null;
 let stopFishingTime = null;
-// googleRoutesApiKey comes from charts.js (loaded before this file).
+// googleRoutesApiKey, currentGpsPosition, requestGpsPosition all come from
+// charts.js (loaded before this file).
 // Home address — a single lat/lng set on the Settings tab's map ("Add
-// Home"), loaded from config/settings.json below. Replaces what used to
-// be a free-text address typed directly into this page (geocoded by
-// Google Routes at request time); a fixed, precise coordinate set once
-// is both more reliable and means this page doesn't need its own address
-// input at all anymore.
+// Home"), loaded from config/settings.json below. A fixed, precise
+// coordinate set once, rather than a free-text address geocoded at
+// request time.
 let homeLat = null;
 let homeLng = null;
 
@@ -81,8 +80,8 @@ async function updateTimings() {
   localStorage.setItem(TIMINGS_STORAGE_KEY, JSON.stringify({ homeByStr }));
   setTimingsStatus("Calculating…");
 
-  // A fresh GPS read, not the one from page load — position may have
-  // changed since (paddled out, walked down the beach).
+  // A fresh GPS read, not the cached currentGpsPosition from page load —
+  // position may have changed since (paddled out, walked down the beach).
   const currentPosition = await new Promise((resolve) => {
     if (!navigator.geolocation) { resolve(null); return; }
     navigator.geolocation.getCurrentPosition(
@@ -155,20 +154,51 @@ function findNearestLocation(locations, lat, lng) {
   return best ? { location: best, distanceKm: bestDist } : null;
 }
 
-function populateManualPicker(locations, onSelect) {
-  const select = document.getElementById("manualLocationSelect");
-  select.innerHTML = "";
-  const seenNames = new Set();
-  for (const loc of locations) {
-    if (seenNames.has(loc.name)) continue;
-    seenNames.add(loc.name);
-    const opt = document.createElement("option");
-    opt.value = loc.name;
-    opt.textContent = loc.name;
-    select.appendChild(opt);
+/**
+ * Builds the map (renderLeafletLocationMap, charts.js) — one marker per
+ * tracked location (same dedup-by-name-then-both-types-if-present pattern
+ * as the Location tab's own renderLocationMap in app.js), PLUS the
+ * device's own current position as a distinct red dot marker
+ * (iconKind:"currentPosition") when GPS succeeded — see init(). Clicking
+ * a location marker opens/updates the hover panel for that spot; the
+ * position marker itself isn't clickable, it's purely a "you are here"
+ * reference alongside it.
+ */
+function renderLiveMap(gpsPosition) {
+  const byName = new Map();
+  for (const loc of liveData.locations || []) {
+    if (!byName.has(loc.name)) byName.set(loc.name, []);
+    byName.get(loc.name).push(loc);
   }
-  select.addEventListener("change", () => onSelect(select.value));
-  document.getElementById("manualPickerRow").style.display = "block";
+
+  const points = [];
+  for (const [name, variants] of byName) {
+    const { lat, lng } = variants[0];
+    const types = variants.map((v) => v.type);
+    const iconKind = types.includes("Kayak") && types.includes("Land based") ? "both" : types.includes("Land based") ? "landBased" : "kayak";
+    points.push({ lat, lng, label: name, iconKind, onClick: () => selectLocationAndType(name, "Kayak") });
+  }
+  if (gpsPosition) {
+    points.push({ lat: gpsPosition.lat, lng: gpsPosition.lng, label: "You are here", iconKind: "currentPosition" });
+  }
+
+  const map = renderLeafletLocationMap("liveMap", points, {});
+  // Overrides whatever renderLeafletLocationMap itself just set (either a
+  // saved view shared with the Location/Settings maps, or a fit-everything
+  // view) — Live's whole point is "where am I right now", so it should
+  // always open centered on the device's actual position when that's
+  // available, not wherever a DIFFERENT page's map was last left looking.
+  if (map && gpsPosition) {
+    map.setView([gpsPosition.lat, gpsPosition.lng], 13);
+  }
+}
+
+function showLiveHoverPanel() {
+  document.getElementById("liveHoverPanel").style.display = "block";
+}
+
+function hideLiveHoverPanel() {
+  document.getElementById("liveHoverPanel").style.display = "none";
 }
 
 function renderTypePicker(availableTypes, selectedType, onSelect) {
@@ -196,7 +226,9 @@ function renderTypePicker(availableTypes, selectedType, onSelect) {
 // Selects a physical location by name, resolving which type variant to
 // actually show — defaults to Kayak when available (per the site owner's
 // stated preference), falling back to whichever type IS available for
-// locations that don't have a Kayak option at all.
+// locations that don't have a Kayak option at all. Opens (or keeps open)
+// the hover panel and updates its heading — the map-click equivalent of
+// tapping a marker on the Location tab.
 function selectLocationAndType(name, preferredType) {
   const variants = (liveData.locations || []).filter((l) => l.name === name);
   if (variants.length === 0) return;
@@ -205,6 +237,7 @@ function selectLocationAndType(name, preferredType) {
     ? preferredType
     : (availableTypes.includes("Kayak") ? "Kayak" : availableTypes[0]);
 
+  const isNewLocation = name !== currentLocationName;
   currentLocationName = name;
   currentType = type;
 
@@ -217,13 +250,18 @@ function selectLocationAndType(name, preferredType) {
   // previously calculated line would be stale, so clear it rather than
   // show a result that no longer matches what's on screen.
   stopFishingTime = null;
-  hasCenteredLiveChartOnNow = false; // a genuinely new location/type is worth re-centering on "now" again
+  if (isNewLocation) hasCenteredLiveChartOnNow = false; // a genuinely new location is worth re-centering on "now" again; switching type on the SAME spot isn't
   setTimingsStatus("");
+
+  document.getElementById("liveHoverPanelLocationName").textContent = loc.name;
+  document.getElementById("liveHoverPanelSub").textContent = `${loc.type} · shore faces ${loc.shore}`;
+  showLiveHoverPanel();
+
   renderForLocation(loc);
 }
 
 function renderSummary(loc, rows, now) {
-  const card = document.getElementById("summaryCard");
+  const card = document.getElementById("liveSummaryCard");
   card.style.display = "block";
   if (rows.length === 0) {
     card.innerHTML = `<div class="empty-state">No data yet for this location.</div>`;
@@ -240,24 +278,18 @@ function renderSummary(loc, rows, now) {
   const fishingVal = fishingRow ? fishingRow["Fishing Condition"] : null;
 
   card.innerHTML = `
-    <div class="summary-top">
-      <div>
-        <div class="summary-title">${loc.name}</div>
-        <div class="summary-sub">${loc.type} · shore faces ${loc.shore}</div>
+    <div class="badge-stack" style="margin-bottom:10px;">
+      <div class="badge-item">
+        <div class="condition-badge" style="background:${conditionVal != null ? (CONDITION_COLORS[Math.round(conditionVal)] || "var(--cond-none)") : "var(--cond-none)"}">
+          ${conditionVal != null ? conditionVal + "/5" : "–"}
+        </div>
+        <div class="badge-label">Location</div>
       </div>
-      <div class="badge-stack">
-        <div class="badge-item">
-          <div class="condition-badge" style="background:${conditionVal != null ? (CONDITION_COLORS[Math.round(conditionVal)] || "var(--cond-none)") : "var(--cond-none)"}">
-            ${conditionVal != null ? conditionVal + "/5" : "–"}
-          </div>
-          <div class="badge-label">Location</div>
+      <div class="badge-item">
+        <div class="condition-badge" style="background:${fishingVal != null ? (CONDITION_COLORS[Math.round(fishingVal)] || "var(--cond-none)") : "var(--cond-none)"}">
+          ${fishingVal != null ? fishingVal + "/5" : "–"}
         </div>
-        <div class="badge-item">
-          <div class="condition-badge" style="background:${fishingVal != null ? (CONDITION_COLORS[Math.round(fishingVal)] || "var(--cond-none)") : "var(--cond-none)"}">
-            ${fishingVal != null ? fishingVal + "/5" : "–"}
-          </div>
-          <div class="badge-label">Fishing</div>
-        </div>
+        <div class="badge-label">Fishing</div>
       </div>
     </div>
     <div class="stat-grid">
@@ -279,9 +311,9 @@ function renderSummary(loc, rows, now) {
 
 // Tracks whether we've already auto-centered the mobile chart on "now"
 // for the CURRENT location — reset when the location changes (see
-// selectLocationAndType), but NOT on every periodic data refresh for the
-// same location, so a manually-scrolled position isn't yanked away every
-// 30 minutes.
+// selectLocationAndType), but NOT on every re-render for the same
+// location (switching type, updating timings), so a manually-scrolled
+// position isn't yanked away by those.
 let hasCenteredLiveChartOnNow = false;
 
 function renderForLocation(loc) {
@@ -297,7 +329,16 @@ function renderForLocation(loc) {
 
   renderSummary(loc, windowRows, new Date());
 
-  document.getElementById("liveChartSection").style.display = "block";
+  const frame = document.getElementById("liveChartFrame");
+  const emptyState = document.getElementById("liveHoverPanelEmptyState");
+  if (windowRows.length === 0) {
+    frame.style.display = "none";
+    emptyState.style.display = "block";
+    return;
+  }
+  frame.style.display = "block";
+  emptyState.style.display = "none";
+
   const sunTimes = (liveData.sunTimes && liveData.sunTimes[loc.name]) || [];
 
   const canvas = document.getElementById("liveChart");
@@ -333,11 +374,7 @@ function renderForLocation(loc) {
     xRange: { min: windowStart, max: windowEnd },
   });
 
-  if (windowRows.length === 0) {
-    document.getElementById("liveChartSection").style.display = "none";
-  }
-
-  if (isMobileDevice && !hasCenteredLiveChartOnNow && windowRows.length > 0) {
+  if (isMobileDevice && !hasCenteredLiveChartOnNow) {
     hasCenteredLiveChartOnNow = true;
     // Deferred a tick so the canvas has actually taken on the width set
     // above (and .live-chart-scroll's own scrollWidth reflects it) before
@@ -352,7 +389,13 @@ function renderForLocation(loc) {
 }
 
 function setGpsStatus(html) {
-  document.getElementById("gpsStatus").innerHTML = html;
+  const el = document.getElementById("liveGpsStatus");
+  if (!html) {
+    el.style.display = "none";
+    return;
+  }
+  el.innerHTML = html;
+  el.style.display = "block";
 }
 
 async function init() {
@@ -381,13 +424,14 @@ async function init() {
     document.getElementById("homeByTime").value = savedTimings.homeByStr || "";
   }
   document.getElementById("btnUpdateTimings").addEventListener("click", updateTimings);
+  document.getElementById("btnCloseLiveHoverPanel").addEventListener("click", hideLiveHoverPanel);
   // Wired once here, not inside renderForLocation — that function reuses
   // this same persistent <canvas> across every location switch and
-  // periodic refresh (destroying and recreating the Chart.js instance
-  // each time, but never the canvas element itself), so wiring these
-  // per-render would stack up duplicate listeners on the same canvas.
-  // getChart() always reads whatever the current liveChart is, so this
-  // stays correct across those re-renders without needing to be re-wired.
+  // re-render (destroying and recreating the Chart.js instance each time,
+  // but never the canvas element itself), so wiring these per-render
+  // would stack up duplicate listeners on the same canvas. getChart()
+  // always reads whatever the current liveChart is, so this stays correct
+  // across those re-renders without needing to be re-wired.
   wireHoldToShowTooltip(() => liveChart, document.getElementById("liveChart"));
   setupFullscreenToggle("liveChartFrame");
 
@@ -405,38 +449,32 @@ async function init() {
     // been merged in.
     await loadTideOffsets(liveData.locations);
   } catch (err) {
-    setGpsStatus(`<div class="empty-state">Could not load conditions data — check your connection.</div>`);
+    setGpsStatus(`Could not load conditions data — check your connection.`);
     console.error(err);
     return;
   }
 
   const locations = liveData.locations || [];
-  populateManualPicker(locations, (name) => {
-    setGpsStatus(`<div class="summary-sub">Showing: <strong>${name}</strong> (manually selected)</div>`);
-    selectLocationAndType(name, "Kayak");
-  });
 
-  if (!navigator.geolocation) {
-    setGpsStatus(`<div class="empty-state">Your browser doesn't support GPS location. Pick a spot manually below.</div>`);
+  // requestGpsPosition (charts.js) — shared/cached, so this doesn't
+  // trigger a SECOND permission prompt if something else on the page
+  // (e.g. a later "Update timings" click) also asks; that action does its
+  // own fresh read regardless, since position may have moved on since.
+  const position = await requestGpsPosition();
+  if (!position) {
+    setGpsStatus(`Couldn't get your location — showing all tracked spots. Tap one on the map to view it.`);
+    renderLiveMap(null);
     return;
   }
 
-  navigator.geolocation.getCurrentPosition(
-    (position) => {
-      const { latitude, longitude } = position.coords;
-      const match = findNearestLocation(locations, latitude, longitude);
-      if (!match) {
-        setGpsStatus(`<div class="empty-state">Got your location, but no configured spots have coordinates yet. Pick one manually below.</div>`);
-        return;
-      }
-      setGpsStatus(`<div class="summary-sub">Matched to: <strong>${match.location.name}</strong> (${match.distanceKm.toFixed(1)}km away)</div>`);
-      selectLocationAndType(match.location.name, "Kayak");
-    },
-    (err) => {
-      setGpsStatus(`<div class="empty-state">Couldn't get your location (${err.message}). Pick a spot manually below.</div>`);
-    },
-    { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
-  );
+  const match = findNearestLocation(locations, position.lat, position.lng);
+  renderLiveMap(position);
+  if (!match) {
+    setGpsStatus(`Got your location, but no configured spots have coordinates yet.`);
+    return;
+  }
+  setGpsStatus("");
+  selectLocationAndType(match.location.name, "Kayak");
 }
 
 init();
