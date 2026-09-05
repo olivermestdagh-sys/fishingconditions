@@ -90,42 +90,6 @@ main {
   height: 100%;
 }
 
-/* Live tab's own wrapper around its map (#liveMap) — NOT the same thing
-   as .location-map-fullpage above, which is shared with the Location
-   tab's map and must stay untouched by anything Live-specific. On
-   desktop this is just a transparent pass-through (100%/100%, identical
-   to what .location-map-fullpage already does on its own) — the mobile
-   behavor below is the only reason this wrapper exists at all. */
-.live-map-scroll-wrap {
-  width: 100%;
-  height: 100%;
-}
-
-/* Same 900px threshold used everywhere else on the site for "is this a
-   phone" (app.js's isMobileDevice, the various chart-frame breakpoints).
-   Shrinks the map's own height (freeing vertical space for the
-   collapsible panel below/over it) while making it WIDER than the
-   viewport instead of narrower to match — deliberately, per request,
-   rather than just showing a smaller slice of the same-width map. The
-   map itself (#liveMap, sized via the descendant selector below) becomes
-   wide enough that this wrapper's own overflow-x:auto is what reveals the
-   rest of it, a horizontal scroll/pan gesture — genuinely additional to,
-   not a replacement for, Leaflet's own built-in drag-to-pan/zoom, which
-   still works exactly as before on whatever's currently in view. */
-@media (max-width: 900px) {
-  .live-map-scroll-wrap {
-    height: 32vh;
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-x;
-  }
-  .live-map-scroll-wrap #liveMap {
-    width: 220%;
-    height: 100%;
-  }
-}
-
 /* Small floating banner over the Live tab's map, shown while GPS is still
    resolving or failed entirely — before there's any matched location to
    open a proper hover panel for. Hidden (display:none, set in JS) once a
@@ -2455,15 +2419,21 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
   margin-bottom: 4px;
 }
 
-/* Same 900px breakpoint as .location-hover-panel-chart-frame's own mobile
-   rule — added once the bottom reservation became exact rather than a
-   flat over-estimate (see above), since a flat number no longer safely
-   covers both sizes without either overlapping (too small) or leaving
-   dead space (too big). 380 + 22 = 402 — 22 is mobile's smaller
-   buildConditionStripsPlugin stripHeight*2. */
+/* Deliberately, substantially shorter than desktop on mobile — not just
+   the small strip-reservation difference the 402px above was (which
+   only ever amounted to a 6px adjustment for accounting reasons, not a
+   real size choice). This is a genuine height reduction, per request,
+   freeing up vertical space on a phone screen for the rest of the panel
+   (ratings, timings) rather than letting the chart claim as much of the
+   screen as desktop gives it. The chart's own width/horizontal-scroll
+   behavior (renderForLocation's isMobileDevice branch, .live-chart-scroll
+   below) is unrelated to this and already existed before this change —
+   this only touches height. 238 (reduced base) + 22 (unchanged —
+   buildConditionStripsPlugin's actual mobile strip reservation, not a
+   number to arbitrarily shrink along with the rest) = 260. */
 @media (max-width: 900px) {
   .live-chart-frame {
-    height: 402px;
+    height: 260px;
   }
 }
 
