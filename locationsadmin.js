@@ -6,7 +6,17 @@
 // outside this Settings page touches location GROUPS or triggers a data
 // refresh.
 const GROUPS_FILE_PATH = "config/location_groups.json";
+const SETTINGS_FILE_PATH = "config/settings.json";
 const WORKFLOW_FILE = "update.yml";
+
+// Home address — a single lat/lng, stored in config/settings.json
+// alongside googleRoutesApiKey (NOT config/locations.json; it isn't a
+// fishing location, doesn't need a shore/type/tide config, and shouldn't
+// show up in anything that lists "locations"). Set via the map ("Add
+// Home" button below), read once on load so its pin can show immediately
+// if already set — see loadHomeLocation/saveHomeLocation.
+let homeLat = null;
+let homeLng = null;
 
 // TYPE_TIME_FIELDS and defaultTypeConfig also now live in charts.js —
 // same reasoning, the preview's "Add as permanent location" flow needed
@@ -189,6 +199,7 @@ async function init() {
     renderRows();
   });
   document.getElementById("btnAddByMapClick").addEventListener("click", toggleAddLocationClickMode);
+  document.getElementById("btnAddHome").addEventListener("click", toggleAddHomeClickMode);
   document.getElementById("btnSave").addEventListener("click", () => onSave(false));
   document.getElementById("btnSaveAndRefresh").addEventListener("click", () => onSave(true));
 
@@ -201,13 +212,50 @@ async function init() {
   });
   document.getElementById("btnSaveGroups").addEventListener("click", onSaveGroups);
 
-  // Groups and coords both need to be ready before the first renderRows()
-  // (called at the end of loadLocations, which renders the map too) — groups
-  // populate each location's Location Group <select>, coords populate the
-  // map's markers. Both are independent of `locations` itself, so they load
-  // in parallel rather than one after another.
-  await Promise.all([loadLocationGroups(), loadLocationCoords()]);
+  // Groups, coords, and home all need to be ready before the first
+  // renderRows() (called at the end of loadLocations, which renders the
+  // map too) — groups populate each location's Location Group <select>,
+  // coords and home both populate the map's markers. All three are
+  // independent of `locations` itself, so they load in parallel rather
+  // than one after another.
+  await Promise.all([loadLocationGroups(), loadLocationCoords(), loadHomeLocation()]);
   await loadLocations();
+}
+
+/**
+ * Reads config/settings.json once on load, purely to show the home pin
+ * immediately if one's already set — NOT tracking a sha here the way
+ * loadLocationGroups does for GROUPS_FILE_PATH, since this page never
+ * edits any OTHER field in settings.json (googleRoutesApiKey) and
+ * saveHomeLocation below re-reads the file fresh immediately before
+ * writing anyway, same "re-check sha right before a write" reasoning as
+ * every other save on this page. A missing file, or no connection yet,
+ * just means no home is set yet — not an error worth surfacing.
+ */
+async function loadHomeLocation() {
+  try {
+    const conn = getConnection();
+    let settings = {};
+    if (conn && conn.owner && conn.repo && conn.token) {
+      const res = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${SETTINGS_FILE_PATH}?ref=${BRANCH}`, {
+        headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const decoded = decodeURIComponent(escape(atob(json.content.replace(/\n/g, ""))));
+        settings = JSON.parse(decoded);
+      }
+    } else {
+      const res = await fetch("config/settings.json", { cache: "no-store" });
+      if (res.ok) settings = await res.json();
+    }
+    homeLat = settings.homeLat ?? null;
+    homeLng = settings.homeLng ?? null;
+  } catch (err) {
+    console.error("Could not load home location:", err);
+    homeLat = null;
+    homeLng = null;
+  }
 }
 
 async function loadLocationGroups() {
@@ -491,11 +539,16 @@ function renderSettingsLocationMap() {
       onClick: () => jumpToLocationRow(i),
     };
   });
+  // Home isn't a fishing location — no edit card to jump to, so its
+  // onClick is a no-op rather than pointing at a row that doesn't exist.
+  if (homeLat != null && homeLng != null) {
+    points.push({ lat: homeLat, lng: homeLng, label: "Home", iconKind: "home", onClick: () => {} });
+  }
   renderLeafletLocationMap("settingsLocationMap", points, { onMapClick: onSettingsMapClick });
-  document.getElementById("settingsLocationMap").classList.toggle("map-click-armed", addLocationClickArmed);
+  document.getElementById("settingsLocationMap").classList.toggle("map-click-armed", addLocationClickArmed || addHomeClickArmed);
 }
 
-// True while the "📍 Click map to add location" button is armed — the
+// True while the "📍 Add location" button is armed — the
 // NEXT click on open map area (not a marker) starts a new location there;
 // see onSettingsMapClick. A separate armed step (rather than every map
 // click always adding a location) avoids accidentally creating locations
@@ -503,15 +556,29 @@ function renderSettingsLocationMap() {
 // common use on this page.
 let addLocationClickArmed = false;
 
+// Same idea as addLocationClickArmed, for the "🏠 Add Home" button — the
+// two are mutually exclusive (arming one disarms the other; see both
+// toggle functions below), since a single map click can only ever mean
+// one or the other.
+let addHomeClickArmed = false;
+
 function toggleAddLocationClickMode() {
   addLocationClickArmed = !addLocationClickArmed;
+  if (addLocationClickArmed && addHomeClickArmed) {
+    addHomeClickArmed = false;
+    const homeBtn = document.getElementById("btnAddHome");
+    if (homeBtn) {
+      homeBtn.textContent = "🏠 Add Home";
+      homeBtn.classList.remove("active");
+    }
+  }
   const btn = document.getElementById("btnAddByMapClick");
   if (btn) {
-    btn.textContent = addLocationClickArmed ? "Click the map to place it… (cancel)" : "📍 Click map to add location";
+    btn.textContent = addLocationClickArmed ? "Click the map to place it… (cancel)" : "📍 Add location";
     btn.classList.toggle("active", addLocationClickArmed);
   }
   const mapEl = document.getElementById("settingsLocationMap");
-  if (mapEl) mapEl.classList.toggle("map-click-armed", addLocationClickArmed);
+  if (mapEl) mapEl.classList.toggle("map-click-armed", addLocationClickArmed || addHomeClickArmed);
   // Re-run the filter so arming immediately hides whatever location was
   // previously shown (see the "armed" branch in applyLocationFilter) —
   // otherwise the old selection would keep showing right up until the map
@@ -519,6 +586,26 @@ function toggleAddLocationClickMode() {
   // Deliberately does NOT touch selectedLocationIdx/localStorage itself —
   // canceling (armed -> unarmed without a map click) falls straight back
   // to whatever was selected before arming, exactly as if nothing happened.
+  applyLocationFilter();
+}
+
+function toggleAddHomeClickMode() {
+  addHomeClickArmed = !addHomeClickArmed;
+  if (addHomeClickArmed && addLocationClickArmed) {
+    addLocationClickArmed = false;
+    const locBtn = document.getElementById("btnAddByMapClick");
+    if (locBtn) {
+      locBtn.textContent = "📍 Add location";
+      locBtn.classList.remove("active");
+    }
+  }
+  const btn = document.getElementById("btnAddHome");
+  if (btn) {
+    btn.textContent = addHomeClickArmed ? "Click the map to place home… (cancel)" : "🏠 Add Home";
+    btn.classList.toggle("active", addHomeClickArmed);
+  }
+  const mapEl = document.getElementById("settingsLocationMap");
+  if (mapEl) mapEl.classList.toggle("map-click-armed", addLocationClickArmed || addHomeClickArmed);
   applyLocationFilter();
 }
 
@@ -532,11 +619,23 @@ function toggleAddLocationClickMode() {
  * ends by creating the location via createNewLocationAt.
  */
 async function onSettingsMapClick(lat, lng) {
+  if (addHomeClickArmed) {
+    addHomeClickArmed = false;
+    const btn = document.getElementById("btnAddHome");
+    if (btn) {
+      btn.textContent = "🏠 Add Home";
+      btn.classList.remove("active");
+    }
+    document.getElementById("settingsLocationMap")?.classList.remove("map-click-armed");
+    await saveHomeLocation(lat, lng);
+    return;
+  }
+
   if (!addLocationClickArmed) return;
   addLocationClickArmed = false;
   const btn = document.getElementById("btnAddByMapClick");
   if (btn) {
-    btn.textContent = "📍 Click map to add location";
+    btn.textContent = "📍 Add location";
     btn.classList.remove("active");
   }
 
@@ -561,6 +660,63 @@ async function onSettingsMapClick(lat, lng) {
     createNewLocationAt(lat, lng, result.candidate);
   } else {
     createNewLocationAt(lat, lng);
+  }
+}
+
+/**
+ * Writes the clicked point to config/settings.json as homeLat/homeLng,
+ * preserving whatever else is already in that file (googleRoutesApiKey)
+ * — reads the file fresh immediately before writing (same "re-check the
+ * sha right before a write, in case it changed elsewhere" reasoning as
+ * onSaveGroups/onSave below), merges in the new coordinates, and writes
+ * the whole file back. Updates the map immediately on success so the
+ * house pin appears without needing a reload.
+ */
+async function saveHomeLocation(lat, lng) {
+  const conn = getConnection();
+  if (!conn) {
+    alert("Connect to GitHub first (above) before setting a home address.");
+    return;
+  }
+  try {
+    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${SETTINGS_FILE_PATH}?ref=${BRANCH}`, {
+      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+    });
+    let currentSettings = {};
+    let sha = null;
+    if (getRes.status === 404) {
+      sha = null; // creating the file for the first time
+    } else if (!getRes.ok) {
+      throw new Error(`Could not read current settings file (${getRes.status})`);
+    } else {
+      const json = await getRes.json();
+      sha = json.sha;
+      const decoded = decodeURIComponent(escape(atob(json.content.replace(/\n/g, ""))));
+      currentSettings = JSON.parse(decoded);
+    }
+
+    currentSettings.homeLat = lat;
+    currentSettings.homeLng = lng;
+
+    const content = JSON.stringify(currentSettings, null, 2) + "\n";
+    const body = { message: "Set home location via site", content: utf8ToBase64(content), branch: BRANCH };
+    if (sha) body.sha = sha;
+
+    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${SETTINGS_FILE_PATH}`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!putRes.ok) {
+      const errBody = await putRes.json().catch(() => ({}));
+      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
+    }
+
+    homeLat = lat;
+    homeLng = lng;
+    renderSettingsLocationMap();
+  } catch (err) {
+    alert(`Could not save home location: ${err.message}`);
   }
 }
 

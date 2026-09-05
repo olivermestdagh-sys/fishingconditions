@@ -674,6 +674,7 @@ const MAP_PIN_STYLES = {
   kayak: { fill: "#185FA5", light: "#E6F1FB" },
   landBased: { fill: "#854F0B", light: "#FAEEDA" },
   both: { fill: "#534AB7", light: "#EEEDFE" },
+  home: { fill: "#15803D", light: "#DCFCE7" },
 };
 
 function kayakGlyphSvg(color, cx, cy, scale) {
@@ -697,10 +698,25 @@ function rodGlyphSvg(color, cx, cy, scale) {
   `;
 }
 
+// Same hand-drawn-shape convention as the two glyphs above — a simple
+// roof-plus-body silhouette with a white door cutout, not an icon font or
+// external asset. Used for the single "home" marker (see
+// saveHomeLocation/renderSettingsLocationMap in locationsadmin.js) — the
+// one map-click-armed pin that isn't a fishing location at all.
+function houseGlyphSvg(color, cx, cy, scale) {
+  return `
+    <g transform="translate(${cx} ${cy}) scale(${scale})">
+      <path d="M0 -9 L9 -1.5 L6 -1.5 L6 8 L-6 8 L-6 -1.5 L-9 -1.5 Z" fill="${color}"/>
+      <rect x="-2" y="1.5" width="4" height="6.5" fill="white"/>
+    </g>
+  `;
+}
+
 function buildMapPinIconHtml(kind) {
   const { fill, light } = MAP_PIN_STYLES[kind] || MAP_PIN_STYLES.kayak;
   let glyph;
-  if (kind === "landBased") glyph = rodGlyphSvg(fill, 17, 16, 1);
+  if (kind === "home") glyph = houseGlyphSvg(fill, 17, 16, 1);
+  else if (kind === "landBased") glyph = rodGlyphSvg(fill, 17, 16, 1);
   else if (kind === "both") glyph = kayakGlyphSvg(fill, 12.5, 16, 0.62) + rodGlyphSvg(fill, 21.5, 16, 0.62);
   else glyph = kayakGlyphSvg(fill, 17, 16, 1);
   return `
@@ -3997,6 +4013,50 @@ async function getDriveTimeMinutes(destLat, destLng) {
   } catch (err) {
     console.error("Drive time lookup failed:", err);
     driveTimeCache[cacheKey] = null;
+    return null;
+  }
+}
+
+/**
+ * Real drive time (minutes) between two arbitrary coordinate pairs, via
+ * Google's Routes API — unlike getDriveTimeMinutes above (which always
+ * uses the device's CURRENT GPS position as the origin), this takes both
+ * ends explicitly. Used for "fishing spot → home" (live.js) — the origin
+ * there is the matched location's own saved lat/lng, not wherever the
+ * device happens to be standing right now. Returns null (not an
+ * exception) for any failure, same convention as getDriveTimeMinutes.
+ * Deliberately NOT merged into getDriveTimeMinutes itself — that
+ * function's whole shape (only needing a destination, GPS-caching
+ * currentGpsPosition) is specifically for "drive time from here", and
+ * forcing a generic two-coordinate signature onto every caller of it
+ * would mean re-passing the current GPS position at every existing call
+ * site for no benefit.
+ */
+async function getDriveTimeBetweenCoords(originLat, originLng, destLat, destLng) {
+  if (originLat == null || originLng == null || destLat == null || destLng == null) return null;
+  if (!googleRoutesApiKey) return null;
+  try {
+    const res = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": googleRoutesApiKey,
+        "X-Goog-FieldMask": "routes.duration",
+      },
+      body: JSON.stringify({
+        origin: { location: { latLng: { latitude: originLat, longitude: originLng } } },
+        destination: { location: { latLng: { latitude: destLat, longitude: destLng } } },
+        travelMode: "DRIVE",
+        routingPreference: "TRAFFIC_AWARE",
+      }),
+    });
+    if (!res.ok) throw new Error(`Routes API returned ${res.status}`);
+    const data = await res.json();
+    const durationStr = data.routes && data.routes[0] && data.routes[0].duration;
+    const durationSeconds = durationStr ? parseInt(durationStr, 10) : null;
+    return durationSeconds != null && !Number.isNaN(durationSeconds) ? durationSeconds / 60 : null;
+  } catch (err) {
+    console.error("Drive time between coordinates lookup failed:", err);
     return null;
   }
 }

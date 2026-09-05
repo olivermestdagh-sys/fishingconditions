@@ -2,6 +2,14 @@ const DATA_URL = "data/conditions.json";
 const SETTINGS_URL = "config/settings.json";
 const TIMINGS_STORAGE_KEY = "liveHomeTimings";
 
+// Same convention as week.js's own PIXELS_PER_HOUR — a genuinely
+// readable, un-squashed width per hour of data, rather than cramming a
+// full 48-hour window into one phone-width canvas. Only used on mobile
+// (see renderForLocation's isMobileDevice branch) — desktop has enough
+// width already that squashing to fit was never the complaint here.
+const PIXELS_PER_HOUR = 32;
+const isMobileDevice = Math.min(window.innerWidth, window.innerHeight) <= 900;
+
 // CONDITION_COLORS comes from charts.js (loaded before this file).
 
 let liveData = null;
@@ -11,6 +19,14 @@ let currentType = null;
 let currentLoc = null;
 let stopFishingTime = null;
 // googleRoutesApiKey comes from charts.js (loaded before this file).
+// Home address — a single lat/lng set on the Settings tab's map ("Add
+// Home"), loaded from config/settings.json below. Replaces what used to
+// be a free-text address typed directly into this page (geocoded by
+// Google Routes at request time); a fixed, precise coordinate set once
+// is both more reliable and means this page doesn't need its own address
+// input at all anymore.
+let homeLat = null;
+let homeLng = null;
 
 function timeToMinutes(hhmm) {
   const m = String(hhmm || "").match(/^(\d{1,2}):(\d{1,2})$/);
@@ -25,43 +41,6 @@ function minutesToClock(mins) {
   const period = h < 12 ? "AM" : "PM";
   const h12 = h % 12 === 0 ? 12 : h % 12;
   return `${h12}:${String(m).padStart(2, "0")} ${period}`;
-}
-
-/**
- * Real drive time (minutes) from a set of coordinates to a free-text
- * address, via Google's Routes API — used here for "fishing location →
- * home address" (the reverse direction from charts.js's own
- * getDriveTimeMinutes(), which goes GPS → location). The destination is
- * passed as a plain address string; Routes API geocodes it internally, no
- * separate geocoding call needed. Returns null (not an exception) on any failure.
- */
-async function getDriveTimeToAddress(originLat, originLng, address) {
-  if (originLat == null || originLng == null || !address) return null;
-  if (!googleRoutesApiKey) return null;
-  try {
-    const res = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": googleRoutesApiKey,
-        "X-Goog-FieldMask": "routes.duration",
-      },
-      body: JSON.stringify({
-        origin: { location: { latLng: { latitude: originLat, longitude: originLng } } },
-        destination: { address },
-        travelMode: "DRIVE",
-        routingPreference: "TRAFFIC_AWARE",
-      }),
-    });
-    if (!res.ok) throw new Error(`Routes API returned ${res.status}`);
-    const data = await res.json();
-    const durationStr = data.routes && data.routes[0] && data.routes[0].duration;
-    const durationSeconds = durationStr ? parseInt(durationStr, 10) : null;
-    return durationSeconds != null && !Number.isNaN(durationSeconds) ? durationSeconds / 60 : null;
-  } catch (err) {
-    console.error("Drive time to address lookup failed:", err);
-    return null;
-  }
 }
 
 function setTimingsStatus(html, isError) {
@@ -84,10 +63,13 @@ async function updateTimings() {
     setTimingsStatus("Match a location first.", true);
     return;
   }
+  if (homeLat == null || homeLng == null) {
+    setTimingsStatus('No home address set yet — add one on the <a href="locations.html">Settings</a> tab first ("Add Home" on the map).', true);
+    return;
+  }
   const homeByStr = document.getElementById("homeByTime").value;
-  const address = document.getElementById("homeAddress").value.trim();
-  if (!homeByStr || !address) {
-    setTimingsStatus("Enter both a Home By time and a home address.", true);
+  if (!homeByStr) {
+    setTimingsStatus("Enter a Home By time.", true);
     return;
   }
   const homeByMinutes = timeToMinutes(homeByStr);
@@ -96,7 +78,7 @@ async function updateTimings() {
     return;
   }
 
-  localStorage.setItem(TIMINGS_STORAGE_KEY, JSON.stringify({ homeByStr, address }));
+  localStorage.setItem(TIMINGS_STORAGE_KEY, JSON.stringify({ homeByStr }));
   setTimingsStatus("Calculating…");
 
   // A fresh GPS read, not the one from page load — position may have
@@ -114,9 +96,12 @@ async function updateTimings() {
     return;
   }
 
-  const driveMinutes = await getDriveTimeToAddress(currentLoc.lat, currentLoc.lng, address);
+  // getDriveTimeBetweenCoords comes from charts.js — this location's own
+  // saved lat/lng to the saved home lat/lng, NOT the device's current GPS
+  // position (that's the SEPARATE "back to car" segment below).
+  const driveMinutes = await getDriveTimeBetweenCoords(currentLoc.lat, currentLoc.lng, homeLat, homeLng);
   if (driveMinutes == null) {
-    setTimingsStatus("Couldn't calculate drive time — check the address, and that the Routes API key is set up.", true);
+    setTimingsStatus("Couldn't calculate drive time — check that the Routes API key is set up.", true);
     return;
   }
 
@@ -232,6 +217,7 @@ function selectLocationAndType(name, preferredType) {
   // previously calculated line would be stale, so clear it rather than
   // show a result that no longer matches what's on screen.
   stopFishingTime = null;
+  hasCenteredLiveChartOnNow = false; // a genuinely new location/type is worth re-centering on "now" again
   setTimingsStatus("");
   renderForLocation(loc);
 }
@@ -291,6 +277,13 @@ function renderSummary(loc, rows, now) {
   `;
 }
 
+// Tracks whether we've already auto-centered the mobile chart on "now"
+// for the CURRENT location — reset when the location changes (see
+// selectLocationAndType), but NOT on every periodic data refresh for the
+// same location, so a manually-scrolled position isn't yanked away every
+// 30 minutes.
+let hasCenteredLiveChartOnNow = false;
+
 function renderForLocation(loc) {
   const rows = (liveData.rows || [])
     .filter((r) => r["Location Name"] === loc.name && r["Type"] === loc.type)
@@ -306,8 +299,22 @@ function renderForLocation(loc) {
 
   document.getElementById("liveChartSection").style.display = "block";
   const sunTimes = (liveData.sunTimes && liveData.sunTimes[loc.name]) || [];
+
+  const canvas = document.getElementById("liveChart");
+  // On mobile: natural, un-squashed per-hour width (same PIXELS_PER_HOUR
+  // convention as week.js) instead of forcing the full 48-hour window
+  // into one phone-width canvas — #liveChartScroll (style.css) is what
+  // actually makes this scrollable; a canvas width alone does nothing
+  // without that wrapper. Desktop is untouched (100%, fills the frame
+  // exactly, no scrolling — there was never a "squashed" complaint there).
+  if (isMobileDevice) {
+    canvas.style.width = 48 * PIXELS_PER_HOUR + "px";
+  } else {
+    canvas.style.width = "100%";
+  }
+
   liveChart = renderConditionsChart({
-    canvas: document.getElementById("liveChart"),
+    canvas,
     rows: windowRows,
     sunTimes,
     existingChart: liveChart,
@@ -319,10 +326,28 @@ function renderForLocation(loc) {
     compact: false,
     disableBuiltinEvents: true, // this page drives the tooltip itself — see wireHoldToShowTooltip in init(), and charts.js
     tideOffsetMinutes: loc.tideOffset,
+    // Explicit, not left to auto-fit — guarantees "now" sits at EXACTLY
+    // the horizontal midpoint of the canvas (windowStart..windowEnd is
+    // symmetric around nowMs by construction), which is what the mobile
+    // centering scroll just below depends on.
+    xRange: { min: windowStart, max: windowEnd },
   });
 
   if (windowRows.length === 0) {
     document.getElementById("liveChartSection").style.display = "none";
+  }
+
+  if (isMobileDevice && !hasCenteredLiveChartOnNow && windowRows.length > 0) {
+    hasCenteredLiveChartOnNow = true;
+    // Deferred a tick so the canvas has actually taken on the width set
+    // above (and .live-chart-scroll's own scrollWidth reflects it) before
+    // computing where the midpoint is.
+    requestAnimationFrame(() => {
+      const scrollWrap = document.getElementById("liveChartScroll");
+      if (!scrollWrap) return;
+      const target = scrollWrap.scrollWidth / 2 - scrollWrap.clientWidth / 2;
+      scrollWrap.scrollLeft = Math.max(0, target);
+    });
   }
 }
 
@@ -339,6 +364,8 @@ async function init() {
     if (settingsRes.ok) {
       const settings = await settingsRes.json();
       googleRoutesApiKey = settings.googleRoutesApiKey || null;
+      homeLat = settings.homeLat ?? null;
+      homeLng = settings.homeLng ?? null;
     }
   } catch (err) {
     console.error("Could not load settings.json:", err);
@@ -352,7 +379,6 @@ async function init() {
   }
   if (savedTimings) {
     document.getElementById("homeByTime").value = savedTimings.homeByStr || "";
-    document.getElementById("homeAddress").value = savedTimings.address || "";
   }
   document.getElementById("btnUpdateTimings").addEventListener("click", updateTimings);
   // Wired once here, not inside renderForLocation — that function reuses
