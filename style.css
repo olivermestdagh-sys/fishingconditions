@@ -2600,7 +2600,12 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
    overlapping — vertical separation alone guarantees no collision
    regardless of how wide either one's content happens to be. Same
    position on the Location tab too (no gps-status pill there to avoid) for
-   one consistent, predictable spot across both tabs. */
+   one consistent, predictable spot across both tabs.
+   max-width: calc(100vw - 20px), not a flat 220px — a flat px cap can
+   still be wider than what's actually left on a narrow phone once the
+   10px right-inset is accounted for; tying it to the viewport guarantees
+   the box itself never claims more width than genuinely fits, on any
+   screen. */
 .mark-controls-bar {
   position: absolute;
   top: 56px;
@@ -2610,13 +2615,22 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
   border-radius: 12px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
   padding: 8px 10px;
-  max-width: 220px;
+  max-width: calc(100vw - 20px);
 }
 
+/* flex-wrap:wrap is the actual fix for the Filters button running off the
+   right edge of the screen: previously, with no wrap allowed and the
+   select/button unable to shrink below their own content's minimum width,
+   the row simply overflowed its parent — and since the parent's right edge
+   already sits near the screen's own right edge, that overflow spilled the
+   button straight off-screen rather than visibly clipping inside a visible
+   box. With wrap allowed, "Filters" now drops to its own line underneath
+   "Colour by [select]" instead, whenever the two don't fit side by side. */
 .mark-controls-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .mark-controls-label {
@@ -2627,6 +2641,7 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
   align-items: center;
   gap: 4px;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .mark-controls-select {
@@ -2635,6 +2650,12 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
   border-radius: 6px;
   border: 1px solid var(--grey-200);
   max-width: 110px;
+  /* Flex/grid children default to min-width:auto, which for a <select> is
+     based on its content and can exceed max-width's own cap in a flex
+     row — overriding it to 0 is what actually lets max-width win and the
+     select shrink to fit, rather than forcing the whole row wider than
+     intended regardless of flex-wrap above. */
+  min-width: 0;
 }
 
 .mark-controls-filter-btn {
@@ -2642,6 +2663,10 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
   font-size: 0.78rem;
   padding: 5px 10px;
   white-space: nowrap;
+  /* Never shrink/wrap its own text mid-word — if it doesn't fit next to
+     the select, the fix above is for the WHOLE button to move to its own
+     line, not for "Filters" itself to get squeezed or broken. */
+  flex-shrink: 0;
 }
 
 /* Small count badge on the Filters button (see initMarkControls) — only
