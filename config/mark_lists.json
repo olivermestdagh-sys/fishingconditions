@@ -1,51 +1,214 @@
 [
-  { "field": "Mark Type", "value": "Fish" },
-  { "field": "Mark Type", "value": "POI" },
-
-  { "field": "Species", "value": "Whiting" },
-  { "field": "Species", "value": "Gummy Shark" },
-  { "field": "Species", "value": "Flathead" },
-  { "field": "Species", "value": "Snapper" },
-  { "field": "Species", "value": "Squid" },
-  { "field": "Species", "value": "Kingfish" },
-  { "field": "Species", "value": "Tuna" },
-  { "field": "Species", "value": "Crayfish" },
-  { "field": "Species", "value": "Snook" },
-  { "field": "Species", "value": "Scallops" },
-  { "field": "Species", "value": "Grass Whiting" },
-  { "field": "Species", "value": "Trevally" },
-  { "field": "Species", "value": "Leather Jacket" },
-  { "field": "Species", "value": "Elephant Fish" },
-  { "field": "Species", "value": "Wrasse" },
-  { "field": "Species", "value": "Garfish" },
-  { "field": "Species", "value": "Port Jackson Shark" },
-
-  { "field": "Weather Condition", "value": "Clear" },
-  { "field": "Weather Condition", "value": "Cloudy" },
-  { "field": "Weather Condition", "value": "Overcast" },
-  { "field": "Weather Condition", "value": "Rain" },
-  { "field": "Weather Condition", "value": "Windy" },
-
-  { "field": "Tide Condition", "value": "Running In" },
-  { "field": "Tide Condition", "value": "Running Out" },
-  { "field": "Tide Condition", "value": "Slack High" },
-  { "field": "Tide Condition", "value": "Slack Low" },
-
-  { "field": "Water Condition", "value": "Clear" },
-  { "field": "Water Condition", "value": "Weedy" },
-  { "field": "Water Condition", "value": "Murky" },
-  { "field": "Water Condition", "value": "Discoloured" },
-
-  { "field": "Bait", "value": "Pipi" },
-  { "field": "Bait", "value": "Squid" },
-  { "field": "Bait", "value": "Sandworm" },
-
-  { "field": "Rig", "value": "Paternoster" },
-  { "field": "Rig", "value": "Running Sinker" },
-
-  { "field": "Rod", "value": "2-4kg Spin" },
-  { "field": "Rod", "value": "4-6kg Spin" },
-
-  { "field": "Berley", "value": "Pilchard Mix" },
-  { "field": "Berley", "value": "Tuna Oil Mix" }
+  {
+    "field": "Mark Type",
+    "value": "Fish"
+  },
+  {
+    "field": "Mark Type",
+    "value": "POI"
+  },
+  {
+    "field": "Species",
+    "value": "Whiting"
+  },
+  {
+    "field": "Species",
+    "value": "Gummy Shark"
+  },
+  {
+    "field": "Species",
+    "value": "Flathead"
+  },
+  {
+    "field": "Species",
+    "value": "Snapper"
+  },
+  {
+    "field": "Species",
+    "value": "Squid"
+  },
+  {
+    "field": "Species",
+    "value": "Kingfish"
+  },
+  {
+    "field": "Species",
+    "value": "Tuna"
+  },
+  {
+    "field": "Species",
+    "value": "Crayfish"
+  },
+  {
+    "field": "Species",
+    "value": "Snook"
+  },
+  {
+    "field": "Species",
+    "value": "Scallops"
+  },
+  {
+    "field": "Species",
+    "value": "Grass Whiting"
+  },
+  {
+    "field": "Species",
+    "value": "Trevally"
+  },
+  {
+    "field": "Species",
+    "value": "Leather Jacket"
+  },
+  {
+    "field": "Species",
+    "value": "Elephant Fish"
+  },
+  {
+    "field": "Species",
+    "value": "Wrasse"
+  },
+  {
+    "field": "Species",
+    "value": "Garfish"
+  },
+  {
+    "field": "Species",
+    "value": "Port Jackson Shark"
+  },
+  {
+    "field": "Weather Condition",
+    "value": "Clear"
+  },
+  {
+    "field": "Weather Condition",
+    "value": "Cloudy"
+  },
+  {
+    "field": "Weather Condition",
+    "value": "Overcast"
+  },
+  {
+    "field": "Weather Condition",
+    "value": "Rain"
+  },
+  {
+    "field": "Weather Condition",
+    "value": "Windy"
+  },
+  {
+    "field": "Tide Condition",
+    "value": "Running In"
+  },
+  {
+    "field": "Tide Condition",
+    "value": "Running Out"
+  },
+  {
+    "field": "Tide Condition",
+    "value": "Slack High"
+  },
+  {
+    "field": "Tide Condition",
+    "value": "Slack Low"
+  },
+  {
+    "field": "Water Condition",
+    "value": "Clear"
+  },
+  {
+    "field": "Water Condition",
+    "value": "Weedy"
+  },
+  {
+    "field": "Water Condition",
+    "value": "Murky"
+  },
+  {
+    "field": "Bait",
+    "value": "Pipi"
+  },
+  {
+    "field": "Bait",
+    "value": "Squid"
+  },
+  {
+    "field": "Rig",
+    "value": "Paternoster"
+  },
+  {
+    "field": "Berley",
+    "value": "Pilchard Mix"
+  },
+  {
+    "field": "Berley",
+    "value": "Tuna Oil Mix"
+  },
+  {
+    "field": "Bait",
+    "value": "Prawn"
+  },
+  {
+    "field": "Rig",
+    "value": "Jig Head"
+  },
+  {
+    "field": "Rig",
+    "value": "Lure"
+  },
+  {
+    "field": "Rig",
+    "value": "Sliding drop"
+  },
+  {
+    "field": "Rod",
+    "value": "Raider Bream"
+  },
+  {
+    "field": "Rod",
+    "value": "Raider EGI"
+  },
+  {
+    "field": "Rod",
+    "value": "Ruvalus"
+  },
+  {
+    "field": "Rod",
+    "value": "Wilson"
+  },
+  {
+    "field": "Rod",
+    "value": "Maikuro"
+  },
+  {
+    "field": "Rod",
+    "value": "Prevail II"
+  },
+  {
+    "field": "Rod",
+    "value": "Crossfire"
+  },
+  {
+    "field": "Rod",
+    "value": "Penn Snapper"
+  },
+  {
+    "field": "Berley",
+    "value": "Whiting"
+  },
+  {
+    "field": "Tide Condition",
+    "value": "Last Run In"
+  },
+  {
+    "field": "Tide Condition",
+    "value": "Last Run Out"
+  },
+  {
+    "field": "Tide Condition",
+    "value": "Start Run In"
+  },
+  {
+    "field": "Tide Condition",
+    "value": "Start Run Out"
+  }
 ]
