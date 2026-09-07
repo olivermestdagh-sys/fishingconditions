@@ -402,12 +402,15 @@ async function onSaveGroups() {
 // --- Fishing Mark Lists (Settings tab) --------------------------------------
 //
 // Same read/render/add/remove/save shape as Location Groups just above, just
-// two-dimensional: markLists is a flat {field, value} array (see
+// two-dimensional: markLists is a flat {field, value, color?} array (see
 // MARK_LIST_FIELDS in charts.js) covering ALL nine pick-list fields at
 // once, rather than one array per field — one file, one sha, one save
 // button, rather than nine of everything. The UI still renders it grouped
 // by field (one card sub-section per field) so it reads as nine separate
-// lists even though it's a single flat array underneath.
+// lists even though it's a single flat array underneath. `color`, when set
+// (see onSetMarkListValueColor below), is just a plain hex string — purely
+// a display preference for this Settings-tab chip today, not yet read by
+// anything that renders marks on a map.
 
 let markLists = [];
 let markListsSha = null;
@@ -445,6 +448,21 @@ async function loadMarkLists() {
   renderMarkLists();
 }
 
+// Simple relative-luminance check so a chip's label text stays readable
+// against WHATEVER background colour was picked (see
+// onSetMarkListValueColor below) — light backgrounds get dark text, dark
+// backgrounds get white text, rather than picking one fixed text colour
+// that would go illegible against roughly half of all possible picks.
+function pickReadableTextColor(hex) {
+  const c = String(hex || "").replace("#", "");
+  if (c.length !== 6) return "#374151"; // not a real hex colour — same grey .loc-chip already defaults to
+  const r = parseInt(c.substring(0, 2), 16);
+  const g = parseInt(c.substring(2, 4), 16);
+  const b = parseInt(c.substring(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.6 ? "#111827" : "#ffffff";
+}
+
 function renderMarkLists() {
   const container = document.getElementById("markListsGroups");
   container.innerHTML = MARK_LIST_FIELDS.map(({ key, label }) => `
@@ -470,19 +488,56 @@ function renderMarkLists() {
       row.innerHTML = `<p class="footnote" style="margin:0;text-align:left;">No options yet — add one below.</p>`;
       return;
     }
-    row.innerHTML = values.map((v) => `
-      <span class="loc-chip" style="cursor:default;display:inline-flex;align-items:center;gap:6px;">
-        <span>${v.value.replace(/</g, "&lt;")}</span>
-        <button type="button" data-remove-mark-value data-field="${key}" data-value="${v.value.replace(/"/g, "&quot;")}"
-          aria-label="Remove ${v.value.replace(/"/g, "&quot;")}"
+    row.innerHTML = values.map((v) => {
+      const escAttr = v.value.replace(/"/g, "&quot;");
+      const escText = v.value.replace(/</g, "&lt;");
+      // Only overrides the chip's default white/grey look when a colour has
+      // actually been picked for this value — an unset one still just looks
+      // like every other .loc-chip until clicked.
+      const colorStyle = v.color ? `background:${v.color};border-color:${v.color};color:${pickReadableTextColor(v.color)};` : "";
+      return `
+      <span class="loc-chip mark-list-color-chip" data-field="${key}" data-value="${escAttr}" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;${colorStyle}">
+        <input type="color" class="mark-list-color-input" data-field="${key}" data-value="${escAttr}" value="${v.color || "#e5e7eb"}"
+          aria-label="Pick a colour for ${escAttr}"
+          style="position:absolute;width:0;height:0;padding:0;border:0;opacity:0;" />
+        <span>${escText}</span>
+        <button type="button" data-remove-mark-value data-field="${key}" data-value="${escAttr}"
+          aria-label="Remove ${escAttr}"
           style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>
       </span>
-    `).join("");
+    `;
+    }).join("");
   });
 
   container.querySelectorAll("button[data-remove-mark-value]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
+      // Stops the click from also bubbling up into this same chip's own
+      // click-to-open-the-colour-picker handler just below — removing a
+      // value and immediately popping a colour picker for the (now gone)
+      // chip underneath the cursor would be a confusing double-action from
+      // one click.
+      e.stopPropagation();
       onRemoveMarkListValue(e.currentTarget.dataset.field, e.currentTarget.dataset.value);
+    });
+  });
+  // Clicking anywhere on a chip OTHER than its × button opens that value's
+  // colour picker — done by forwarding the click to a visually-hidden
+  // <input type="color"> rather than building a custom swatch picker from
+  // scratch; every modern browser already has a perfectly good native one.
+  container.querySelectorAll(".mark-list-color-chip").forEach((chip) => {
+    chip.addEventListener("click", (e) => {
+      if (e.target.closest("[data-remove-mark-value]")) return;
+      const colorInput = chip.querySelector(".mark-list-color-input");
+      if (colorInput) colorInput.click();
+    });
+  });
+  container.querySelectorAll(".mark-list-color-input").forEach((input) => {
+    // "change" (fires once the picker closes with a value committed), not
+    // "input" (fires continuously while dragging inside the picker) — one
+    // update per pick, not a flood of them.
+    input.addEventListener("change", (e) => {
+      onSetMarkListValueColor(e.currentTarget.dataset.field, e.currentTarget.dataset.value, e.currentTarget.value);
+      renderMarkLists();
     });
   });
   container.querySelectorAll(".mark-list-add-btn").forEach((btn) => {
@@ -517,6 +572,21 @@ function onAddMarkListValue(key) {
   markLists.push({ field: fieldDef.label, value });
   input.value = "";
   renderMarkLists();
+}
+
+// Sets (or clears back to none, if `color` is falsy) the display colour for
+// one specific value — e.g. "Whiting" under Species. Purely a local edit
+// like Add/Remove above; still needs "Save mark lists" clicked afterward to
+// actually commit it to config/mark_lists.json on GitHub. No cleanup of
+// existing marks needed here (unlike the location-groups equivalent above):
+// a mark just references the value string itself, never the colour, so
+// recolouring (or un-colouring) an option doesn't touch anything that
+// already used it.
+function onSetMarkListValueColor(key, value, color) {
+  const fieldDef = MARK_LIST_FIELDS.find((f) => f.key === key);
+  if (!fieldDef) return;
+  const entry = markLists.find((r) => r.field === fieldDef.label && r.value === value);
+  if (entry) entry.color = color;
 }
 
 // Removing an option here does NOT scrub it from any mark that already used
