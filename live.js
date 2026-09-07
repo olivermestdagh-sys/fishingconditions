@@ -188,9 +188,10 @@ function renderLiveMap(gpsPosition) {
       lng: gpsPosition.lng,
       label: "You are here",
       iconKind: "currentPosition",
-      // ONLY this exact entry point gets smart-filled Weather/Tide Condition
-      // (from currentLoc's own real data) plus "last value used" for
-      // everything else — see computeQuickMarkDefaults' own comment
+      // ONLY this exact entry point gets smart-filled Tide Condition (from
+      // currentLoc's own real tide data) plus "last value used" for
+      // everything else EXCEPT Weather Condition, which deliberately gets
+      // no default at all — see computeQuickMarkDefaults' own comment
       // (charts.js) for why. A plain map click (below, and the Location
       // tab's own click) always starts blank; guessing conditions for an
       // arbitrary clicked point would be guessing about somewhere the
