@@ -949,32 +949,55 @@ function hashStringToHue(str) {
 }
 
 /**
- * Map pin style for one mark record. POI marks get a fixed, distinct
- * "flag" look (same role the old GPX flagbuoy sym played) since there's
- * usually only a handful of them and they should read as categorically
- * different from a catch, not just another hue. Everything else (Fish, or
- * any future custom Mark Type) is coloured by hashStringToHue on species
- * (falling back to the mark's type if it has no species) — see that
- * function's own comment for why hue-by-hash rather than a lookup table.
+ * Map pin style for one mark record, coloured by whichever field
+ * `state.groupByKey` currently selects (Species by default — see
+ * createMarkLayerState/MARK_LIST_FIELDS) rather than always Species: if
+ * that field's value has a colour assigned on the Settings tab's Fishing
+ * Mark Lists (see onSetMarkListValueColor, locationsadmin.js), that exact
+ * colour is used; otherwise falls back to hashStringToHue on the value
+ * itself, so anything not yet given a real colour still gets a stable,
+ * distinguishable one for free. A mark with no value at all for the
+ * current group field (e.g. grouping by Bait, but this mark has none set)
+ * gets MARK_NO_VALUE_STYLE — a neutral grey — rather than hashing an empty
+ * string, which would misleadingly paint every "no value" mark the exact
+ * same (meaningless) colour as whatever value happens to hash the same.
+ *
+ * No more hardcoded "POI always gets a flag icon" special case (the
+ * previous version of this function had one) — now that any value on any
+ * field can be given its own colour from Settings, a POI mark stands out
+ * by giving "POI" its own colour there (under Mark Type) same as any other
+ * value, rather than code baking in one specific value's appearance.
  */
-function markStyleFor(mark) {
-  if (mark.type === "POI") {
-    return { color: "#000000", fillColor: "#f97316", radius: 6, weight: 2 };
+const MARK_NO_VALUE_STYLE = { color: "#374151", fillColor: "#9ca3af", radius: 4, weight: 1 };
+
+function markStyleFor(mark, state) {
+  const groupField = MARK_LIST_FIELDS.find((f) => f.key === state.groupByKey) || MARK_LIST_FIELDS[0];
+  const value = mark[state.groupByKey];
+  if (!value) return MARK_NO_VALUE_STYLE;
+  const tileEntry = (state.markLists || []).find((r) => r.field === groupField.label && r.value === value);
+  if (tileEntry && tileEntry.color) {
+    return { color: "#374151", fillColor: tileEntry.color, radius: 5, weight: 1.5 };
   }
-  const hue = hashStringToHue(mark.species || mark.type || "");
+  const hue = hashStringToHue(value);
   return { color: `hsl(${hue}, 70%, 25%)`, fillColor: `hsl(${hue}, 65%, 50%)`, radius: 4, weight: 1 };
 }
 
-// "Name — Species (YYYY-MM-DD)" for a Fish mark, "Name (YYYY-MM-DD)" for a
-// POI (no species to show). Plain slice of the naive dateTime string rather
-// than a locale-formatted date — unambiguous across marks spanning several
-// years, and this data can easily span years once real logging starts.
-// escapeHtml on name/species: Leaflet's bindTooltip renders its string
-// argument as raw HTML (sets innerHTML), so an unescaped "&" or "<" in a
-// mark's name would silently break the tooltip rather than just display oddly.
-function markTooltipText(mark) {
+// "<group value> — Name — Species (YYYY-MM-DD)" — the group-value prefix is
+// whatever field state.groupByKey currently has selected (see
+// markStyleFor's own comment), so the tooltip always names the exact thing
+// the colour is standing for, whether that's Species, Tide Condition, or
+// anything else. Omitted when this mark has no value for that field. Plain
+// slice of the naive dateTime string rather than a locale-formatted date —
+// unambiguous across marks spanning several years, and this data can
+// easily span years once real logging starts. escapeHtml throughout:
+// Leaflet's bindTooltip renders its string argument as raw HTML (sets
+// innerHTML), so an unescaped "&" or "<" anywhere in this would silently
+// break the tooltip rather than just display oddly.
+function markTooltipText(mark, state) {
   const label = mark.species ? `${escapeHtml(mark.name)} — ${escapeHtml(mark.species)}` : escapeHtml(mark.name);
-  return `${label} (${String(mark.dateTime || "").slice(0, 10)})`;
+  const dated = `${label} (${String(mark.dateTime || "").slice(0, 10)})`;
+  const groupValue = mark[state.groupByKey];
+  return groupValue ? `${escapeHtml(groupValue)} — ${dated}` : dated;
 }
 
 // The set of optional, pick-list-backed fields a mark can carry, alongside
@@ -1435,8 +1458,8 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         marker.setPopupContent(buildMarkPopupViewHtml(mark));
         wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options);
         marker.unbindTooltip();
-        marker.bindTooltip(markTooltipText(mark), { direction: "top" });
-        const style = markStyleFor(mark);
+        marker.bindTooltip(markTooltipText(mark, options.state), { direction: "top" });
+        const style = markStyleFor(mark, options.state);
         marker.setStyle({ color: style.color, fillColor: style.fillColor, radius: style.radius, weight: style.weight });
       } else {
         statusEl.textContent = "Save failed: " + result.error;
@@ -1553,7 +1576,7 @@ async function loadAndRenderMarks(map, state) {
   const renderer = L.canvas({ padding: 0.5 });
   for (const mark of marks) {
     if (mark.lat == null || mark.lng == null) continue;
-    const style = markStyleFor(mark);
+    const style = markStyleFor(mark, state);
     const marker = L.circleMarker([mark.lat, mark.lng], {
       renderer,
       radius: style.radius,
@@ -1562,7 +1585,7 @@ async function loadAndRenderMarks(map, state) {
       fillColor: style.fillColor,
       fillOpacity: 0.85,
     }).addTo(map);
-    marker.bindTooltip(markTooltipText(mark), { direction: "top" });
+    marker.bindTooltip(markTooltipText(mark, state), { direction: "top" });
     marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
     state.marksById.set(mark.id, mark);
     state.markersById.set(mark.id, marker);
@@ -1586,8 +1609,310 @@ async function loadAndRenderMarks(map, state) {
     // isn't in state.marksById until saved — this handler correctly no-ops
     // for it; startNewMarkEntry wires that popup's buttons itself, directly.
     if (!mark || !marker) return;
-    wireMarkPopupButtons(popupEl, marker, mark, state.markLists);
+    wireMarkPopupButtons(popupEl, marker, mark, state.markLists, { state });
   });
+
+  initMarkControls(map, state);
+}
+
+// --- Mark display filtering & colour-by-field grouping ---------------------
+//
+// Two independent, persisted view preferences layered on top of the marks
+// layer itself: which field currently determines colour (state.groupByKey
+// — see markStyleFor/markTooltipText above) and which values are
+// included/excluded from display at all (state.filters — see
+// markMatchesFilters below). Both live on the SAME `state` object
+// loadAndRenderMarks already threads everywhere marks are touched, and both
+// persist to localStorage (see loadMarkViewSettings/saveMarkViewSettings)
+// SHARED across the Location and Live tabs — one filter setup follows you
+// between them, the same way the GitHub connection itself already does,
+// rather than needing to be set up twice.
+
+const MARK_VIEW_STORAGE_KEY = "markViewSettings";
+
+/**
+ * Reads {groupByKey, filters} from localStorage — filters as
+ * {[fieldKey]: {include: Set<string>, exclude: Set<string>}}, rebuilt from
+ * the plain arrays JSON actually stores (see saveMarkViewSettings). Never
+ * throws; a missing/corrupt entry just means "start from defaults"
+ * (Species, no filters), same as any other first-time-use case on this site.
+ */
+function loadMarkViewSettings() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(MARK_VIEW_STORAGE_KEY) || "null");
+    if (!raw) return { groupByKey: "species", filters: {} };
+    const filters = {};
+    for (const [key, f] of Object.entries(raw.filters || {})) {
+      filters[key] = { include: new Set(f.include || []), exclude: new Set(f.exclude || []) };
+    }
+    return { groupByKey: raw.groupByKey || "species", filters };
+  } catch {
+    return { groupByKey: "species", filters: {} };
+  }
+}
+
+/** Mirror of loadMarkViewSettings — Sets serialized back to plain arrays for
+ * JSON.stringify, which doesn't know how to handle a Set on its own. */
+function saveMarkViewSettings(state) {
+  try {
+    const filters = {};
+    for (const [key, f] of Object.entries(state.filters)) {
+      filters[key] = { include: [...(f.include || [])], exclude: [...(f.exclude || [])] };
+    }
+    localStorage.setItem(MARK_VIEW_STORAGE_KEY, JSON.stringify({ groupByKey: state.groupByKey, filters }));
+  } catch {
+    // Same reasoning as saveLastMarkFieldValues' own try/catch above — a
+    // localStorage failure here just means this session's filter tweak
+    // won't be remembered next time, not worth surfacing as an error.
+  }
+}
+
+/**
+ * Whether one mark should be shown at all, given the current filters —
+ * AND across every field that has an active filter, OR within one field's
+ * include set (matching ANY of the picked values passes), and the mirror
+ * OR within its exclude set (matching ANY of THOSE hides it). A field with
+ * no active include/exclude entries is ignored entirely — every mark passes
+ * it by default. A mark with no value at all for a field that has an
+ * active INCLUDE filter fails that field (nothing to match); a mark with no
+ * value for a field with only an EXCLUDE filter passes it trivially
+ * (nothing there to be excluded).
+ */
+function markMatchesFilters(mark, filters) {
+  for (const [key, f] of Object.entries(filters)) {
+    if (!f) continue;
+    const value = mark[key];
+    if (f.include && f.include.size > 0) {
+      if (!value || !f.include.has(value)) return false;
+    }
+    if (f.exclude && f.exclude.size > 0) {
+      if (value && f.exclude.has(value)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Re-applies state.filters and state.groupByKey to every mark currently
+ * known about (state.marksById/markersById) — shows/hides each marker on
+ * `map` to match the filter, and restyles/re-tooltips whatever's left
+ * visible to match the current colour-by field. Called once after the
+ * initial load (to respect filters restored from a previous visit) and
+ * again every time the group-by select changes, a filter is set/cleared in
+ * the modal, or an active-filter chip is removed directly.
+ */
+function applyMarkFiltersAndGrouping(map, state) {
+  state.marksById.forEach((mark, id) => {
+    const marker = state.markersById.get(id);
+    if (!marker) return;
+    const passes = markMatchesFilters(mark, state.filters);
+    const onMap = map.hasLayer(marker);
+    if (passes) {
+      if (!onMap) marker.addTo(map);
+      const style = markStyleFor(mark, state);
+      marker.setStyle({ color: style.color, fillColor: style.fillColor, radius: style.radius, weight: style.weight });
+      marker.unbindTooltip();
+      marker.bindTooltip(markTooltipText(mark, state), { direction: "top" });
+    } else if (onMap) {
+      map.removeLayer(marker);
+    }
+  });
+}
+
+/**
+ * Small removable-chip summary of whatever filters are currently active —
+ * "NOT " prefix distinguishes an exclude chip from an include one alongside
+ * the include/exclude colour coding (see the inline styles below), since
+ * colour alone isn't a safe way to convey that distinction (screen readers,
+ * colour-blindness). Renders nothing (empty container) when no filters are
+ * active at all, rather than an empty title bar with nothing under it.
+ */
+function renderActiveFilterChips(container, state, onChange) {
+  const chips = [];
+  for (const { key, label } of MARK_LIST_FIELDS) {
+    const f = state.filters[key];
+    if (!f) continue;
+    for (const v of f.include || []) chips.push({ key, label, value: v, mode: "include" });
+    for (const v of f.exclude || []) chips.push({ key, label, value: v, mode: "exclude" });
+  }
+  if (chips.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+  container.innerHTML = chips
+    .map((c) => {
+      const style =
+        c.mode === "include"
+          ? "background:#dcfce7;border-color:#16a34a;color:#166534;"
+          : "background:#fee2e2;border-color:#dc2626;color:#991b1b;";
+      const escValue = escapeHtml(c.value);
+      return `<span class="loc-chip" style="display:inline-flex;align-items:center;gap:4px;cursor:default;font-size:0.72rem;padding:3px 8px;${style}">
+        ${c.mode === "exclude" ? "NOT " : ""}${escapeHtml(c.label)}: ${escValue}
+        <button type="button" data-remove-active-filter data-field="${c.key}" data-value="${escValue}" data-mode="${c.mode}"
+          aria-label="Remove filter"
+          style="background:none;border:none;color:inherit;cursor:pointer;padding:0;font-size:0.9rem;line-height:1;">×</button>
+      </span>`;
+    })
+    .join("");
+  container.querySelectorAll("[data-remove-active-filter]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const { field, value, mode } = btn.dataset;
+      state.filters[field]?.[mode]?.delete(value);
+      onChange();
+    });
+  });
+}
+
+/**
+ * Modal for setting filters — one section per MARK_LIST_FIELDS entry that
+ * actually has values in mark_lists.json (a field with nothing configured
+ * yet is skipped outright, not shown as an empty section), each value a
+ * 3-state chip cycling neutral -> include -> exclude -> neutral on tap.
+ * Mutates state.filters directly and live as chips are tapped (no separate
+ * "apply" step to remember) — Done/the close button/tapping the backdrop
+ * all just close the dialog the same way, since every change already took
+ * effect the moment it was tapped. "Clear all" empties every field's
+ * filter in one go, for starting over without hunting down each chip.
+ *
+ * Resolves once closed (no return value — the caller reads state.filters
+ * directly afterward, same object that was already being mutated live).
+ */
+function showMarkFilterModal(state, markLists) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "ww-candidate-overlay";
+
+    function chipStateFor(key, value) {
+      const f = state.filters[key];
+      if (f && f.include && f.include.has(value)) return "include";
+      if (f && f.exclude && f.exclude.has(value)) return "exclude";
+      return "neutral";
+    }
+    function chipStyleFor(chipState) {
+      if (chipState === "include") return "background:#dcfce7;border-color:#16a34a;color:#166534;";
+      if (chipState === "exclude") return "background:#fee2e2;border-color:#dc2626;color:#991b1b;";
+      return "";
+    }
+
+    const sectionsHtml = MARK_LIST_FIELDS.map(({ key, label }) => {
+      const values = markLists.filter((r) => r.field === label).map((r) => r.value);
+      if (values.length === 0) return ""; // nothing configured for this field yet — no point showing an empty section
+      const chips = values
+        .map((v) => {
+          const cs = chipStateFor(key, v);
+          const escValue = v.replace(/"/g, "&quot;");
+          const escText = v.replace(/</g, "&lt;");
+          return `<span class="loc-chip mark-filter-chip" data-field="${key}" data-value="${escValue}" data-state="${cs}"
+            style="cursor:pointer;${chipStyleFor(cs)}">${escText}</span>`;
+        })
+        .join("");
+      return `
+        <div style="margin-bottom:14px;">
+          <div style="font-size:0.8rem;font-weight:600;margin-bottom:6px;">${label}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">${chips}</div>
+        </div>
+      `;
+    }).join("");
+
+    overlay.innerHTML = `
+      <div class="ww-candidate-dialog">
+        <button type="button" class="ww-candidate-close" aria-label="Close">&times;</button>
+        <h3 style="margin:0 0 4px;">Filter marks</h3>
+        <p class="footnote" style="margin:0 0 12px;">Tap once to require it, tap again to exclude it, tap again to clear.</p>
+        ${sectionsHtml || `<p class="footnote" style="margin:0;">No pick-list options set up yet — add some on the Settings tab first.</p>`}
+        <div style="display:flex;gap:8px;margin-top:6px;">
+          <button type="button" id="markFilterClearAll" class="btn-secondary" style="flex:1;">Clear all</button>
+          <button type="button" id="markFilterDone" class="btn-primary" style="flex:1;">Done</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const cleanup = () => {
+      overlay.remove();
+      resolve();
+    };
+
+    function cycleChip(chip) {
+      const key = chip.dataset.field;
+      const value = chip.dataset.value;
+      const current = chip.dataset.state;
+      if (!state.filters[key]) state.filters[key] = { include: new Set(), exclude: new Set() };
+      const f = state.filters[key];
+      let next;
+      if (current === "neutral") {
+        f.include.add(value);
+        next = "include";
+      } else if (current === "include") {
+        f.include.delete(value);
+        f.exclude.add(value);
+        next = "exclude";
+      } else {
+        f.exclude.delete(value);
+        next = "neutral";
+      }
+      chip.dataset.state = next;
+      chip.style.cssText = `cursor:pointer;${chipStyleFor(next)}`;
+    }
+
+    overlay.querySelectorAll(".mark-filter-chip").forEach((chip) => {
+      chip.addEventListener("click", () => cycleChip(chip));
+    });
+    overlay.querySelector("#markFilterClearAll").addEventListener("click", () => {
+      for (const key of Object.keys(state.filters)) {
+        state.filters[key] = { include: new Set(), exclude: new Set() };
+      }
+      overlay.querySelectorAll(".mark-filter-chip").forEach((chip) => {
+        chip.dataset.state = "neutral";
+        chip.style.cssText = "cursor:pointer;";
+      });
+    });
+    overlay.querySelector("#markFilterDone").addEventListener("click", cleanup);
+    overlay.querySelector(".ww-candidate-close").addEventListener("click", cleanup);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) cleanup();
+    });
+  });
+}
+
+/**
+ * Wires up the small floating control bar (see #markControlsBar in
+ * conditions.html/live.html) — the "colour by" select, the Filters
+ * button + modal, and the active-filter chip row — and shows it, since
+ * it starts hidden in the HTML (nothing to control before marks have
+ * loaded at all). Called once, at the end of loadAndRenderMarks, so it
+ * only ever appears alongside actual mark data.
+ */
+function initMarkControls(map, state) {
+  const bar = document.getElementById("markControlsBar");
+  if (!bar) return; // page doesn't have the controls markup (shouldn't happen on Location/Live, defensive)
+  bar.style.display = "block";
+
+  const select = document.getElementById("markGroupBySelect");
+  select.innerHTML = MARK_LIST_FIELDS.map(({ key, label }) => `<option value="${key}"${key === state.groupByKey ? " selected" : ""}>${label}</option>`).join("");
+  select.addEventListener("change", () => {
+    state.groupByKey = select.value;
+    refresh();
+  });
+
+  const chipsContainer = document.getElementById("markActiveFilterChips");
+  const badge = document.getElementById("markFilterBadge");
+
+  function refresh() {
+    applyMarkFiltersAndGrouping(map, state);
+    renderActiveFilterChips(chipsContainer, state, refresh);
+    const activeCount = Object.values(state.filters).reduce((n, f) => n + (f ? f.include.size + f.exclude.size : 0), 0);
+    badge.style.display = activeCount > 0 ? "flex" : "none";
+    badge.textContent = String(activeCount);
+    saveMarkViewSettings(state);
+  }
+
+  document.getElementById("markFilterBtn").addEventListener("click", async () => {
+    await showMarkFilterModal(state, state.markLists);
+    refresh();
+  });
+
+  refresh(); // respects whatever was restored from localStorage on load
 }
 
 /**
@@ -1596,10 +1921,13 @@ async function loadAndRenderMarks(map, state) {
  * (which populates it) and into the map's own click handler
  * (handleMapClickForMarks, which reads it) so the click handler always sees
  * whatever's currently loaded rather than a stale empty snapshot taken
- * before the async load finished.
+ * before the async load finished. groupByKey/filters start from whatever
+ * was saved last time (see loadMarkViewSettings) — shared across the
+ * Location and Live tabs, since both call this the same way.
  */
 function createMarkLayerState() {
-  return { marksById: new Map(), markersById: new Map(), markLists: [] };
+  const saved = loadMarkViewSettings();
+  return { marksById: new Map(), markersById: new Map(), markLists: [], groupByKey: saved.groupByKey, filters: saved.filters };
 }
 
 /**
@@ -1673,7 +2001,7 @@ function startNewMarkEntry(map, lat, lng, state, defaults = {}) {
   for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
     if (defaults[f.key]) draft[f.key] = defaults[f.key];
   }
-  const style = markStyleFor(draft);
+  const style = markStyleFor(draft, state);
   const marker = L.circleMarker([lat, lng], {
     radius: style.radius,
     color: style.color,

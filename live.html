@@ -25,6 +25,18 @@
   <div id="liveMap" class="location-map-fullpage"></div>
   <div id="liveGpsStatus" class="live-gps-status">Finding your location…</div>
 
+  <div id="markControlsBar" class="mark-controls-bar" style="display:none;">
+    <div class="mark-controls-row">
+      <label class="mark-controls-label">Colour by
+        <select id="markGroupBySelect" class="mark-controls-select"></select>
+      </label>
+      <button type="button" id="markFilterBtn" class="btn-secondary mark-controls-filter-btn">
+        Filters<span id="markFilterBadge" class="mark-filter-badge" style="display:none;"></span>
+      </button>
+    </div>
+    <div id="markActiveFilterChips" class="mark-active-filter-chips"></div>
+  </div>
+
   <div id="liveHoverPanel" class="location-hover-panel" style="display:none;">
     <button id="btnCloseLiveHoverPanel" class="location-hover-panel-close" aria-label="Close">&times;</button>
 
