@@ -489,14 +489,14 @@ this restriction — nothing extra is drawn.
   cache above)
 - `data/conditions.json` — the generated data file (starts empty; gets
   overwritten automatically by the workflow)
+- `data/marks.json` — your GPS fishing marks (catches and points of
+  interest), logged by hand while out fishing. Starts empty. See "GPS
+  fishing marks" below
 - `cloudflare-worker/willyweather-search.js` — optional, separate piece of
   infrastructure (not deployed via GitHub Pages) that powers the WillyWeather
   candidate popup on the Settings map and the Location tab's live preview —
   see "Getting real WillyWeather names via the map" and "Live preview from
   the Location tab" above
-- `config/marks.json` — your GPS fishing marks (catches and points of
-  interest), logged by hand while out fishing. Starts empty. See "GPS
-  fishing marks" below
 - `config/mark_lists.json` — the editable pick-lists (species, bait, rig,
   weather/tide/water condition, etc) offered when logging a mark. Edit from
   the Settings tab's "Fishing Mark Lists" section
@@ -513,15 +513,20 @@ export from Garmin/Lowrance and drop in as-is) — marks.json is an
 open-ended, editable personal log that grows every time you're out, entered
 directly on this site rather than imported from a device.
 
-**Storage**: flat JSON in `config/marks.json`, written the same way as every
-other config file on this site — by committing directly to your repo from
-the browser (see "Editing locations from the site itself" below), no
-separate database. At the scale of one person logging by hand (realistically
-low hundreds to a few thousand marks over years), a flat file stays only a
-few hundred KB and is trivial for GitHub's API to read and rewrite whole on
-every save — introducing a real database wouldn't earn its cost unless this
-became multi-user, needed fast live queries, or needed unattended server-side
-writes. Worth revisiting only if this file ever grows past a few MB.
+**Storage**: flat JSON in `data/marks.json` — in `data/` rather than
+`config/` despite being written the same browser-to-GitHub-API way as every
+config file on this site: `config/` holds settings that configure how the
+site/pipeline behaves (which locations to track, which groups exist, API
+keys), while `data/` holds the actual content the site renders
+(`conditions.json` IS the data every page displays) — and marks are exactly
+that, real content that just happens to be authored here instead of by
+`fetch_conditions.py`. No separate database. At the scale of one person
+logging by hand (realistically low hundreds to a few thousand marks over
+years), a flat file stays only a few hundred KB and is trivial for GitHub's
+API to read and rewrite whole on every save — introducing a real database
+wouldn't earn its cost unless this became multi-user, needed fast live
+queries, or needed unattended server-side writes. Worth revisiting only if
+this file ever grows past a few MB.
 
 **Fields on a mark**: GPS location (lat/lng), a display name, Mark Type
 (seeded with Fish/POI, but itself just another editable list — see below —

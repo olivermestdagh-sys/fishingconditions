@@ -1148,7 +1148,7 @@ async function saveNewLocationToGitHub(newLoc) {
 // A "mark" is a single manually-placed GPS point recorded while out fishing —
 // either a real Catch (with species/conditions/gear detail attached) or a
 // plain POI (a snag, a hazard, a ramp not otherwise tracked, etc). Kept as
-// its own small file (config/marks.json) rather than folded into
+// its own small file (data/marks.json) rather than folded into
 // config/locations.json: locations.json describes the fixed handful of spots
 // this whole site scores tide/weather/wind conditions FOR, while marks are an
 // open-ended, ever-growing personal log added to constantly out on the
@@ -1158,6 +1158,16 @@ async function saveNewLocationToGitHub(newLoc) {
 // Also distinct from the personal-spots GPX layer above: that's a static,
 // read-only file exported from a device and dropped in as-is, while marks
 // are entered directly on this site and editable here.
+//
+// Lives in data/ rather than config/ despite being written the same
+// browser->GitHub-API way as config/locations.json etc: config/ is for
+// settings that configure how the site/pipeline behaves (which locations to
+// track, which groups exist, API keys), while data/ is the actual content
+// the site renders (conditions.json IS the data every page displays) — and
+// marks are exactly that: real content, not a setting, that just happens to
+// be authored here instead of by fetch_conditions.py. mark_lists.json stays
+// in config/ since IT genuinely is a settings file (the set of options
+// offered), the same role config/location_groups.json already plays.
 //
 // Stored as flat JSON, written via the exact same GitHub Contents API
 // read-sha/write pattern as locations.json/location_groups.json above (see
@@ -1175,11 +1185,11 @@ async function saveNewLocationToGitHub(newLoc) {
 // of thousands of rows; until then a flat file keeps the whole architecture
 // (and the deploy-by-drag-and-drop workflow) one consistent shape.
 
-const MARKS_FILE_PATH = "config/marks.json";
+const MARKS_FILE_PATH = "data/marks.json";
 const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
 
 /**
- * Shape of one entry in config/marks.json's `marks` array:
+ * Shape of one entry in data/marks.json's `marks` array:
  *
  *   {
  *     id:        string — e.g. "m_1730962345123_a1b2c" (see makeMarkId
