@@ -1,4 +1,7 @@
 [
+  { "field": "Mark Type", "value": "Fish" },
+  { "field": "Mark Type", "value": "POI" },
+
   { "field": "Species", "value": "Whiting" },
   { "field": "Species", "value": "Gummy Shark" },
   { "field": "Species", "value": "Flathead" },
