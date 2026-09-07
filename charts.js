@@ -982,22 +982,25 @@ function markStyleFor(mark, state) {
   return { color: `hsl(${hue}, 70%, 25%)`, fillColor: `hsl(${hue}, 65%, 50%)`, radius: 4, weight: 1 };
 }
 
-// "<group value> — Name — Species (YYYY-MM-DD)" — the group-value prefix is
-// whatever field state.groupByKey currently has selected (see
+// "<group value> — Name — Species (YYYY-MM-DD) · source" — the group-value
+// prefix is whatever field state.groupByKey currently has selected (see
 // markStyleFor's own comment), so the tooltip always names the exact thing
 // the colour is standing for, whether that's Species, Tide Condition, or
-// anything else. Omitted when this mark has no value for that field. Plain
-// slice of the naive dateTime string rather than a locale-formatted date —
-// unambiguous across marks spanning several years, and this data can
-// easily span years once real logging starts. escapeHtml throughout:
-// Leaflet's bindTooltip renders its string argument as raw HTML (sets
-// innerHTML), so an unescaped "&" or "<" anywhere in this would silently
-// break the tooltip rather than just display oddly.
+// anything else. Omitted when this mark has no value for that field, same
+// as the trailing "· source" (omitted entirely for the handful of marks
+// created before that field existed at all). Plain slice of the naive
+// dateTime string rather than a locale-formatted date — unambiguous across
+// marks spanning several years, and this data can easily span years once
+// real logging starts. escapeHtml throughout: Leaflet's bindTooltip renders
+// its string argument as raw HTML (sets innerHTML), so an unescaped "&" or
+// "<" anywhere in this would silently break the tooltip rather than just
+// display oddly.
 function markTooltipText(mark, state) {
   const label = mark.species ? `${escapeHtml(mark.name)} — ${escapeHtml(mark.species)}` : escapeHtml(mark.name);
-  const dated = `${label} (${String(mark.dateTime || "").slice(0, 10)})`;
+  let text = `${label} (${String(mark.dateTime || "").slice(0, 10)})`;
+  if (mark.source) text += ` · ${escapeHtml(mark.source)}`;
   const groupValue = mark[state.groupByKey];
-  return groupValue ? `${escapeHtml(groupValue)} — ${dated}` : dated;
+  return groupValue ? `${escapeHtml(groupValue)} — ${text}` : text;
 }
 
 // The set of optional, pick-list-backed fields a mark can carry, alongside
@@ -1209,7 +1212,9 @@ function buildMarkPopupViewHtml(mark) {
   row("Type", mark.type);
   row("Date/Time", mark.dateTime);
   for (const f of MARK_POPUP_OPTIONAL_FIELDS) row(f.displayLabel, mark[f.key]);
+  row("Size", mark.size != null ? `${mark.size} cm` : null);
   row("Notes", mark.notes);
+  row("Source", mark.source);
   const canEdit = !!getConnection();
   return `
     <div data-mark-id="${escapeHtml(mark.id)}" style="min-width:200px;">
@@ -1223,11 +1228,15 @@ function buildMarkPopupViewHtml(mark) {
  * Editable form version of the same popup — one text input (Name), one
  * datetime-local input (Date/Time), a <select> per pick-list field sourced
  * from markLists (falls back to an empty option list, still usable, if
- * mark_lists.json failed to load — see loadAndRenderMarks), and a free-text
- * Notes textarea. Deliberately does NOT expose lat/lng: repositioning a
- * mark's actual GPS point is a different, more error-prone action (fat-finger
- * a coordinate here and the pin silently jumps oceans) than correcting its
- * details, and wasn't asked for — the pin stays exactly where it was placed.
+ * mark_lists.json failed to load — see loadAndRenderMarks), a numeric Size
+ * (cm) input, a free-text Notes textarea, and a read-only Source field
+ * (see collectMarkFormValues — there's no `name` collected from it because
+ * there's nothing TO collect: it's carried over from the original mark
+ * unconditionally, not editable here at all). Deliberately does NOT expose
+ * lat/lng: repositioning a mark's actual GPS point is a different, more
+ * error-prone action (fat-finger a coordinate here and the pin silently
+ * jumps oceans) than correcting its details, and wasn't asked for — the
+ * pin stays exactly where it was placed.
  */
 function buildMarkPopupEditHtml(mark, markLists) {
   const optionalFieldsHtml = MARK_POPUP_OPTIONAL_FIELDS.map(
@@ -1249,8 +1258,15 @@ function buildMarkPopupEditHtml(mark, markLists) {
           <input type="datetime-local" name="dateTime" step="1" value="${naiveToDatetimeLocal(mark.dateTime)}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
         ${optionalFieldsHtml}
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Size (cm)
+          <input type="number" name="size" min="0" step="1" value="${mark.size != null ? mark.size : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
+        </label>
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Notes
           <textarea name="notes" rows="2" style="${MARK_POPUP_INPUT_STYLE}resize:vertical;">${escapeHtml(mark.notes || "")}</textarea>
+        </label>
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Source
+          <input type="text" readonly value="${escapeHtml(mark.source || "—")}"
+            style="${MARK_POPUP_INPUT_STYLE}background:var(--grey-100);color:var(--grey-500);cursor:not-allowed;" />
         </label>
       </form>
       <div style="display:flex;gap:8px;margin-top:10px;">
@@ -1265,10 +1281,13 @@ function buildMarkPopupEditHtml(mark, markLists) {
 /**
  * Reads the edit form's current values back into a full mark object ready
  * to save — id/lat/lng/createdAt/source carried over unchanged from the
- * original (see buildMarkPopupEditHtml's own comment on why lat/lng aren't
- * editable here), everything else pick-list/optional fields included only
- * when non-blank, keeping the same sparse-object convention the rest of
- * marks.json already uses (an unset field is simply absent, not `""`).
+ * original (see buildMarkPopupEditHtml's own comment on why lat/lng, and
+ * separately source, aren't editable here), everything else pick-list/
+ * optional/size fields included only when non-blank, keeping the same
+ * sparse-object convention the rest of marks.json already uses (an unset
+ * field is simply absent, not `""`). Size is rounded to a whole number —
+ * the schema only ever stores whole centimetres — rather than silently
+ * accepting a decimal a numeric input would otherwise happily produce.
  */
 function collectMarkFormValues(form, originalMark) {
   const val = (name) => (form.querySelector(`[name="${name}"]`).value || "").trim();
@@ -1285,6 +1304,11 @@ function collectMarkFormValues(form, originalMark) {
   for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
     const v = val(f.key);
     if (v) updated[f.key] = v;
+  }
+  const sizeRaw = val("size");
+  if (sizeRaw) {
+    const sizeNum = Math.round(Number(sizeRaw));
+    if (Number.isFinite(sizeNum)) updated.size = sizeNum; // whole cm — see the field's own schema comment
   }
   const notes = val("notes");
   if (notes) updated.notes = notes;
@@ -1447,6 +1471,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         Object.assign(mark, updated);
         for (const f of MARK_POPUP_OPTIONAL_FIELDS) if (!(f.key in updated)) delete mark[f.key];
         if (!("notes" in updated)) delete mark.notes;
+        if (!("size" in updated)) delete mark.size;
         saveLastMarkFieldValues(mark); // every successful save, create or edit — see that function's own comment
 
         if (options.isNew && options.state) {
@@ -1721,15 +1746,17 @@ function applyMarkFiltersAndGrouping(map, state) {
 
 /**
  * Small removable-chip summary of whatever filters are currently active —
- * "NOT " prefix distinguishes an exclude chip from an include one alongside
- * the include/exclude colour coding (see the inline styles below), since
- * colour alone isn't a safe way to convey that distinction (screen readers,
- * colour-blindness). Renders nothing (empty container) when no filters are
- * active at all, rather than an empty title bar with nothing under it.
+ * covers both MARK_LIST_FIELDS and MARK_FILTER_ONLY_FIELDS (e.g. Source),
+ * since a filter can be active on either kind. "NOT " prefix distinguishes
+ * an exclude chip from an include one alongside the include/exclude colour
+ * coding (see the inline styles below), since colour alone isn't a safe
+ * way to convey that distinction (screen readers, colour-blindness).
+ * Renders nothing (empty container) when no filters are active at all,
+ * rather than an empty title bar with nothing under it.
  */
 function renderActiveFilterChips(container, state, onChange) {
   const chips = [];
-  for (const { key, label } of MARK_LIST_FIELDS) {
+  for (const { key, label } of [...MARK_LIST_FIELDS, ...MARK_FILTER_ONLY_FIELDS]) {
     const f = state.filters[key];
     if (!f) continue;
     for (const v of f.include || []) chips.push({ key, label, value: v, mode: "include" });
@@ -1765,8 +1792,11 @@ function renderActiveFilterChips(container, state, onChange) {
 
 /**
  * Modal for setting filters — one section per MARK_LIST_FIELDS entry that
- * actually has values in mark_lists.json (a field with nothing configured
- * yet is skipped outright, not shown as an empty section), each value a
+ * actually has values in mark_lists.json, PLUS one section per
+ * MARK_FILTER_ONLY_FIELDS entry (currently just Source) using whatever
+ * distinct values are actually present across the loaded marks instead
+ * (see distinctValuesForField) — a field with nothing to show either way
+ * is skipped outright, not shown as an empty section. Each value is a
  * 3-state chip cycling neutral -> include -> exclude -> neutral on tap.
  * Mutates state.filters directly and live as chips are tapped (no separate
  * "apply" step to remember) — Done/the close button/tapping the backdrop
@@ -1777,7 +1807,7 @@ function renderActiveFilterChips(container, state, onChange) {
  * Resolves once closed (no return value — the caller reads state.filters
  * directly afterward, same object that was already being mutated live).
  */
-function showMarkFilterModal(state, markLists) {
+function showMarkFilterModal(state) {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.className = "ww-candidate-overlay";
@@ -1793,10 +1823,8 @@ function showMarkFilterModal(state, markLists) {
       if (chipState === "exclude") return "background:#fee2e2;border-color:#dc2626;color:#991b1b;";
       return "";
     }
-
-    const sectionsHtml = MARK_LIST_FIELDS.map(({ key, label }) => {
-      const values = markLists.filter((r) => r.field === label).map((r) => r.value);
-      if (values.length === 0) return ""; // nothing configured for this field yet — no point showing an empty section
+    function sectionHtml(key, label, values) {
+      if (values.length === 0) return ""; // nothing to filter on for this field yet — no point showing an empty section
       const chips = values
         .map((v) => {
           const cs = chipStateFor(key, v);
@@ -1812,7 +1840,11 @@ function showMarkFilterModal(state, markLists) {
           <div style="display:flex;flex-wrap:wrap;gap:6px;">${chips}</div>
         </div>
       `;
-    }).join("");
+    }
+
+    const sectionsHtml =
+      MARK_LIST_FIELDS.map(({ key, label }) => sectionHtml(key, label, state.markLists.filter((r) => r.field === label).map((r) => r.value))).join("") +
+      MARK_FILTER_ONLY_FIELDS.map(({ key, label }) => sectionHtml(key, label, distinctValuesForField(state.marksById, key))).join("");
 
     overlay.innerHTML = `
       <div class="ww-candidate-dialog">
@@ -1908,7 +1940,7 @@ function initMarkControls(map, state) {
   }
 
   document.getElementById("markFilterBtn").addEventListener("click", async () => {
-    await showMarkFilterModal(state, state.markLists);
+    await showMarkFilterModal(state);
     refresh();
   });
 
@@ -1976,12 +2008,13 @@ function showMapClickChoiceDialog() {
  * Starts a brand-new, unsaved mark at (lat, lng) — drops a circleMarker
  * straight away with its popup already open in edit mode (see
  * buildMarkPopupEditHtml), pre-filled with the coordinates, the current
- * date/time, and whatever `defaults` supplies (see computeQuickMarkDefaults
- * and getLastMarkFieldValues — only the Live tab's "You are here" click
- * passes anything here; every other entry point starts fully blank).
- * Nothing is written to data/marks.json until Save is actually pressed —
- * Cancel (see wireMarkPopupButtons' isNew branch) just removes this
- * temporary marker again, leaving marks.json untouched.
+ * date/time, source:"Manual" (see the schema comment above
+ * MARKS_FILE_PATH), and whatever `defaults` supplies (see
+ * computeQuickMarkDefaults and getLastMarkFieldValues — only the Live tab's
+ * "You are here" click passes anything here; every other entry point
+ * starts fully blank). Nothing is written to data/marks.json until Save is
+ * actually pressed — Cancel (see wireMarkPopupButtons' isNew branch) just
+ * removes this temporary marker again, leaving marks.json untouched.
  *
  * `state` is the same object loadAndRenderMarks populates for this map (see
  * createMarkLayerState) — on a successful save, wireMarkPopupButtons adds
@@ -1997,6 +2030,7 @@ function startNewMarkEntry(map, lat, lng, state, defaults = {}) {
     type: defaults.type || "",
     dateTime: nowAsNaiveString(),
     createdAt: null, // set for real only once actually saved — see wireMarkPopupButtons
+    source: "Manual", // any mark created through this site's own UI — see the schema comment above MARKS_FILE_PATH
   };
   for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
     if (defaults[f.key]) draft[f.key] = defaults[f.key];
@@ -2255,16 +2289,28 @@ const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
  *                chart/map, while createdAt stays useful for sanity-checking
  *                a backfilled entry later. Never shown as the primary time.
  *     notes:     string, optional — free text.
- *     source:    string, optional — omitted entirely for marks entered
- *                directly on this site. Set to "gpx-import" on the batch of
- *                marks migrated once from the old data/personal-spots.gpx
- *                waypoint file, so that one-off import stays distinguishable
- *                later (e.g. if it ever needs re-running, or if imported
- *                data should read/filter differently from a hand-logged
- *                catch — that GPX file only ever recorded ONE date per spot
- *                even when re-caught there many times, so an imported mark's
+ *     size:      number, optional — whole centimetres. Deliberately just a
+ *                plain number, not a pick-list field — a measurement, not a
+ *                category, so there's nothing to draw a Settings-tab list
+ *                from and no colour-by-field/filter support for it either
+ *                (see MARK_LIST_FIELDS/MARK_FILTER_ONLY_FIELDS below —
+ *                neither includes it).
+ *     source:    string, optional — "Manual" for any mark created through
+ *                this site's own UI (see startNewMarkEntry), "gpx-import"
+ *                on the batch migrated once from the old
+ *                data/personal-spots.gpx waypoint file (kept distinguishable
+ *                since that file only ever recorded ONE date per spot even
+ *                when re-caught there many times, so an imported mark's
  *                dateTime is really "most recent catch here", not
- *                necessarily "the only catch here").
+ *                necessarily "the only catch here"). Shown on the popup —
+ *                view mode as a plain row, edit mode as a read-only field —
+ *                but never an input the person can change: it's a record of
+ *                how the mark came to exist, not a fact about the mark
+ *                itself, so editing it wouldn't mean anything. Genuinely
+ *                unset (rather than "Manual") only for the handful of marks
+ *                created before this field existed at all. Filterable (see
+ *                MARK_FILTER_ONLY_FIELDS) even though it's not one of the
+ *                Settings-tab pick-list fields.
  *
  *     // Fish-only fields — all optional (a POI mark has none of these; a
  *     // Fish mark may leave any blank too, e.g. a throwback not worth full
@@ -2279,10 +2325,9 @@ const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
  *     bait, rig, rod, berley: string
  *   }
  *
- * Deliberately NOT storing yet: length/weight, photos. Every reader of this
- * array already has to tolerate missing fields (POIs don't have catch
- * fields at all), so adding one more later is a non-breaking change — just
- * not asked for yet.
+ * Deliberately NOT storing yet: photos. Every reader of this array already
+ * has to tolerate missing fields (POIs don't have catch fields at all), so
+ * adding one more later is a non-breaking change — just not asked for yet.
  */
 
 /**
@@ -2316,6 +2361,29 @@ const MARK_LIST_FIELDS = [
   { key: "rod", label: "Rod" },
   { key: "berley", label: "Berley" },
 ];
+
+/**
+ * Fields that can be FILTERED on the map (see showMarkFilterModal,
+ * markMatchesFilters) but, unlike MARK_LIST_FIELDS above, have no
+ * Settings-tab pick-list behind them and aren't shown as an editable
+ * dropdown in the mark popup — currently just Source, which is read-only
+ * everywhere it appears (see buildMarkPopupEditHtml). Its filter options
+ * come from distinctValuesForField, scanning whatever source values
+ * actually exist across the loaded marks, rather than a fixed list — so a
+ * future new source (e.g. a Garmin import) becomes filterable automatically
+ * the moment a mark with that value exists, no code change needed.
+ */
+const MARK_FILTER_ONLY_FIELDS = [{ key: "source", label: "Source" }];
+
+/** Sorted list of every distinct non-empty value a given field actually
+ * has across the currently-loaded marks — see MARK_FILTER_ONLY_FIELDS. */
+function distinctValuesForField(marksById, key) {
+  const values = new Set();
+  marksById.forEach((mark) => {
+    if (mark[key]) values.add(mark[key]);
+  });
+  return [...values].sort();
+}
 
 /**
  * m_<ms since epoch>_<5 random base36 chars> — the random suffix (rather
