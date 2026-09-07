@@ -992,6 +992,138 @@ const MARK_POPUP_OPTIONAL_FIELDS = [
   { key: "berley", listLabel: "Berley", displayLabel: "Berley" },
 ];
 
+// --- Mark quick-entry defaults ("You are here" click, Live tab only) -------
+//
+// Two independent default sources, merged by startNewMarkEntry's caller
+// (see the "You are here" onClick in live.js): "last value used" for every
+// list-driven field (below), and a small set of real-data-driven guesses
+// for Weather/Tide Condition specifically (computeQuickMarkDefaults).
+// Neither ever applies to a plain map click — see handleMapClickForMarks'
+// own comment for why that stays blank everywhere else.
+
+const MARK_LAST_VALUES_STORAGE_KEY = "markLastFieldValues";
+
+/** Reads the {type, species, waterCondition, bait, rig, rod, berley} object
+ * of whatever value was actually saved for each field LAST — see
+ * saveLastMarkFieldValues. Never throws; a missing/corrupt entry just means
+ * no defaults for that field, same as any other blank-optional-field case. */
+function getLastMarkFieldValues() {
+  try {
+    return JSON.parse(localStorage.getItem(MARK_LAST_VALUES_STORAGE_KEY) || "null") || {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Called after EVERY successful mark save — creating a new one or editing
+ * an existing one, from any entry point — so "last value used" always
+ * tracks the most recent real usage across the whole app, not just quick
+ * entries. Merges into whatever was already stored rather than overwriting
+ * wholesale: a field left blank on THIS save (so absent from `mark`) simply
+ * keeps whatever value was last remembered for it, rather than being wiped.
+ */
+function saveLastMarkFieldValues(mark) {
+  try {
+    const current = getLastMarkFieldValues();
+    if (mark.type) current.type = mark.type;
+    for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
+      if (f.key === "weatherCondition" || f.key === "tideCondition") continue; // these have their own real-data defaulting, not a "last used" one
+      if (mark[f.key]) current[f.key] = mark[f.key];
+    }
+    localStorage.setItem(MARK_LAST_VALUES_STORAGE_KEY, JSON.stringify(current));
+  } catch {
+    // localStorage can throw in rare cases (private browsing quirks, storage
+    // disabled) — worth degrading quietly here, same as elsewhere on this
+    // site (see selectLocation's own try/catch, locationsadmin.js): the save
+    // to marks.json itself already succeeded by the time this runs, losing
+    // just the "remember it for next time" convenience isn't worth surfacing
+    // as an error.
+  }
+}
+
+// Thresholds for computeQuickMarkDefaults below. The 10-minute slack window
+// and the 2-hour run-transition offset were both specified directly; the
+// ±15-minute tolerance AROUND that 2-hour point wasn't — chosen deliberately
+// tighter than the slack window so most of a run phase still reads as the
+// plain Running In/Out most of the time, rather than every click landing on
+// one of the more specific labels. Easy to retune if 15 min feels wrong in
+// practice.
+const TIDE_SLACK_WINDOW_MS = 10 * 60000;
+const TIDE_RUN_TRANSITION_OFFSET_MS = 2 * 3600000;
+const TIDE_RUN_TRANSITION_WINDOW_MS = 15 * 60000;
+
+/**
+ * Best-effort Weather/Tide Condition guesses for the exact moment someone
+ * taps their own position on the Live tab to start a mark (see
+ * startNewMarkEntry's `defaults` param, wired up in live.js). `rows` is
+ * that location's own real data (see getRowsForCurrentLoc, live.js) —
+ * NOT windowed to ±24h, since a tide half-cycle can be close to that on its
+ * own and this needs the surrounding low/high safely inside whatever's
+ * passed in.
+ *
+ * Weather Condition: real weather DESCRIPTION data (cloud cover, rain
+ * probability) isn't part of this pipeline at all — conditions.json only
+ * ever carries temp/wind/pressure/tide, nothing that distinguishes Clear
+ * from Cloudy from Overcast from Rain. The one signal that IS real and
+ * available is wind speed, so this only ever fires "Windy" (reusing
+ * KAYAK_WIND_THRESHOLD_KMH, the same threshold this site's own kayak
+ * condition scoring already uses) or leaves weatherCondition unset
+ * entirely — falling back to "last value used" like every other field —
+ * rather than guessing at the rest with no real signal behind it.
+ *
+ * Tide Condition: derived from the location's own real tide curve
+ * (findTideExtrema) relative to right now — within TIDE_SLACK_WINDOW_MS of
+ * an actual high/low, "Slack High"/"Slack Low"; within
+ * TIDE_RUN_TRANSITION_WINDOW_MS of the point TIDE_RUN_TRANSITION_OFFSET_MS
+ * after a low or before a high, "Start Run In"/"Last Run In" (mirrored for
+ * Run Out after a high/before a low); otherwise the plain "Running In"/
+ * "Running Out" for whichever half of the cycle right now falls in. Left
+ * unset (again falling back to "last value used") if there isn't a real
+ * low AND high surrounding right now to measure any of this against.
+ */
+function computeQuickMarkDefaults(rows) {
+  const defaults = {};
+
+  const windRow = lastNonNullAtOrBefore(rows, "Wind Realtime (km/h)", new Date());
+  if (windRow && windRow["Wind Realtime (km/h)"] >= KAYAK_WIND_THRESHOLD_KMH) {
+    defaults.weatherCondition = "Windy";
+  }
+
+  const nowMs = nowInNaiveEncoding();
+  const extrema = findTideExtrema(rows);
+  let prev = null, next = null;
+  for (const ex of extrema) {
+    if (ex.t <= nowMs) prev = ex;
+    else {
+      next = ex;
+      break;
+    }
+  }
+  if (prev && next) {
+    const distToPrev = nowMs - prev.t;
+    const distToNext = next.t - nowMs;
+    if (distToPrev <= TIDE_SLACK_WINDOW_MS) {
+      defaults.tideCondition = prev.type === "high" ? "Slack High" : "Slack Low";
+    } else if (distToNext <= TIDE_SLACK_WINDOW_MS) {
+      defaults.tideCondition = next.type === "high" ? "Slack High" : "Slack Low";
+    } else if (prev.type === "low" && next.type === "high") {
+      if (Math.abs(distToPrev - TIDE_RUN_TRANSITION_OFFSET_MS) <= TIDE_RUN_TRANSITION_WINDOW_MS) defaults.tideCondition = "Start Run In";
+      else if (Math.abs(distToNext - TIDE_RUN_TRANSITION_OFFSET_MS) <= TIDE_RUN_TRANSITION_WINDOW_MS) defaults.tideCondition = "Last Run In";
+      else defaults.tideCondition = "Running In";
+    } else if (prev.type === "high" && next.type === "low") {
+      if (Math.abs(distToPrev - TIDE_RUN_TRANSITION_OFFSET_MS) <= TIDE_RUN_TRANSITION_WINDOW_MS) defaults.tideCondition = "Start Run Out";
+      else if (Math.abs(distToNext - TIDE_RUN_TRANSITION_OFFSET_MS) <= TIDE_RUN_TRANSITION_WINDOW_MS) defaults.tideCondition = "Last Run Out";
+      else defaults.tideCondition = "Running Out";
+    }
+    // Two consecutive extrema of the SAME type (two lows/two highs in a row)
+    // shouldn't happen with well-formed tide data — left unset rather than
+    // guessed if it ever does.
+  }
+
+  return defaults;
+}
+
 // Shared inline style for every text/select/textarea input in the popup's
 // edit form — matches the input styling already used throughout
 // locationsadmin.js/live.html, so an edited mark's form doesn't look like a
@@ -1292,6 +1424,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         Object.assign(mark, updated);
         for (const f of MARK_POPUP_OPTIONAL_FIELDS) if (!(f.key in updated)) delete mark[f.key];
         if (!("notes" in updated)) delete mark.notes;
+        saveLastMarkFieldValues(mark); // every successful save, create or edit — see that function's own comment
 
         if (options.isNew && options.state) {
           options.state.marksById.set(mark.id, mark);
@@ -1514,8 +1647,10 @@ function showMapClickChoiceDialog() {
 /**
  * Starts a brand-new, unsaved mark at (lat, lng) — drops a circleMarker
  * straight away with its popup already open in edit mode (see
- * buildMarkPopupEditHtml), pre-filled with just the coordinates and the
- * current date/time, everything else blank for the person to fill in.
+ * buildMarkPopupEditHtml), pre-filled with the coordinates, the current
+ * date/time, and whatever `defaults` supplies (see computeQuickMarkDefaults
+ * and getLastMarkFieldValues — only the Live tab's "You are here" click
+ * passes anything here; every other entry point starts fully blank).
  * Nothing is written to data/marks.json until Save is actually pressed —
  * Cancel (see wireMarkPopupButtons' isNew branch) just removes this
  * temporary marker again, leaving marks.json untouched.
@@ -1525,16 +1660,19 @@ function showMapClickChoiceDialog() {
  * the new mark/marker into it, so it behaves exactly like any other mark
  * from then on (clickable, re-editable) without needing a page reload.
  */
-function startNewMarkEntry(map, lat, lng, state) {
+function startNewMarkEntry(map, lat, lng, state, defaults = {}) {
   const draft = {
     id: makeMarkId(),
     lat,
     lng,
     name: "",
-    type: "",
+    type: defaults.type || "",
     dateTime: nowAsNaiveString(),
     createdAt: null, // set for real only once actually saved — see wireMarkPopupButtons
   };
+  for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
+    if (defaults[f.key]) draft[f.key] = defaults[f.key];
+  }
   const style = markStyleFor(draft);
   const marker = L.circleMarker([lat, lng], {
     radius: style.radius,
@@ -1563,13 +1701,18 @@ function startNewMarkEntry(map, lat, lng, state) {
  * "preview a location" click feature to begin with, so there's no ambiguity
  * to resolve and a click goes straight to starting a new mark.
  *
+ * `defaults`, if given, is passed straight through to startNewMarkEntry —
+ * only the Live tab's "You are here" click (live.js) actually supplies one
+ * (see computeQuickMarkDefaults); a plain click through this same function
+ * always starts blank.
+ *
  * Marks are gated behind a GitHub connection everywhere else on this site
  * (see loadAndRenderMarks) — without one, "add a mark" isn't a real option
  * to offer, so a click just falls back to whatever this map's plain-click
  * behaviour was before marks existed (the Location tab's preview, or
  * nothing at all on Live).
  */
-async function handleMapClickForMarks(map, lat, lng, state, onLocationPreviewClick) {
+async function handleMapClickForMarks(map, lat, lng, state, onLocationPreviewClick, defaults = {}) {
   if (!getConnection()) {
     if (onLocationPreviewClick) onLocationPreviewClick(lat, lng);
     return;
@@ -1582,7 +1725,7 @@ async function handleMapClickForMarks(map, lat, lng, state, onLocationPreviewCli
     }
     if (choice !== "mark") return; // cancelled
   }
-  startNewMarkEntry(map, lat, lng, state);
+  startNewMarkEntry(map, lat, lng, state, defaults);
 }
 
 
