@@ -903,30 +903,66 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
   return map;
 }
 
-// --- Personal fishing-spot waypoints (GPX) ----------------------------------
+// --- Fishing marks map layer -------------------------------------------------
 //
-// The site owner's own private catch history — spots logged over time in a
-// chartplotter/phone app (Lowrance, C-MAP Embark, etc.) and exported as a
-// standard GPX file — shown as an extra layer over the Location tab's map,
-// gated behind having a GitHub connection set up (see loadAndRenderPersonalSpots).
+// The site owner's own catch/POI history (data/marks.json — see the "GPS
+// fishing marks" schema block above) — shown as an extra layer over the
+// Location and Live tabs' maps, gated behind having a GitHub connection set
+// up (see loadAndRenderMarks).
+//
+// Previously this read data/personal-spots.gpx directly (a raw export from
+// a chartplotter app) and styled each point by its GPX <sym> value — that
+// data has since been migrated into data/marks.json as real mark records
+// (see the one-off migration this schema was built for), and both the
+// Location and Live tabs now read the marks file instead. parseGpxWaypoints
+// below is no longer called from anywhere — kept only in case the raw GPX
+// ever needs re-parsing (a fresh export, or a fresh device import) — but is
+// genuinely orphaned code today; safe to delete once that's confirmed
+// unneeded.
 
-// One style per distinct <sym> value found in the initial GPX export.
-// "Different icon per sym" here means color/size/border varies by sym, not
-// a different SILHOUETTE — see loadAndRenderPersonalSpots's own comment for
-// why, at this data's actual scale (2500+ points), real distinct icon
-// shapes would trade away meaningful rendering performance to get.
-const PERSONAL_SPOT_SYM_STYLES = {
-  bigfish: { color: "#7f1d1d", fillColor: "#dc2626", radius: 6, weight: 1.5 },
-  "circle,yellow": { color: "#854d0e", fillColor: "#eab308", radius: 4, weight: 1 },
-  "circle,aqua": { color: "#155e75", fillColor: "#22d3ee", radius: 4, weight: 1 },
-  "circle,green": { color: "#14532d", fillColor: "#4ade80", radius: 4, weight: 1 },
-  flagbuoy: { color: "#000000", fillColor: "#f97316", radius: 6, weight: 2 },
-};
-// Whatever a FUTURE re-exported GPX might use that isn't one of the above —
-// exact same sym property, gpx files people export later aren't guaranteed
-// to only ever use these five, and an unstyled/invisible marker for an
-// unrecognized sym would be a confusing silent failure.
-const PERSONAL_SPOT_DEFAULT_STYLE = { color: "#374151", fillColor: "#9ca3af", radius: 4, weight: 1 };
+/**
+ * Deterministic string -> 0-359 hue, so every distinct Species (or Mark
+ * Type, for a mark with none) gets its own stable, distinguishable colour
+ * on the map WITHOUT a hardcoded per-value styling table — species is an
+ * open, Settings-tab-editable list now (see MARK_LIST_FIELDS above), so a
+ * fixed lookup table (the old PERSONAL_SPOT_SYM_STYLES's approach) would
+ * silently fall back to one dull default colour for every new species added
+ * from now on. Not cryptographic, just needs to be stable and reasonably
+ * spread out — good enough for "eyeball which colour is which species".
+ */
+function hashStringToHue(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) % 360;
+}
+
+/**
+ * Map pin style for one mark record. POI marks get a fixed, distinct
+ * "flag" look (same role the old GPX flagbuoy sym played) since there's
+ * usually only a handful of them and they should read as categorically
+ * different from a catch, not just another hue. Everything else (Fish, or
+ * any future custom Mark Type) is coloured by hashStringToHue on species
+ * (falling back to the mark's type if it has no species) — see that
+ * function's own comment for why hue-by-hash rather than a lookup table.
+ */
+function markStyleFor(mark) {
+  if (mark.type === "POI") {
+    return { color: "#000000", fillColor: "#f97316", radius: 6, weight: 2 };
+  }
+  const hue = hashStringToHue(mark.species || mark.type || "");
+  return { color: `hsl(${hue}, 70%, 25%)`, fillColor: `hsl(${hue}, 65%, 50%)`, radius: 4, weight: 1 };
+}
+
+// "Name — Species (YYYY-MM-DD)" for a Fish mark, "Name (YYYY-MM-DD)" for a
+// POI (no species to show). Plain slice of the naive dateTime string rather
+// than a locale-formatted date — unambiguous across marks spanning several
+// years, and this data can easily span years once real logging starts.
+function markTooltipText(mark) {
+  const label = mark.species ? `${mark.name} — ${mark.species}` : mark.name;
+  return `${label} (${String(mark.dateTime || "").slice(0, 10)})`;
+}
 
 /**
  * Parses a GPX file's <wpt> waypoints into plain {lat, lon, name, desc, sym}
@@ -936,6 +972,9 @@ const PERSONAL_SPOT_DEFAULT_STYLE = { color: "#374151", fillColor: "#9ca3af", ra
  * extensions, etc., all ignored). Returns [] (not an exception) for
  * anything that fails to parse, since a malformed or empty file should mean
  * "nothing to show", not a page-breaking error.
+ *
+ * UNUSED as of the marks.json migration above — see this section's header
+ * comment.
  */
 function parseGpxWaypoints(gpxText) {
   try {
@@ -962,51 +1001,54 @@ function parseGpxWaypoints(gpxText) {
 }
 
 /**
- * Loads data/personal-spots.gpx (a plain GPX file — replace it with a fresh
- * export any time to update what's shown, no conversion step needed) and
- * plots every waypoint on an already-created Leaflet map.
+ * Loads data/marks.json and plots every mark on an already-created Leaflet
+ * map. Cache-busted with a `?_=` query param — same reason
+ * loadLocationCoords/loadTideOffsets already do this for their own data/config
+ * fetches: GitHub Pages' CDN caches static files with max-age=600, so a mark
+ * added moments ago wouldn't show up here for up to 10 minutes without it.
  *
  * Gated behind getConnection() — the SAME GitHub personal access token
  * already used for admin/write actions on Settings, not a new or separate
  * token. IMPORTANT CAVEAT, worth understanding clearly: this only gates
  * whether the JS chooses to RENDER the data — it does not, and on a static
- * GitHub Pages site CANNOT, restrict who can fetch data/personal-spots.gpx
- * directly. That file sits in the same public repo as everything else on
- * this site; anyone who knows or guesses the path can still download it
- * with a plain HTTP request, connection or no connection. This is a "don't
- * clutter the map with 2500+ personal points for random visitors" gate, not
+ * GitHub Pages site CANNOT, restrict who can fetch data/marks.json directly.
+ * That file sits in the same public repo as everything else on this site;
+ * anyone who knows or guesses the path can still download it with a plain
+ * HTTP request, connection or no connection. This is a "don't clutter the
+ * map with a couple thousand personal points for random visitors" gate, not
  * genuine access control — there's no server here able to enforce one. If
- * these points need to be genuinely private, they can't live in this
- * repo at all.
+ * these points need to be genuinely private, they can't live in this repo
+ * at all.
  *
  * Rendered as Leaflet circleMarkers on a dedicated canvas renderer
  * (L.canvas()), deliberately NOT the custom SVG divIcon pins
  * (buildMapPinDivIcon) used for tracked fishing LOCATIONS elsewhere on this
- * same map. At this data's actual scale, building and painting a couple
- * thousand individual HTML/SVG elements would be meaningfully heavier than
- * Leaflet's own canvas-rendered circles, which are built for exactly this
- * point count.
+ * same map. At this data's actual scale (a couple thousand points from the
+ * GPX migration alone, and growing), building and painting that many
+ * individual HTML/SVG elements would be meaningfully heavier than Leaflet's
+ * own canvas-rendered circles, which are built for exactly this point count.
  */
-async function loadAndRenderPersonalSpots(map) {
+async function loadAndRenderMarks(map) {
   if (!getConnection()) return;
 
-  let gpxText;
+  let marksJson;
   try {
-    const res = await fetch("data/personal-spots.gpx", { cache: "no-store" });
-    if (!res.ok) return; // file not uploaded yet — nothing to show, not an error
-    gpxText = await res.text();
+    const res = await fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) return; // file not there yet / nothing to show, not an error
+    marksJson = await res.json();
   } catch (err) {
-    console.error("Could not load personal-spots.gpx:", err);
+    console.error("Could not load marks.json:", err);
     return;
   }
 
-  const waypoints = parseGpxWaypoints(gpxText);
-  if (waypoints.length === 0) return;
+  const marks = (marksJson && marksJson.marks) || [];
+  if (marks.length === 0) return;
 
   const renderer = L.canvas({ padding: 0.5 });
-  for (const wp of waypoints) {
-    const style = PERSONAL_SPOT_SYM_STYLES[wp.sym] || PERSONAL_SPOT_DEFAULT_STYLE;
-    const marker = L.circleMarker([wp.lat, wp.lon], {
+  for (const mark of marks) {
+    if (mark.lat == null || mark.lng == null) continue;
+    const style = markStyleFor(mark);
+    const marker = L.circleMarker([mark.lat, mark.lng], {
       renderer,
       radius: style.radius,
       color: style.color,
@@ -1014,7 +1056,7 @@ async function loadAndRenderPersonalSpots(map) {
       fillColor: style.fillColor,
       fillOpacity: 0.85,
     }).addTo(map);
-    if (wp.name) marker.bindTooltip(wp.name, { direction: "top" });
+    marker.bindTooltip(markTooltipText(mark), { direction: "top" });
   }
 }
 

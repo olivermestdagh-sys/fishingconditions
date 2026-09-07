@@ -504,14 +504,21 @@ this restriction — nothing extra is drawn.
 ## GPS fishing marks
 
 A **mark** is a single GPS point you drop yourself, out on the water — either
-a **Catch** (with species, conditions, and gear detail attached) or a plain
-**POI** (a snag, a hazard, a ramp not otherwise tracked). This is separate
-from both the Locations list above (the fixed handful of spots the site
-scores tide/weather/wind conditions FOR) and the personal-spots GPX layer
-described elsewhere in this file (a static, read-only waypoint file you
-export from Garmin/Lowrance and drop in as-is) — marks.json is an
-open-ended, editable personal log that grows every time you're out, entered
-directly on this site rather than imported from a device.
+a **Fish** (with species, conditions, and gear detail attached) or a plain
+**POI** (a snag, a hazard, a ramp not otherwise tracked) — Mark Type is
+itself just another editable list (see below), so a third type later ("Ramp",
+say) is a Settings edit, not a code change. This is separate from the
+Locations list above (the fixed handful of spots the site scores
+tide/weather/wind conditions FOR) — marks.json is an open-ended, editable
+personal log that grows every time you're out.
+
+**One-off migration**: `data/personal-spots.gpx` — the site owner's existing
+catch history exported from C-MAP Embark — has been migrated into
+`data/marks.json` as real mark records (2,523 of them). The GPX file itself
+is left in the repo untouched for now, but the Location and Live tab maps no
+longer read it directly; both now render straight from `data/marks.json`
+instead. The old file is effectively retired and safe to delete once you're
+happy the migrated data looks right — nothing on the site reads it anymore.
 
 **Storage**: flat JSON in `data/marks.json` — in `data/` rather than
 `config/` despite being written the same browser-to-GitHub-API way as every
@@ -529,17 +536,15 @@ queries, or needed unattended server-side writes. Worth revisiting only if
 this file ever grows past a few MB.
 
 **Fields on a mark**: GPS location (lat/lng), a display name, Mark Type
-(seeded with Fish/POI, but itself just another editable list — see below —
-so a "Ramp" or "Hazard" type is a Settings edit, not a code change),
-Date/Time (when it happened — separate from when the record was saved, so a
-mark logged from memory afterwards still shows the real catch time), and
-free text notes. A Fish mark can additionally carry Species, Weather
-Condition, Tide Condition, Water Condition, Bait, Rig, Rod, and Berley — each
-one picked from `config/mark_lists.json` rather than typed free text, so a
-value like "Whiting" is always spelled the same way for filtering/export
-later rather than drifting into near-duplicates ("whiting", "small
-whiting"). The full field-by-field shape is documented as a comment above
-`MARK_LIST_FIELDS` in `charts.js`.
+(seeded with Fish/POI), Date/Time (when it happened — separate from when the
+record was saved, so a mark logged from memory afterwards still shows the
+real catch time), and free text notes. A Fish mark can additionally carry
+Species, Weather Condition, Tide Condition, Water Condition, Bait, Rig, Rod,
+and Berley — each one picked from `config/mark_lists.json` rather than typed
+free text, so a value like "Whiting" is always spelled the same way for
+filtering/export later rather than drifting into near-duplicates ("whiting",
+"small whiting"). The full field-by-field shape is documented as a comment
+above `MARK_LIST_FIELDS` in `charts.js`.
 
 **Editing the pick-lists**: the Settings tab's "Fishing Mark Lists" section
 lets you add or remove options for each of the nine fields above (Mark Type
@@ -547,6 +552,18 @@ included), the same way "Location Groups" already works for location tags —
 type a new value, hit Add (or Enter), then "Save mark lists" to commit it.
 Removing an option doesn't touch any mark that already used it; it just
 won't be offered again.
+
+**Displaying marks on the map**: the Location and Live tab maps both plot
+every mark in `data/marks.json` as a small coloured circle (see
+`loadAndRenderMarks` in `charts.js`), gated behind having a GitHub connection
+set up on the Settings tab — same "don't clutter the map for random public
+visitors, but not real access control" caveat as the rest of this site's
+GitHub-gated features (the file itself is still a plain public URL). Colour
+is derived from each mark's Species (or its Mark Type, for a POI) via a
+simple hash, so every distinct species gets its own stable colour without
+needing a hardcoded lookup table that would need updating every time a new
+species is added to the pick-list. Hover/tap a point for its name, species,
+and date.
 
 **Not built yet**: the actual "add a mark while out fishing" UI on the Live
 tab, filtering marks by these fields, and exporting a filtered set to a
