@@ -9,15 +9,18 @@
   },
   {
     "field": "Species",
-    "value": "Whiting"
+    "value": "Whiting",
+    "color": "#f5f901"
   },
   {
     "field": "Species",
-    "value": "Gummy Shark"
+    "value": "Gummy Shark",
+    "color": "#0453f1"
   },
   {
     "field": "Species",
-    "value": "Flathead"
+    "value": "Flathead",
+    "color": "#fab905"
   },
   {
     "field": "Species",
