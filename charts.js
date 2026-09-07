@@ -1042,16 +1042,15 @@ function saveLastMarkFieldValues(mark) {
   }
 }
 
-// Thresholds for computeQuickMarkDefaults below. The 10-minute slack window
-// and the 2-hour run-transition offset were both specified directly; the
-// ±15-minute tolerance AROUND that 2-hour point wasn't — chosen deliberately
-// tighter than the slack window so most of a run phase still reads as the
-// plain Running In/Out most of the time, rather than every click landing on
-// one of the more specific labels. Easy to retune if 15 min feels wrong in
-// practice.
+// Thresholds for computeQuickMarkDefaults below — both given directly:
+// ±10 minutes around an actual low/high counts as slack; the 2 hours either
+// side of THAT slack window (i.e. from 10 minutes out to 2 hours out) counts
+// as the "just started"/"about to finish" run zone. So, relative to one
+// extreme E: [E-2h, E-10min) = Last Run *, [E-10min, E+10min] = Slack *,
+// (E+10min, E+2h] = Start Run * — a full zone each, not a narrow window
+// around a single point.
 const TIDE_SLACK_WINDOW_MS = 10 * 60000;
-const TIDE_RUN_TRANSITION_OFFSET_MS = 2 * 3600000;
-const TIDE_RUN_TRANSITION_WINDOW_MS = 15 * 60000;
+const TIDE_RUN_TRANSITION_ZONE_MS = 2 * 3600000;
 
 /**
  * Best-effort Weather/Tide Condition guesses for the exact moment someone
@@ -1073,14 +1072,15 @@ const TIDE_RUN_TRANSITION_WINDOW_MS = 15 * 60000;
  * rather than guessing at the rest with no real signal behind it.
  *
  * Tide Condition: derived from the location's own real tide curve
- * (findTideExtrema) relative to right now — within TIDE_SLACK_WINDOW_MS of
- * an actual high/low, "Slack High"/"Slack Low"; within
- * TIDE_RUN_TRANSITION_WINDOW_MS of the point TIDE_RUN_TRANSITION_OFFSET_MS
- * after a low or before a high, "Start Run In"/"Last Run In" (mirrored for
- * Run Out after a high/before a low); otherwise the plain "Running In"/
- * "Running Out" for whichever half of the cycle right now falls in. Left
- * unset (again falling back to "last value used") if there isn't a real
- * low AND high surrounding right now to measure any of this against.
+ * (findTideExtrema) relative to right now. Working outward from whichever
+ * extreme (low or high) is closer — within TIDE_SLACK_WINDOW_MS of it,
+ * "Slack Low"/"Slack High"; within TIDE_RUN_TRANSITION_ZONE_MS of it (but
+ * past the slack window), "Start Run *" if that extreme was just LEFT or
+ * "Last Run *" if it's still COMING UP, In/Out matching whether the tide is
+ * rising or falling through this stretch; otherwise (more than 2 hours from
+ * both surrounding extremes) the plain "Running In"/"Running Out". Left
+ * unset (falling back to "last value used") if there isn't a real low AND
+ * high surrounding right now to measure any of this against.
  */
 function computeQuickMarkDefaults(rows) {
   const defaults = {};
@@ -1101,19 +1101,22 @@ function computeQuickMarkDefaults(rows) {
     }
   }
   if (prev && next) {
-    const distToPrev = nowMs - prev.t;
-    const distToNext = next.t - nowMs;
+    const distToPrev = nowMs - prev.t; // time since the extreme just left
+    const distToNext = next.t - nowMs; // time until the extreme coming up
+    const runningIn = prev.type === "low" && next.type === "high";
+    const runningOut = prev.type === "high" && next.type === "low";
+
     if (distToPrev <= TIDE_SLACK_WINDOW_MS) {
       defaults.tideCondition = prev.type === "high" ? "Slack High" : "Slack Low";
     } else if (distToNext <= TIDE_SLACK_WINDOW_MS) {
       defaults.tideCondition = next.type === "high" ? "Slack High" : "Slack Low";
-    } else if (prev.type === "low" && next.type === "high") {
-      if (Math.abs(distToPrev - TIDE_RUN_TRANSITION_OFFSET_MS) <= TIDE_RUN_TRANSITION_WINDOW_MS) defaults.tideCondition = "Start Run In";
-      else if (Math.abs(distToNext - TIDE_RUN_TRANSITION_OFFSET_MS) <= TIDE_RUN_TRANSITION_WINDOW_MS) defaults.tideCondition = "Last Run In";
+    } else if (runningIn) {
+      if (distToPrev <= TIDE_RUN_TRANSITION_ZONE_MS) defaults.tideCondition = "Start Run In";
+      else if (distToNext <= TIDE_RUN_TRANSITION_ZONE_MS) defaults.tideCondition = "Last Run In";
       else defaults.tideCondition = "Running In";
-    } else if (prev.type === "high" && next.type === "low") {
-      if (Math.abs(distToPrev - TIDE_RUN_TRANSITION_OFFSET_MS) <= TIDE_RUN_TRANSITION_WINDOW_MS) defaults.tideCondition = "Start Run Out";
-      else if (Math.abs(distToNext - TIDE_RUN_TRANSITION_OFFSET_MS) <= TIDE_RUN_TRANSITION_WINDOW_MS) defaults.tideCondition = "Last Run Out";
+    } else if (runningOut) {
+      if (distToPrev <= TIDE_RUN_TRANSITION_ZONE_MS) defaults.tideCondition = "Start Run Out";
+      else if (distToNext <= TIDE_RUN_TRANSITION_ZONE_MS) defaults.tideCondition = "Last Run Out";
       else defaults.tideCondition = "Running Out";
     }
     // Two consecutive extrema of the SAME type (two lows/two highs in a row)
