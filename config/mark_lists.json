@@ -228,5 +228,9 @@
   {
     "field": "Tide Condition",
     "value": "Start Run Out"
+  },
+  {
+    "field": "Species",
+    "value": "Unknown"
   }
 ]
