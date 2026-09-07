@@ -494,6 +494,57 @@ this restriction — nothing extra is drawn.
   candidate popup on the Settings map and the Location tab's live preview —
   see "Getting real WillyWeather names via the map" and "Live preview from
   the Location tab" above
+- `config/marks.json` — your GPS fishing marks (catches and points of
+  interest), logged by hand while out fishing. Starts empty. See "GPS
+  fishing marks" below
+- `config/mark_lists.json` — the editable pick-lists (species, bait, rig,
+  weather/tide/water condition, etc) offered when logging a mark. Edit from
+  the Settings tab's "Fishing Mark Lists" section
+
+## GPS fishing marks
+
+A **mark** is a single GPS point you drop yourself, out on the water — either
+a **Catch** (with species, conditions, and gear detail attached) or a plain
+**POI** (a snag, a hazard, a ramp not otherwise tracked). This is separate
+from both the Locations list above (the fixed handful of spots the site
+scores tide/weather/wind conditions FOR) and the personal-spots GPX layer
+described elsewhere in this file (a static, read-only waypoint file you
+export from Garmin/Lowrance and drop in as-is) — marks.json is an
+open-ended, editable personal log that grows every time you're out, entered
+directly on this site rather than imported from a device.
+
+**Storage**: flat JSON in `config/marks.json`, written the same way as every
+other config file on this site — by committing directly to your repo from
+the browser (see "Editing locations from the site itself" below), no
+separate database. At the scale of one person logging by hand (realistically
+low hundreds to a few thousand marks over years), a flat file stays only a
+few hundred KB and is trivial for GitHub's API to read and rewrite whole on
+every save — introducing a real database wouldn't earn its cost unless this
+became multi-user, needed fast live queries, or needed unattended server-side
+writes. Worth revisiting only if this file ever grows past a few MB.
+
+**Fields on a mark**: GPS location (lat/lng), a display name, Type
+(Catch/POI), Date/Time (when it happened — separate from when the record was
+saved, so a mark logged from memory afterwards still shows the real catch
+time), and free text notes. A Catch can additionally carry Species, Weather
+Condition, Tide Condition, Water Condition, Bait, Rig, Rod, and Berley — each
+one picked from `config/mark_lists.json` rather than typed free text, so a
+value like "Whiting" is always spelled the same way for filtering/export
+later rather than drifting into near-duplicates ("whiting", "small
+whiting"). The full field-by-field shape is documented as a comment above
+`MARK_LIST_FIELDS` in `charts.js`.
+
+**Editing the pick-lists**: the Settings tab's "Fishing Mark Lists" section
+lets you add or remove options for each of the eight fields above, the same
+way "Location Groups" already works for location tags — type a new value,
+hit Add (or Enter), then "Save mark lists" to commit it. Removing an option
+doesn't touch any mark that already used it; it just won't be offered again.
+
+**Not built yet**: the actual "add a mark while out fishing" UI on the Live
+tab, filtering marks by these fields, and exporting a filtered set to a
+Garmin/Lowrance-compatible format. The structure above is designed with all
+three in mind (stable `id` per mark for export/dedupe, normalized pick-list
+values for clean filtering) but none of that is wired up yet.
 
 ## Editing locations from the site itself
 
