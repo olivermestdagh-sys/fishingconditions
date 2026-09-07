@@ -1143,6 +1143,116 @@ async function saveNewLocationToGitHub(newLoc) {
   }
 }
 
+// --- GPS fishing marks (shared) ---------------------------------------------
+//
+// A "mark" is a single manually-placed GPS point recorded while out fishing —
+// either a real Catch (with species/conditions/gear detail attached) or a
+// plain POI (a snag, a hazard, a ramp not otherwise tracked, etc). Kept as
+// its own small file (config/marks.json) rather than folded into
+// config/locations.json: locations.json describes the fixed handful of spots
+// this whole site scores tide/weather/wind conditions FOR, while marks are an
+// open-ended, ever-growing personal log added to constantly out on the
+// water — mixing the two would make every locations-list load (and every
+// diff of that file) balloon over time for no reason, and conflates two
+// genuinely different concerns (site scoring config vs. personal catch diary).
+// Also distinct from the personal-spots GPX layer above: that's a static,
+// read-only file exported from a device and dropped in as-is, while marks
+// are entered directly on this site and editable here.
+//
+// Stored as flat JSON, written via the exact same GitHub Contents API
+// read-sha/write pattern as locations.json/location_groups.json above (see
+// getConnection/GITHUB_API) rather than standing up any real database. At
+// personal-log scale — one person, logged by hand while fishing, realistically
+// low hundreds to a few thousand entries over years — even a few thousand
+// marks is only a few hundred KB of JSON, trivial for the GitHub API to read
+// and rewrite whole on every save, and consistent with how every other piece
+// of site-authored config already works here (no build step, no server). A
+// real database would only start to earn its added cost/complexity if this
+// became multi-user/concurrent writers, needed live queries at a scale where
+// fetching the whole file each time was actually slow, or needed writes from
+// an unattended server process (like fetch_conditions.py) — none of which
+// apply. Revisit this if marks.json ever grows past a few MB or a few tens
+// of thousands of rows; until then a flat file keeps the whole architecture
+// (and the deploy-by-drag-and-drop workflow) one consistent shape.
+
+const MARKS_FILE_PATH = "config/marks.json";
+const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
+
+/**
+ * Shape of one entry in config/marks.json's `marks` array:
+ *
+ *   {
+ *     id:        string — e.g. "m_1730962345123_a1b2c" (see makeMarkId
+ *                below). A timestamp+random suffix rather than an array
+ *                index, so edit/delete/export/dedupe all have something
+ *                stable to key on that survives re-ordering or a future
+ *                Garmin/Lowrance import mixing in externally-created ids.
+ *     lat, lng:  number — WGS84 decimal degrees, same convention as every
+ *                other coordinate on this site.
+ *     name:      string — short display label for the pin.
+ *     type:      "Catch" | "POI"
+ *     dateTime:  string — naive "YYYY-MM-DD HH:MM:SS" (see parseNaive
+ *                above) — the time the mark is actually ABOUT (when the
+ *                catch happened / the spot was found).
+ *     createdAt: string — naive "YYYY-MM-DD HH:MM:SS" — when the record was
+ *                actually saved. Kept separate from dateTime for the same
+ *                reason a paper logbook has both a "when it happened" and a
+ *                "when I wrote it down" column: a mark logged from memory
+ *                after getting home should show the real catch time on the
+ *                chart/map, while createdAt stays useful for sanity-checking
+ *                a backfilled entry later. Never shown as the primary time.
+ *     notes:     string, optional — free text.
+ *
+ *     // Catch-only fields — all optional (a POI has none of these; a Catch
+ *     // may leave any blank too, e.g. a throwback not worth full detail).
+ *     // Each value should come from config/mark_lists.json (see
+ *     // MARK_LIST_FIELDS below) rather than free text, so filtering and
+ *     // export later can group on exact matches instead of near-duplicate
+ *     // strings ("Whiting" vs "whiting" vs "small whiting"):
+ *     species, weatherCondition, tideCondition, waterCondition,
+ *     bait, rig, rod, berley: string
+ *   }
+ *
+ * Deliberately NOT storing yet: length/weight, photos. Every reader of this
+ * array already has to tolerate missing fields (POIs don't have catch
+ * fields at all), so adding one more later is a non-breaking change — just
+ * not asked for yet.
+ */
+
+/**
+ * The fixed set of mark fields that draw from an editable pick-list rather
+ * than free text — maintained on the Settings tab ("Mark Lists" section,
+ * locationsadmin.js) and stored as flat {field, value} rows in
+ * config/mark_lists.json, one row per selectable option (`field` matching
+ * `label` below exactly, e.g. {"field":"Species","value":"Whiting"}).
+ * `key` is the property name actually written onto a mark record above.
+ * Kept as a single shared list — rather than duplicated per page — since
+ * both the future "add mark" UI on the Live tab and this Settings-tab list
+ * editor need to agree on exactly the same set of fields and the same
+ * field/record-key mapping, or a value picked on one page could save under
+ * a key the other page doesn't know to look for.
+ */
+const MARK_LIST_FIELDS = [
+  { key: "species", label: "Species" },
+  { key: "weatherCondition", label: "Weather Condition" },
+  { key: "tideCondition", label: "Tide Condition" },
+  { key: "waterCondition", label: "Water Condition" },
+  { key: "bait", label: "Bait" },
+  { key: "rig", label: "Rig" },
+  { key: "rod", label: "Rod" },
+  { key: "berley", label: "Berley" },
+];
+
+/**
+ * m_<ms since epoch>_<5 random base36 chars> — the random suffix (rather
+ * than the timestamp alone) avoids a collision if two marks somehow get
+ * created within the same millisecond (e.g. a future bulk import), without
+ * needing a real UUID library for what's otherwise a plain string id.
+ */
+function makeMarkId() {
+  return `m_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
 // --- WillyWeather search / candidate picker (shared) -----------------------
 //
 // Originally lived only in locationsadmin.js (the Settings tab's "click map

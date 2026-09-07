@@ -211,14 +211,16 @@ async function init() {
     }
   });
   document.getElementById("btnSaveGroups").addEventListener("click", onSaveGroups);
+  document.getElementById("btnSaveMarkLists").addEventListener("click", onSaveMarkLists);
 
-  // Groups, coords, and home all need to be ready before the first
-  // renderRows() (called at the end of loadLocations, which renders the
-  // map too) — groups populate each location's Location Group <select>,
-  // coords and home both populate the map's markers. All three are
-  // independent of `locations` itself, so they load in parallel rather
-  // than one after another.
-  await Promise.all([loadLocationGroups(), loadLocationCoords(), loadHomeLocation()]);
+  // Groups, coords, home, and mark lists all need to be ready before the
+  // first renderRows() (called at the end of loadLocations, which renders
+  // the map too) — well, mark lists don't actually feed renderRows() the
+  // way the other three do (nothing on this page reaches into `locations`
+  // for them yet), but there's no reason to make it wait its turn behind
+  // ones that do. All four are independent of `locations` itself and of
+  // each other, so they load in parallel rather than one after another.
+  await Promise.all([loadLocationGroups(), loadLocationCoords(), loadHomeLocation(), loadMarkLists()]);
   await loadLocations();
 }
 
@@ -394,6 +396,187 @@ async function onSaveGroups() {
   } catch (err) {
     console.error(err);
     setGroupsSaveStatus("Save failed: " + err.message, true);
+  }
+}
+
+// --- Fishing Mark Lists (Settings tab) --------------------------------------
+//
+// Same read/render/add/remove/save shape as Location Groups just above, just
+// two-dimensional: markLists is a flat {field, value} array (see
+// MARK_LIST_FIELDS in charts.js) covering ALL eight pick-list fields at
+// once, rather than one array per field — one file, one sha, one save
+// button, rather than eight of everything. The UI still renders it grouped
+// by field (one card sub-section per field) so it reads as eight separate
+// lists even though it's a single flat array underneath.
+
+let markLists = [];
+let markListsSha = null;
+
+async function loadMarkLists() {
+  const conn = getConnection();
+  try {
+    if (conn && conn.owner && conn.repo && conn.token) {
+      const res = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARK_LISTS_FILE_PATH}?ref=${BRANCH}`, {
+        headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+      });
+      if (res.status === 404) {
+        // Same as groups — perfectly normal the first time this feature is
+        // used on a repo; starts empty and gets created on first Save.
+        markLists = [];
+        markListsSha = null;
+      } else if (!res.ok) {
+        throw new Error(`GitHub returned ${res.status}`);
+      } else {
+        const json = await res.json();
+        markListsSha = json.sha;
+        const decoded = decodeURIComponent(escape(atob(json.content.replace(/\n/g, ""))));
+        markLists = JSON.parse(decoded);
+      }
+    } else {
+      // No connection yet — fall back to the public static file, same as groups.
+      const res = await fetch("config/mark_lists.json", { cache: "no-store" });
+      markLists = res.ok ? await res.json() : [];
+    }
+  } catch (err) {
+    console.error(err);
+    markLists = [];
+  }
+  document.getElementById("markListsSection").style.display = "block";
+  renderMarkLists();
+}
+
+function renderMarkLists() {
+  const container = document.getElementById("markListsGroups");
+  container.innerHTML = MARK_LIST_FIELDS.map(({ key, label }) => `
+    <div class="mark-list-field-group" style="margin-bottom:16px;">
+      <label class="loc-edit-label" style="display:block;margin-bottom:6px;">${label}</label>
+      <div class="mark-list-chip-row" data-field="${key}" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input type="text" class="mark-list-new-value" data-field="${key}" placeholder="Add a ${label.toLowerCase()} option"
+          style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+        <button type="button" class="btn-secondary mark-list-add-btn" data-field="${key}">+ Add</button>
+      </div>
+    </div>
+  `).join("");
+
+  // Filled in a second pass (rather than inline above) purely so each
+  // field's "no options yet" empty-state and chip list can be computed
+  // from `markLists` without repeating the same filter/join logic inline
+  // in the template string eight times over.
+  MARK_LIST_FIELDS.forEach(({ key, label }) => {
+    const row = container.querySelector(`.mark-list-chip-row[data-field="${key}"]`);
+    const values = markLists.filter((r) => r.field === label);
+    if (values.length === 0) {
+      row.innerHTML = `<p class="footnote" style="margin:0;text-align:left;">No options yet — add one below.</p>`;
+      return;
+    }
+    row.innerHTML = values.map((v) => `
+      <span class="loc-chip" style="cursor:default;display:inline-flex;align-items:center;gap:6px;">
+        <span>${v.value.replace(/</g, "&lt;")}</span>
+        <button type="button" data-remove-mark-value data-field="${key}" data-value="${v.value.replace(/"/g, "&quot;")}"
+          aria-label="Remove ${v.value.replace(/"/g, "&quot;")}"
+          style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>
+      </span>
+    `).join("");
+  });
+
+  container.querySelectorAll("button[data-remove-mark-value]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      onRemoveMarkListValue(e.currentTarget.dataset.field, e.currentTarget.dataset.value);
+    });
+  });
+  container.querySelectorAll(".mark-list-add-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => onAddMarkListValue(e.currentTarget.dataset.field));
+  });
+  // Enter-to-add, same convenience as the Location Groups input — rebound
+  // each render since the inputs themselves are recreated by the innerHTML
+  // replace above.
+  container.querySelectorAll(".mark-list-new-value").forEach((input) => {
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        onAddMarkListValue(e.currentTarget.dataset.field);
+      }
+    });
+  });
+}
+
+function onAddMarkListValue(key) {
+  const fieldDef = MARK_LIST_FIELDS.find((f) => f.key === key);
+  if (!fieldDef) return;
+  const input = document.querySelector(`.mark-list-new-value[data-field="${key}"]`);
+  const value = input.value.trim();
+  // Case-insensitive duplicate check — "whiting" typed after "Whiting"
+  // already exists shouldn't silently create a second, near-identical
+  // option that later filtering/export would treat as a different value.
+  const exists = value && markLists.some((r) => r.field === fieldDef.label && r.value.toLowerCase() === value.toLowerCase());
+  if (!value || exists) {
+    input.value = "";
+    return;
+  }
+  markLists.push({ field: fieldDef.label, value });
+  input.value = "";
+  renderMarkLists();
+}
+
+// Removing an option here does NOT scrub it from any mark that already used
+// it (unlike onRemoveGroup's cleanup of locations above) — there's no marks
+// editor on this page yet for it to reach into. That's a fine degrade for
+// now: an existing mark keeping a since-removed value just won't offer that
+// value as a pick again, it isn't broken or hidden.
+function onRemoveMarkListValue(key, value) {
+  const fieldDef = MARK_LIST_FIELDS.find((f) => f.key === key);
+  if (!fieldDef) return;
+  markLists = markLists.filter((r) => !(r.field === fieldDef.label && r.value === value));
+  renderMarkLists();
+}
+
+function setMarkListsSaveStatus(text, isError) {
+  const el = document.getElementById("markListsSaveStatus");
+  el.textContent = text;
+  el.style.color = isError ? "#dc2626" : "#16a34a";
+}
+
+async function onSaveMarkLists() {
+  const conn = getConnection();
+  if (!conn) {
+    setMarkListsSaveStatus("Connect to GitHub first (above) before saving.", true);
+    return;
+  }
+  setMarkListsSaveStatus("Saving…");
+  try {
+    // Re-check the current sha immediately before writing — same reasoning
+    // as onSaveGroups (in case the file changed elsewhere, or doesn't exist
+    // in the repo yet at all).
+    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARK_LISTS_FILE_PATH}?ref=${BRANCH}`, {
+      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+    });
+    if (getRes.status === 404) {
+      markListsSha = null; // creating the file for the first time
+    } else if (!getRes.ok) {
+      throw new Error(`Could not read current file (${getRes.status})`);
+    } else {
+      markListsSha = (await getRes.json()).sha;
+    }
+
+    const content = JSON.stringify(markLists, null, 2) + "\n";
+    const body = { message: "Update fishing mark lists via site", content: utf8ToBase64(content), branch: BRANCH };
+    if (markListsSha) body.sha = markListsSha; // omitted entirely on create — GitHub rejects an explicit sha:null
+
+    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARK_LISTS_FILE_PATH}`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!putRes.ok) {
+      const errBody = await putRes.json().catch(() => ({}));
+      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
+    }
+    markListsSha = (await putRes.json()).content.sha;
+    setMarkListsSaveStatus("Saved to GitHub.");
+  } catch (err) {
+    console.error(err);
+    setMarkListsSaveStatus("Save failed: " + err.message, true);
   }
 }
 
