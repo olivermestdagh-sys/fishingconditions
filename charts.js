@@ -1216,6 +1216,16 @@ const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
  *                chart/map, while createdAt stays useful for sanity-checking
  *                a backfilled entry later. Never shown as the primary time.
  *     notes:     string, optional — free text.
+ *     source:    string, optional — omitted entirely for marks entered
+ *                directly on this site. Set to "gpx-import" on the batch of
+ *                marks migrated once from the old data/personal-spots.gpx
+ *                waypoint file, so that one-off import stays distinguishable
+ *                later (e.g. if it ever needs re-running, or if imported
+ *                data should read/filter differently from a hand-logged
+ *                catch — that GPX file only ever recorded ONE date per spot
+ *                even when re-caught there many times, so an imported mark's
+ *                dateTime is really "most recent catch here", not
+ *                necessarily "the only catch here").
  *
  *     // Fish-only fields — all optional (a POI mark has none of these; a
  *     // Fish mark may leave any blank too, e.g. a throwback not worth full
