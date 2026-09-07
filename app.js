@@ -88,7 +88,11 @@ async function init() {
   // Restores and shows whichever location was last viewed, rather than
   // starting on a bare map every visit — the selection was already being
   // saved to localStorage on every pick (see selectLocationByKey) even
-  // before this, it just wasn't being read back on load until now.
+  // before this, it just wasn't being read back on load until now. If the
+  // panel was last explicitly closed instead (see hideLocationHoverPanel,
+  // which clears this same entry), there's nothing saved here and the map
+  // correctly starts with no panel open, rather than reopening whatever was
+  // picked before it was closed.
   const saved = localStorage.getItem("selectedLocation");
   if (saved && state.rowsByLocation[saved]) {
     // Panel visible BEFORE rendering the chart into it, not after — see
@@ -131,6 +135,13 @@ function showLocationHoverPanel() {
 
 function hideLocationHoverPanel() {
   document.getElementById("locationHoverPanel").style.display = "none";
+  // Closing is itself part of "last viewed state" — without this, init()'s
+  // restore-on-load below would keep reopening whatever location was last
+  // SELECTED even after being explicitly closed, since selecting one and
+  // closing the panel are two separate actions and only the first one was
+  // ever being remembered. Clearing it here makes "nothing open" a real,
+  // rememberable state of its own, not just an unsaved transient one.
+  localStorage.removeItem("selectedLocation");
 }
 
 /**
