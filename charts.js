@@ -996,10 +996,11 @@ const MARK_POPUP_OPTIONAL_FIELDS = [
 //
 // Two independent default sources, merged by startNewMarkEntry's caller
 // (see the "You are here" onClick in live.js): "last value used" for every
-// list-driven field (below), and a small set of real-data-driven guesses
-// for Weather/Tide Condition specifically (computeQuickMarkDefaults).
-// Neither ever applies to a plain map click — see handleMapClickForMarks'
-// own comment for why that stays blank everywhere else.
+// list-driven field (below, Weather Condition deliberately excluded — see
+// computeQuickMarkDefaults), and a real-data-driven guess for Tide
+// Condition specifically (also computeQuickMarkDefaults). Neither ever
+// applies to a plain map click — see handleMapClickForMarks' own comment
+// for why that stays blank everywhere else.
 
 const MARK_LAST_VALUES_STORAGE_KEY = "markLastFieldValues";
 
@@ -1028,7 +1029,7 @@ function saveLastMarkFieldValues(mark) {
     const current = getLastMarkFieldValues();
     if (mark.type) current.type = mark.type;
     for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
-      if (f.key === "weatherCondition" || f.key === "tideCondition") continue; // these have their own real-data defaulting, not a "last used" one
+      if (f.key === "weatherCondition" || f.key === "tideCondition") continue; // tideCondition has its own real-data defaulting (computeQuickMarkDefaults); weatherCondition deliberately gets no default at all, of either kind — see that same function's comment
       if (mark[f.key]) current[f.key] = mark[f.key];
     }
     localStorage.setItem(MARK_LAST_VALUES_STORAGE_KEY, JSON.stringify(current));
@@ -1053,23 +1054,24 @@ const TIDE_SLACK_WINDOW_MS = 10 * 60000;
 const TIDE_RUN_TRANSITION_ZONE_MS = 2 * 3600000;
 
 /**
- * Best-effort Weather/Tide Condition guesses for the exact moment someone
- * taps their own position on the Live tab to start a mark (see
- * startNewMarkEntry's `defaults` param, wired up in live.js). `rows` is
- * that location's own real data (see getRowsForCurrentLoc, live.js) —
- * NOT windowed to ±24h, since a tide half-cycle can be close to that on its
- * own and this needs the surrounding low/high safely inside whatever's
- * passed in.
+ * Best-effort Tide Condition guess for the exact moment someone taps their
+ * own position on the Live tab to start a mark (see startNewMarkEntry's
+ * `defaults` param, wired up in live.js). `rows` is that location's own
+ * real data (see getRowsForCurrentLoc, live.js) — NOT windowed to ±24h,
+ * since a tide half-cycle can be close to that on its own and this needs
+ * the surrounding low/high safely inside whatever's passed in.
  *
- * Weather Condition: real weather DESCRIPTION data (cloud cover, rain
- * probability) isn't part of this pipeline at all — conditions.json only
- * ever carries temp/wind/pressure/tide, nothing that distinguishes Clear
- * from Cloudy from Overcast from Rain. The one signal that IS real and
- * available is wind speed, so this only ever fires "Windy" (reusing
- * KAYAK_WIND_THRESHOLD_KMH, the same threshold this site's own kayak
- * condition scoring already uses) or leaves weatherCondition unset
- * entirely — falling back to "last value used" like every other field —
- * rather than guessing at the rest with no real signal behind it.
+ * Weather Condition is deliberately NOT defaulted here at all, in either
+ * direction — not computed, and not carried over from "last value used"
+ * either (see saveLastMarkFieldValues' own exclusion of it). Real weather
+ * DESCRIPTION data (cloud cover, rain probability) isn't part of this
+ * pipeline — conditions.json only ever carries temp/wind/pressure/tide,
+ * nothing that distinguishes Clear from Cloudy from Overcast from Rain. The
+ * only real signal available (wind speed) could only ever detect "Windy"
+ * and nothing else, which made for a worse default than no default at all:
+ * confidently right sometimes, silently wrong (or just blank when it should
+ * say Rain) the rest of the time, with no way to tell which from the form
+ * alone. Left for the person to pick every time instead.
  *
  * Tide Condition: derived from the location's own real tide curve
  * (findTideExtrema) relative to right now. Working outward from whichever
@@ -1084,11 +1086,6 @@ const TIDE_RUN_TRANSITION_ZONE_MS = 2 * 3600000;
  */
 function computeQuickMarkDefaults(rows) {
   const defaults = {};
-
-  const windRow = lastNonNullAtOrBefore(rows, "Wind Realtime (km/h)", new Date());
-  if (windRow && windRow["Wind Realtime (km/h)"] >= KAYAK_WIND_THRESHOLD_KMH) {
-    defaults.weatherCondition = "Windy";
-  }
 
   const nowMs = nowInNaiveEncoding();
   const extrema = findTideExtrema(rows);
