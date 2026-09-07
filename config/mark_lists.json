@@ -10,7 +10,7 @@
   {
     "field": "Species",
     "value": "Whiting",
-    "color": "#f5f901"
+    "color": "#ffff00"
   },
   {
     "field": "Species",
@@ -24,23 +24,28 @@
   },
   {
     "field": "Species",
-    "value": "Snapper"
+    "value": "Snapper",
+    "color": "#fc0303"
   },
   {
     "field": "Species",
-    "value": "Squid"
+    "value": "Squid",
+    "color": "#0e2c67"
   },
   {
     "field": "Species",
-    "value": "Kingfish"
+    "value": "Kingfish",
+    "color": "#0d1e3f"
   },
   {
     "field": "Species",
-    "value": "Tuna"
+    "value": "Tuna",
+    "color": "#122d63"
   },
   {
     "field": "Species",
-    "value": "Crayfish"
+    "value": "Crayfish",
+    "color": "#8c772b"
   },
   {
     "field": "Species",
@@ -52,7 +57,8 @@
   },
   {
     "field": "Species",
-    "value": "Grass Whiting"
+    "value": "Grass Whiting",
+    "color": "#ffff00"
   },
   {
     "field": "Species",
@@ -100,31 +106,38 @@
   },
   {
     "field": "Tide Condition",
-    "value": "Running In"
+    "value": "Running In",
+    "color": "#0000ff"
   },
   {
     "field": "Tide Condition",
-    "value": "Running Out"
+    "value": "Running Out",
+    "color": "#ff0000"
   },
   {
     "field": "Tide Condition",
-    "value": "Slack High"
+    "value": "Slack High",
+    "color": "#4723fb"
   },
   {
     "field": "Tide Condition",
-    "value": "Slack Low"
+    "value": "Slack Low",
+    "color": "#ee823a"
   },
   {
     "field": "Water Condition",
-    "value": "Clear"
+    "value": "Clear",
+    "color": "#ffffff"
   },
   {
     "field": "Water Condition",
-    "value": "Weedy"
+    "value": "Weedy",
+    "color": "#235e0d"
   },
   {
     "field": "Water Condition",
-    "value": "Murky"
+    "value": "Murky",
+    "color": "#59606e"
   },
   {
     "field": "Bait",
@@ -132,7 +145,8 @@
   },
   {
     "field": "Bait",
-    "value": "Squid"
+    "value": "Squid",
+    "color": "#3c60aa"
   },
   {
     "field": "Rig",
@@ -148,7 +162,8 @@
   },
   {
     "field": "Bait",
-    "value": "Prawn"
+    "value": "Prawn",
+    "color": "#b16610"
   },
   {
     "field": "Rig",
