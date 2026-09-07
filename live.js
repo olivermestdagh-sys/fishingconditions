@@ -159,12 +159,16 @@ function findNearestLocation(locations, lat, lng) {
  * tracked location (same dedup-by-name-then-both-types-if-present pattern
  * as the Location tab's own renderLocationMap in app.js), PLUS the
  * device's own current position as a distinct red dot marker
- * (iconKind:"currentPosition") when GPS succeeded — see init(). Clicking
- * a location marker opens/updates the hover panel for that spot; the
- * position marker itself isn't clickable, it's purely a "you are here"
- * reference alongside it.
+ * (iconKind:"currentPosition") when GPS succeeded — see init(). Clicking a
+ * location marker opens/updates the hover panel for that spot; clicking
+ * either the position marker OR any other open water starts a new fishing
+ * mark right there (see handleMapClickForMarks, charts.js) — for the
+ * position marker specifically, using the actual gpsPosition coordinates
+ * rather than wherever the click's own lat/lng landed, since a marker click
+ * doesn't hand back map coordinates the way a plain map click does.
  */
 function renderLiveMap(gpsPosition) {
+  const markLayerState = createMarkLayerState();
   const byName = new Map();
   for (const loc of liveData.locations || []) {
     if (!byName.has(loc.name)) byName.set(loc.name, []);
@@ -179,10 +183,18 @@ function renderLiveMap(gpsPosition) {
     points.push({ lat, lng, label: name, iconKind, onClick: () => selectLocationAndType(name, "Kayak") });
   }
   if (gpsPosition) {
-    points.push({ lat: gpsPosition.lat, lng: gpsPosition.lng, label: "You are here", iconKind: "currentPosition" });
+    points.push({
+      lat: gpsPosition.lat,
+      lng: gpsPosition.lng,
+      label: "You are here",
+      iconKind: "currentPosition",
+      onClick: () => handleMapClickForMarks(map, gpsPosition.lat, gpsPosition.lng, markLayerState, null),
+    });
   }
 
-  const map = renderLeafletLocationMap("liveMap", points, {});
+  const map = renderLeafletLocationMap("liveMap", points, {
+    onMapClick: (lat, lng) => handleMapClickForMarks(map, lat, lng, markLayerState, null),
+  });
   // Overrides whatever renderLeafletLocationMap itself just set (either a
   // saved view shared with the Location/Settings maps, or a fit-everything
   // view) — Live's whole point is "where am I right now", so it should
@@ -193,8 +205,11 @@ function renderLiveMap(gpsPosition) {
   }
   // Same fishing-marks layer as the Location tab (charts.js) — gated the
   // same way (getConnection()), same caveats apply (see that function's own
-  // comment).
-  if (map) loadAndRenderMarks(map);
+  // comment). markLayerState is created above (not inside
+  // loadAndRenderMarks) so the onMapClick/onClick handlers just wired in
+  // have somewhere to read marksById/markersById/markLists from once this
+  // finishes loading them, without a second callback.
+  if (map) loadAndRenderMarks(map, markLayerState);
 }
 
 // Whether the panel's expanded content (ratings, timings, chart) is

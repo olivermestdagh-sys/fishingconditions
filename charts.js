@@ -530,6 +530,16 @@ function nowInNaiveEncoding() {
   return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds());
 }
 
+// String-formatted counterpart of nowInNaiveEncoding above, for anywhere a
+// naive "YYYY-MM-DD HH:MM:SS" string (not a ms timestamp) is needed —
+// currently just defaulting a brand-new mark's Date/Time and createdAt to
+// "right now" (see startNewMarkEntry below).
+function nowAsNaiveString() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 const KAYAK_WIND_THRESHOLD_KMH = 15;
 
 /**
@@ -1115,13 +1125,21 @@ function collectMarkFormValues(form, originalMark) {
 }
 
 /**
- * Writes one updated mark back to data/marks.json on GitHub — same
- * read-current-sha/find/replace/write-whole-file pattern as
- * saveNewLocationToGitHub below, just updating an existing array entry by
- * id instead of appending a new one. Requires an existing GitHub connection
- * (see getConnection) — the mark popups themselves only ever render at all
- * when connected in the first place (see loadAndRenderMarks), so in
- * practice this check is a defensive backstop, not the primary gate.
+ * Writes one mark to data/marks.json on GitHub — same read-current-sha/
+ * modify/write-whole-file pattern as saveNewLocationToGitHub below. Upserts
+ * by id: replaces the matching entry if one exists (the edit-popup flow —
+ * see wireMarkPopupButtons), otherwise appends it as a new entry (the
+ * "start a new mark" flow — see startNewMarkEntry). One function for both
+ * rather than a separate create/update pair, since the only real difference
+ * between them is whether an existing array index was found, and getting
+ * that wrong in the edit case (e.g. the mark was deleted elsewhere between
+ * loading the page and saving) is better handled by just writing it back in
+ * than by failing the save outright.
+ *
+ * Requires an existing GitHub connection (see getConnection) — the mark
+ * popups themselves only ever render at all when connected in the first
+ * place (see loadAndRenderMarks), so in practice this check is a defensive
+ * backstop, not the primary gate.
  *
  * Returns { success: true } or { success: false, error: "..." } — never
  * throws, so the popup's own Save handler can show the error text directly.
@@ -1139,13 +1157,12 @@ async function saveMarkToGitHub(updatedMark) {
     const getJson = await getRes.json();
     const decoded = decodeURIComponent(escape(atob(getJson.content.replace(/\n/g, ""))));
     const marksJson = JSON.parse(decoded);
-    const marksArr = marksJson.marks || [];
+    if (!Array.isArray(marksJson.marks)) marksJson.marks = [];
+    const marksArr = marksJson.marks;
 
     const idx = marksArr.findIndex((m) => m.id === updatedMark.id);
-    if (idx === -1) {
-      return { success: false, error: "This mark no longer exists in marks.json — it may have been removed elsewhere. Refresh the page." };
-    }
-    marksArr[idx] = updatedMark;
+    if (idx === -1) marksArr.push(updatedMark);
+    else marksArr[idx] = updatedMark;
 
     const content = JSON.stringify(marksJson, null, 2) + "\n";
     const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARKS_FILE_PATH}`, {
@@ -1156,7 +1173,7 @@ async function saveMarkToGitHub(updatedMark) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        message: `Update mark "${updatedMark.name}" via site`,
+        message: `${idx === -1 ? "Add" : "Update"} mark "${updatedMark.name}" via site`,
         content: utf8ToBase64(content),
         sha: getJson.sha,
         branch: BRANCH,
@@ -1193,8 +1210,17 @@ async function saveMarkToGitHub(updatedMark) {
  * given this project's history of exactly that kind of Leaflet-on-mobile
  * gap). Stopping it explicitly, right at the button, doesn't depend on
  * pinning down which exact mechanism let it through.
+ *
+ * `options.isNew` (default false) is set only for a mark started via
+ * startNewMarkEntry — one that doesn't exist in marks.json yet at all.
+ * Changes two things while true: Cancel discards the whole marker instead
+ * of reverting to a view mode that has nothing real to show yet, and a
+ * successful Save also registers the new mark into `options.state`
+ * (marksById/markersById) and flips isNew back to false — from that point
+ * on this exact same popup behaves exactly like one opened on an
+ * already-existing mark, Cancel included.
  */
-function wireMarkPopupButtons(popupEl, marker, mark, markListsCache) {
+function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {}) {
   // Belt-and-braces alongside Leaflet's own automatic handling of the same
   // popup container — see this function's own comment above.
   L.DomEvent.disableClickPropagation(popupEl);
@@ -1204,7 +1230,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache) {
     editBtn.addEventListener("click", (e) => {
       L.DomEvent.stop(e);
       marker.setPopupContent(buildMarkPopupEditHtml(mark, markListsCache));
-      wireMarkPopupButtons(popupEl, marker, mark, markListsCache);
+      wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options);
     });
   }
 
@@ -1212,8 +1238,15 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache) {
   if (cancelBtn) {
     cancelBtn.addEventListener("click", (e) => {
       L.DomEvent.stop(e);
+      if (options.isNew) {
+        // Nothing was ever saved — there's no "view mode" to revert to,
+        // just remove the draft pin entirely.
+        marker.closePopup();
+        options.map.removeLayer(marker);
+        return;
+      }
       marker.setPopupContent(buildMarkPopupViewHtml(mark));
-      wireMarkPopupButtons(popupEl, marker, mark, markListsCache);
+      wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options);
     });
   }
 
@@ -1224,6 +1257,15 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache) {
       const form = popupEl.querySelector("[data-mark-form]");
       const statusEl = popupEl.querySelector("[data-mark-save-status]");
       const updated = collectMarkFormValues(form, mark);
+      if (options.isNew) {
+        // createdAt is set for real only now, at the actual moment of
+        // saving — the draft's own dateTime (defaulted to "now" at
+        // creation, editable in the form) is what the user is asserting
+        // this mark is ABOUT, which may drift from the literal save moment
+        // by however long they spent filling the form in.
+        updated.createdAt = nowAsNaiveString();
+        if (!updated.name) updated.name = updated.type || "Mark"; // never save a genuinely blank label
+      }
       saveBtn.disabled = true;
       statusEl.textContent = "Saving…";
       statusEl.style.color = "";
@@ -1239,8 +1281,14 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache) {
         for (const f of MARK_POPUP_OPTIONAL_FIELDS) if (!(f.key in updated)) delete mark[f.key];
         if (!("notes" in updated)) delete mark.notes;
 
+        if (options.isNew && options.state) {
+          options.state.marksById.set(mark.id, mark);
+          options.state.markersById.set(mark.id, marker);
+          options.isNew = false; // this popup now behaves like any other existing mark's
+        }
+
         marker.setPopupContent(buildMarkPopupViewHtml(mark));
-        wireMarkPopupButtons(popupEl, marker, mark, markListsCache);
+        wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options);
         marker.unbindTooltip();
         marker.bindTooltip(markTooltipText(mark), { direction: "top" });
         const style = markStyleFor(mark);
@@ -1321,13 +1369,18 @@ function parseGpxWaypoints(gpxText) {
  * individual HTML/SVG elements would be meaningfully heavier than Leaflet's
  * own canvas-rendered circles, which are built for exactly this point count.
  *
- * `marksById`/`markersById` are scoped to this one call (one per map/page
- * load, not shared globally) — Location and Live are separate page loads
- * with their own Leaflet map instance, so each gets its own independent copy
- * with no risk of one page's edits leaking into the other's in-memory state
- * before a reload.
+ * `state` (see createMarkLayerState) is created by the CALLER, before this
+ * resolves, and populated here rather than owned locally — the caller wires
+ * its own map-click handler (handleMapClickForMarks, for starting a brand
+ * new mark) at map-creation time, before this async load has necessarily
+ * finished, and that handler needs somewhere to find markLists/marksById/
+ * markersById once they're ready without an awkward second callback. One
+ * `state` per map/page load, not shared globally — Location and Live are
+ * separate page loads with their own Leaflet map instance, so each gets its
+ * own independent copy with no risk of one page's edits leaking into the
+ * other's in-memory state before a reload.
  */
-async function loadAndRenderMarks(map) {
+async function loadAndRenderMarks(map, state) {
   if (!getConnection()) return;
 
   let marksJson;
@@ -1341,21 +1394,16 @@ async function loadAndRenderMarks(map) {
   }
 
   const marks = (marksJson && marksJson.marks) || [];
-  if (marks.length === 0) return;
 
   // Best-effort — the edit form's dropdowns just fall back to "no options
   // besides the current value" if this fails, rather than blocking the
   // whole marks layer from rendering over a pick-list fetch problem.
-  let markLists = [];
   try {
     const listsRes = await fetch(`${MARK_LISTS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" });
-    if (listsRes.ok) markLists = await listsRes.json();
+    if (listsRes.ok) state.markLists = await listsRes.json();
   } catch (err) {
     console.error("Could not load mark_lists.json (edit dropdowns will be limited):", err);
   }
-
-  const marksById = new Map();
-  const markersById = new Map();
 
   const renderer = L.canvas({ padding: 0.5 });
   for (const mark of marks) {
@@ -1371,8 +1419,8 @@ async function loadAndRenderMarks(map) {
     }).addTo(map);
     marker.bindTooltip(markTooltipText(mark), { direction: "top" });
     marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
-    marksById.set(mark.id, mark);
-    markersById.set(mark.id, marker);
+    state.marksById.set(mark.id, mark);
+    state.markersById.set(mark.id, marker);
   }
 
   // One delegated listener for the whole map rather than one per marker —
@@ -1387,11 +1435,142 @@ async function loadAndRenderMarks(map) {
     const popupEl = e.popup.getElement();
     const root = popupEl.querySelector("[data-mark-id]");
     if (!root) return; // some other feature's popup, not one of ours
-    const mark = marksById.get(root.dataset.markId);
-    const marker = markersById.get(root.dataset.markId);
+    const mark = state.marksById.get(root.dataset.markId);
+    const marker = state.markersById.get(root.dataset.markId);
+    // A brand-new draft (see startNewMarkEntry) also has a data-mark-id but
+    // isn't in state.marksById until saved — this handler correctly no-ops
+    // for it; startNewMarkEntry wires that popup's buttons itself, directly.
     if (!mark || !marker) return;
-    wireMarkPopupButtons(popupEl, marker, mark, markLists);
+    wireMarkPopupButtons(popupEl, marker, mark, state.markLists);
   });
+}
+
+/**
+ * Fresh, empty {marksById, markersById, markLists} bag — create ONE per map
+ * (Location tab, Live tab), pass the SAME object into both loadAndRenderMarks
+ * (which populates it) and into the map's own click handler
+ * (handleMapClickForMarks, which reads it) so the click handler always sees
+ * whatever's currently loaded rather than a stale empty snapshot taken
+ * before the async load finished.
+ */
+function createMarkLayerState() {
+  return { marksById: new Map(), markersById: new Map(), markLists: [] };
+}
+
+/**
+ * Small yes/no-style modal asking whether a plain map click (Location tab
+ * only — see handleMapClickForMarks) means "show me the conditions graph
+ * for whatever's near here" (the pre-existing preview feature) or "log a
+ * new mark right here". Reuses the WillyWeather candidate picker's overlay/
+ * dialog frame (.ww-candidate-overlay/.ww-candidate-dialog/.ww-candidate-close,
+ * style.css) rather than inventing a new modal shape — same "centered
+ * dialog over a dimmed page" need, just two plain buttons instead of a
+ * scrollable candidate list.
+ *
+ * Resolves to "graph", "mark", or "cancel".
+ */
+function showMapClickChoiceDialog() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "ww-candidate-overlay";
+    overlay.innerHTML = `
+      <div class="ww-candidate-dialog">
+        <button type="button" class="ww-candidate-close" aria-label="Cancel">&times;</button>
+        <h3 style="margin:0 0 4px;">What's here?</h3>
+        <p class="footnote" style="margin:0 0 14px;">This spot isn't one of your tracked locations or an existing mark.</p>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <button type="button" class="btn-primary" data-map-click-choice="mark" style="width:100%;">Add a new mark here</button>
+          <button type="button" class="btn-secondary" data-map-click-choice="graph" style="width:100%;">View the conditions graph for this spot</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const cleanup = (result) => {
+      overlay.remove();
+      resolve(result);
+    };
+    overlay.querySelector(".ww-candidate-close").addEventListener("click", () => cleanup("cancel"));
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) cleanup("cancel");
+    });
+    overlay.querySelectorAll("[data-map-click-choice]").forEach((btn) => {
+      btn.addEventListener("click", () => cleanup(btn.dataset.mapClickChoice));
+    });
+  });
+}
+
+/**
+ * Starts a brand-new, unsaved mark at (lat, lng) — drops a circleMarker
+ * straight away with its popup already open in edit mode (see
+ * buildMarkPopupEditHtml), pre-filled with just the coordinates and the
+ * current date/time, everything else blank for the person to fill in.
+ * Nothing is written to data/marks.json until Save is actually pressed —
+ * Cancel (see wireMarkPopupButtons' isNew branch) just removes this
+ * temporary marker again, leaving marks.json untouched.
+ *
+ * `state` is the same object loadAndRenderMarks populates for this map (see
+ * createMarkLayerState) — on a successful save, wireMarkPopupButtons adds
+ * the new mark/marker into it, so it behaves exactly like any other mark
+ * from then on (clickable, re-editable) without needing a page reload.
+ */
+function startNewMarkEntry(map, lat, lng, state) {
+  const draft = {
+    id: makeMarkId(),
+    lat,
+    lng,
+    name: "",
+    type: "",
+    dateTime: nowAsNaiveString(),
+    createdAt: null, // set for real only once actually saved — see wireMarkPopupButtons
+  };
+  const style = markStyleFor(draft);
+  const marker = L.circleMarker([lat, lng], {
+    radius: style.radius,
+    color: style.color,
+    weight: style.weight,
+    fillColor: style.fillColor,
+    fillOpacity: 0.85,
+  }).addTo(map);
+  marker.bindPopup(buildMarkPopupEditHtml(draft, state.markLists), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
+  marker.openPopup();
+  const popupEl = marker.getPopup().getElement();
+  wireMarkPopupButtons(popupEl, marker, draft, state.markLists, { isNew: true, map, state });
+}
+
+/**
+ * What a plain click on empty map area (i.e. not on an existing marker)
+ * should do — shared by the Location and Live tabs, since both maps now
+ * carry the marks layer on top of whatever else they already show.
+ *
+ * onLocationPreviewClick, if given (Location tab only — see app.js), is the
+ * PRE-EXISTING "click map to preview a tracked location's conditions" flow
+ * (onLocationMapClickForPreview). When present, a click has to ASK which of
+ * the two the person actually meant rather than guessing, since both are
+ * now genuinely plausible reasons to click empty water — see
+ * showMapClickChoiceDialog. The Live tab passes null here: it never had a
+ * "preview a location" click feature to begin with, so there's no ambiguity
+ * to resolve and a click goes straight to starting a new mark.
+ *
+ * Marks are gated behind a GitHub connection everywhere else on this site
+ * (see loadAndRenderMarks) — without one, "add a mark" isn't a real option
+ * to offer, so a click just falls back to whatever this map's plain-click
+ * behaviour was before marks existed (the Location tab's preview, or
+ * nothing at all on Live).
+ */
+async function handleMapClickForMarks(map, lat, lng, state, onLocationPreviewClick) {
+  if (!getConnection()) {
+    if (onLocationPreviewClick) onLocationPreviewClick(lat, lng);
+    return;
+  }
+  if (onLocationPreviewClick) {
+    const choice = await showMapClickChoiceDialog();
+    if (choice === "graph") {
+      onLocationPreviewClick(lat, lng);
+      return;
+    }
+    if (choice !== "mark") return; // cancelled
+  }
+  startNewMarkEntry(map, lat, lng, state);
 }
 
 

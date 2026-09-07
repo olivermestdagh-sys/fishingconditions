@@ -167,14 +167,20 @@ function renderLocationMap() {
     }
   }
 
-  const map = renderLeafletLocationMap("locationMap", points, { onMapClick: onLocationMapClickForPreview });
+  const markLayerState = createMarkLayerState();
+  const map = renderLeafletLocationMap("locationMap", points, {
+    onMapClick: (lat, lng) => handleMapClickForMarks(map, lat, lng, markLayerState, onLocationMapClickForPreview),
+  });
   if (!map) return;
   // Fishing marks (data/marks.json) — an extra layer over the tracked-location
   // pins above, only for whoever has a GitHub connection set up (see
   // loadAndRenderMarks's own comment for exactly what that does and doesn't
   // gate). Fire-and-forget: this page's own map/location rendering doesn't
-  // need to wait on it.
-  loadAndRenderMarks(map);
+  // need to wait on it. markLayerState is created above (not inside
+  // loadAndRenderMarks) so the onMapClick handler just wired in has
+  // somewhere to read marksById/markersById/markLists from once this
+  // finishes loading them, without a second callback.
+  loadAndRenderMarks(map, markLayerState);
   // Popup content only exists in the DOM once a popup actually opens (up
   // until then it's just an HTML string Leaflet is holding onto), so its
   // buttons have to be wired here rather than up front.
