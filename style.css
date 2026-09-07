@@ -2576,6 +2576,21 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
   margin-bottom: 0;
 }
 
+/* Fishing-mark popups (view/edit — see buildMarkPopupViewHtml/
+   buildMarkPopupEditHtml, charts.js) can run to a dozen-plus fields in edit
+   mode, easily taller than the available viewport on mobile — Leaflet's
+   popup container doesn't cap its own height, so without this it can render
+   partly off-screen with no way to reach the Save button underneath.
+   Scoped to this popup's own className (set in loadAndRenderMarks) rather
+   than every .leaflet-popup-content on the site, so it doesn't affect the
+   short, single-purpose popups used elsewhere (e.g. .map-popup-type-btn's
+   own popup above). */
+.mark-popup-leaflet .leaflet-popup-content {
+  max-height: 60vh;
+  overflow-y: auto;
+  margin-right: 4px;
+}
+
 /* Brief highlight flash when a location's edit card is jumped to from
    the Settings map (see jumpToLocationRow, locationsadmin.js) — confirms
    which card the map click actually landed on, since scrollIntoView
