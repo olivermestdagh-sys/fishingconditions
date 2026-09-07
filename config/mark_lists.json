@@ -1,0 +1,36 @@
+[
+  { "field": "Species", "value": "Whiting" },
+  { "field": "Species", "value": "Gummy Shark" },
+  { "field": "Species", "value": "Flathead" },
+  { "field": "Species", "value": "Snapper" },
+  { "field": "Species", "value": "Squid" },
+
+  { "field": "Weather Condition", "value": "Clear" },
+  { "field": "Weather Condition", "value": "Cloudy" },
+  { "field": "Weather Condition", "value": "Overcast" },
+  { "field": "Weather Condition", "value": "Rain" },
+  { "field": "Weather Condition", "value": "Windy" },
+
+  { "field": "Tide Condition", "value": "Running In" },
+  { "field": "Tide Condition", "value": "Running Out" },
+  { "field": "Tide Condition", "value": "Slack High" },
+  { "field": "Tide Condition", "value": "Slack Low" },
+
+  { "field": "Water Condition", "value": "Clear" },
+  { "field": "Water Condition", "value": "Weedy" },
+  { "field": "Water Condition", "value": "Murky" },
+  { "field": "Water Condition", "value": "Discoloured" },
+
+  { "field": "Bait", "value": "Pipi" },
+  { "field": "Bait", "value": "Squid" },
+  { "field": "Bait", "value": "Sandworm" },
+
+  { "field": "Rig", "value": "Paternoster" },
+  { "field": "Rig", "value": "Running Sinker" },
+
+  { "field": "Rod", "value": "2-4kg Spin" },
+  { "field": "Rod", "value": "4-6kg Spin" },
+
+  { "field": "Berley", "value": "Pilchard Mix" },
+  { "field": "Berley", "value": "Tuna Oil Mix" }
+]
