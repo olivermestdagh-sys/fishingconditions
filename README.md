@@ -523,10 +523,12 @@ every save — introducing a real database wouldn't earn its cost unless this
 became multi-user, needed fast live queries, or needed unattended server-side
 writes. Worth revisiting only if this file ever grows past a few MB.
 
-**Fields on a mark**: GPS location (lat/lng), a display name, Type
-(Catch/POI), Date/Time (when it happened — separate from when the record was
-saved, so a mark logged from memory afterwards still shows the real catch
-time), and free text notes. A Catch can additionally carry Species, Weather
+**Fields on a mark**: GPS location (lat/lng), a display name, Mark Type
+(seeded with Fish/POI, but itself just another editable list — see below —
+so a "Ramp" or "Hazard" type is a Settings edit, not a code change),
+Date/Time (when it happened — separate from when the record was saved, so a
+mark logged from memory afterwards still shows the real catch time), and
+free text notes. A Fish mark can additionally carry Species, Weather
 Condition, Tide Condition, Water Condition, Bait, Rig, Rod, and Berley — each
 one picked from `config/mark_lists.json` rather than typed free text, so a
 value like "Whiting" is always spelled the same way for filtering/export
@@ -535,10 +537,11 @@ whiting"). The full field-by-field shape is documented as a comment above
 `MARK_LIST_FIELDS` in `charts.js`.
 
 **Editing the pick-lists**: the Settings tab's "Fishing Mark Lists" section
-lets you add or remove options for each of the eight fields above, the same
-way "Location Groups" already works for location tags — type a new value,
-hit Add (or Enter), then "Save mark lists" to commit it. Removing an option
-doesn't touch any mark that already used it; it just won't be offered again.
+lets you add or remove options for each of the nine fields above (Mark Type
+included), the same way "Location Groups" already works for location tags —
+type a new value, hit Add (or Enter), then "Save mark lists" to commit it.
+Removing an option doesn't touch any mark that already used it; it just
+won't be offered again.
 
 **Not built yet**: the actual "add a mark while out fishing" UI on the Live
 tab, filtering marks by these fields, and exporting a filtered set to a

@@ -1190,7 +1190,11 @@ const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
  *     lat, lng:  number — WGS84 decimal degrees, same convention as every
  *                other coordinate on this site.
  *     name:      string — short display label for the pin.
- *     type:      "Catch" | "POI"
+ *     type:      string — from config/mark_lists.json's "Mark Type" list
+ *                (starts seeded with "Fish"/"POI", but it's an editable list
+ *                like any other below, not a hardcoded two-value enum — e.g.
+ *                a "Ramp" or "Hazard" mark type later is just adding a row,
+ *                no code change).
  *     dateTime:  string — naive "YYYY-MM-DD HH:MM:SS" (see parseNaive
  *                above) — the time the mark is actually ABOUT (when the
  *                catch happened / the spot was found).
@@ -1203,12 +1207,15 @@ const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
  *                a backfilled entry later. Never shown as the primary time.
  *     notes:     string, optional — free text.
  *
- *     // Catch-only fields — all optional (a POI has none of these; a Catch
- *     // may leave any blank too, e.g. a throwback not worth full detail).
- *     // Each value should come from config/mark_lists.json (see
+ *     // Fish-only fields — all optional (a POI mark has none of these; a
+ *     // Fish mark may leave any blank too, e.g. a throwback not worth full
+ *     // detail). Each value should come from config/mark_lists.json (see
  *     // MARK_LIST_FIELDS below) rather than free text, so filtering and
  *     // export later can group on exact matches instead of near-duplicate
- *     // strings ("Whiting" vs "whiting" vs "small whiting"):
+ *     // strings ("Whiting" vs "whiting" vs "small whiting"). "Only make
+ *     // sense for a Fish-type mark" is a UI convention, not something
+ *     // enforced by this file — a non-Fish mark type added later is free
+ *     // to use these fields too if that ever makes sense:
  *     species, weatherCondition, tideCondition, waterCondition,
  *     bait, rig, rod, berley: string
  *   }
@@ -1231,8 +1238,16 @@ const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
  * editor need to agree on exactly the same set of fields and the same
  * field/record-key mapping, or a value picked on one page could save under
  * a key the other page doesn't know to look for.
+ *
+ * "type" (Mark Type) is listed first and is the odd one out — every other
+ * field here is optional catch detail, while this is the field that decides
+ * what KIND of mark it is at all. Made list-driven rather than a hardcoded
+ * "Catch"/"POI" enum for the same reason the rest are: so a new mark type
+ * (a boat ramp, a snag, a bait ground) is a Settings-tab edit, not a code
+ * change — seeded with just Fish and POI to start.
  */
 const MARK_LIST_FIELDS = [
+  { key: "type", label: "Mark Type" },
   { key: "species", label: "Species" },
   { key: "weatherCondition", label: "Weather Condition" },
   { key: "tideCondition", label: "Tide Condition" },

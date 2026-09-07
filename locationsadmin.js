@@ -403,10 +403,10 @@ async function onSaveGroups() {
 //
 // Same read/render/add/remove/save shape as Location Groups just above, just
 // two-dimensional: markLists is a flat {field, value} array (see
-// MARK_LIST_FIELDS in charts.js) covering ALL eight pick-list fields at
+// MARK_LIST_FIELDS in charts.js) covering ALL nine pick-list fields at
 // once, rather than one array per field — one file, one sha, one save
-// button, rather than eight of everything. The UI still renders it grouped
-// by field (one card sub-section per field) so it reads as eight separate
+// button, rather than nine of everything. The UI still renders it grouped
+// by field (one card sub-section per field) so it reads as nine separate
 // lists even though it's a single flat array underneath.
 
 let markLists = [];
