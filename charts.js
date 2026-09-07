@@ -1182,11 +1182,27 @@ async function saveMarkToGitHub(updatedMark) {
  * mode — popupopen only fires when a popup first OPENS, not on a later
  * setPopupContent, so switching modes has to re-wire itself rather than
  * relying on that event a second time.
+ *
+ * Every button handler below starts with L.DomEvent.stop(e) (stopPropagation
+ * + preventDefault). Leaflet already calls disableClickPropagation on a
+ * popup's own container to stop exactly this — a click inside the popup
+ * reaching the map underneath and re-triggering whatever the map's own click
+ * does (here: onLocationMapClickForPreview's "look up what's at this spot"
+ * flow) — but that alone wasn't enough to stop it in practice (most likely a
+ * touch/tap timing quirk on mobile rather than plain desktop click bubbling,
+ * given this project's history of exactly that kind of Leaflet-on-mobile
+ * gap). Stopping it explicitly, right at the button, doesn't depend on
+ * pinning down which exact mechanism let it through.
  */
 function wireMarkPopupButtons(popupEl, marker, mark, markListsCache) {
+  // Belt-and-braces alongside Leaflet's own automatic handling of the same
+  // popup container — see this function's own comment above.
+  L.DomEvent.disableClickPropagation(popupEl);
+
   const editBtn = popupEl.querySelector("[data-mark-edit]");
   if (editBtn) {
-    editBtn.addEventListener("click", () => {
+    editBtn.addEventListener("click", (e) => {
+      L.DomEvent.stop(e);
       marker.setPopupContent(buildMarkPopupEditHtml(mark, markListsCache));
       wireMarkPopupButtons(popupEl, marker, mark, markListsCache);
     });
@@ -1194,7 +1210,8 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache) {
 
   const cancelBtn = popupEl.querySelector("[data-mark-cancel]");
   if (cancelBtn) {
-    cancelBtn.addEventListener("click", () => {
+    cancelBtn.addEventListener("click", (e) => {
+      L.DomEvent.stop(e);
       marker.setPopupContent(buildMarkPopupViewHtml(mark));
       wireMarkPopupButtons(popupEl, marker, mark, markListsCache);
     });
@@ -1202,7 +1219,8 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache) {
 
   const saveBtn = popupEl.querySelector("[data-mark-save]");
   if (saveBtn) {
-    saveBtn.addEventListener("click", async () => {
+    saveBtn.addEventListener("click", async (e) => {
+      L.DomEvent.stop(e);
       const form = popupEl.querySelector("[data-mark-form]");
       const statusEl = popupEl.querySelector("[data-mark-save-status]");
       const updated = collectMarkFormValues(form, mark);
