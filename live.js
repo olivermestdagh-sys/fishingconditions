@@ -188,7 +188,17 @@ function renderLiveMap(gpsPosition) {
       lng: gpsPosition.lng,
       label: "You are here",
       iconKind: "currentPosition",
-      onClick: () => handleMapClickForMarks(map, gpsPosition.lat, gpsPosition.lng, markLayerState, null),
+      // ONLY this exact entry point gets smart-filled Weather/Tide Condition
+      // (from currentLoc's own real data) plus "last value used" for
+      // everything else — see computeQuickMarkDefaults' own comment
+      // (charts.js) for why. A plain map click (below, and the Location
+      // tab's own click) always starts blank; guessing conditions for an
+      // arbitrary clicked point would be guessing about somewhere the
+      // person isn't necessarily standing.
+      onClick: () => {
+        const defaults = { ...getLastMarkFieldValues(), ...computeQuickMarkDefaults(getRowsForCurrentLoc()) };
+        handleMapClickForMarks(map, gpsPosition.lat, gpsPosition.lng, markLayerState, null, defaults);
+      },
     });
   }
 
@@ -369,11 +379,22 @@ function renderSummary(loc, rows, now) {
 // position isn't yanked away by those.
 let hasCenteredLiveChartOnNow = false;
 
-function renderForLocation(loc) {
-  const rows = (liveData.rows || [])
-    .filter((r) => r["Location Name"] === loc.name && r["Type"] === loc.type)
+// Shared by renderForLocation and the "You are here" quick-mark-entry click
+// handler (renderLiveMap) — both need the exact same filtered/sorted/
+// _t-annotated rows for currentLoc; extracted so the quick-entry defaults
+// (computeQuickMarkDefaults, charts.js) read the same real tide/wind data
+// the chart itself is built from, not a second, possibly-differently-shaped
+// copy of it.
+function getRowsForCurrentLoc() {
+  if (!currentLoc) return [];
+  return (liveData.rows || [])
+    .filter((r) => r["Location Name"] === currentLoc.name && r["Type"] === currentLoc.type)
     .map((r) => ({ ...r, _t: parseNaive(r.dateTime) }))
     .sort((a, b) => a._t - b._t);
+}
+
+function renderForLocation(loc) {
+  const rows = getRowsForCurrentLoc();
 
   const nowMs = nowInNaiveEncoding();
   const windowStart = nowMs - 24 * 3600 * 1000;
