@@ -959,9 +959,281 @@ function markStyleFor(mark) {
 // POI (no species to show). Plain slice of the naive dateTime string rather
 // than a locale-formatted date — unambiguous across marks spanning several
 // years, and this data can easily span years once real logging starts.
+// escapeHtml on name/species: Leaflet's bindTooltip renders its string
+// argument as raw HTML (sets innerHTML), so an unescaped "&" or "<" in a
+// mark's name would silently break the tooltip rather than just display oddly.
 function markTooltipText(mark) {
-  const label = mark.species ? `${mark.name} — ${mark.species}` : mark.name;
+  const label = mark.species ? `${escapeHtml(mark.name)} — ${escapeHtml(mark.species)}` : escapeHtml(mark.name);
   return `${label} (${String(mark.dateTime || "").slice(0, 10)})`;
+}
+
+// The set of optional, pick-list-backed fields a mark can carry, alongside
+// their MARK_LIST_FIELDS label and a short display label for the popup —
+// walked by both the view and edit popup builders below so the two stay in
+// sync without repeating the same field-by-field list twice.
+const MARK_POPUP_OPTIONAL_FIELDS = [
+  { key: "species", listLabel: "Species", displayLabel: "Species" },
+  { key: "weatherCondition", listLabel: "Weather Condition", displayLabel: "Weather" },
+  { key: "tideCondition", listLabel: "Tide Condition", displayLabel: "Tide" },
+  { key: "waterCondition", listLabel: "Water Condition", displayLabel: "Water" },
+  { key: "bait", listLabel: "Bait", displayLabel: "Bait" },
+  { key: "rig", listLabel: "Rig", displayLabel: "Rig" },
+  { key: "rod", listLabel: "Rod", displayLabel: "Rod" },
+  { key: "berley", listLabel: "Berley", displayLabel: "Berley" },
+];
+
+// Shared inline style for every text/select/textarea input in the popup's
+// edit form — matches the input styling already used throughout
+// locationsadmin.js/live.html, so an edited mark's form doesn't look like a
+// different app bolted onto the map.
+const MARK_POPUP_INPUT_STYLE = "width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--grey-200);font-size:0.85rem;box-sizing:border-box;";
+
+// "YYYY-MM-DD HH:MM:SS" (this site's naive convention — see parseNaive) <->
+// the format a native <input type="datetime-local" step="1"> reads/writes
+// ("YYYY-MM-DDTHH:MM:SS"). The only actual difference is the separator, so
+// no real date-time library needed for either direction.
+function naiveToDatetimeLocal(naive) {
+  return String(naive || "").replace(" ", "T");
+}
+function datetimeLocalToNaive(value) {
+  let v = String(value || "").replace("T", " ");
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(v)) v += ":00"; // browser omitted seconds (blank/whole-minute entry)
+  return v;
+}
+
+/**
+ * <option> list for one pick-list field, sourced from config/mark_lists.json
+ * rows matching `listLabel` (see MARK_LIST_FIELDS above for the field/label
+ * convention). The mark's CURRENT value is always included as an option
+ * even if it's since been removed from the list on the Settings tab —
+ * otherwise editing an old mark whose value predates a list edit would
+ * silently blank that field out the moment the dropdown renders.
+ */
+function markListOptionsHtml(markLists, listLabel, currentValue) {
+  const values = markLists.filter((r) => r.field === listLabel).map((r) => r.value);
+  if (currentValue && !values.includes(currentValue)) values.unshift(currentValue);
+  const opts = values.map((v) => `<option value="${escapeHtml(v)}"${v === currentValue ? " selected" : ""}>${escapeHtml(v)}</option>`);
+  return `<option value="">—</option>${opts.join("")}`;
+}
+
+/**
+ * Read-only popup content shown on first clicking a mark — every populated
+ * field as a plain label/value row (empty/undefined fields simply omitted,
+ * rather than shown blank), plus the Edit button. `data-mark-id` on the
+ * root element is how the map-level popupopen handler (see
+ * loadAndRenderMarks) knows which mark a given open popup belongs to.
+ */
+function buildMarkPopupViewHtml(mark) {
+  const rows = [];
+  const row = (label, value) => {
+    if (value == null || value === "") return;
+    rows.push(`<div style="display:flex;gap:6px;font-size:0.85rem;margin-bottom:3px;"><span style="font-weight:600;min-width:64px;">${escapeHtml(label)}</span><span>${escapeHtml(value)}</span></div>`);
+  };
+  row("Name", mark.name);
+  row("Type", mark.type);
+  row("Date/Time", mark.dateTime);
+  for (const f of MARK_POPUP_OPTIONAL_FIELDS) row(f.displayLabel, mark[f.key]);
+  row("Notes", mark.notes);
+  return `
+    <div data-mark-id="${escapeHtml(mark.id)}" style="min-width:200px;">
+      ${rows.join("")}
+      <button type="button" class="btn-secondary" data-mark-edit style="margin-top:8px;padding:4px 10px;font-size:0.85rem;">Edit</button>
+    </div>
+  `;
+}
+
+/**
+ * Editable form version of the same popup — one text input (Name), one
+ * datetime-local input (Date/Time), a <select> per pick-list field sourced
+ * from markLists (falls back to an empty option list, still usable, if
+ * mark_lists.json failed to load — see loadAndRenderMarks), and a free-text
+ * Notes textarea. Deliberately does NOT expose lat/lng: repositioning a
+ * mark's actual GPS point is a different, more error-prone action (fat-finger
+ * a coordinate here and the pin silently jumps oceans) than correcting its
+ * details, and wasn't asked for — the pin stays exactly where it was placed.
+ */
+function buildMarkPopupEditHtml(mark, markLists) {
+  const optionalFieldsHtml = MARK_POPUP_OPTIONAL_FIELDS.map(
+    (f) => `
+      <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">${escapeHtml(f.displayLabel)}
+        <select name="${f.key}" style="${MARK_POPUP_INPUT_STYLE}">${markListOptionsHtml(markLists, f.listLabel, mark[f.key])}</select>
+      </label>`
+  ).join("");
+  return `
+    <div data-mark-id="${escapeHtml(mark.id)}" style="min-width:220px;max-width:260px;">
+      <form data-mark-form onsubmit="return false;">
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:0 0 2px;">Name
+          <input type="text" name="name" value="${escapeHtml(mark.name || "")}" style="${MARK_POPUP_INPUT_STYLE}" />
+        </label>
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Type
+          <select name="type" style="${MARK_POPUP_INPUT_STYLE}">${markListOptionsHtml(markLists, "Mark Type", mark.type)}</select>
+        </label>
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Date/Time
+          <input type="datetime-local" name="dateTime" step="1" value="${naiveToDatetimeLocal(mark.dateTime)}" style="${MARK_POPUP_INPUT_STYLE}" />
+        </label>
+        ${optionalFieldsHtml}
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Notes
+          <textarea name="notes" rows="2" style="${MARK_POPUP_INPUT_STYLE}resize:vertical;">${escapeHtml(mark.notes || "")}</textarea>
+        </label>
+      </form>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button type="button" class="btn-primary" data-mark-save style="padding:4px 10px;font-size:0.85rem;">Save</button>
+        <button type="button" class="btn-secondary" data-mark-cancel style="padding:4px 10px;font-size:0.85rem;">Cancel</button>
+      </div>
+      <div data-mark-save-status style="margin-top:6px;font-size:0.8rem;"></div>
+    </div>
+  `;
+}
+
+/**
+ * Reads the edit form's current values back into a full mark object ready
+ * to save — id/lat/lng/createdAt/source carried over unchanged from the
+ * original (see buildMarkPopupEditHtml's own comment on why lat/lng aren't
+ * editable here), everything else pick-list/optional fields included only
+ * when non-blank, keeping the same sparse-object convention the rest of
+ * marks.json already uses (an unset field is simply absent, not `""`).
+ */
+function collectMarkFormValues(form, originalMark) {
+  const val = (name) => (form.querySelector(`[name="${name}"]`).value || "").trim();
+  const updated = {
+    id: originalMark.id,
+    lat: originalMark.lat,
+    lng: originalMark.lng,
+    name: val("name"),
+    type: val("type"),
+    dateTime: datetimeLocalToNaive(form.querySelector('[name="dateTime"]').value),
+    createdAt: originalMark.createdAt,
+  };
+  if (originalMark.source) updated.source = originalMark.source;
+  for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
+    const v = val(f.key);
+    if (v) updated[f.key] = v;
+  }
+  const notes = val("notes");
+  if (notes) updated.notes = notes;
+  return updated;
+}
+
+/**
+ * Writes one updated mark back to data/marks.json on GitHub — same
+ * read-current-sha/find/replace/write-whole-file pattern as
+ * saveNewLocationToGitHub below, just updating an existing array entry by
+ * id instead of appending a new one. Requires an existing GitHub connection
+ * (see getConnection) — the mark popups themselves only ever render at all
+ * when connected in the first place (see loadAndRenderMarks), so in
+ * practice this check is a defensive backstop, not the primary gate.
+ *
+ * Returns { success: true } or { success: false, error: "..." } — never
+ * throws, so the popup's own Save handler can show the error text directly.
+ */
+async function saveMarkToGitHub(updatedMark) {
+  const conn = getConnection();
+  if (!conn || !conn.owner || !conn.repo || !conn.token) {
+    return { success: false, error: "Not connected to GitHub — connect from the Settings tab first." };
+  }
+  try {
+    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARKS_FILE_PATH}?ref=${BRANCH}`, {
+      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+    });
+    if (!getRes.ok) throw new Error(`Could not read current file (${getRes.status})`);
+    const getJson = await getRes.json();
+    const decoded = decodeURIComponent(escape(atob(getJson.content.replace(/\n/g, ""))));
+    const marksJson = JSON.parse(decoded);
+    const marksArr = marksJson.marks || [];
+
+    const idx = marksArr.findIndex((m) => m.id === updatedMark.id);
+    if (idx === -1) {
+      return { success: false, error: "This mark no longer exists in marks.json — it may have been removed elsewhere. Refresh the page." };
+    }
+    marksArr[idx] = updatedMark;
+
+    const content = JSON.stringify(marksJson, null, 2) + "\n";
+    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARKS_FILE_PATH}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${conn.token}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: `Update mark "${updatedMark.name}" via site`,
+        content: utf8ToBase64(content),
+        sha: getJson.sha,
+        branch: BRANCH,
+      }),
+    });
+    if (!putRes.ok) {
+      const errBody = await putRes.json().catch(() => ({}));
+      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
+    }
+    return { success: true };
+  } catch (err) {
+    console.error("saveMarkToGitHub failed:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Wires whichever buttons currently exist inside one open mark popup — only
+ * ever one of Edit (view mode) or Save/Cancel (edit mode) at a time, so at
+ * most one of the two branches below actually finds anything. Called both
+ * from the map's own popupopen event (see loadAndRenderMarks) AND, directly,
+ * every time this same code swaps the popup's content between view and edit
+ * mode — popupopen only fires when a popup first OPENS, not on a later
+ * setPopupContent, so switching modes has to re-wire itself rather than
+ * relying on that event a second time.
+ */
+function wireMarkPopupButtons(popupEl, marker, mark, markListsCache) {
+  const editBtn = popupEl.querySelector("[data-mark-edit]");
+  if (editBtn) {
+    editBtn.addEventListener("click", () => {
+      marker.setPopupContent(buildMarkPopupEditHtml(mark, markListsCache));
+      wireMarkPopupButtons(popupEl, marker, mark, markListsCache);
+    });
+  }
+
+  const cancelBtn = popupEl.querySelector("[data-mark-cancel]");
+  if (cancelBtn) {
+    cancelBtn.addEventListener("click", () => {
+      marker.setPopupContent(buildMarkPopupViewHtml(mark));
+      wireMarkPopupButtons(popupEl, marker, mark, markListsCache);
+    });
+  }
+
+  const saveBtn = popupEl.querySelector("[data-mark-save]");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", async () => {
+      const form = popupEl.querySelector("[data-mark-form]");
+      const statusEl = popupEl.querySelector("[data-mark-save-status]");
+      const updated = collectMarkFormValues(form, mark);
+      saveBtn.disabled = true;
+      statusEl.textContent = "Saving…";
+      statusEl.style.color = "";
+
+      const result = await saveMarkToGitHub(updated);
+      if (result.success) {
+        // Mutate the SAME object every closure here already holds a
+        // reference to (marksById's entry, this popup's `mark`) rather than
+        // replacing it — swapping in a new object would leave marksById
+        // pointing at stale data for any OTHER popup opened on this mark
+        // later without a full page reload.
+        Object.assign(mark, updated);
+        for (const f of MARK_POPUP_OPTIONAL_FIELDS) if (!(f.key in updated)) delete mark[f.key];
+        if (!("notes" in updated)) delete mark.notes;
+
+        marker.setPopupContent(buildMarkPopupViewHtml(mark));
+        wireMarkPopupButtons(popupEl, marker, mark, markListsCache);
+        marker.unbindTooltip();
+        marker.bindTooltip(markTooltipText(mark), { direction: "top" });
+        const style = markStyleFor(mark);
+        marker.setStyle({ color: style.color, fillColor: style.fillColor, radius: style.radius, weight: style.weight });
+      } else {
+        statusEl.textContent = "Save failed: " + result.error;
+        statusEl.style.color = "#dc2626";
+        saveBtn.disabled = false;
+      }
+    });
+  }
 }
 
 /**
@@ -1001,11 +1273,14 @@ function parseGpxWaypoints(gpxText) {
 }
 
 /**
- * Loads data/marks.json and plots every mark on an already-created Leaflet
- * map. Cache-busted with a `?_=` query param — same reason
- * loadLocationCoords/loadTideOffsets already do this for their own data/config
- * fetches: GitHub Pages' CDN caches static files with max-age=600, so a mark
- * added moments ago wouldn't show up here for up to 10 minutes without it.
+ * Loads data/marks.json (and config/mark_lists.json, for the edit form's
+ * dropdown options) and plots every mark on an already-created Leaflet map,
+ * each one clickable into a view/edit popup (see buildMarkPopupViewHtml/
+ * buildMarkPopupEditHtml above). Cache-busted with a `?_=` query param —
+ * same reason loadLocationCoords/loadTideOffsets already do this for their
+ * own data/config fetches: GitHub Pages' CDN caches static files with
+ * max-age=600, so a mark added (or edited) moments ago wouldn't show up
+ * here for up to 10 minutes without it.
  *
  * Gated behind getConnection() — the SAME GitHub personal access token
  * already used for admin/write actions on Settings, not a new or separate
@@ -1027,6 +1302,12 @@ function parseGpxWaypoints(gpxText) {
  * GPX migration alone, and growing), building and painting that many
  * individual HTML/SVG elements would be meaningfully heavier than Leaflet's
  * own canvas-rendered circles, which are built for exactly this point count.
+ *
+ * `marksById`/`markersById` are scoped to this one call (one per map/page
+ * load, not shared globally) — Location and Live are separate page loads
+ * with their own Leaflet map instance, so each gets its own independent copy
+ * with no risk of one page's edits leaking into the other's in-memory state
+ * before a reload.
  */
 async function loadAndRenderMarks(map) {
   if (!getConnection()) return;
@@ -1044,6 +1325,20 @@ async function loadAndRenderMarks(map) {
   const marks = (marksJson && marksJson.marks) || [];
   if (marks.length === 0) return;
 
+  // Best-effort — the edit form's dropdowns just fall back to "no options
+  // besides the current value" if this fails, rather than blocking the
+  // whole marks layer from rendering over a pick-list fetch problem.
+  let markLists = [];
+  try {
+    const listsRes = await fetch(`${MARK_LISTS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" });
+    if (listsRes.ok) markLists = await listsRes.json();
+  } catch (err) {
+    console.error("Could not load mark_lists.json (edit dropdowns will be limited):", err);
+  }
+
+  const marksById = new Map();
+  const markersById = new Map();
+
   const renderer = L.canvas({ padding: 0.5 });
   for (const mark of marks) {
     if (mark.lat == null || mark.lng == null) continue;
@@ -1057,8 +1352,30 @@ async function loadAndRenderMarks(map) {
       fillOpacity: 0.85,
     }).addTo(map);
     marker.bindTooltip(markTooltipText(mark), { direction: "top" });
+    marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
+    marksById.set(mark.id, mark);
+    markersById.set(mark.id, marker);
   }
+
+  // One delegated listener for the whole map rather than one per marker —
+  // same reasoning as the canvas renderer above: with a couple thousand
+  // points, a per-marker popupopen listener would trade away exactly the
+  // performance headroom the canvas renderer was chosen to get back. Popup
+  // content only exists in the DOM once a popup actually opens (up until
+  // then it's just an HTML string Leaflet is holding onto), so buttons are
+  // wired here, not up front — same pattern app.js's own map popups already
+  // use for their own (different) buttons.
+  map.on("popupopen", (e) => {
+    const popupEl = e.popup.getElement();
+    const root = popupEl.querySelector("[data-mark-id]");
+    if (!root) return; // some other feature's popup, not one of ours
+    const mark = marksById.get(root.dataset.markId);
+    const marker = markersById.get(root.dataset.markId);
+    if (!mark || !marker) return;
+    wireMarkPopupButtons(popupEl, marker, mark, markLists);
+  });
 }
+
 
 // --- GitHub read/write (shared) ---------------------------------------------
 //
