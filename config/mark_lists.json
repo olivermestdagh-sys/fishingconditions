@@ -80,23 +80,23 @@
   },
   {
     "field": "Weather Condition",
-    "value": "Clear"
+    "value": "Clear",
+    "color": "#43c8f4"
   },
   {
     "field": "Weather Condition",
-    "value": "Cloudy"
+    "value": "Cloudy",
+    "color": "#eceff4"
   },
   {
     "field": "Weather Condition",
-    "value": "Overcast"
+    "value": "Overcast",
+    "color": "#747576"
   },
   {
     "field": "Weather Condition",
-    "value": "Rain"
-  },
-  {
-    "field": "Weather Condition",
-    "value": "Windy"
+    "value": "Rain",
+    "color": "#143576"
   },
   {
     "field": "Tide Condition",
