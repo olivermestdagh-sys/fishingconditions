@@ -1032,6 +1032,17 @@ function markListOptionsHtml(markLists, listLabel, currentValue) {
  * rather than shown blank), plus the Edit button. `data-mark-id` on the
  * root element is how the map-level popupopen handler (see
  * loadAndRenderMarks) knows which mark a given open popup belongs to.
+ *
+ * The Edit button only renders at all when getConnection() finds a saved
+ * GitHub token — with no token there's no way to actually WRITE a change
+ * back to data/marks.json (saveMarkToGitHub would just fail), so offering
+ * an Edit button that can only ever end in a save error is worse than not
+ * offering one. In practice this whole popup already only ever renders
+ * behind that same connection check one level up (loadAndRenderMarks won't
+ * even load marks without one today), so this is currently a belt-and-braces
+ * check rather than one closing a live gap — but it keeps the button itself
+ * correct on its own terms, independent of whatever gates marks display
+ * further up, rather than relying on that outer gate alone.
  */
 function buildMarkPopupViewHtml(mark) {
   const rows = [];
@@ -1044,10 +1055,11 @@ function buildMarkPopupViewHtml(mark) {
   row("Date/Time", mark.dateTime);
   for (const f of MARK_POPUP_OPTIONAL_FIELDS) row(f.displayLabel, mark[f.key]);
   row("Notes", mark.notes);
+  const canEdit = !!getConnection();
   return `
     <div data-mark-id="${escapeHtml(mark.id)}" style="min-width:200px;">
       ${rows.join("")}
-      <button type="button" class="btn-secondary" data-mark-edit style="margin-top:8px;padding:4px 10px;font-size:0.85rem;">Edit</button>
+      ${canEdit ? `<button type="button" class="btn-secondary" data-mark-edit style="margin-top:8px;padding:4px 10px;font-size:0.85rem;">Edit</button>` : ""}
     </div>
   `;
 }
