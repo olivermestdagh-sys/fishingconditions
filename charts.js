@@ -1232,6 +1232,9 @@ function buildMarkPopupViewHtml(mark) {
   for (const f of MARK_POPUP_OPTIONAL_FIELDS) row(f.displayLabel, mark[f.key]);
   row("Size", mark.size != null ? `${mark.size} cm` : null);
   row("Barometer", mark.barometer != null ? `${mark.barometer} hPa` : null);
+  row("Temperature", mark.temperature != null ? `${mark.temperature}°C` : null);
+  row("Water Temp", mark.waterTemperature != null ? `${mark.waterTemperature}°C` : null);
+  row("Water Depth", mark.waterDepth != null ? `${mark.waterDepth} m` : null);
   const windParts = [mark.windDirection, mark.windSpeed != null ? `${mark.windSpeed} km/h` : null].filter(Boolean);
   row("Wind", windParts.length ? windParts.join(" ") : null);
   row("Notes", mark.notes);
@@ -1284,6 +1287,15 @@ function buildMarkPopupEditHtml(mark, markLists) {
         </label>
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Barometer (hPa)
           <input type="number" name="barometer" min="0" step="0.1" value="${mark.barometer != null ? mark.barometer : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
+        </label>
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Temperature (°C)
+          <input type="number" name="temperature" step="0.1" value="${mark.temperature != null ? mark.temperature : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
+        </label>
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Water Temp (°C)
+          <input type="number" name="waterTemperature" step="0.1" value="${mark.waterTemperature != null ? mark.waterTemperature : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
+        </label>
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Water Depth (m)
+          <input type="number" name="waterDepth" min="0" step="0.1" value="${mark.waterDepth != null ? mark.waterDepth : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Wind Direction
           <select name="windDirection" style="${MARK_POPUP_INPUT_STYLE}">
@@ -1347,6 +1359,21 @@ function collectMarkFormValues(form, originalMark) {
   if (barometerRaw) {
     const barometerNum = Number(barometerRaw);
     if (Number.isFinite(barometerNum)) updated.barometer = barometerNum; // hPa, not rounded — see the field's own schema comment
+  }
+  const temperatureRaw = val("temperature");
+  if (temperatureRaw) {
+    const temperatureNum = Number(temperatureRaw);
+    if (Number.isFinite(temperatureNum)) updated.temperature = temperatureNum; // °C, not rounded — see the field's own schema comment
+  }
+  const waterTemperatureRaw = val("waterTemperature");
+  if (waterTemperatureRaw) {
+    const waterTemperatureNum = Number(waterTemperatureRaw);
+    if (Number.isFinite(waterTemperatureNum)) updated.waterTemperature = waterTemperatureNum; // °C, not rounded — see the field's own schema comment
+  }
+  const waterDepthRaw = val("waterDepth");
+  if (waterDepthRaw) {
+    const waterDepthNum = Number(waterDepthRaw);
+    if (Number.isFinite(waterDepthNum)) updated.waterDepth = waterDepthNum; // metres, not rounded — see the field's own schema comment
   }
   const windDirectionRaw = val("windDirection");
   if (windDirectionRaw) updated.windDirection = windDirectionRaw; // already one of SHORE_OPTIONS' 16 compass points — the <select> only ever offers those
@@ -1585,6 +1612,9 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         if (!("notes" in updated)) delete mark.notes;
         if (!("size" in updated)) delete mark.size;
         if (!("barometer" in updated)) delete mark.barometer;
+        if (!("temperature" in updated)) delete mark.temperature;
+        if (!("waterTemperature" in updated)) delete mark.waterTemperature;
+        if (!("waterDepth" in updated)) delete mark.waterDepth;
         if (!("windDirection" in updated)) delete mark.windDirection;
         if (!("windSpeed" in updated)) delete mark.windSpeed;
         saveLastMarkFieldValues(mark); // every successful save, create or edit — see that function's own comment
@@ -2208,6 +2238,8 @@ async function fillMarkFormFromHistoricalLookup(popupEl, lat, lng, dateTimeNaive
   fillIfBlank("weatherCondition", result.weatherCondition);
   fillIfBlank("tideCondition", result.tideCondition);
   fillIfBlank("barometer", result.barometer);
+  fillIfBlank("temperature", result.temperature);
+  fillIfBlank("waterTemperature", result.waterTemperature);
   fillIfBlank("windDirection", result.windDirection);
   fillIfBlank("windSpeed", result.windSpeed);
 }
@@ -2488,6 +2520,21 @@ const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
  *                sounder reading is often given to one decimal place (e.g.
  *                1013.2), and there was no "whole units only" convention
  *                asked for here the way there was for size in centimetres.
+ *     temperature: number, optional — air temperature in °C at the time of
+ *                the mark. Same plain-measurement reasoning as barometer;
+ *                not rounded, and (unlike size/barometer/waterDepth) has no
+ *                min="0" on its input — a genuinely sub-zero reading is
+ *                physically real even if unlikely at these coastal
+ *                Victorian marks, so nothing here should silently reject it.
+ *     waterTemperature: number, optional — sea surface temperature in °C at
+ *                the mark's own point, same units/reasoning as temperature
+ *                just above (and as the existing "Water Temp (°C)" series
+ *                already used elsewhere on this site's own charts).
+ *     waterDepth: number, optional — depth in metres at the mark's own
+ *                point. Same plain-measurement reasoning as the others; has
+ *                no real automatic source (no lookup fills this in — see
+ *                lookupHistoricalMarkConditions's own comment on why), so
+ *                it's always hand-entered.
  *     windDirection: string, optional — one of the 16 compass points (e.g.
  *                "SW"). NOT sourced from MARK_LIST_FIELDS/mark_lists.json —
  *                the compass is a fixed physical set, not an editable
@@ -2497,11 +2544,14 @@ const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
  *     windSpeed: number, optional — whole km/h, matching this site's wind
  *                units everywhere else (KAYAK_WIND_THRESHOLD_KMH, the
  *                "Wind Forecast (km/h)" chart series, etc).
- *     (windDirection, windSpeed, barometer, weatherCondition, and
- *     tideCondition can all be auto-filled via a real historical lookup —
- *     see lookupHistoricalMarkConditions below — but every one of them
- *     stays a normal editable field afterward; the lookup only ever
- *     pre-fills, it never locks a field or marks it as machine-sourced.)
+ *     (windDirection, windSpeed, barometer, temperature, waterTemperature,
+ *     weatherCondition, and tideCondition can all be auto-filled via a real
+ *     historical lookup — see lookupHistoricalMarkConditions below — but
+ *     every one of them stays a normal editable field afterward; the
+ *     lookup only ever pre-fills, it never locks a field or marks it as
+ *     machine-sourced. waterDepth is the one exception with no lookup at
+ *     all — nothing this site already talks to can supply bathymetry for
+ *     an arbitrary point, so it's always a manual entry.)
  *     source:    string, optional — "Manual" for any mark created through
  *                this site's own UI (see startNewMarkEntry), "gpx-import"
  *                on the batch migrated once from the old
@@ -3468,27 +3518,38 @@ function attachFishingConditionScores(rows, sunTimes, dailyTideRanges, pressureB
 
 // --- Historical mark conditions lookup (weather/wind/barometer/tide) -------
 //
-// Auto-fills weatherCondition/tideCondition/barometer/windDirection/
-// windSpeed for a mark at a given (lat, lng, dateTime) — see
-// lookupHistoricalMarkConditions below, the single entry point everything
-// else in this section builds toward. Scope, per how this was designed:
-// ONLY runs for a brand-new mark, either created manually (startNewMarkEntry)
-// or accepted through the Sync tab's import (sync.js) — never a retroactive
-// bulk backfill over marks.json's existing ~2,500 marks. That's a real cost
-// consideration, not just tidiness: WillyWeather is billed per call, so
-// backfilling every existing mark would mean thousands of billed calls for
-// a one-off convenience; doing it only at creation/import time keeps this
-// to one WillyWeather call + one Open-Meteo call per NEW mark, same order
-// of magnitude as everything else this site already calls per mark.
+// Auto-fills weatherCondition/tideCondition/barometer/temperature/
+// waterTemperature/windDirection/windSpeed for a mark at a given
+// (lat, lng, dateTime) — see lookupHistoricalMarkConditions below, the
+// single entry point everything else in this section builds toward.
+// waterDepth has no entry here at all — nothing this site already talks
+// to can supply bathymetry for an arbitrary point, so it stays a manual-
+// only field (see its own schema comment). Scope, per how this was
+// designed: ONLY runs for a brand-new mark, either created manually
+// (startNewMarkEntry) or accepted through the Sync tab's import (sync.js)
+// — never a retroactive bulk backfill over marks.json's existing ~2,500
+// marks. That's a real cost consideration, not just tidiness: WillyWeather
+// is billed per call, so backfilling every existing mark would mean
+// thousands of billed calls for a one-off convenience; doing it only at
+// creation/import time keeps this to one WillyWeather call + two
+// Open-Meteo calls (weather + marine) per NEW mark, same order of
+// magnitude as everything else this site already calls per mark.
 //
-// Two independent data sources, fetched in parallel (see
+// Three independent data sources, fetched in parallel (see
 // lookupHistoricalMarkConditions):
-//   - Wind (direction/speed), Barometer, and Weather Condition all come
-//     from Open-Meteo's historical archive API — free, keyless, documented
-//     back to 1940 (archive-api.open-meteo.com/v1/archive). Same
-//     parameter names/units this site's live pressure fetch already uses
-//     (pressure_msl, timezone=auto for naive-local timestamps), plus
-//     windspeed_10m/winddirection_10m/weathercode.
+//   - Wind (direction/speed), Barometer, Temperature, and Weather Condition
+//     all come from Open-Meteo's historical archive API — free, keyless,
+//     documented back to 1940 (archive-api.open-meteo.com/v1/archive).
+//     Same parameter names/units this site's live pressure fetch already
+//     uses (pressure_msl, timezone=auto for naive-local timestamps), plus
+//     windspeed_10m/winddirection_10m/weathercode/temperature_2m.
+//   - Water Temperature comes from Open-Meteo's separate MARINE API
+//     (marine-api.open-meteo.com/v1/marine — the same endpoint
+//     fetchOpenMeteoMarineHourly already uses for the Location tab's live
+//     preview, just with start_date/end_date instead of forecast_days/
+//     past_days). Open-Meteo's own docs describe this endpoint's
+//     historical coverage as "limited" without saying exactly how limited
+//     — see fetchOpenMeteoHistoricalMarineHourly's own comment.
 //   - Tide Condition comes from WillyWeather, via the willyweather-search
 //     Worker, using "our defined rules" (classifyTideConditionFromExtrema
 //     above) applied to real historical tide events — snapped to whichever
@@ -3556,13 +3617,44 @@ async function fetchOpenMeteoHistoricalHourly(lat, lng, dateStr) {
   try {
     const res = await fetch(
       `${OPEN_METEO_ARCHIVE_URL}?latitude=${lat}&longitude=${lng}&start_date=${dateStr}&end_date=${dateStr}` +
-      `&hourly=windspeed_10m,winddirection_10m,pressure_msl,weathercode&timezone=auto`
+      `&hourly=windspeed_10m,winddirection_10m,pressure_msl,weathercode,temperature_2m&timezone=auto`
     );
     if (!res.ok) return null;
     const data = await res.json();
     return data.hourly || null;
   } catch (err) {
     console.error("Open-Meteo historical fetch failed:", err);
+    return null;
+  }
+}
+
+/**
+ * Sea surface temperature for the exact calendar day dateStr falls on, at
+ * (lat, lng) — same historical-lookup idea as fetchOpenMeteoHistoricalHourly
+ * just above, but Open-Meteo splits marine data onto its own separate
+ * endpoint (OPEN_METEO_MARINE_URL — the same one fetchOpenMeteoMarineHourly
+ * already uses for the Location tab's live preview, just with start_date/
+ * end_date instead of forecast_days/past_days). UNVERIFIED against a real
+ * call, same honesty note as lookupTideConditionAt's own: Open-Meteo's own
+ * docs describe the marine API as having "limited" historical coverage
+ * compared to the main weather archive, but didn't specify exactly how
+ * limited, and this was never actually confirmed live (no network path to
+ * either Open-Meteo endpoint from the sandbox this was built in). Failing
+ * to null here just means waterTemperature stays unset on that mark, same
+ * as any other lookup piece that comes back empty — never a wrong guess.
+ */
+async function fetchOpenMeteoHistoricalMarineHourly(lat, lng, dateStr) {
+  if (lat == null || lng == null || !dateStr) return null;
+  try {
+    const res = await fetch(
+      `${OPEN_METEO_MARINE_URL}?latitude=${lat}&longitude=${lng}&start_date=${dateStr}&end_date=${dateStr}` +
+      `&hourly=sea_surface_temperature&timezone=auto&cell_selection=sea`
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.hourly || null;
+  } catch (err) {
+    console.error("Open-Meteo historical marine fetch failed:", err);
     return null;
   }
 }
@@ -3715,9 +3807,10 @@ async function lookupHistoricalMarkConditions(lat, lng, dateTimeNaive) {
   const dateStr = dateTimeNaive.slice(0, 10);
   const hourKey = dateTimeNaive.slice(0, 13);
 
-  const [tideCondition, hourly] = await Promise.all([
+  const [tideCondition, hourly, marineHourly] = await Promise.all([
     lookupTideConditionAt(lat, lng, targetMs),
     fetchOpenMeteoHistoricalHourly(lat, lng, dateStr),
+    fetchOpenMeteoHistoricalMarineHourly(lat, lng, dateStr),
   ]);
 
   if (tideCondition) result.tideCondition = tideCondition;
@@ -3727,12 +3820,19 @@ async function lookupHistoricalMarkConditions(lat, lng, dateTimeNaive) {
     const dir = openMeteoHourlyLookup(hourly.time, hourly.winddirection_10m)[hourKey];
     const pressure = openMeteoHourlyLookup(hourly.time, hourly.pressure_msl)[hourKey];
     const code = openMeteoHourlyLookup(hourly.time, hourly.weathercode)[hourKey];
+    const airTemp = openMeteoHourlyLookup(hourly.time, hourly.temperature_2m)[hourKey];
 
     if (speed != null) result.windSpeed = Math.round(speed);
     if (dir != null) result.windDirection = previewDegreesToCompass(dir);
     if (pressure != null) result.barometer = Math.round(pressure * 10) / 10;
+    if (airTemp != null) result.temperature = Math.round(airTemp * 10) / 10;
     const cond = weatherCodeToCondition(code);
     if (cond) result.weatherCondition = cond;
+  }
+
+  if (marineHourly && Array.isArray(marineHourly.time)) {
+    const waterTemp = openMeteoHourlyLookup(marineHourly.time, marineHourly.sea_surface_temperature)[hourKey];
+    if (waterTemp != null) result.waterTemperature = Math.round(waterTemp * 10) / 10;
   }
 
   return result;

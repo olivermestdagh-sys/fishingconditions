@@ -545,9 +545,10 @@ Species, Weather Condition, Tide Condition, Water Condition, Bait, Rig, Rod,
 and Berley — each one picked from `config/mark_lists.json` rather than typed
 free text, so a value like "Whiting" is always spelled the same way for
 filtering/export later rather than drifting into near-duplicates ("whiting",
-"small whiting"). Size (cm), Barometer (hPa), Wind Direction, and Wind Speed
-(km/h) round it out as plain measurements rather than pick-list fields —
-there's nothing to draw a Settings-tab list from for a number, and Wind
+"small whiting"). Size (cm), Barometer (hPa), Temperature (°C), Water
+Temperature (°C), Water Depth (m), Wind Direction, and Wind Speed (km/h)
+round it out as plain measurements rather than pick-list fields — there's
+nothing to draw a Settings-tab list from for a number, and Wind
 Direction's 16 compass points are a fixed physical set, not something that
 would ever need editing the way Species or Bait might. The full field-by-field
 shape is documented as a comment above `MARK_LIST_FIELDS`/`MARKS_FILE_PATH`
@@ -615,13 +616,15 @@ mismatch turns up).
 **Every field a mark can carry** is shown per candidate and editable right
 in its row before importing — not just Species/Name/Type/Date-Time/Notes,
 but also Weather Condition, Tide Condition, Water Condition, Bait, Rig,
-Rod, Berley, Size, Barometer, Wind Direction, and Wind Speed. The pick-list
-ones (Mark Type, Species, and everything from Weather Condition through
-Berley) are driven off the exact same `config/mark_lists.json` options as
-the main mark-edit popup elsewhere on the site, so there's only ever one
-place those lists are maintained. Weather/Tide/Barometer/Wind additionally
-come pre-filled from a real historical lookup — see "Auto-filling
-Weather/Tide/Barometer/Wind on a mark" below for where that data comes
+Rod, Berley, Size, Barometer, Temperature, Water Temperature, Water Depth,
+Wind Direction, and Wind Speed. The pick-list ones (Mark Type, Species,
+and everything from Weather Condition through Berley) are driven off the
+exact same `config/mark_lists.json` options as the main mark-edit popup
+elsewhere on the site, so there's only ever one place those lists are
+maintained. Weather/Tide/Barometer/Temperature/Water Temperature/Wind
+additionally come pre-filled from a real historical lookup — see
+"Auto-filling Weather/Tide/Barometer/Wind on a mark" below for where that
+data comes
 from and its own caveats.
 
 **Export** downloads every mark in `data/marks.json` as one GPX file. A
@@ -660,39 +663,51 @@ Gated behind the same GitHub connection as everything else that writes to
 this repo (see "Editing locations from the site itself" below) — connect
 from Settings first.
 
-## Auto-filling Weather/Tide/Barometer/Wind on a mark
+## Auto-filling Weather/Tide/Barometer/Temperature/Wind on a mark
 
 A brand-new mark — created manually on the map, or accepted through the
 Sync tab's import — gets a best-effort, real-data guess for Weather
-Condition, Tide Condition, Barometer, Wind Direction, and Wind Speed,
-looked up for its own exact GPS point and Date/Time. Every one of these
-stays a normal editable field afterward; the lookup only ever pre-fills a
+Condition, Tide Condition, Barometer, Temperature, Water Temperature, Wind
+Direction, and Wind Speed, looked up for its own exact GPS point and
+Date/Time. **Water Depth is the one exception** — nothing this site
+already talks to can supply bathymetry for an arbitrary point, so it stays
+a manual-only field, same as Species/Bait/Rig/etc. Every auto-filled field
+stays a normal editable one afterward; the lookup only ever pre-fills a
 blank field, it never locks one or overwrites something already set (by
 you, or by the Live tab's own "You are here" tide guess — see below).
 
 On the **Sync tab**, this lookup runs right after a file is parsed and
 matched — before the review list even appears — so every new candidate
-shown for review already has its own Weather/Tide/Barometer/Wind fields
-filled in and editable right there in its row, alongside Species/Name/Type/
-Notes. Whatever's showing at the moment you hit Import (looked-up or
-hand-edited) is exactly what gets saved; nothing is looked up a second time
-at Import itself.
+shown for review already has its own Weather/Tide/Barometer/Temperature/
+Water Temperature/Wind fields filled in and editable right there in its
+row, alongside Species/Name/Type/Notes. Whatever's showing at the moment
+you hit Import (looked-up or hand-edited) is exactly what gets saved;
+nothing is looked up a second time at Import itself.
 
 **Scope, deliberately**: this only ever runs for a NEW mark — never a
 retroactive backfill over the marks already sitting in `data/marks.json`.
 WillyWeather bills per call, so backfilling thousands of existing marks in
 one go would mean thousands of billed calls for a one-off convenience;
 only looking this up for candidates actually up for review/creation keeps
-it to one WillyWeather call plus one Open-Meteo call per NEW mark — and on
-the Sync tab, only for candidates that are actually new (an already-tracked
-match is never shown, so never looked up either).
+it to one WillyWeather call plus two Open-Meteo calls (weather + marine)
+per NEW mark — and on the Sync tab, only for candidates that are actually
+new (an already-tracked match is never shown, so never looked up either).
 
 **Where the data comes from**:
 
-- **Wind, Barometer, Weather Condition** — Open-Meteo's historical archive
-  API (`archive-api.open-meteo.com`), free and keyless, hourly data back
-  to 1940. Weather Condition comes from Open-Meteo's WMO weather code,
-  collapsed onto this site's own Clear/Cloudy/Overcast/Rain pick-list.
+- **Wind, Barometer, Temperature, Weather Condition** — Open-Meteo's
+  historical archive API (`archive-api.open-meteo.com`), free and
+  keyless, hourly data back to 1940. Weather Condition comes from
+  Open-Meteo's WMO weather code, collapsed onto this site's own
+  Clear/Cloudy/Overcast/Rain pick-list.
+- **Water Temperature** — Open-Meteo's separate marine API
+  (`marine-api.open-meteo.com`), the same one the Location tab's live
+  preview already uses for sea surface temperature, just pointed at a
+  past date instead of a forecast window. Open-Meteo's own docs describe
+  this endpoint's historical coverage as "limited" without saying exactly
+  how limited — unconfirmed against a real call (see the caveat below),
+  so a mark from further back may simply come back with Water Temperature
+  left blank rather than a wrong guess.
 - **Tide Condition** — WillyWeather's real tide predictions for that exact
   past date, via the `willyweather-search` Worker, run through "our
   defined rules" (the same Slack/Running/Last Run/Start Run logic the Live
@@ -709,7 +724,8 @@ change to that file, it isn't picked up by the normal GitHub upload flow —
 it has to be manually pasted into Cloudflare's dashboard and redeployed
 (see the deploy steps at the top of `willyweather-search.js`). Tide
 Condition will simply stay blank on new marks until that's done; Weather/
-Wind/Barometer don't depend on the Worker at all and work regardless.
+Wind/Barometer/Temperature/Water Temperature don't depend on the Worker at
+all and work regardless.
 
 **One assumption worth knowing about**: this relies on WillyWeather's own
 API actually honouring that `startDate` parameter for a past date the way

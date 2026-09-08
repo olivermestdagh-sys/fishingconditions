@@ -789,6 +789,9 @@ function renderCandidateRow(c, i) {
         <div class="sync-row-inputs">
           <input type="number" data-role="size" data-idx="${i}" value="${c.size != null ? c.size : ""}" min="0" step="1" placeholder="Size (cm)" title="Size (cm)" />
           <input type="number" data-role="barometer" data-idx="${i}" value="${c.barometer != null ? c.barometer : ""}" min="0" step="0.1" placeholder="hPa" title="Barometer (hPa)" />
+          <input type="number" data-role="temperature" data-idx="${i}" value="${c.temperature != null ? c.temperature : ""}" step="0.1" placeholder="Air °C" title="Temperature (°C)" />
+          <input type="number" data-role="waterTemperature" data-idx="${i}" value="${c.waterTemperature != null ? c.waterTemperature : ""}" step="0.1" placeholder="Water °C" title="Water Temp (°C)" />
+          <input type="number" data-role="waterDepth" data-idx="${i}" value="${c.waterDepth != null ? c.waterDepth : ""}" min="0" step="0.1" placeholder="Depth (m)" title="Water Depth (m)" />
           <select data-role="windDirection" data-idx="${i}" title="Wind Direction">
             <option value=""${c.windDirection ? "" : " selected"}>Wind</option>${windDirectionOptions}
           </select>
@@ -917,9 +920,12 @@ async function handleImportClick() {
     if (c.rod) mark.rod = c.rod;
     if (c.berley) mark.berley = c.berley;
     if (c.size != null) mark.size = c.size;
+    if (c.waterDepth != null) mark.waterDepth = c.waterDepth;
     if (c.weatherCondition) mark.weatherCondition = c.weatherCondition;
     if (c.tideCondition) mark.tideCondition = c.tideCondition;
     if (c.barometer != null) mark.barometer = c.barometer;
+    if (c.temperature != null) mark.temperature = c.temperature;
+    if (c.waterTemperature != null) mark.waterTemperature = c.waterTemperature;
     if (c.windDirection) mark.windDirection = c.windDirection;
     if (c.windSpeed != null) mark.windSpeed = c.windSpeed;
     return mark;
@@ -1010,22 +1016,26 @@ async function handleFileInputChange(e) {
       // Every other mark field this review row now also exposes for
       // editing (see renderCandidateRow) — blank until either the
       // historical lookup fills some of them in (weatherCondition/
-      // tideCondition/barometer/windDirection/windSpeed) or the person
-      // edits one by hand. waterCondition/bait/rig/rod/berley/size have
-      // no lookup source at all (nothing feeds them automatically); they
-      // start blank and stay that way unless hand-edited.
+      // tideCondition/barometer/temperature/waterTemperature/
+      // windDirection/windSpeed) or the person edits one by hand.
+      // waterCondition/bait/rig/rod/berley/size/waterDepth have no lookup
+      // source at all (nothing feeds them automatically); they start
+      // blank and stay that way unless hand-edited.
       waterCondition: undefined,
       bait: undefined,
       rig: undefined,
       rod: undefined,
       berley: undefined,
       size: undefined,
+      waterDepth: undefined,
       // Filled in below, for reviewable candidates only — see
       // lookupHistoricalMarkConditions, charts.js. Left undefined (not
       // shown) for anything the lookup didn't resolve.
       weatherCondition: undefined,
       tideCondition: undefined,
       barometer: undefined,
+      temperature: undefined,
+      waterTemperature: undefined,
       windDirection: undefined,
       windSpeed: undefined,
     }));
@@ -1155,6 +1165,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     } else if (role === "barometer") {
       const v = e.target.value;
       c.barometer = v === "" ? undefined : Number(v);
+    } else if (role === "temperature") {
+      const v = e.target.value;
+      c.temperature = v === "" ? undefined : Number(v);
+    } else if (role === "waterTemperature") {
+      const v = e.target.value;
+      c.waterTemperature = v === "" ? undefined : Number(v);
+    } else if (role === "waterDepth") {
+      const v = e.target.value;
+      c.waterDepth = v === "" ? undefined : Number(v);
     } else if (role === "windSpeed") {
       const v = e.target.value;
       c.windSpeed = v === "" ? undefined : Math.round(Number(v));
