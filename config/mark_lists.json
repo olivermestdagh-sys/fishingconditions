@@ -1,7 +1,8 @@
 [
   {
     "field": "Mark Type",
-    "value": "POI"
+    "value": "POI",
+    "shape": "diamond"
   },
   {
     "field": "Species",
@@ -236,10 +237,12 @@
   },
   {
     "field": "Mark Type",
-    "value": "Mark"
+    "value": "Mark",
+    "shape": "circle"
   },
   {
     "field": "Mark Type",
-    "value": "Catch"
+    "value": "Catch",
+    "shape": "cross"
   }
 ]
