@@ -1213,6 +1213,7 @@ function buildMarkPopupViewHtml(mark) {
   row("Date/Time", mark.dateTime);
   for (const f of MARK_POPUP_OPTIONAL_FIELDS) row(f.displayLabel, mark[f.key]);
   row("Size", mark.size != null ? `${mark.size} cm` : null);
+  row("Barometer", mark.barometer != null ? `${mark.barometer} hPa` : null);
   row("Notes", mark.notes);
   row("Source", mark.source);
   const canEdit = !!getConnection();
@@ -1260,6 +1261,9 @@ function buildMarkPopupEditHtml(mark, markLists) {
         ${optionalFieldsHtml}
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Size (cm)
           <input type="number" name="size" min="0" step="1" value="${mark.size != null ? mark.size : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
+        </label>
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Barometer (hPa)
+          <input type="number" name="barometer" min="0" step="0.1" value="${mark.barometer != null ? mark.barometer : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Notes
           <textarea name="notes" rows="2" style="${MARK_POPUP_INPUT_STYLE}resize:vertical;">${escapeHtml(mark.notes || "")}</textarea>
@@ -1309,6 +1313,11 @@ function collectMarkFormValues(form, originalMark) {
   if (sizeRaw) {
     const sizeNum = Math.round(Number(sizeRaw));
     if (Number.isFinite(sizeNum)) updated.size = sizeNum; // whole cm — see the field's own schema comment
+  }
+  const barometerRaw = val("barometer");
+  if (barometerRaw) {
+    const barometerNum = Number(barometerRaw);
+    if (Number.isFinite(barometerNum)) updated.barometer = barometerNum; // hPa, not rounded — see the field's own schema comment
   }
   const notes = val("notes");
   if (notes) updated.notes = notes;
@@ -1539,6 +1548,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         for (const f of MARK_POPUP_OPTIONAL_FIELDS) if (!(f.key in updated)) delete mark[f.key];
         if (!("notes" in updated)) delete mark.notes;
         if (!("size" in updated)) delete mark.size;
+        if (!("barometer" in updated)) delete mark.barometer;
         saveLastMarkFieldValues(mark); // every successful save, create or edit — see that function's own comment
 
         if (options.isNew && options.state) {
@@ -2367,6 +2377,15 @@ const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
  *                from and no colour-by-field/filter support for it either
  *                (see MARK_LIST_FIELDS/MARK_FILTER_ONLY_FIELDS below —
  *                neither includes it).
+ *     barometer: number, optional — barometric pressure in hPa at the time
+ *                of the mark (typically low-to-high 1000s, e.g. 1013).
+ *                Same reasoning as size just above: a plain measurement,
+ *                not a pick-list field, so it's absent from
+ *                MARK_LIST_FIELDS/MARK_FILTER_ONLY_FIELDS too. Unlike size,
+ *                not rounded to a whole number on save — a barometer or
+ *                sounder reading is often given to one decimal place (e.g.
+ *                1013.2), and there was no "whole units only" convention
+ *                asked for here the way there was for size in centimetres.
  *     source:    string, optional — "Manual" for any mark created through
  *                this site's own UI (see startNewMarkEntry), "gpx-import"
  *                on the batch migrated once from the old
