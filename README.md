@@ -612,9 +612,15 @@ auto-numbering (`"Snapper-13"` → `"Snapper"`) and a small hardcoded alias
 list (`"Gummy"` → `"Gummy Shark"`, easy to extend in `sync.js` if another
 mismatch turns up).
 
-**Weather Condition, Tide Condition, Barometer, Wind Direction, and Wind
-Speed** are also shown per candidate, pre-filled from a real historical
-lookup and editable right there before importing — see "Auto-filling
+**Every field a mark can carry** is shown per candidate and editable right
+in its row before importing — not just Species/Name/Type/Date-Time/Notes,
+but also Weather Condition, Tide Condition, Water Condition, Bait, Rig,
+Rod, Berley, Size, Barometer, Wind Direction, and Wind Speed. The pick-list
+ones (Mark Type, Species, and everything from Weather Condition through
+Berley) are driven off the exact same `config/mark_lists.json` options as
+the main mark-edit popup elsewhere on the site, so there's only ever one
+place those lists are maintained. Weather/Tide/Barometer/Wind additionally
+come pre-filled from a real historical lookup — see "Auto-filling
 Weather/Tide/Barometer/Wind on a mark" below for where that data comes
 from and its own caveats.
 

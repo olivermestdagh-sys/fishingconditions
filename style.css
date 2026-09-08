@@ -2864,6 +2864,7 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
   border-radius: 6px;
   border: 1px solid var(--grey-200);
   font-size: 0.85rem;
+  min-width: 90px;
 }
 
 .sync-row-inputs input[type="number"] {
