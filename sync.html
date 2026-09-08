@@ -78,6 +78,10 @@
         Downloads every mark currently in <code>data/marks.json</code> as a single GPX file — Garmin units
         and Lowrance sounders that accept GPX import (confirmed on Oliver's own unit) can load it directly.
       </p>
+      <div style="margin-bottom:10px;">
+        <label for="exportFilenameInput" style="display:block;font-size:0.8rem;font-weight:600;margin-bottom:4px;">File name</label>
+        <input type="text" id="exportFilenameInput" style="width:100%;max-width:340px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+      </div>
       <button type="button" id="btnExportGpx" class="btn-primary">Export all marks as GPX</button>
       <div id="exportStatus" style="margin-top:10px;font-size:0.85rem;"></div>
     </section>

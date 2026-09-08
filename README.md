@@ -624,11 +624,17 @@ come pre-filled from a real historical lookup — see "Auto-filling
 Weather/Tide/Barometer/Wind on a mark" below for where that data comes
 from and its own caveats.
 
-**Export** downloads every mark in `data/marks.json` as one GPX file.
-Garmin units take this directly; Lowrance sounders that accept GPX import
-do too (no need for a real binary `.usr` writer — a much heavier, riskier
-thing to get right without a real unit to test an exported file against,
-and unnecessary since GPX import works).
+**Export** downloads every mark in `data/marks.json` as one GPX file. A
+**File name** field lets you name it before downloading — pre-filled with
+`fishing-marks-YYYY-MM-DD-HHMM.gpx` (date AND time, so exporting more than
+once in a day doesn't quietly overwrite an earlier download), editable to
+whatever you'd rather call it (e.g. "Lang Lang Trip") — `.gpx` gets added
+automatically if you don't type it yourself, and characters a filename
+can't contain are stripped. Garmin units take the result directly;
+Lowrance sounders that accept GPX import do too (no need for a real
+binary `.usr` writer — a much heavier, riskier thing to get right without
+a real unit to test an exported file against, and unnecessary since GPX
+import works).
 
 Each waypoint's `<name>` is the mark's **species** (falling back to its
 own `name` field, then a generic label, only if there's no species at
