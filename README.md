@@ -682,20 +682,31 @@ own `name` field, then a generic label, only if there's no species at
 all) — most of the old migrated batch has a place name in `name`
 ("Williamstown", "Leopold"), which is far less useful on a chartplotter
 than the actual catch; that place name is kept in `<desc>` instead rather
-than lost. Each waypoint also gets a `<sym>` — a Fish-type mark gets
-Lowrance's "fish" icon in whatever colour its species is configured with
-in `config/mark_lists.json` (the same colour the site's own map paints
-that species' pins with), a POI gets a plain diamond. Worth knowing: this
-is a best-effort substitute, not a restoration of whatever icon a mark
-literally had on the device originally — the Sync tab's own `.usr` parser
-reads past a waypoint's icon/colour bytes without keeping either value, so
-that original information is already gone for every mark imported so far.
-It's also unverified against a real device: the "shape,colour" `<sym>`
-convention comes from a reverse-engineered mapping for Lowrance's binary
-`.usr` format specifically, not confirmed against how Lowrance's own GPX
-*import* parses a plain `<sym>` string — worth checking a small test
-export on the actual sounder rather than assuming every species shows its
-intended colour.
+than lost. Each waypoint also gets a `<sym>` — a different **shape per
+Mark Type** (POI -> circle, Mark -> square, Catch -> cross), coloured by
+**species** (not applicable for a POI, which has none, so it gets its
+shape bare with no colour) — matched to the nearest of Lowrance's own
+7-colour palette (blue/magenta/orange/yellow/green/aqua/white) from
+whatever colour that species already has configured in
+`config/mark_lists.json` (the same colour the site's own map paints that
+species' pins with). This also means species colours never need to be
+manually restricted to Lowrance-safe ones in `mark_lists.json` itself —
+the reduction to 7 named colours happens only at export time.
+
+Worth knowing: this is a best-effort substitute, not a restoration of
+whatever icon a mark literally had on the device originally — the Sync
+tab's own `.usr` parser reads past a waypoint's icon/colour bytes without
+keeping either value, so that original information is already gone for
+every mark imported so far. An earlier version of this used Lowrance's
+"fish" icon with a colour suffix, which turned out to be wrong — real
+testing directly on Oliver's own HDS 7 found the fish icon has no colour
+option on the actual device at all. The circle/square/cross shapes above
+come from multiple independently-confirmed real-user reports of Lowrance's
+actual GPX symbol vocabulary, not just the same theoretical `.usr`-format
+reference table that led to the "fish" mistake — but the exact 7-colour
+palette wasn't independently confirmed for square/cross specifically (only
+circle/diamond/x), so it's still worth a small test export on the actual
+sounder before assuming every species shows its intended colour.
 
 Gated behind the same GitHub connection as everything else that writes to
 this repo (see "Editing locations from the site itself" below) — connect

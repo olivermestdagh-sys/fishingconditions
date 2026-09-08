@@ -507,33 +507,52 @@ function naiveToGpxTime(naive) {
   return String(naive).replace(" ", "T") + "Z";
 }
 
-// Lowrance's own icon-color naming convention for GPX <sym> — "shape,color"
-// (e.g. "fish,blue") — matches the reverse-engineered lowranceusr4 icon
-// table this project already used when building the .usr PARSER (see
-// parseUsrWaypoints's header comment; same table, same source). Used here
-// on EXPORT so a re-imported mark shows something more useful than every
-// chartplotter's own default fallback icon (a plain blue circle — exactly
-// what Oliver saw before this existed, since there was no <sym> tag at
-// all).
+// Lowrance's own GPX <sym> vocabulary for waypoint icons — "shape,color"
+// (e.g. "circle,blue"). REVISED from an earlier version of this code that
+// used "fish,color": real-world testing directly on Oliver's own HDS 7
+// found the fish icon has no colour option on the actual device at all,
+// which turned out to line up with multiple independent real-user reports
+// found while researching this (a Lowrance forum thread: "some Lowrance
+// icons don't support color for some icons in GPX" and "you cannot change
+// the color of that one by just naming it something else... that is not a
+// symbol that Lowrance will recognize"). The basic geometric shapes —
+// circle, square/diamond, x/cross — are the ones repeatedly confirmed
+// (same forum thread, plus a separate HDS-7-specific one: "you can change
+// the blue circle to an X and change the color to any of the 7 options
+// available") to genuinely support a 7-colour palette via this exact
+// "shape,color" string syntax. That's what this now uses instead.
 //
-// IMPORTANT HONESTY NOTE: this is NOT a restoration of whatever icon a
-// mark originally had on the device. parseUsrWaypoints reads straight past
-// a waypoint's own icon_id/color_id bytes (just to keep the byte offset
-// correct for the fields after them) without keeping either value — by
-// the time a mark reaches marks.json, that original icon information is
-// already gone, for every mark imported so far. What this does instead is
-// derive a colour from the mark's own SPECIES, using the same colour
-// already configured for it in config/mark_lists.json (the same colour the
-// site's own map already paints that species' pins with) — matched to the
-// nearest of Lowrance's 8 basic named colours. It's the best available
-// substitute given what's actually stored, not a literal reconstruction.
-// It's also UNVERIFIED against a real device: this "shape,color" string
-// convention comes from a reverse-engineered mapping for Lowrance's binary
-// .usr format specifically, not confirmed against how Lowrance's own GPX
-// IMPORT parses a plain <sym> string. Worst case if it's not honoured:
-// exactly today's behaviour (a default icon) — it can't make things worse,
-// but it's worth checking a small test export on the actual sounder before
-// assuming every species is showing its intended colour.
+// Each Mark Type gets its own SHAPE (Oliver's own call): POI -> circle,
+// Mark -> square, Catch -> cross. Colour represents SPECIES, not
+// available at all for a POI (no species to represent — see
+// gpxSymForMark) — matched to the nearest of the 7-colour palette below
+// from whatever hex colour that species already has configured in
+// config/mark_lists.json (the same colour the site's own map paints that
+// species' pins with), rather than requiring an exact hex match. This
+// also naturally satisfies "limit the colours used for species to those
+// the Lowrance unit can use" without needing to change any species'
+// configured colour in mark_lists.json itself — the reduction to 7 named
+// colours happens only here, at export time.
+//
+// TWO HONESTY CAVEATS, same spirit as elsewhere in this codebase:
+//   1. This is not a restoration of whatever icon a mark originally had
+//      on the device — parseUsrWaypoints reads straight past a
+//      waypoint's own icon_id/color_id bytes without keeping either
+//      value, so that original information is already gone for every
+//      mark imported so far. This derives a colour from species instead,
+//      the best available substitute given what's actually stored.
+//   2. The exact 7-colour palette below (blue/magenta/orange/yellow/
+//      green/aqua/white) is the one consistently reported for circle/
+//      diamond/x specifically across the sources found — but wasn't
+//      independently confirmed against square or cross specifically, nor
+//      against a real device from this end (no Lowrance hardware, and no
+//      network access to Lowrance's own site, from the sandbox this was
+//      built in). Worth a small test export to confirm square/cross
+//      accept the same 7 before trusting every species' colour is
+//      correct — if any of them differ, this palette (and
+//      nearestLowranceColorName's own matching) is the one place to
+//      adjust.
+const LOWRANCE_TYPE_SHAPES = { POI: "circle", Mark: "square", Catch: "cross", Fish: "cross" };
 const LOWRANCE_NAMED_COLORS = {
   blue: [0, 0, 255],
   magenta: [255, 0, 255],
@@ -542,7 +561,6 @@ const LOWRANCE_NAMED_COLORS = {
   green: [0, 128, 0],
   aqua: [0, 255, 255],
   white: [255, 255, 255],
-  red: [255, 0, 0],
 };
 
 function hexToRgb(hex) {
@@ -552,7 +570,7 @@ function hexToRgb(hex) {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-/** Nearest of Lowrance's 8 basic named colours to a #rrggbb hex value, by
+/** Nearest of Lowrance's 7 basic named colours to a #rrggbb hex value, by
  * plain squared-RGB-distance — good enough for "which named colour does
  * this look most like", not colour-science-accurate. Returns null for an
  * unparseable/missing hex. */
@@ -573,17 +591,21 @@ function nearestLowranceColorName(hex) {
 }
 
 /** The <sym> value for one mark on export — see this section's own header
- * comment for the honesty caveats. A POI gets a plain diamond (Lowrance's
- * own generic waypoint shape per the same reference table); a Fish mark
- * gets the "fish" shape in whatever colour its species is configured with
- * in config/mark_lists.json (falling back to green — the first-listed
- * colour for the "fish" icon in the same source table — for a species
- * with no colour configured, or no species at all). */
+ * comment for the shape-per-type mapping and the honesty caveats. A POI
+ * gets its shape bare, no colour suffix at all — colour represents
+ * species, and a POI structurally has none (see the Mark/POI/Catch field
+ * split, MARK_TYPE_FIELD_KEYS in charts.js) — so there's nothing to
+ * derive one from. A Mark or Catch (or legacy Fish) gets its own shape in
+ * whatever colour its species is configured with in
+ * config/mark_lists.json, falling back to blue for a species with no
+ * colour configured, or no species value at all on an otherwise
+ * non-POI record. */
 function gpxSymForMark(m) {
-  if (m.type === "POI") return "diamond,blue";
+  const shape = LOWRANCE_TYPE_SHAPES[m.type] || "circle";
+  if (m.type === "POI") return shape;
   const entry = markLists.find((r) => r.field === "Species" && r.value === m.species);
   const colorName = entry && entry.color ? nearestLowranceColorName(entry.color) : null;
-  return `fish,${colorName || "green"}`;
+  return `${shape},${colorName || "blue"}`;
 }
 
 function buildGpxDocument(marks) {
