@@ -505,22 +505,39 @@ this restriction — nothing extra is drawn.
 
 ## GPS fishing marks
 
-A **mark** is a single GPS point you drop yourself, out on the water — either
-a **Fish** (with species, conditions, and gear detail attached) or a plain
-**POI** (a snag, a hazard, a ramp not otherwise tracked) — Mark Type is
-itself just another editable list (see below), so a third type later ("Ramp",
-say) is a Settings edit, not a code change. This is separate from the
-Locations list above (the fixed handful of spots the site scores
-tide/weather/wind conditions FOR) — marks.json is an open-ended, editable
-personal log that grows every time you're out.
+A **mark** is a single GPS point you drop yourself, out on the water. Three
+Mark Types, each showing (and saving) only the fields that actually apply —
+see "Which fields show for which type" below:
+- **POI** — just a name and when it was found (a snag, a hazard, a ramp not
+  otherwise tracked). No species, no catch detail.
+- **Mark** — a POI plus Species — "I think this is around here", without
+  logging a real catch's full detail.
+- **Catch** — the full field set: species, conditions, gear, measurements.
 
-**One-off migration**: `data/personal-spots.gpx` — the site owner's existing
-catch history exported from C-MAP Embark — has been migrated into
+Mark Type is itself just another editable list (see below), so a fourth
+type later ("Ramp", say) is a Settings edit, not a code change — though it
+defaults to showing the full Catch-level field set until it's specifically
+taught otherwise (see `MARK_TYPE_FIELD_KEYS` in `charts.js`). This is
+separate from the Locations list above (the fixed handful of spots the site
+scores tide/weather/wind conditions FOR) — marks.json is an open-ended,
+editable personal log that grows every time you're out.
+
+**One-off migrations**: `data/personal-spots.gpx` — the site owner's
+existing catch history exported from C-MAP Embark — has been migrated into
 `data/marks.json` as real mark records (2,523 of them). The GPX file itself
 is left in the repo untouched for now, but the Location and Live tab maps no
 longer read it directly; both now render straight from `data/marks.json`
 instead. The old file is effectively retired and safe to delete once you're
 happy the migrated data looks right — nothing on the site reads it anymore.
+Separately, when the POI/Mark/Catch distinction above replaced the original
+two-value Fish/POI Mark Type, every mark that existed with type `"Fish"` was
+migrated in one pass to type `"Mark"` — a deliberately conservative rename
+(nothing else on those records was touched, even a record that happened to
+already carry Catch-level fields from before this distinction existed) — see
+this file's own git history for that diff. `"Fish"` stays in
+`config/mark_lists.json`'s own pick-list for a short window purely so it
+doesn't vanish out from under anything already mid-edit; remove it by hand
+once nothing's likely to still pick it.
 
 **Storage**: flat JSON in `data/marks.json` — in `data/` rather than
 `config/` despite being written the same browser-to-GitHub-API way as every
@@ -537,29 +554,45 @@ wouldn't earn its cost unless this became multi-user, needed fast live
 queries, or needed unattended server-side writes. Worth revisiting only if
 this file ever grows past a few MB.
 
-**Fields on a mark**: GPS location (lat/lng), a display name, Mark Type
-(seeded with Fish/POI), Date/Time (when it happened — separate from when the
-record was saved, so a mark logged from memory afterwards still shows the
-real catch time), and free text notes. A Fish mark can additionally carry
-Species, Weather Condition, Tide Condition, Water Condition, Bait, Rig, Rod,
-and Berley — each one picked from `config/mark_lists.json` rather than typed
-free text, so a value like "Whiting" is always spelled the same way for
-filtering/export later rather than drifting into near-duplicates ("whiting",
-"small whiting"). Size (cm), Barometer (hPa), Temperature (°C), Water
-Temperature (°C), Water Depth (m), Wind Direction, and Wind Speed (km/h)
-round it out as plain measurements rather than pick-list fields — there's
-nothing to draw a Settings-tab list from for a number, and Wind
-Direction's 16 compass points are a fixed physical set, not something that
-would ever need editing the way Species or Bait might. The full field-by-field
-shape is documented as a comment above `MARK_LIST_FIELDS`/`MARKS_FILE_PATH`
-in `charts.js`.
+**Fields on a mark**: GPS location (lat/lng), a display name, Mark Type,
+and Date/Time (when it happened — separate from when the record was saved,
+so a mark logged from memory afterwards still shows the real catch time) —
+every mark has these three regardless of type. A Mark additionally carries
+Species; a Catch adds Weather Condition, Tide Condition, Water Condition,
+Bait, Rig, Rod, Berley, Size (cm), Barometer (hPa), Temperature (°C), Water
+Temperature (°C), Water Depth (m), Wind Direction, Wind Speed (km/h), and
+free-text Notes. The pick-list fields (Species, and everything from Weather
+Condition through Berley) are picked from `config/mark_lists.json` rather
+than typed free text, so a value like "Whiting" is always spelled the same
+way for filtering/export later rather than drifting into near-duplicates
+("whiting", "small whiting"); the plain-measurement fields (Size, Barometer,
+Temperature, Water Temperature, Water Depth, Wind Speed) have no such list
+behind them — there's nothing to draw a Settings-tab list from for a number.
+Wind Direction is the one exception that's neither: its 16 compass points
+come from a fixed physical set baked into `charts.js`, not
+`config/mark_lists.json`, since a compass point is never something that
+would need Settings-tab editing the way Species or Bait might. The full
+field-by-field shape, and exactly which fields go with which Mark Type, is
+documented as a comment above `MARK_TYPE_FIELD_KEYS`/`MARKS_FILE_PATH` in
+`charts.js`.
+
+**Which fields show for which type**: the mark popup (both viewing and
+editing) and the Sync tab's review row only ever show the fields that apply
+to whatever Mark Type is currently selected — picking Species for a POI, or
+Barometer for a Mark, was never possible to begin with rather than just
+hidden after the fact. Switching Mark Type live, mid-edit (on an existing
+mark, a new one, or a Sync candidate awaiting import), immediately reveals
+or hides the relevant fields without needing to save and reopen — and
+hitting Save genuinely drops anything that's no longer applicable, not just
+visually hides it: turning an existing Catch into a POI clears its Species,
+Weather Condition, Barometer, everything, back down to just name/type/time.
 
 **Editing the pick-lists**: the Settings tab's "Fishing Mark Lists" section
-lets you add or remove options for each of the nine fields above (Mark Type
-included), the same way "Location Groups" already works for location tags —
-type a new value, hit Add (or Enter), then "Save mark lists" to commit it.
-Removing an option doesn't touch any mark that already used it; it just
-won't be offered again.
+lets you add or remove options for each of the pick-list-backed fields above
+(Mark Type included), the same way "Location Groups" already works for
+location tags — type a new value, hit Add (or Enter), then "Save mark
+lists" to commit it. Removing an option doesn't touch any mark that already
+used it; it just won't be offered again.
 
 **Displaying marks on the map**: the Location and Live tab maps both plot
 every mark in `data/marks.json` as a small coloured circle (see
@@ -567,11 +600,11 @@ every mark in `data/marks.json` as a small coloured circle (see
 set up on the Settings tab — same "don't clutter the map for random public
 visitors, but not real access control" caveat as the rest of this site's
 GitHub-gated features (the file itself is still a plain public URL). Colour
-is derived from each mark's Species (or its Mark Type, for a POI) via a
-simple hash, so every distinct species gets its own stable colour without
-needing a hardcoded lookup table that would need updating every time a new
-species is added to the pick-list. Hover/tap a point for its name, species,
-and date.
+is derived from each mark's Species (or its Mark Type, for anything without
+one) via a simple hash, so every distinct species gets its own stable colour
+without needing a hardcoded lookup table that would need updating every time
+a new species is added to the pick-list. Hover/tap a point for its name,
+species, and date.
 
 **Not built yet**: the actual "add a mark while out fishing" UI on the Live
 tab, and filtering marks by these fields. Importing/exporting from a
@@ -613,19 +646,24 @@ auto-numbering (`"Snapper-13"` → `"Snapper"`) and a small hardcoded alias
 list (`"Gummy"` → `"Gummy Shark"`, easy to extend in `sync.js` if another
 mismatch turns up).
 
-**Every field a mark can carry** is shown per candidate and editable right
-in its row before importing — not just Species/Name/Type/Date-Time/Notes,
-but also Weather Condition, Tide Condition, Water Condition, Bait, Rig,
-Rod, Berley, Size, Barometer, Temperature, Water Temperature, Water Depth,
-Wind Direction, and Wind Speed. The pick-list ones (Mark Type, Species,
-and everything from Weather Condition through Berley) are driven off the
-exact same `config/mark_lists.json` options as the main mark-edit popup
-elsewhere on the site, so there's only ever one place those lists are
-maintained. Weather/Tide/Barometer/Temperature/Water Temperature/Wind
-additionally come pre-filled from a real historical lookup — see
+**Every field a mark can carry** is shown per candidate — but, same as the
+main mark-edit popup, only the ones that actually apply to whatever Mark
+Type is currently selected for that row (see "Which fields show for which
+type" above); switching a candidate's own Type live in its row shows or
+hides the rest immediately. Name/Type/Date-Time/Species are always
+available (Species drops away for a POI); Weather Condition, Tide
+Condition, Water Condition, Bait, Rig, Rod, Berley, Size, Barometer,
+Temperature, Water Temperature, Water Depth, Wind Direction, and Wind Speed
+only show for a Catch. Every candidate defaults to Catch on import (a
+device waypoint represents an actual sighting/catch), editable per-row
+before you commit. The pick-list ones (Mark Type, Species, and everything
+from Weather Condition through Berley) are driven off the exact same
+`config/mark_lists.json` options as the main mark-edit popup elsewhere on
+the site, so there's only ever one place those lists are maintained.
+Weather/Tide/Barometer/Temperature/Water Temperature/Wind additionally come
+pre-filled from a real historical lookup for anything Catch-level — see
 "Auto-filling Weather/Tide/Barometer/Wind on a mark" below for where that
-data comes
-from and its own caveats.
+data comes from and its own caveats.
 
 **Export** downloads every mark in `data/marks.json` as one GPX file. A
 **File name** field lets you name it before downloading — pre-filled with
@@ -665,33 +703,43 @@ from Settings first.
 
 ## Auto-filling Weather/Tide/Barometer/Temperature/Wind on a mark
 
-A brand-new mark — created manually on the map, or accepted through the
-Sync tab's import — gets a best-effort, real-data guess for Weather
+A brand-new **Catch** — created manually on the map, or accepted through
+the Sync tab's import — gets a best-effort, real-data guess for Weather
 Condition, Tide Condition, Barometer, Temperature, Water Temperature, Wind
 Direction, and Wind Speed, looked up for its own exact GPS point and
-Date/Time. **Water Depth is the one exception** — nothing this site
-already talks to can supply bathymetry for an arbitrary point, so it stays
-a manual-only field, same as Species/Bait/Rig/etc. Every auto-filled field
-stays a normal editable one afterward; the lookup only ever pre-fills a
-blank field, it never locks one or overwrites something already set (by
-you, or by the Live tab's own "You are here" tide guess — see below).
+Date/Time. These are exactly the fields a POI or a plain Mark can't carry
+at all (see "Which fields show for which type" above), so the lookup
+doesn't run for either — manually starting a new mark as POI or Mark skips
+it entirely rather than spending a WillyWeather call and two Open-Meteo
+calls on fields nothing will show or save. **Water Depth is the one
+exception even for a Catch** — nothing this site already talks to can
+supply bathymetry for an arbitrary point, so it stays a manual-only field.
+Every auto-filled field stays a normal editable one afterward; the lookup
+only ever pre-fills a blank field, it never locks one or overwrites
+something already set (by you, or by the Live tab's own "You are here"
+tide guess — see below).
 
 On the **Sync tab**, this lookup runs right after a file is parsed and
 matched — before the review list even appears — so every new candidate
-shown for review already has its own Weather/Tide/Barometer/Temperature/
-Water Temperature/Wind fields filled in and editable right there in its
-row, alongside Species/Name/Type/Notes. Whatever's showing at the moment
-you hit Import (looked-up or hand-edited) is exactly what gets saved;
-nothing is looked up a second time at Import itself.
+(which all default to Catch on import) shown for review already has its
+own Weather/Tide/Barometer/Temperature/Water Temperature/Wind fields
+filled in and editable right there in its row, alongside Species/Name/
+Type/Notes. Whatever's showing at the moment you hit Import (looked-up or
+hand-edited) is exactly what gets saved; nothing is looked up a second
+time at Import itself. Switching a candidate's own Type away from Catch
+before importing simply drops those fields at Import (see "Which fields
+show for which type" above) — the lookup itself has already run by then
+regardless, since it happens once for the whole batch right after parsing.
 
 **Scope, deliberately**: this only ever runs for a NEW mark — never a
 retroactive backfill over the marks already sitting in `data/marks.json`.
 WillyWeather bills per call, so backfilling thousands of existing marks in
 one go would mean thousands of billed calls for a one-off convenience;
-only looking this up for candidates actually up for review/creation keeps
-it to one WillyWeather call plus two Open-Meteo calls (weather + marine)
-per NEW mark — and on the Sync tab, only for candidates that are actually
-new (an already-tracked match is never shown, so never looked up either).
+only looking this up for candidates actually up for review/creation (and
+only when the fields it fills could even apply — see above) keeps it to at
+most one WillyWeather call plus two Open-Meteo calls (weather + marine) per
+NEW Catch — and on the Sync tab, only for candidates that are actually new
+(an already-tracked match is never shown, so never looked up either).
 
 **Where the data comes from**:
 
