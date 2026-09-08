@@ -1382,6 +1382,73 @@ async function saveMarkToGitHub(updatedMark) {
 }
 
 /**
+ * Appends MANY new marks to data/marks.json in a single commit — the Sync
+ * tab's bulk-import save (see sync.js), as opposed to saveMarkToGitHub just
+ * above, which is a single add-or-update used by the interactive map
+ * popup. Doing one GET + one PUT for the whole batch (rather than looping
+ * saveMarkToGitHub once per mark) matters here specifically because an
+ * import can realistically be hundreds to low-thousands of marks at once —
+ * that many sequential GitHub API round trips would be slow, would race
+ * against each other's read-modify-write (each call re-reading a sha a
+ * previous in-flight call might already be about to invalidate), and would
+ * leave hundreds of individual commits in the repo's history for what is
+ * conceptually one action.
+ *
+ * newMarks is assumed to already be fully-formed mark objects
+ * (id/lat/lng/etc already set — see handleImportClick, sync.js) and already
+ * deduped against whatever was loaded for the review screen; this function
+ * does not re-check for existing near-duplicates itself, it just appends.
+ *
+ * Returns { success: true, added: n } or { success: false, error: "..." } —
+ * never throws.
+ */
+async function saveMarksBatchToGitHub(newMarks) {
+  const conn = getConnection();
+  if (!conn || !conn.owner || !conn.repo || !conn.token) {
+    return { success: false, error: "Not connected to GitHub — connect from the Settings tab first." };
+  }
+  if (!newMarks || newMarks.length === 0) {
+    return { success: false, error: "Nothing selected to import." };
+  }
+  try {
+    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARKS_FILE_PATH}?ref=${BRANCH}`, {
+      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+    });
+    if (!getRes.ok) throw new Error(`Could not read current file (${getRes.status})`);
+    const getJson = await getRes.json();
+    const decoded = decodeURIComponent(escape(atob(getJson.content.replace(/\n/g, ""))));
+    const marksJson = JSON.parse(decoded);
+    if (!Array.isArray(marksJson.marks)) marksJson.marks = [];
+
+    marksJson.marks.push(...newMarks);
+
+    const content = JSON.stringify(marksJson, null, 2) + "\n";
+    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARKS_FILE_PATH}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${conn.token}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: `Import ${newMarks.length} mark${newMarks.length === 1 ? "" : "s"} via Sync tab`,
+        content: utf8ToBase64(content),
+        sha: getJson.sha,
+        branch: BRANCH,
+      }),
+    });
+    if (!putRes.ok) {
+      const errBody = await putRes.json().catch(() => ({}));
+      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
+    }
+    return { success: true, added: newMarks.length };
+  } catch (err) {
+    console.error("saveMarksBatchToGitHub failed:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
  * Wires whichever buttons currently exist inside one open mark popup — only
  * ever one of Edit (view mode) or Save/Cancel (edit mode) at a time, so at
  * most one of the two branches below actually finds anything. Called both
@@ -1496,16 +1563,20 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
 }
 
 /**
- * Parses a GPX file's <wpt> waypoints into plain {lat, lon, name, desc, sym}
+ * Parses a GPX file's <wpt> waypoints into plain {lat, lon, name, desc, sym, time}
  * objects, using the browser's own built-in DOMParser rather than a
  * third-party XML/GPX library — GPX is just XML, and this only ever needs
- * <wpt> plus four of its child tags, not the full GPX spec (routes, tracks,
+ * <wpt> plus five of its child tags, not the full GPX spec (routes, tracks,
  * extensions, etc., all ignored). Returns [] (not an exception) for
  * anything that fails to parse, since a malformed or empty file should mean
  * "nothing to show", not a page-breaking error.
  *
- * UNUSED as of the marks.json migration above — see this section's header
- * comment.
+ * Was unused after the one-off marks.json migration (a script, not this
+ * browser code) — reused again by the Sync tab (sync.js) for importing a
+ * fresh Garmin export. `time` was added for that: the old migration never
+ * needed a per-point timestamp (see MARKS_FILE_PATH's schema comment on why
+ * gpx-import marks' dateTime is "most recent catch", not exact), but a live
+ * import genuinely wants the device's own per-waypoint timestamp.
  */
 function parseGpxWaypoints(gpxText) {
   try {
@@ -1522,6 +1593,7 @@ function parseGpxWaypoints(gpxText) {
         name: wpt.querySelector("name")?.textContent || "",
         desc: wpt.querySelector("desc")?.textContent || "",
         sym: wpt.querySelector("sym")?.textContent || "",
+        time: wpt.querySelector("time")?.textContent || "",
       });
     }
     return waypoints;
@@ -2302,15 +2374,30 @@ const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
  *                since that file only ever recorded ONE date per spot even
  *                when re-caught there many times, so an imported mark's
  *                dateTime is really "most recent catch here", not
- *                necessarily "the only catch here"). Shown on the popup —
- *                view mode as a plain row, edit mode as a read-only field —
- *                but never an input the person can change: it's a record of
- *                how the mark came to exist, not a fact about the mark
- *                itself, so editing it wouldn't mean anything. Genuinely
- *                unset (rather than "Manual") only for the handful of marks
- *                created before this field existed at all. Filterable (see
+ *                necessarily "the only catch here"), or "lowrance-import" /
+ *                "garmin-import" from the Sync tab (sync.js) — same
+ *                "most recent catch" caveat applies there too when several
+ *                device waypoints at the same spot get merged into one
+ *                mark on import. Shown on the popup — view mode as a plain
+ *                row, edit mode as a read-only field — but never an input
+ *                the person can change: it's a record of how the mark came
+ *                to exist, not a fact about the mark itself, so editing it
+ *                wouldn't mean anything. Genuinely unset (rather than
+ *                "Manual") only for the handful of marks created before
+ *                this field existed at all. Filterable (see
  *                MARK_FILTER_ONLY_FIELDS) even though it's not one of the
  *                Settings-tab pick-list fields.
+ *     sourceUuid: string, optional — the persistent per-waypoint UUID a
+ *                Lowrance .usr export embeds (raw hex, not the canonical
+ *                8-4-4-4-12 string form — nothing here needs that, just a
+ *                stable key). Only ever set on a "lowrance-import" mark.
+ *                Lets a LATER re-import of the same device data recognise
+ *                "this exact waypoint was already brought in" with
+ *                certainty, rather than falling back to the same
+ *                distance-based fuzzy match used for Garmin GPX (which has
+ *                no persistent per-point ID at all) — see matchAgainstExisting
+ *                in sync.js. Never shown or editable in the popup; purely
+ *                bookkeeping for the Sync tab's own dedupe.
  *
  *     // Fish-only fields — all optional (a POI mark has none of these; a
  *     // Fish mark may leave any blank too, e.g. a throwback not worth full

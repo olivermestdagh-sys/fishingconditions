@@ -471,9 +471,11 @@ this restriction — nothing extra is drawn.
   "+ Fishing times"/"+ Home to home" arms a row for a click-drag-release trip
   schedule calculation against that graph), `conditions.html` — the
   per-location table/graph view, `locations.html` — the locations editor,
-  `style.css`, `app.js`, `locationsadmin.js`, `charts.js` (shared charting
-  code used by `app.js`, `week.js`, and `live.js`) — the
-  website itself (no build step, no dependencies)
+  `sync.html`/`sync.js` — the Garmin/Lowrance import-export tab (see "Syncing
+  marks with a Garmin or Lowrance device" below), `style.css`, `app.js`,
+  `locationsadmin.js`, `charts.js` (shared charting code used by `app.js`,
+  `week.js`, `live.js`, and `sync.js`) — the website itself (no build step,
+  no dependencies)
 - `scripts/fetch_conditions.py` — fetches from WillyWeather, writes `data/conditions.json`,
   and also writes back to `config/locations.json` (see "How locations get matched to
   WillyWeather" above) — pure Python standard library only, no `pip install` needed
@@ -566,10 +568,54 @@ species is added to the pick-list. Hover/tap a point for its name, species,
 and date.
 
 **Not built yet**: the actual "add a mark while out fishing" UI on the Live
-tab, filtering marks by these fields, and exporting a filtered set to a
-Garmin/Lowrance-compatible format. The structure above is designed with all
-three in mind (stable `id` per mark for export/dedupe, normalized pick-list
-values for clean filtering) but none of that is wired up yet.
+tab, and filtering marks by these fields. Importing/exporting from a
+Garmin/Lowrance device now IS built — see "Syncing marks with a Garmin or
+Lowrance device" below.
+
+## Syncing marks with a Garmin or Lowrance device
+
+The **Sync** tab reads a device's own waypoint export (Garmin GPX, or a
+Lowrance `.usr` format 6 file straight off the chartplotter's "export
+waypoints" menu), matches every waypoint against what's already in
+`data/marks.json`, and lets you review/edit before anything is saved —
+nothing is written until you actually hit Import.
+
+**Matching, in order**:
+
+1. **Exact device ID** (Lowrance only) — each Lowrance waypoint carries a
+   persistent UUID that survives re-export. The first time a waypoint is
+   imported, that UUID is stored on the mark as `sourceUuid`; re-importing
+   the same file later recognises it with certainty, even if its
+   coordinate or description drifted slightly on the device since. Garmin
+   GPX has no equivalent persistent ID, so this step never applies there.
+2. **Distance only** (both device types) — anything within 20m of a mark
+   already in `data/marks.json` is treated as already tracked. No name or
+   species check — deliberately simple, per how this was designed. A
+   matched candidate isn't hidden, just shown unchecked by default, so a
+   genuinely different catch recorded a few metres from an old mark is
+   still visible and one click from being imported anyway.
+
+Before matching, waypoints from the SAME file that sit within 20m of each
+other AND resolve to the same species are merged into one candidate —
+chartplotters commonly save a fresh waypoint every time you drift back
+over a spot rather than updating one, so a real export routinely has
+several separate records for what's genuinely one mark.
+
+**Species names** are normalised against `config/mark_lists.json`'s
+Species pick-list before being shown — stripping a device's own
+auto-numbering (`"Snapper-13"` → `"Snapper"`) and a small hardcoded alias
+list (`"Gummy"` → `"Gummy Shark"`, easy to extend in `sync.js` if another
+mismatch turns up).
+
+**Export** downloads every mark in `data/marks.json` as one GPX file.
+Garmin units take this directly; Lowrance sounders that accept GPX import
+do too (no need for a real binary `.usr` writer — a much heavier, riskier
+thing to get right without a real unit to test an exported file against,
+and unnecessary since GPX import works).
+
+Gated behind the same GitHub connection as everything else that writes to
+this repo (see "Editing locations from the site itself" below) — connect
+from Settings first.
 
 ## Editing locations from the site itself
 
