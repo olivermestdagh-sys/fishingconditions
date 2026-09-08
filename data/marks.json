@@ -27749,6 +27749,117 @@
       "createdAt": "2026-01-08 00:00:00",
       "source": "gpx-import",
       "species": "Kingfish"
+    },
+    {
+      "id": "m_1788839150373_xmb14",
+      "lat": -38.47138879733094,
+      "lng": 145.03669926040232,
+      "name": "Squid",
+      "type": "Fish",
+      "dateTime": "2026-06-29 07:13:31",
+      "createdAt": "2026-09-08 13:45:50",
+      "source": "lowrance-import",
+      "species": "Squid",
+      "sourceUuid": "b411e76a6c285247919bc387556ddc8d"
+    },
+    {
+      "id": "m_1788839150373_fh97p",
+      "lat": -38.44163850286531,
+      "lng": 145.42389573663198,
+      "name": "FLATTY",
+      "type": "Fish",
+      "dateTime": "2026-06-29 07:13:31",
+      "createdAt": "2026-09-08 13:45:50",
+      "source": "lowrance-import",
+      "species": "Flathead",
+      "sourceUuid": "5e5c04ba95331d4f821c76971e001c94"
+    },
+    {
+      "id": "m_1788839150373_euv5e",
+      "lat": -38.4364988940657,
+      "lng": 145.42503142162673,
+      "name": "Whiting",
+      "type": "Fish",
+      "dateTime": "2026-06-29 07:13:31",
+      "createdAt": "2026-09-08 13:45:50",
+      "source": "lowrance-import",
+      "species": "Whiting",
+      "sourceUuid": "d35e7d537eefd546b2c4d84206d22f81",
+      "barometer": 1024.4,
+      "windDirection": "NE",
+      "windSpeed": 14
+    },
+    {
+      "id": "m_1788839150373_52a0i",
+      "lat": -38.431175342053606,
+      "lng": 145.40757251817556,
+      "name": "Gummy Shark",
+      "type": "Fish",
+      "dateTime": "2026-06-29 07:13:31",
+      "createdAt": "2026-09-08 13:45:50",
+      "source": "lowrance-import",
+      "species": "Gummy Shark",
+      "sourceUuid": "1f4eaf5071cfc04f84f3e7ee6976a27a"
+    },
+    {
+      "id": "m_1788839150373_baj0s",
+      "lat": -38.37629306657422,
+      "lng": 145.22856693090608,
+      "name": "WHIT9NG",
+      "type": "Fish",
+      "dateTime": "2026-06-29 07:13:31",
+      "createdAt": "2026-09-08 13:45:50",
+      "source": "lowrance-import",
+      "species": "Whiting",
+      "sourceUuid": "6506249fb825d34a9099b3250c30108e"
+    },
+    {
+      "id": "m_1788839150373_z846o",
+      "lat": -38.31009644313002,
+      "lng": 144.97920295419928,
+      "name": "Squid",
+      "type": "Fish",
+      "dateTime": "2026-03-23 06:01:13",
+      "createdAt": "2026-09-08 13:45:50",
+      "source": "lowrance-import",
+      "species": "Squid",
+      "sourceUuid": "9943e6be1761b749ade2ce8355cb9351"
+    },
+    {
+      "id": "m_1788839150373_peqes",
+      "lat": -38.31164530356958,
+      "lng": 144.97940124840474,
+      "name": "FLATTY",
+      "type": "Fish",
+      "dateTime": "2026-06-29 07:13:31",
+      "createdAt": "2026-09-08 13:45:50",
+      "source": "lowrance-import",
+      "species": "Flathead",
+      "sourceUuid": "2aaa1eecf4efd841acd6d2658a1ff878"
+    },
+    {
+      "id": "m_1788839150373_lxjgo",
+      "lat": -38.30515967177497,
+      "lng": 145.52041093444072,
+      "name": "RAMP",
+      "type": "POI",
+      "dateTime": "2026-07-10 09:11:36",
+      "createdAt": "2026-09-08 13:45:50",
+      "source": "lowrance-import",
+      "species": "Unknown",
+      "sourceUuid": "e9bbec25a00ecd449c22a7b6685e9f1e"
+    },
+    {
+      "id": "m_1788839150373_9oo36",
+      "lat": -38.256856373556424,
+      "lng": 145.29766344812703,
+      "name": "WHITING",
+      "type": "Fish",
+      "dateTime": "2026-03-23 06:01:13",
+      "createdAt": "2026-09-08 13:45:50",
+      "source": "lowrance-import",
+      "species": "Whiting",
+      "sourceUuid": "70929483e4c6a8488a642e7b7ee7a378"
     }
   ]
 }
