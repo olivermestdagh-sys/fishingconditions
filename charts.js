@@ -809,6 +809,53 @@ const MAP_VIEW_STORAGE_KEY = "goodConditionsLocationMapView";
 // re-renders safe.
 const leafletMapInstances = {};
 
+/**
+ * Fixes a real bug (reported directly: on a small/narrow viewport, a new
+ * mark's entry popup rendered BEHIND the Live tab's bottom-sheet hover
+ * panel AND behind the mark filter modal) that turned out to need more
+ * than "give the popup a higher z-index" — that alone (still worth
+ * keeping — see .leaflet-popup-pane's own CSS comment) wasn't enough,
+ * because of something more fundamental sitting underneath it:
+ *
+ * The element passed to L.map() (here, whatever #liveMap/#locationMap/etc
+ * IS — Leaflet doesn't create a wrapping div, that exact element becomes
+ * .leaflet-container itself) had no `position` set at all in this site's
+ * CSS, i.e. it was `position: static`. A static element's entire box —
+ * including everything painted inside it, no matter what z-index values
+ * exist among ITS OWN descendants — always paints as one unit BELOW any
+ * POSITIONED sibling that has its own z-index (like .location-hover-panel
+ * or the filter modal's .ww-candidate-overlay). Static elements simply
+ * don't participate in z-index comparison against positioned ones at all;
+ * raising the popup pane's z-index was rearranging deck chairs one level
+ * too deep to matter. (This is also the more likely explanation for it
+ * showing up on a narrowed DESKTOP window too, not just real mobile
+ * devices — nothing here is actually screen-size-conditional; a narrow
+ * viewport just makes the map and hover panel/filter genuinely overlap in
+ * the first place, on any device.)
+ *
+ * The fix (paired with .location-map-fullpage/.location-map's own
+ * position:relative in style.css, which makes this next part possible at
+ * all) toggles a class on the map's own container for exactly as long as
+ * a popup is open on it — raising the WHOLE map (popup included) above
+ * every other floating layer only while genuinely needed, rather than
+ * permanently (which would otherwise leave the map sitting over the hover
+ * panel even with no popup open, defeating the hover panel's own purpose
+ * of covering the map). Wired in once, here, for every map this site
+ * creates (there's only this one call site for L.map at all) rather than
+ * scoped to marks specifically — a popup should always be the topmost
+ * thing regardless of which one it is (an existing-location's info
+ * popup, a WillyWeather preview popup, not just a mark's), so this isn't
+ * narrowed to "only mark popups" on purpose.
+ */
+function wireMapPopupZIndexToggle(map) {
+  map.on("popupopen", () => {
+    map.getContainer().classList.add("map-has-open-popup");
+  });
+  map.on("popupclose", () => {
+    map.getContainer().classList.remove("map-has-open-popup");
+  });
+}
+
 function renderLeafletLocationMap(containerId, points, opts = {}) {
   const container = document.getElementById(containerId);
   if (!container || typeof L === "undefined") return null;
@@ -830,6 +877,8 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     maxZoom: 18,
   }).addTo(map);
+
+  wireMapPopupZIndexToggle(map);
 
   const bounds = [];
   for (const p of valid) {

@@ -2591,34 +2591,25 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
   margin-right: 4px;
 }
 
-/* Raises Leaflet's own popup PANE (not just this one popup's own wrapper —
-   see below for why that distinction matters) above every other floating
-   layer on the site. Leaflet's default popup pane sits at z-index:700 (its
-   own leaflet.css, between markerPane and tooltipPane in Leaflet's fixed
-   scheme) — comfortably below TWO of this site's own floating layers that
-   can genuinely overlap it on a small mobile screen: the Live tab's
-   bottom-sheet .location-hover-panel (2000, "the minimised location/graph
-   panel") and the mark filter modal, which reuses .ww-candidate-overlay
-   (10000, "the filter window"). That left a mark's entry/edit popup
-   trapped BEHIND both, unreachable — exactly what Oliver reported. A
-   popup is a "finish this or cancel it" interaction by nature; it should
-   always be the front-most thing on screen wherever it opens, so this is
-   pushed well clear of every other z-index on the site (10001 was
-   previously the highest, .chart-modal-close) rather than just nudged
-   past these two specific layers, in case something else floats even
-   higher later.
-   Targets the PANE, every popup on the map shares ONE .leaflet-popup-pane
-   element (Leaflet doesn't create a separate pane per popup) — a z-index
-   set on an individual .leaflet-popup instead (e.g. scoped to just
-   .mark-popup-leaflet, matching every other rule in this file that
-   deliberately scopes to THIS popup only) can't win a stacking fight
-   against something outside the pane if the pane itself is still capped
-   at 700: children can't escape their own parent's stacking context.
-   Applying this to the whole pane does mean every popup on the map
-   (tracked-location info, WillyWeather preview, not just marks) now sits
-   above the hover panel and filter modal too — judged the right call
-   given a popup is always meant to be the topmost thing regardless of
-   which one it is, not a regression specific to marks.
+/* PART 1 of 2 (see the .map-has-open-popup rule below for part 2, and
+   wireMapPopupZIndexToggle's own comment in charts.js for the full story)
+   — raises Leaflet's own popup PANE, above every OTHER pane inside the
+   same map (tile/marker/etc), so a popup can never end up visually
+   covered by one of ITS OWN map's other layers. Leaflet's default popup
+   pane z-index is 700 (leaflet.css, between markerPane and tooltipPane in
+   Leaflet's fixed scheme).
+   On its own this part turned out NOT to be enough to fix the actual bug
+   reported (a mark's entry popup still rendering behind the Live tab's
+   bottom-sheet hover panel and the mark filter modal on a narrow
+   viewport) — see wireMapPopupZIndexToggle in charts.js for the real
+   underlying cause and why a SECOND piece (below) was needed too. Kept
+   anyway as still-correct, still-useful defensive layering within the map
+   itself.
+   Targets the PANE, not one popup's own wrapper — every popup on the map
+   shares ONE .leaflet-popup-pane element (Leaflet doesn't create a
+   separate pane per popup), so a z-index set on an individual
+   .leaflet-popup instead can't achieve even this much: children can't
+   escape their own parent's stacking context.
    Selector specificity note: plain `.leaflet-popup-pane` alone would tie
    leaflet.css's own same-specificity rule, and since style.css loads
    BEFORE leaflet.css in every page's <head>, the tie would go to
@@ -2628,6 +2619,37 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
    rule's specificity past that tie, the same technique already relied on
    by .mark-popup-leaflet .leaflet-popup-content just above. */
 .leaflet-container .leaflet-popup-pane {
+  z-index: 10500;
+}
+
+/* PART 2 of 2 — the piece that actually fixes the reported bug. See
+   wireMapPopupZIndexToggle's own comment in charts.js for the full
+   explanation of WHY part 1 alone wasn't enough (short version: the map's
+   own container element had no `position` at all — a plain static
+   element's entire contents always paint below any POSITIONED sibling
+   with a z-index, like .location-hover-panel or the filter modal,
+   regardless of any z-index trick played among the static element's own
+   descendants). position:relative here doesn't change anything
+   visually on its own (z-index stays "auto" until the class below is
+   actually toggled) — it's what makes that toggle able to do anything at
+   all once it IS applied. */
+.location-map-fullpage,
+.location-map {
+  position: relative;
+}
+
+/* Toggled by wireMapPopupZIndexToggle (charts.js) directly on the map's
+   own container — via Leaflet's popupopen/popupclose events — for
+   exactly as long as any popup is open on that map. Raises the WHOLE map
+   (not just the popup pane inside it — see PART 1 above for why that
+   alone can't reach far enough) above every other floating layer on the
+   page ONLY while genuinely needed, rather than permanently: leaving the
+   map permanently above .location-hover-panel would otherwise defeat the
+   hover panel's own entire purpose (visually covering the bottom portion
+   of the map while it's showing). 10500 matches PART 1's value — nothing
+   depends on them being different, they're just both clear of everything
+   else on the site (10001 was previously the highest, .chart-modal-close). */
+.leaflet-container.map-has-open-popup {
   z-index: 10500;
 }
 
