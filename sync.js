@@ -56,9 +56,10 @@ let searchFilter = "";
 // at 20m rather than a UI setting for now, per Oliver's own call when this
 // tab was being designed — distance alone, no name/species check, so a
 // genuinely different catch recorded a few metres from an old one will
-// still get folded in as "already tracked" (shown, but unchecked by
-// default — see matchAgainstExisting/renderCandidateRow — so nothing is
-// silently dropped, just not auto-selected).
+// still get folded in as "already tracked" and left out of the review list
+// entirely (see reviewableCandidates) — only genuinely new spots are real
+// import candidates, so there's nothing for an already-tracked one to do
+// there, even unchecked.
 const SYNC_MATCH_RADIUS_M = 20;
 
 // Grid cell size for the spatial index below, in degrees — deliberately
@@ -429,11 +430,15 @@ function collapseRawWaypoints(rawList) {
  *     import always falls back to, since Garmin waypoints carry no
  *     persistent ID this site can key on.
  *
- * A matched candidate is NOT dropped from the list — see
- * renderCandidateRow/handleFileInputChange — just shown unchecked by
- * default and clearly labelled, so a genuinely new mark that just happens
- * to sit within 20m of something else already tracked is still visible and
- * one click away from being imported anyway, rather than silently lost.
+ * A matched candidate is kept on the `candidates` array (see
+ * handleFileInputChange) so renderSummary can still report an honest total
+ * and matched-count, but reviewableCandidates() (below) filters it out of
+ * the actual review list — per Oliver's own call, only genuinely-new spots
+ * are real import candidates at all, so there's nothing useful for a
+ * matched one to do in that list even unchecked. The trade-off is real:
+ * a genuinely different catch recorded a few metres from an old mark would
+ * also match here and quietly not appear. Given the 20m radius that's judged
+ * an acceptable, deliberate cost — see SYNC_MATCH_RADIUS_M's own comment.
  */
 function matchAgainstExisting(groups) {
   const uuidToMark = new Map();
@@ -575,6 +580,19 @@ async function handleExportClick() {
 // Review UI
 // ---------------------------------------------------------------------------
 
+/** Only genuinely-new candidates are ever reviewable — anything already
+ * matched to a mark in data/marks.json (see matchAgainstExisting) isn't a
+ * real import candidate at all, so it's excluded here rather than just
+ * shown unchecked. This is the ONE place that distinction is applied;
+ * every other function below (rendering, search, select-all) works off
+ * this list, not the raw `candidates` array, so a matched point can never
+ * end up on screen or get imported by accident. renderSummary is the sole
+ * exception — it still reports the matched count for transparency, just
+ * without listing them individually. */
+function reviewableCandidates() {
+  return candidates.filter((c) => !c.matchedExisting);
+}
+
 function candidateMatchesSearch(c) {
   if (!searchFilter) return true;
   const haystack = `${c.species || ""} ${c.name || ""} ${c.rawName || ""}`.toLowerCase();
@@ -584,12 +602,12 @@ function candidateMatchesSearch(c) {
 function renderSummary() {
   const el = document.getElementById("syncSummary");
   if (!el) return;
-  const newCount = candidates.filter((c) => !c.matchedExisting).length;
+  const newCount = reviewableCandidates().length;
   const matchedCount = candidates.length - newCount;
   el.textContent =
     `${candidates.length} distinct spot${candidates.length === 1 ? "" : "s"} found — ` +
-    `${newCount} new, ${matchedCount} already within ${SYNC_MATCH_RADIUS_M}m of an existing mark ` +
-    `(shown below, unchecked by default).`;
+    `${newCount} new (listed below), ${matchedCount} already within ${SYNC_MATCH_RADIUS_M}m of an ` +
+    `existing mark (not shown — nothing to import there).`;
 }
 
 function renderCandidateRow(c, i) {
@@ -599,13 +617,9 @@ function renderCandidateRow(c, i) {
   const speciesIsKnown = knownSpecies.includes(c.species);
   const extraOption = speciesIsKnown || !c.species ? "" : `<option value="${escapeHtml(c.species)}" selected>${escapeHtml(c.species)} (new)</option>`;
 
-  let matchBadge = `<span class="pill sync-pill-new">new</span>`;
-  if (c.matchedExisting) {
-    const label = c.matchedExisting.exact
-      ? "already synced"
-      : `near existing mark (${Math.round(c.matchedExisting.distanceM)}m)`;
-    matchBadge = `<span class="pill sync-pill-match" title="${escapeHtml(c.matchedExisting.name || "")}">${label}</span>`;
-  }
+  // No matched-existing badge branch here any more — a row only ever
+  // renders at all when reviewableCandidates() included it, i.e. it's
+  // always genuinely new. See reviewableCandidates' own comment.
   const visitBadge = c.visitCount > 1 ? `<span class="pill sync-pill-visits">${c.visitCount} visits merged</span>` : "";
 
   return `
@@ -615,7 +629,7 @@ function renderCandidateRow(c, i) {
       </label>
       <div class="sync-row-body">
         <div class="sync-row-badges">
-          ${matchBadge}${visitBadge}
+          <span class="pill sync-pill-new">new</span>${visitBadge}
           <span class="sync-row-coords">${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}</span>
           <span class="sync-row-date">${escapeHtml(c.dateTime || "")}</span>
         </div>
@@ -637,7 +651,7 @@ function renderReviewList() {
   if (!container) return;
   const filtered = [];
   candidates.forEach((c, i) => {
-    if (candidateMatchesSearch(c)) filtered.push(i);
+    if (!c.matchedExisting && candidateMatchesSearch(c)) filtered.push(i);
   });
   const slice = filtered.slice(0, visibleCount);
   container.innerHTML = slice.map((i) => renderCandidateRow(candidates[i], i)).join("");
@@ -647,9 +661,10 @@ function renderReviewList() {
 
   const countEl = document.getElementById("reviewCount");
   if (countEl) {
+    const totalReviewable = reviewableCandidates().length;
     countEl.textContent =
       `Showing ${slice.length} of ${filtered.length}` +
-      (filtered.length !== candidates.length ? ` (filtered from ${candidates.length})` : "");
+      (filtered.length !== totalReviewable ? ` (filtered from ${totalReviewable} new)` : "");
   }
 }
 
@@ -657,24 +672,14 @@ function renderReviewList() {
  * Bulk-selects/deselects, always scoped to whatever the current search
  * filter shows — hitting either button after filtering down to just
  * "Snapper" shouldn't silently touch every Whiting outside the current
- * filter.
- *
- * `onlyNew`, when true (the "Select all new" button), additionally skips
- * any candidate that already matched something in marks.json — this
- * matters for real safety, not just tidiness: without it, clearing the
- * search box and hitting "select all" would select every ALREADY-TRACKED
- * candidate too (there can easily be far more of those than genuinely new
- * ones — a real re-import of Oliver's own device data hit exactly this:
- * 2,300 already-tracked out of 2,314 total), and importing them again
- * would flood marks.json with near-duplicates. "Deselect all" has no such
- * restriction — deselecting everything currently shown is never harmful,
- * so it stays simple.
+ * filter. Only ever touches reviewableCandidates() (see its own comment) —
+ * matched-existing candidates are never rendered as rows in the first
+ * place now, so there's no separate "onlyNew" safeguard needed here any
+ * more; there's simply nothing else in scope to select.
  */
-function setAllSelected(value, onlyNew) {
-  candidates.forEach((c) => {
-    if (!candidateMatchesSearch(c)) return;
-    if (onlyNew && c.matchedExisting) return;
-    c.selected = value;
+function setAllSelected(value) {
+  reviewableCandidates().forEach((c) => {
+    if (candidateMatchesSearch(c)) c.selected = value;
   });
   renderReviewList();
 }
@@ -846,8 +851,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   knownSpecies = markLists.filter((r) => r.field === "Species").map((r) => r.value);
 
   document.getElementById("syncFileInput").addEventListener("change", handleFileInputChange);
-  document.getElementById("btnSelectAllNew").addEventListener("click", () => setAllSelected(true, true));
-  document.getElementById("btnDeselectAll").addEventListener("click", () => setAllSelected(false, false));
+  document.getElementById("btnSelectAllNew").addEventListener("click", () => setAllSelected(true));
+  document.getElementById("btnDeselectAll").addEventListener("click", () => setAllSelected(false));
   document.getElementById("btnShowMore").addEventListener("click", () => {
     visibleCount += 100;
     renderReviewList();
