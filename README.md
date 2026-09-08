@@ -612,6 +612,12 @@ auto-numbering (`"Snapper-13"` → `"Snapper"`) and a small hardcoded alias
 list (`"Gummy"` → `"Gummy Shark"`, easy to extend in `sync.js` if another
 mismatch turns up).
 
+**Weather Condition, Tide Condition, Barometer, Wind Direction, and Wind
+Speed** are also shown per candidate, pre-filled from a real historical
+lookup and editable right there before importing — see "Auto-filling
+Weather/Tide/Barometer/Wind on a mark" below for where that data comes
+from and its own caveats.
+
 **Export** downloads every mark in `data/marks.json` as one GPX file.
 Garmin units take this directly; Lowrance sounders that accept GPX import
 do too (no need for a real binary `.usr` writer — a much heavier, riskier
@@ -632,12 +638,22 @@ stays a normal editable field afterward; the lookup only ever pre-fills a
 blank field, it never locks one or overwrites something already set (by
 you, or by the Live tab's own "You are here" tide guess — see below).
 
+On the **Sync tab**, this lookup runs right after a file is parsed and
+matched — before the review list even appears — so every new candidate
+shown for review already has its own Weather/Tide/Barometer/Wind fields
+filled in and editable right there in its row, alongside Species/Name/Type/
+Notes. Whatever's showing at the moment you hit Import (looked-up or
+hand-edited) is exactly what gets saved; nothing is looked up a second time
+at Import itself.
+
 **Scope, deliberately**: this only ever runs for a NEW mark — never a
 retroactive backfill over the marks already sitting in `data/marks.json`.
 WillyWeather bills per call, so backfilling thousands of existing marks in
 one go would mean thousands of billed calls for a one-off convenience;
-only looking this up at creation/import time keeps it to one WillyWeather
-call plus one Open-Meteo call per NEW mark.
+only looking this up for candidates actually up for review/creation keeps
+it to one WillyWeather call plus one Open-Meteo call per NEW mark — and on
+the Sync tab, only for candidates that are actually new (an already-tracked
+match is never shown, so never looked up either).
 
 **Where the data comes from**:
 
