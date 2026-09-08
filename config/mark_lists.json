@@ -7,79 +7,99 @@
   {
     "field": "Species",
     "value": "Whiting",
-    "color": "#ffff00"
+    "color": "#ffff00",
+    "lowranceColor": "yellow"
   },
   {
     "field": "Species",
     "value": "Gummy Shark",
-    "color": "#0453f1"
+    "color": "#0000ff",
+    "lowranceColor": "blue"
   },
   {
     "field": "Species",
     "value": "Flathead",
-    "color": "#fab905"
+    "color": "#ff00ff",
+    "lowranceColor": "magenta"
   },
   {
     "field": "Species",
     "value": "Snapper",
-    "color": "#fc0303"
+    "color": "#fc0303",
+    "lowranceColor": "red"
   },
   {
     "field": "Species",
     "value": "Squid",
-    "color": "#0e2c67"
+    "color": "#00ff00",
+    "lowranceColor": "green"
   },
   {
     "field": "Species",
     "value": "Kingfish",
-    "color": "#0d1e3f"
+    "color": "#0000ff",
+    "lowranceColor": "blue"
   },
   {
     "field": "Species",
     "value": "Tuna",
-    "color": "#122d63"
+    "color": "#122d63",
+    "lowranceColor": "blue"
   },
   {
     "field": "Species",
     "value": "Crayfish",
-    "color": "#8c772b"
+    "color": "#ffffff",
+    "lowranceColor": "white"
   },
   {
     "field": "Species",
-    "value": "Snook"
+    "value": "Snook",
+    "lowranceColor": "white"
   },
   {
     "field": "Species",
-    "value": "Scallops"
+    "value": "Scallops",
+    "lowranceColor": "white"
   },
   {
     "field": "Species",
     "value": "Grass Whiting",
-    "color": "#ffff00"
+    "color": "#00ff00",
+    "lowranceColor": "green"
   },
   {
     "field": "Species",
-    "value": "Trevally"
+    "value": "Trevally",
+    "lowranceColor": "white"
   },
   {
     "field": "Species",
-    "value": "Leather Jacket"
+    "value": "Leather Jacket",
+    "lowranceColor": "green"
   },
   {
     "field": "Species",
-    "value": "Elephant Fish"
+    "value": "Elephant Fish",
+    "lowranceColor": "blue",
+    "color": "#0000ff"
   },
   {
     "field": "Species",
-    "value": "Wrasse"
+    "value": "Wrasse",
+    "lowranceColor": "green",
+    "color": "#00ff00"
   },
   {
     "field": "Species",
-    "value": "Garfish"
+    "value": "Garfish",
+    "lowranceColor": "white"
   },
   {
     "field": "Species",
-    "value": "Port Jackson Shark"
+    "value": "Port Jackson Shark",
+    "lowranceColor": "blue",
+    "color": "#0000ff"
   },
   {
     "field": "Weather Condition",
@@ -228,7 +248,8 @@
   },
   {
     "field": "Species",
-    "value": "Unknown"
+    "value": "Unknown",
+    "lowranceColor": "white"
   },
   {
     "field": "Bait",
