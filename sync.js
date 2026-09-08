@@ -600,12 +600,15 @@ function buildGpxDocument(marks) {
       const desc = descParts.join(" — ");
       const timeTag = m.dateTime ? `<time>${escapeXml(naiveToGpxTime(m.dateTime))}</time>` : "";
       const descTag = desc ? `<desc>${escapeXml(desc)}</desc>` : "";
-      // Species first, per Oliver's own call — most marks' `name` is a
-      // place name (Williamstown, Leopold, etc, from the old gpx-import
-      // migration), which is far less useful on a chartplotter than the
-      // actual catch. Falls back to name (still better than nothing) and
-      // then a generic label only when a mark has neither.
-      const nameTag = escapeXml(m.species || m.name || "Mark");
+      // Species first for a Mark/Catch, per Oliver's own earlier call —
+      // most marks' `name` is a place name (Williamstown, Leopold, etc,
+      // from the old gpx-import migration), which is far less useful on a
+      // chartplotter than the actual catch/species. A POI has no species
+      // of its own at all going forward (see the Mark/POI/Catch field
+      // split, MARK_TYPE_FIELD_KEYS in charts.js) — its own name IS the
+      // point, so it always wins there regardless of anything a stray
+      // legacy `species` value on an old record might still hold.
+      const nameTag = escapeXml(m.type === "POI" ? (m.name || "Mark") : (m.species || m.name || "Mark"));
       const symTag = `<sym>${escapeXml(gpxSymForMark(m))}</sym>`;
       return (
         `  <wpt lat="${m.lat}" lon="${m.lng}">\n` +
@@ -745,8 +748,15 @@ function renderCandidateRow(c, i) {
   // always genuinely new. See reviewableCandidates' own comment.
   const visitBadge = c.visitCount > 1 ? `<span class="pill sync-pill-visits">${c.visitCount} visits merged</span>` : "";
 
-  // Every OTHER pick-list field a mark can carry (Mark Type, Weather/Tide/
-  // Water Condition, Bait, Rig, Rod, Berley) — driven straight off
+  // Mark Type itself is always shown (it's what DRIVES which of the other
+  // fields show at all — see applyMarkFieldVisibility, charts.js, reused
+  // here unchanged) — split out of the generic pick-list loop below so its
+  // own <select> can be found directly (data-mark-type-select) for wiring
+  // a change listener, same convention as the main mark-edit popup.
+  const typeOptionsHtml = markListOptionsHtml(markLists, "Mark Type", c.type);
+
+  // Every OTHER pick-list field a mark can carry (Weather/Tide/Water
+  // Condition, Bait, Rig, Rod, Berley) — driven straight off
   // MARK_LIST_FIELDS/markListOptionsHtml, the exact same list+lookup the
   // main mark-edit popup itself uses (buildMarkPopupEditHtml, charts.js),
   // rather than a second hand-maintained copy that could drift out of
@@ -756,10 +766,16 @@ function renderCandidateRow(c, i) {
   // Species is excluded from this loop and handled separately above/below
   // it — it gets its own "(new)" labelling for an unrecognised device
   // species name, which is common and worth flagging distinctly; that
-  // doesn't apply to any of these other fields.
-  const otherListFieldsHtml = MARK_LIST_FIELDS.filter((f) => f.key !== "species")
+  // doesn't apply to any of these other fields. Each one is wrapped in a
+  // `display:contents` span carrying `data-field-group` — contributes no
+  // box of its own (so it doesn't disturb the flex layout these sit in),
+  // but lets applyMarkFieldVisibility (charts.js) show/hide it exactly the
+  // same way it already does in the main mark popup, off the SAME
+  // MARK_TYPE_FIELD_KEYS map, rather than a second copy of "which fields
+  // go with which type" logic living here too.
+  const otherListFieldsHtml = MARK_LIST_FIELDS.filter((f) => f.key !== "species" && f.key !== "type")
     .map(
-      (f) => `<select data-role="${f.key}" data-idx="${i}" title="${escapeHtml(f.label)}">${markListOptionsHtml(markLists, f.label, c[f.key])}</select>`
+      (f) => `<span data-field-group="${f.key}" style="display:contents"><select data-role="${f.key}" data-idx="${i}" title="${escapeHtml(f.label)}">${markListOptionsHtml(markLists, f.label, c[f.key])}</select></span>`
     )
     .join("");
 
@@ -781,23 +797,28 @@ function renderCandidateRow(c, i) {
         <div class="sync-row-inputs">
           <input type="text" data-role="name" data-idx="${i}" value="${escapeHtml(c.name)}" placeholder="Display name" title="Name" />
           <input type="datetime-local" data-role="dateTime" data-idx="${i}" step="1" value="${naiveToDatetimeLocal(c.dateTime)}" title="Date/Time" />
-          <select data-role="species" data-idx="${i}" title="Species">
-            <option value="">—</option>${speciesOptions}${extraOption}
-          </select>
+          <select data-role="type" data-idx="${i}" data-mark-type-select title="Mark Type">${typeOptionsHtml}</select>
+          <span data-field-group="species" style="display:contents">
+            <select data-role="species" data-idx="${i}" title="Species">
+              <option value="">—</option>${speciesOptions}${extraOption}
+            </select>
+          </span>
           ${otherListFieldsHtml}
         </div>
         <div class="sync-row-inputs">
-          <input type="number" data-role="size" data-idx="${i}" value="${c.size != null ? c.size : ""}" min="0" step="1" placeholder="Size (cm)" title="Size (cm)" />
-          <input type="number" data-role="barometer" data-idx="${i}" value="${c.barometer != null ? c.barometer : ""}" min="0" step="0.1" placeholder="hPa" title="Barometer (hPa)" />
-          <input type="number" data-role="temperature" data-idx="${i}" value="${c.temperature != null ? c.temperature : ""}" step="0.1" placeholder="Air °C" title="Temperature (°C)" />
-          <input type="number" data-role="waterTemperature" data-idx="${i}" value="${c.waterTemperature != null ? c.waterTemperature : ""}" step="0.1" placeholder="Water °C" title="Water Temp (°C)" />
-          <input type="number" data-role="waterDepth" data-idx="${i}" value="${c.waterDepth != null ? c.waterDepth : ""}" min="0" step="0.1" placeholder="Depth (m)" title="Water Depth (m)" />
-          <select data-role="windDirection" data-idx="${i}" title="Wind Direction">
-            <option value=""${c.windDirection ? "" : " selected"}>Wind</option>${windDirectionOptions}
-          </select>
-          <input type="number" data-role="windSpeed" data-idx="${i}" value="${c.windSpeed != null ? c.windSpeed : ""}" min="0" step="1" placeholder="km/h" title="Wind Speed (km/h)" />
+          <span data-field-group="size" style="display:contents"><input type="number" data-role="size" data-idx="${i}" value="${c.size != null ? c.size : ""}" min="0" step="1" placeholder="Size (cm)" title="Size (cm)" /></span>
+          <span data-field-group="barometer" style="display:contents"><input type="number" data-role="barometer" data-idx="${i}" value="${c.barometer != null ? c.barometer : ""}" min="0" step="0.1" placeholder="hPa" title="Barometer (hPa)" /></span>
+          <span data-field-group="temperature" style="display:contents"><input type="number" data-role="temperature" data-idx="${i}" value="${c.temperature != null ? c.temperature : ""}" step="0.1" placeholder="Air °C" title="Temperature (°C)" /></span>
+          <span data-field-group="waterTemperature" style="display:contents"><input type="number" data-role="waterTemperature" data-idx="${i}" value="${c.waterTemperature != null ? c.waterTemperature : ""}" step="0.1" placeholder="Water °C" title="Water Temp (°C)" /></span>
+          <span data-field-group="waterDepth" style="display:contents"><input type="number" data-role="waterDepth" data-idx="${i}" value="${c.waterDepth != null ? c.waterDepth : ""}" min="0" step="0.1" placeholder="Depth (m)" title="Water Depth (m)" /></span>
+          <span data-field-group="windDirection" style="display:contents">
+            <select data-role="windDirection" data-idx="${i}" title="Wind Direction">
+              <option value=""${c.windDirection ? "" : " selected"}>Wind</option>${windDirectionOptions}
+            </select>
+          </span>
+          <span data-field-group="windSpeed" style="display:contents"><input type="number" data-role="windSpeed" data-idx="${i}" value="${c.windSpeed != null ? c.windSpeed : ""}" min="0" step="1" placeholder="km/h" title="Wind Speed (km/h)" /></span>
         </div>
-        <textarea data-role="notes" data-idx="${i}" rows="2" placeholder="Notes">${escapeHtml(c.notes)}</textarea>
+        <span data-field-group="notes" style="display:contents"><textarea data-role="notes" data-idx="${i}" rows="2" placeholder="Notes">${escapeHtml(c.notes)}</textarea></span>
       </div>
     </div>`;
 }
@@ -811,6 +832,16 @@ function renderReviewList() {
   });
   const slice = filtered.slice(0, visibleCount);
   container.innerHTML = slice.map((i) => renderCandidateRow(candidates[i], i)).join("");
+
+  // Apply each row's own field visibility for its CURRENT type — the same
+  // MARK_TYPE_FIELD_KEYS-driven function the main mark-edit popup uses
+  // (charts.js), just run once per row here since sync.js has no per-row
+  // "just opened" moment to hook the way a Leaflet popup does.
+  container.querySelectorAll(".sync-row").forEach((rowEl) => {
+    const idx = Number(rowEl.dataset.idx);
+    const c = candidates[idx];
+    if (c) applyMarkFieldVisibility(rowEl, c.type);
+  });
 
   const showMoreBtn = document.getElementById("btnShowMore");
   if (showMoreBtn) showMoreBtn.style.display = filtered.length > visibleCount ? "inline-block" : "none";
@@ -906,28 +937,34 @@ async function handleImportClick() {
       lat: c.lat,
       lng: c.lng,
       name: c.name || c.species || "Imported mark",
-      type: c.type || "Fish",
+      type: c.type || "Catch",
       dateTime: c.dateTime || nowStr,
       createdAt: nowStr,
       source: c.sourceLabel,
     };
-    if (c.species) mark.species = c.species;
-    if (c.notes) mark.notes = c.notes;
     if (c.sourceUuid) mark.sourceUuid = c.sourceUuid;
-    if (c.waterCondition) mark.waterCondition = c.waterCondition;
-    if (c.bait) mark.bait = c.bait;
-    if (c.rig) mark.rig = c.rig;
-    if (c.rod) mark.rod = c.rod;
-    if (c.berley) mark.berley = c.berley;
-    if (c.size != null) mark.size = c.size;
-    if (c.waterDepth != null) mark.waterDepth = c.waterDepth;
-    if (c.weatherCondition) mark.weatherCondition = c.weatherCondition;
-    if (c.tideCondition) mark.tideCondition = c.tideCondition;
-    if (c.barometer != null) mark.barometer = c.barometer;
-    if (c.temperature != null) mark.temperature = c.temperature;
-    if (c.waterTemperature != null) mark.waterTemperature = c.waterTemperature;
-    if (c.windDirection) mark.windDirection = c.windDirection;
-    if (c.windSpeed != null) mark.windSpeed = c.windSpeed;
+    // Only ever includes fields applicable to mark.type — same
+    // MARK_TYPE_FIELD_KEYS/fieldKeysForMarkType (charts.js) the main
+    // mark-edit popup's own collectMarkFormValues uses, so switching a
+    // candidate's Type to POI in the review row and importing it actually
+    // omits its Species/etc, not just visually hides the input.
+    const applicable = fieldKeysForMarkType(mark.type);
+    if (applicable.includes("species") && c.species) mark.species = c.species;
+    if (applicable.includes("notes") && c.notes) mark.notes = c.notes;
+    if (applicable.includes("waterCondition") && c.waterCondition) mark.waterCondition = c.waterCondition;
+    if (applicable.includes("bait") && c.bait) mark.bait = c.bait;
+    if (applicable.includes("rig") && c.rig) mark.rig = c.rig;
+    if (applicable.includes("rod") && c.rod) mark.rod = c.rod;
+    if (applicable.includes("berley") && c.berley) mark.berley = c.berley;
+    if (applicable.includes("size") && c.size != null) mark.size = c.size;
+    if (applicable.includes("waterDepth") && c.waterDepth != null) mark.waterDepth = c.waterDepth;
+    if (applicable.includes("weatherCondition") && c.weatherCondition) mark.weatherCondition = c.weatherCondition;
+    if (applicable.includes("tideCondition") && c.tideCondition) mark.tideCondition = c.tideCondition;
+    if (applicable.includes("barometer") && c.barometer != null) mark.barometer = c.barometer;
+    if (applicable.includes("temperature") && c.temperature != null) mark.temperature = c.temperature;
+    if (applicable.includes("waterTemperature") && c.waterTemperature != null) mark.waterTemperature = c.waterTemperature;
+    if (applicable.includes("windDirection") && c.windDirection) mark.windDirection = c.windDirection;
+    if (applicable.includes("windSpeed") && c.windSpeed != null) mark.windSpeed = c.windSpeed;
     return mark;
   });
 
@@ -1005,7 +1042,7 @@ async function handleFileInputChange(e) {
       rawName: g.rawName,
       species: g.species,
       name: g.species,
-      type: "Fish",
+      type: "Catch", // a device-imported waypoint IS a logged catch (species/location/time from the device) — see the Mark/POI/Catch schema split, charts.js's MARK_TYPE_FIELD_KEYS
       notes: cleanDeviceDescription(g.notes),
       dateTime: g.latestMs != null ? previewEpochToNaiveString(g.latestMs / 1000) : "",
       visitCount: g.visitCount,
@@ -1148,7 +1185,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!c) return;
     const role = e.target.dataset.role;
     if (role === "select") c.selected = e.target.checked;
-    else if (SYNC_SELECT_ROLES.has(role)) c[role] = e.target.value || undefined;
+    else if (SYNC_SELECT_ROLES.has(role)) {
+      c[role] = e.target.value || undefined;
+      // Changing Type live re-applies field visibility on THIS row (same
+      // as the main mark-edit popup does) — the actual filtering-out of
+      // any now-inapplicable field's stored value happens at Import time
+      // (see handleImportClick), not here; this is purely the visual
+      // show/hide.
+      if (role === "type") {
+        const rowEl = e.target.closest(".sync-row");
+        if (rowEl) applyMarkFieldVisibility(rowEl, c.type);
+      }
+    }
   });
   document.getElementById("reviewList").addEventListener("input", (e) => {
     const idx = Number(e.target.dataset.idx);

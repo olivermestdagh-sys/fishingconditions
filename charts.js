@@ -1067,6 +1067,47 @@ const MARK_POPUP_OPTIONAL_FIELDS = [
   { key: "berley", listLabel: "Berley", displayLabel: "Berley" },
 ];
 
+/**
+ * Which of the "extra" fields (everything beyond Name/Type/Date-Time,
+ * which every mark always has regardless of type, and Source, which is
+ * read-only metadata rather than a real content field) apply to a mark of
+ * a given Mark Type. Three real types going forward:
+ *   - POI: nothing extra at all — just Name/Type/Date-Time, a plain point
+ *     of interest with no catch of its own.
+ *   - Mark: adds Species only — "I think this species is around here",
+ *     without the full detail of an actual logged catch.
+ *   - Catch: everything — the full field set this popup can show.
+ * "Fish" is the RETIRED predecessor of "Catch" (every mark already in
+ * data/marks.json before this distinction existed was migrated from
+ * type:"Fish" to type:"Mark" — see the delivered marks.json diff — but
+ * the pick-list option itself is only removed from config/mark_lists.json
+ * by hand, separately, so it can still be picked for a short window).
+ * Aliased to the same full field set as Catch here rather than given its
+ * own narrower list, so nothing already-populated on an old record
+ * quietly becomes unreachable if it's ever re-selected. Same reasoning
+ * covers a genuinely unrecognised future type (see fieldKeysForMarkType's
+ * own fallback) — showing extra fields that don't strictly apply is a far
+ * smaller problem than silently hiding real data.
+ */
+const MARK_TYPE_FIELD_KEYS = {
+  POI: [],
+  Mark: ["species"],
+  Catch: [
+    "species", "weatherCondition", "tideCondition", "waterCondition", "bait", "rig", "rod", "berley",
+    "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed", "notes",
+  ],
+};
+MARK_TYPE_FIELD_KEYS.Fish = MARK_TYPE_FIELD_KEYS.Catch;
+
+/** MARK_TYPE_FIELD_KEYS[type], falling back to the full Catch-level field
+ * set for anything not explicitly listed there (including "Fish" via the
+ * alias just above, and any future type this map hasn't been taught about
+ * yet) — see MARK_TYPE_FIELD_KEYS's own comment for why under-hiding is
+ * the safer default than over-hiding. */
+function fieldKeysForMarkType(type) {
+  return MARK_TYPE_FIELD_KEYS[type] || MARK_TYPE_FIELD_KEYS.Catch;
+}
+
 // --- Mark quick-entry defaults ("You are here" click, Live tab only) -------
 //
 // Two independent default sources, merged by startNewMarkEntry's caller
@@ -1275,18 +1316,23 @@ function buildMarkPopupViewHtml(mark) {
     if (value == null || value === "") return;
     rows.push(`<div style="display:flex;gap:6px;font-size:0.85rem;margin-bottom:3px;"><span style="font-weight:600;min-width:64px;">${escapeHtml(label)}</span><span>${escapeHtml(value)}</span></div>`);
   };
+  const applicable = fieldKeysForMarkType(mark.type);
   row("Name", mark.name);
   row("Type", mark.type);
   row("Date/Time", mark.dateTime);
-  for (const f of MARK_POPUP_OPTIONAL_FIELDS) row(f.displayLabel, mark[f.key]);
-  row("Size", mark.size != null ? `${mark.size} cm` : null);
-  row("Barometer", mark.barometer != null ? `${mark.barometer} hPa` : null);
-  row("Temperature", mark.temperature != null ? `${mark.temperature}°C` : null);
-  row("Water Temp", mark.waterTemperature != null ? `${mark.waterTemperature}°C` : null);
-  row("Water Depth", mark.waterDepth != null ? `${mark.waterDepth} m` : null);
-  const windParts = [mark.windDirection, mark.windSpeed != null ? `${mark.windSpeed} km/h` : null].filter(Boolean);
-  row("Wind", windParts.length ? windParts.join(" ") : null);
-  row("Notes", mark.notes);
+  for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
+    if (applicable.includes(f.key)) row(f.displayLabel, mark[f.key]);
+  }
+  if (applicable.includes("size")) row("Size", mark.size != null ? `${mark.size} cm` : null);
+  if (applicable.includes("barometer")) row("Barometer", mark.barometer != null ? `${mark.barometer} hPa` : null);
+  if (applicable.includes("temperature")) row("Temperature", mark.temperature != null ? `${mark.temperature}°C` : null);
+  if (applicable.includes("waterTemperature")) row("Water Temp", mark.waterTemperature != null ? `${mark.waterTemperature}°C` : null);
+  if (applicable.includes("waterDepth")) row("Water Depth", mark.waterDepth != null ? `${mark.waterDepth} m` : null);
+  if (applicable.includes("windDirection") || applicable.includes("windSpeed")) {
+    const windParts = [mark.windDirection, mark.windSpeed != null ? `${mark.windSpeed} km/h` : null].filter(Boolean);
+    row("Wind", windParts.length ? windParts.join(" ") : null);
+  }
+  if (applicable.includes("notes")) row("Notes", mark.notes);
   row("Source", mark.source);
   const canEdit = !!getConnection();
   return `
@@ -1310,13 +1356,23 @@ function buildMarkPopupViewHtml(mark) {
  * error-prone action (fat-finger a coordinate here and the pin silently
  * jumps oceans) than correcting its details, and wasn't asked for — the
  * pin stays exactly where it was placed.
+ *
+ * Every field beyond Name/Type/Date-Time/Source is wrapped in its own
+ * `data-field-group="<key>"` div, always rendered but shown/hidden by
+ * applyMarkFieldVisibility (called right below, and again on every Type
+ * change — see wireMarkPopupButtons) rather than only including the
+ * markup for applicable fields in the first place. Always rendering all
+ * of them (just hidden) is what lets switching Type mid-edit reveal/hide
+ * fields live without needing to rebuild this HTML from scratch.
  */
 function buildMarkPopupEditHtml(mark, markLists) {
   const optionalFieldsHtml = MARK_POPUP_OPTIONAL_FIELDS.map(
     (f) => `
-      <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">${escapeHtml(f.displayLabel)}
-        <select name="${f.key}" style="${MARK_POPUP_INPUT_STYLE}">${markListOptionsHtml(markLists, f.listLabel, mark[f.key])}</select>
-      </label>`
+      <div data-field-group="${f.key}">
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">${escapeHtml(f.displayLabel)}
+          <select name="${f.key}" style="${MARK_POPUP_INPUT_STYLE}">${markListOptionsHtml(markLists, f.listLabel, mark[f.key])}</select>
+        </label>
+      </div>`
   ).join("");
   return `
     <div data-mark-id="${escapeHtml(mark.id)}" style="min-width:220px;max-width:260px;">
@@ -1325,39 +1381,55 @@ function buildMarkPopupEditHtml(mark, markLists) {
           <input type="text" name="name" value="${escapeHtml(mark.name || "")}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Type
-          <select name="type" style="${MARK_POPUP_INPUT_STYLE}">${markListOptionsHtml(markLists, "Mark Type", mark.type)}</select>
+          <select name="type" data-mark-type-select style="${MARK_POPUP_INPUT_STYLE}">${markListOptionsHtml(markLists, "Mark Type", mark.type)}</select>
         </label>
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Date/Time
           <input type="datetime-local" name="dateTime" step="1" value="${naiveToDatetimeLocal(mark.dateTime)}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
         ${optionalFieldsHtml}
-        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Size (cm)
-          <input type="number" name="size" min="0" step="1" value="${mark.size != null ? mark.size : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
-        </label>
-        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Barometer (hPa)
-          <input type="number" name="barometer" min="0" step="0.1" value="${mark.barometer != null ? mark.barometer : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
-        </label>
-        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Temperature (°C)
-          <input type="number" name="temperature" step="0.1" value="${mark.temperature != null ? mark.temperature : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
-        </label>
-        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Water Temp (°C)
-          <input type="number" name="waterTemperature" step="0.1" value="${mark.waterTemperature != null ? mark.waterTemperature : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
-        </label>
-        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Water Depth (m)
-          <input type="number" name="waterDepth" min="0" step="0.1" value="${mark.waterDepth != null ? mark.waterDepth : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
-        </label>
-        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Wind Direction
-          <select name="windDirection" style="${MARK_POPUP_INPUT_STYLE}">
-            <option value=""></option>
-            ${SHORE_OPTIONS.map((d) => `<option value="${d}" ${mark.windDirection === d ? "selected" : ""}>${d}</option>`).join("")}
-          </select>
-        </label>
-        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Wind Speed (km/h)
-          <input type="number" name="windSpeed" min="0" step="1" value="${mark.windSpeed != null ? mark.windSpeed : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
-        </label>
-        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Notes
-          <textarea name="notes" rows="2" style="${MARK_POPUP_INPUT_STYLE}resize:vertical;">${escapeHtml(mark.notes || "")}</textarea>
-        </label>
+        <div data-field-group="size">
+          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Size (cm)
+            <input type="number" name="size" min="0" step="1" value="${mark.size != null ? mark.size : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
+          </label>
+        </div>
+        <div data-field-group="barometer">
+          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Barometer (hPa)
+            <input type="number" name="barometer" min="0" step="0.1" value="${mark.barometer != null ? mark.barometer : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
+          </label>
+        </div>
+        <div data-field-group="temperature">
+          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Temperature (°C)
+            <input type="number" name="temperature" step="0.1" value="${mark.temperature != null ? mark.temperature : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
+          </label>
+        </div>
+        <div data-field-group="waterTemperature">
+          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Water Temp (°C)
+            <input type="number" name="waterTemperature" step="0.1" value="${mark.waterTemperature != null ? mark.waterTemperature : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
+          </label>
+        </div>
+        <div data-field-group="waterDepth">
+          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Water Depth (m)
+            <input type="number" name="waterDepth" min="0" step="0.1" value="${mark.waterDepth != null ? mark.waterDepth : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
+          </label>
+        </div>
+        <div data-field-group="windDirection">
+          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Wind Direction
+            <select name="windDirection" style="${MARK_POPUP_INPUT_STYLE}">
+              <option value=""></option>
+              ${SHORE_OPTIONS.map((d) => `<option value="${d}" ${mark.windDirection === d ? "selected" : ""}>${d}</option>`).join("")}
+            </select>
+          </label>
+        </div>
+        <div data-field-group="windSpeed">
+          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Wind Speed (km/h)
+            <input type="number" name="windSpeed" min="0" step="1" value="${mark.windSpeed != null ? mark.windSpeed : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
+          </label>
+        </div>
+        <div data-field-group="notes">
+          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Notes
+            <textarea name="notes" rows="2" style="${MARK_POPUP_INPUT_STYLE}resize:vertical;">${escapeHtml(mark.notes || "")}</textarea>
+          </label>
+        </div>
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Source
           <input type="text" readonly value="${escapeHtml(mark.source || "—")}"
             style="${MARK_POPUP_INPUT_STYLE}background:var(--grey-100);color:var(--grey-500);cursor:not-allowed;" />
@@ -1373,6 +1445,22 @@ function buildMarkPopupEditHtml(mark, markLists) {
 }
 
 /**
+ * Shows/hides each `data-field-group` in a mark's edit form based on which
+ * fields apply to `type` (see MARK_TYPE_FIELD_KEYS/fieldKeysForMarkType) —
+ * called once right after the edit form is inserted (for whatever type the
+ * mark currently has) and again every time the Type <select> itself
+ * changes (see wireMarkPopupButtons), so switching from POI to Catch
+ * mid-edit immediately reveals the extra fields rather than needing to
+ * save/reopen the popup to see them.
+ */
+function applyMarkFieldVisibility(formEl, type) {
+  const applicable = fieldKeysForMarkType(type);
+  formEl.querySelectorAll("[data-field-group]").forEach((group) => {
+    group.style.display = applicable.includes(group.dataset.fieldGroup) ? "" : "none";
+  });
+}
+
+/**
  * Reads the edit form's current values back into a full mark object ready
  * to save — id/lat/lng/createdAt/source carried over unchanged from the
  * original (see buildMarkPopupEditHtml's own comment on why lat/lng, and
@@ -1385,54 +1473,84 @@ function buildMarkPopupEditHtml(mark, markLists) {
  */
 function collectMarkFormValues(form, originalMark) {
   const val = (name) => (form.querySelector(`[name="${name}"]`).value || "").trim();
+  const type = val("type");
+  // Only ever collects fields applicable to the CURRENTLY SELECTED type
+  // (not just whatever's visible — the same check, read fresh from the
+  // form, rather than trusting applyMarkFieldVisibility's hide/show to
+  // have already blanked anything). That matters concretely: switching an
+  // existing Catch mark's Type to POI and hitting Save should genuinely
+  // strip its weatherCondition/barometer/etc from the saved mark, not
+  // just visually hide inputs that still silently carry their old values
+  // underneath. The existing "delete mark.field if not in updated" cleanup
+  // in wireMarkPopupButtons' save handler does the actual stripping; this
+  // is what makes sure those keys are never IN updated in the first place
+  // for a type they don't apply to.
+  const applicable = fieldKeysForMarkType(type);
   const updated = {
     id: originalMark.id,
     lat: originalMark.lat,
     lng: originalMark.lng,
     name: val("name"),
-    type: val("type"),
+    type,
     dateTime: datetimeLocalToNaive(form.querySelector('[name="dateTime"]').value),
     createdAt: originalMark.createdAt,
   };
   if (originalMark.source) updated.source = originalMark.source;
   for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
+    if (!applicable.includes(f.key)) continue;
     const v = val(f.key);
     if (v) updated[f.key] = v;
   }
-  const sizeRaw = val("size");
-  if (sizeRaw) {
-    const sizeNum = Math.round(Number(sizeRaw));
-    if (Number.isFinite(sizeNum)) updated.size = sizeNum; // whole cm — see the field's own schema comment
+  if (applicable.includes("size")) {
+    const sizeRaw = val("size");
+    if (sizeRaw) {
+      const sizeNum = Math.round(Number(sizeRaw));
+      if (Number.isFinite(sizeNum)) updated.size = sizeNum; // whole cm — see the field's own schema comment
+    }
   }
-  const barometerRaw = val("barometer");
-  if (barometerRaw) {
-    const barometerNum = Number(barometerRaw);
-    if (Number.isFinite(barometerNum)) updated.barometer = barometerNum; // hPa, not rounded — see the field's own schema comment
+  if (applicable.includes("barometer")) {
+    const barometerRaw = val("barometer");
+    if (barometerRaw) {
+      const barometerNum = Number(barometerRaw);
+      if (Number.isFinite(barometerNum)) updated.barometer = barometerNum; // hPa, not rounded — see the field's own schema comment
+    }
   }
-  const temperatureRaw = val("temperature");
-  if (temperatureRaw) {
-    const temperatureNum = Number(temperatureRaw);
-    if (Number.isFinite(temperatureNum)) updated.temperature = temperatureNum; // °C, not rounded — see the field's own schema comment
+  if (applicable.includes("temperature")) {
+    const temperatureRaw = val("temperature");
+    if (temperatureRaw) {
+      const temperatureNum = Number(temperatureRaw);
+      if (Number.isFinite(temperatureNum)) updated.temperature = temperatureNum; // °C, not rounded — see the field's own schema comment
+    }
   }
-  const waterTemperatureRaw = val("waterTemperature");
-  if (waterTemperatureRaw) {
-    const waterTemperatureNum = Number(waterTemperatureRaw);
-    if (Number.isFinite(waterTemperatureNum)) updated.waterTemperature = waterTemperatureNum; // °C, not rounded — see the field's own schema comment
+  if (applicable.includes("waterTemperature")) {
+    const waterTemperatureRaw = val("waterTemperature");
+    if (waterTemperatureRaw) {
+      const waterTemperatureNum = Number(waterTemperatureRaw);
+      if (Number.isFinite(waterTemperatureNum)) updated.waterTemperature = waterTemperatureNum; // °C, not rounded — see the field's own schema comment
+    }
   }
-  const waterDepthRaw = val("waterDepth");
-  if (waterDepthRaw) {
-    const waterDepthNum = Number(waterDepthRaw);
-    if (Number.isFinite(waterDepthNum)) updated.waterDepth = waterDepthNum; // metres, not rounded — see the field's own schema comment
+  if (applicable.includes("waterDepth")) {
+    const waterDepthRaw = val("waterDepth");
+    if (waterDepthRaw) {
+      const waterDepthNum = Number(waterDepthRaw);
+      if (Number.isFinite(waterDepthNum)) updated.waterDepth = waterDepthNum; // metres, not rounded — see the field's own schema comment
+    }
   }
-  const windDirectionRaw = val("windDirection");
-  if (windDirectionRaw) updated.windDirection = windDirectionRaw; // already one of SHORE_OPTIONS' 16 compass points — the <select> only ever offers those
-  const windSpeedRaw = val("windSpeed");
-  if (windSpeedRaw) {
-    const windSpeedNum = Math.round(Number(windSpeedRaw));
-    if (Number.isFinite(windSpeedNum)) updated.windSpeed = windSpeedNum; // whole km/h — see the field's own schema comment
+  if (applicable.includes("windDirection")) {
+    const windDirectionRaw = val("windDirection");
+    if (windDirectionRaw) updated.windDirection = windDirectionRaw; // already one of SHORE_OPTIONS' 16 compass points — the <select> only ever offers those
   }
-  const notes = val("notes");
-  if (notes) updated.notes = notes;
+  if (applicable.includes("windSpeed")) {
+    const windSpeedRaw = val("windSpeed");
+    if (windSpeedRaw) {
+      const windSpeedNum = Math.round(Number(windSpeedRaw));
+      if (Number.isFinite(windSpeedNum)) updated.windSpeed = windSpeedNum; // whole km/h — see the field's own schema comment
+    }
+  }
+  if (applicable.includes("notes")) {
+    const notes = val("notes");
+    if (notes) updated.notes = notes;
+  }
   return updated;
 }
 
@@ -1603,6 +1721,20 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
   // Belt-and-braces alongside Leaflet's own automatic handling of the same
   // popup container — see this function's own comment above.
   L.DomEvent.disableClickPropagation(popupEl);
+
+  // Only present in edit mode (buildMarkPopupEditHtml) — sets up the
+  // initial field visibility for whatever type the mark currently has,
+  // and re-applies it live every time the Type <select> itself changes.
+  // See applyMarkFieldVisibility's own comment for why this needs to be
+  // dynamic rather than just baked into the initial render once.
+  const form = popupEl.querySelector("[data-mark-form]");
+  if (form) {
+    const typeSelect = form.querySelector("[data-mark-type-select]");
+    if (typeSelect) {
+      applyMarkFieldVisibility(form, typeSelect.value);
+      typeSelect.addEventListener("change", () => applyMarkFieldVisibility(form, typeSelect.value));
+    }
+  }
 
   const editBtn = popupEl.querySelector("[data-mark-edit]");
   if (editBtn) {
@@ -2256,8 +2388,15 @@ function startNewMarkEntry(map, lat, lng, state, defaults = {}) {
   // historical lookup (see lookupHistoricalMarkConditions above) — fired
   // off in the background rather than awaited, since it's a network round
   // trip and the popup should open immediately regardless of how long
-  // that takes.
-  fillMarkFormFromHistoricalLookup(popupEl, lat, lng, draft.dateTime);
+  // that takes. Skipped entirely for a POI or Mark-level draft (checking
+  // whether ANY of this lookup's own fields even apply to the type — see
+  // MARK_TYPE_FIELD_KEYS: those fields only ever ALL apply together, on a
+  // Catch, never partially) — a WillyWeather call plus two Open-Meteo
+  // calls would otherwise fire for every new mark regardless of type, even
+  // though POI/Mark can't show or save a single one of those fields.
+  if (fieldKeysForMarkType(draft.type).includes("weatherCondition")) {
+    fillMarkFormFromHistoricalLookup(popupEl, lat, lng, draft.dateTime);
+  }
 }
 
 /**
@@ -2483,10 +2622,13 @@ async function saveNewLocationToGitHub(newLoc) {
 
 // --- GPS fishing marks (shared) ---------------------------------------------
 //
-// A "mark" is a single manually-placed GPS point recorded while out fishing —
-// either a real Catch (with species/conditions/gear detail attached) or a
-// plain POI (a snag, a hazard, a ramp not otherwise tracked, etc). Kept as
-// its own small file (data/marks.json) rather than folded into
+// A "mark" is a single manually-placed GPS point recorded while out fishing.
+// Three real types (see MARK_TYPE_FIELD_KEYS below for exactly what each one
+// carries): a plain POI (a snag, a hazard, a ramp not otherwise tracked —
+// just a name and a time, no species), a Mark ("I think this species is
+// around here" — species only, no other detail), or a real Catch (species
+// plus the full weather/tide/gear/measurement detail this popup can show).
+// Kept as its own small file (data/marks.json) rather than folded into
 // config/locations.json: locations.json describes the fixed handful of spots
 // this whole site scores tide/weather/wind conditions FOR, while marks are an
 // open-ended, ever-growing personal log added to constantly out on the
@@ -2538,11 +2680,26 @@ const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
  *     lat, lng:  number — WGS84 decimal degrees, same convention as every
  *                other coordinate on this site.
  *     name:      string — short display label for the pin.
- *     type:      string — from config/mark_lists.json's "Mark Type" list
- *                (starts seeded with "Fish"/"POI", but it's an editable list
- *                like any other below, not a hardcoded two-value enum — e.g.
- *                a "Ramp" or "Hazard" mark type later is just adding a row,
- *                no code change).
+ *     type:      string — from config/mark_lists.json's "Mark Type" list.
+ *                Three real values going forward: "POI" (just a point of
+ *                interest, no species), "Mark" (species only, no other
+ *                catch detail), "Catch" (the full field set — see
+ *                MARK_TYPE_FIELD_KEYS/fieldKeysForMarkType above for
+ *                exactly which of the fields below apply to which type,
+ *                and buildMarkPopupViewHtml/buildMarkPopupEditHtml for
+ *                where that's actually enforced in the UI). "Fish" is the
+ *                RETIRED predecessor of "Catch" — every mark that existed
+ *                before this three-way distinction was introduced got
+ *                migrated from type:"Fish" to type:"Mark" in one pass (see
+ *                the delivered marks.json diff), and the pick-list option
+ *                itself gets removed from config/mark_lists.json by hand,
+ *                separately, once nothing's likely to pick it by accident.
+ *                Still an editable list like any other below, not a
+ *                hardcoded enum — adding a fourth type later is just
+ *                adding a row to mark_lists.json, though it'll default to
+ *                the full Catch-level field set until MARK_TYPE_FIELD_KEYS
+ *                is taught about it specifically (see that map's own
+ *                comment on why that's the safe default).
  *     dateTime:  string — naive "YYYY-MM-DD HH:MM:SS" (see parseNaive
  *                above) — the time the mark is actually ABOUT (when the
  *                catch happened / the spot was found).
@@ -2667,9 +2824,11 @@ const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
  * "type" (Mark Type) is listed first and is the odd one out — every other
  * field here is optional catch detail, while this is the field that decides
  * what KIND of mark it is at all. Made list-driven rather than a hardcoded
- * "Catch"/"POI" enum for the same reason the rest are: so a new mark type
- * (a boat ramp, a snag, a bait ground) is a Settings-tab edit, not a code
- * change — seeded with just Fish and POI to start.
+ * enum for the same reason the rest are: so a new mark type (a boat ramp, a
+ * snag, a bait ground) is a Settings-tab edit, not a code change — currently
+ * POI/Mark/Catch as the three real values, plus the retired "Fish" (see
+ * MARK_TYPE_FIELD_KEYS, above where `type` gets used) kept around only until
+ * it's removed from config/mark_lists.json by hand.
  */
 const MARK_LIST_FIELDS = [
   { key: "type", label: "Mark Type" },
