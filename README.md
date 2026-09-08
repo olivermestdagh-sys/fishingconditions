@@ -600,7 +600,8 @@ gated behind having a GitHub connection set up on the Settings tab — same
 "don't clutter the map for random public visitors, but not real access
 control" caveat as the rest of this site's GitHub-gated features (the file
 itself is still a plain public URL). Each mark's **shape matches its Mark
-Type** — POI a circle, Mark a square, Catch a cross — the same convention
+Type** — Mark a circle (the default), POI a square, Catch a cross — the
+same convention
 the Lowrance GPX export uses (see "Syncing marks with a Garmin or Lowrance
 device" below), so the two are visually consistent with each other.
 **Colour**, unlike the GPX export, stays the site's own richer palette
@@ -697,7 +698,8 @@ all) — most of the old migrated batch has a place name in `name`
 ("Williamstown", "Leopold"), which is far less useful on a chartplotter
 than the actual catch; that place name is kept in `<desc>` instead rather
 than lost. Each waypoint also gets a `<sym>` — a different **shape per
-Mark Type** (POI -> circle, Mark -> square, Catch -> cross), coloured by
+Mark Type** (Mark -> circle, the default; POI -> square; Catch -> cross),
+coloured by
 **species** (not applicable for a POI, which has none, so it gets its
 shape bare with no colour) — matched to the nearest of Lowrance's own
 7-colour palette (blue/magenta/orange/yellow/green/aqua/white) from
