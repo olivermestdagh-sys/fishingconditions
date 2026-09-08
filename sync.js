@@ -34,6 +34,8 @@ let existingMarks = []; // loaded once from data/marks.json — used both to
                          // just added too, without a re-fetch.
 let markLists = []; // config/mark_lists.json rows — species pick-list options
 let knownSpecies = [];
+let knownWeatherConditions = [];
+let knownTideConditions = [];
 let candidates = []; // the current file's parsed+deduped candidate marks —
                       // see collapseRawWaypoints/buildCandidatesFromRaw
 let visibleCount = 100; // how many of `candidates` (after search filtering)
@@ -622,6 +624,15 @@ function renderCandidateRow(c, i) {
   // always genuinely new. See reviewableCandidates' own comment.
   const visitBadge = c.visitCount > 1 ? `<span class="pill sync-pill-visits">${c.visitCount} visits merged</span>` : "";
 
+  // Weather/Tide/Wind Direction pick from the same lists a manually-edited
+  // mark's own popup uses (see buildMarkPopupEditHtml, charts.js) — an
+  // empty leading <option> for "not looked up / not set", same convention
+  // as every other optional field here. SHORE_OPTIONS is charts.js's own
+  // 16-point compass list (already loaded on this page, same reuse
+  // buildMarkPopupEditHtml itself makes for Wind Direction).
+  const selectOptionsHtml = (values, current) =>
+    values.map((v) => `<option value="${escapeHtml(v)}" ${v === current ? "selected" : ""}>${escapeHtml(v)}</option>`).join("");
+
   return `
     <div class="sync-row" data-idx="${i}">
       <label class="sync-row-check">
@@ -640,6 +651,19 @@ function renderCandidateRow(c, i) {
             <option value="Fish" ${c.type === "Fish" ? "selected" : ""}>Fish</option>
             <option value="POI" ${c.type === "POI" ? "selected" : ""}>POI</option>
           </select>
+        </div>
+        <div class="sync-row-inputs">
+          <select data-role="weatherCondition" data-idx="${i}" title="Weather Condition">
+            <option value=""${c.weatherCondition ? "" : " selected"}>Weather…</option>${selectOptionsHtml(knownWeatherConditions, c.weatherCondition)}
+          </select>
+          <select data-role="tideCondition" data-idx="${i}" title="Tide Condition">
+            <option value=""${c.tideCondition ? "" : " selected"}>Tide…</option>${selectOptionsHtml(knownTideConditions, c.tideCondition)}
+          </select>
+          <input type="number" data-role="barometer" data-idx="${i}" value="${c.barometer != null ? c.barometer : ""}" min="0" step="0.1" placeholder="hPa" title="Barometer (hPa)" />
+          <select data-role="windDirection" data-idx="${i}" title="Wind Direction">
+            <option value=""${c.windDirection ? "" : " selected"}>Wind dir…</option>${selectOptionsHtml(SHORE_OPTIONS, c.windDirection)}
+          </select>
+          <input type="number" data-role="windSpeed" data-idx="${i}" value="${c.windSpeed != null ? c.windSpeed : ""}" min="0" step="1" placeholder="km/h" title="Wind Speed (km/h)" />
         </div>
         <textarea data-role="notes" data-idx="${i}" rows="2" placeholder="Notes">${escapeHtml(c.notes)}</textarea>
       </div>
@@ -733,29 +757,18 @@ async function handleImportClick() {
   }
   const btn = document.getElementById("btnImportSelected");
   btn.disabled = true;
-  statusEl.textContent = `Looking up conditions for ${toImport.length} mark${toImport.length === 1 ? "" : "s"}…`;
+  statusEl.textContent = `Importing ${toImport.length} mark${toImport.length === 1 ? "" : "s"}…`;
   statusEl.style.color = "";
 
-  // Real historical weather/tide/barometer/wind lookup per mark (see
-  // lookupHistoricalMarkConditions, charts.js) — device-imported marks
-  // never carry this data themselves, so every one of them is a genuine
-  // fill-in-the-blanks case, not just a maybe. Runs BEFORE the actual
-  // marks.json write below, so a failed lookup for one mark never risks
-  // the batch commit itself — it just means that one mark imports without
-  // those extra fields, same as if they'd been left blank by hand.
-  const conditionsByIndex = await runWithConcurrencyLimit(
-    toImport,
-    SYNC_LOOKUP_CONCURRENCY,
-    (c) => lookupHistoricalMarkConditions(c.lat, c.lng, c.dateTime || nowAsNaiveString()),
-    (done, total) => {
-      statusEl.textContent = `Looking up conditions: ${done} of ${total}…`;
-    }
-  );
-  statusEl.textContent = `Importing ${toImport.length} mark${toImport.length === 1 ? "" : "s"}…`;
-
+  // Weather/Tide/Barometer/Wind are already looked up by this point — see
+  // handleFileInputChange, which runs lookupHistoricalMarkConditions for
+  // every reviewable candidate up front so the review list itself can show
+  // it (per Oliver's own call), rather than this function looking it up a
+  // second time at Import. Whatever's on each candidate now — including
+  // anything edited by hand in the review row — is exactly what gets
+  // saved.
   const nowStr = nowAsNaiveString();
-  const newMarks = toImport.map((c, i) => {
-    const looked = conditionsByIndex[i] || {};
+  const newMarks = toImport.map((c) => {
     const mark = {
       id: makeMarkId(),
       lat: c.lat,
@@ -769,11 +782,11 @@ async function handleImportClick() {
     if (c.species) mark.species = c.species;
     if (c.notes) mark.notes = c.notes;
     if (c.sourceUuid) mark.sourceUuid = c.sourceUuid;
-    if (looked.weatherCondition) mark.weatherCondition = looked.weatherCondition;
-    if (looked.tideCondition) mark.tideCondition = looked.tideCondition;
-    if (looked.barometer != null) mark.barometer = looked.barometer;
-    if (looked.windDirection) mark.windDirection = looked.windDirection;
-    if (looked.windSpeed != null) mark.windSpeed = looked.windSpeed;
+    if (c.weatherCondition) mark.weatherCondition = c.weatherCondition;
+    if (c.tideCondition) mark.tideCondition = c.tideCondition;
+    if (c.barometer != null) mark.barometer = c.barometer;
+    if (c.windDirection) mark.windDirection = c.windDirection;
+    if (c.windSpeed != null) mark.windSpeed = c.windSpeed;
     return mark;
   });
 
@@ -859,7 +872,38 @@ async function handleFileInputChange(e) {
       sourceLabel,
       matchedExisting: g.matchedExisting,
       selected: !g.matchedExisting, // only genuinely new spots pre-checked
+      // Filled in below, for reviewable candidates only — see
+      // lookupHistoricalMarkConditions, charts.js. Left undefined (not
+      // shown) for anything the lookup didn't resolve.
+      weatherCondition: undefined,
+      tideCondition: undefined,
+      barometer: undefined,
+      windDirection: undefined,
+      windSpeed: undefined,
     }));
+
+    // Real historical weather/tide/barometer/wind lookup, run up front so
+    // the review list can show it directly (per Oliver's own call — this
+    // used to run later, only at Import time) — only for candidates
+    // actually reviewable (see reviewableCandidates' own comment); a
+    // matched-existing one is never shown or imported, so there's no
+    // reason to spend a billed WillyWeather call plus an Open-Meteo call
+    // looking anything up for it.
+    const toLookUp = reviewableCandidates();
+    if (toLookUp.length > 0) {
+      statusEl.textContent = `Looking up conditions for ${toLookUp.length} new spot${toLookUp.length === 1 ? "" : "s"}…`;
+      await runWithConcurrencyLimit(
+        toLookUp,
+        SYNC_LOOKUP_CONCURRENCY,
+        async (c) => {
+          const result = await lookupHistoricalMarkConditions(c.lat, c.lng, c.dateTime || nowAsNaiveString());
+          Object.assign(c, result);
+        },
+        (done, total) => {
+          statusEl.textContent = `Looking up conditions: ${done} of ${total}…`;
+        }
+      );
+    }
 
     visibleCount = 100;
     searchFilter = "";
@@ -911,6 +955,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   existingMarks = marksRes.ok ? (await marksRes.json()).marks || [] : [];
   markLists = listsRes.ok ? await listsRes.json() : [];
   knownSpecies = markLists.filter((r) => r.field === "Species").map((r) => r.value);
+  knownWeatherConditions = markLists.filter((r) => r.field === "Weather Condition").map((r) => r.value);
+  knownTideConditions = markLists.filter((r) => r.field === "Tide Condition").map((r) => r.value);
 
   document.getElementById("syncFileInput").addEventListener("change", handleFileInputChange);
   document.getElementById("btnSelectAllNew").addEventListener("click", () => setAllSelected(true));
@@ -940,6 +986,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (role === "select") c.selected = e.target.checked;
     else if (role === "species") c.species = e.target.value;
     else if (role === "type") c.type = e.target.value;
+    else if (role === "weatherCondition") c.weatherCondition = e.target.value || undefined;
+    else if (role === "tideCondition") c.tideCondition = e.target.value || undefined;
+    else if (role === "windDirection") c.windDirection = e.target.value || undefined;
   });
   document.getElementById("reviewList").addEventListener("input", (e) => {
     const idx = Number(e.target.dataset.idx);
@@ -949,5 +998,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     const role = e.target.dataset.role;
     if (role === "name") c.name = e.target.value;
     else if (role === "notes") c.notes = e.target.value;
+    else if (role === "barometer") {
+      const v = e.target.value;
+      c.barometer = v === "" ? undefined : Number(v);
+    } else if (role === "windSpeed") {
+      const v = e.target.value;
+      c.windSpeed = v === "" ? undefined : Math.round(Number(v));
+    }
   });
 });
