@@ -638,6 +638,21 @@ its name, species, and date. Built on two small custom Leaflet layers
 (`getDiamondMarkerClass`/`getCrossMarkerClass` in `charts.js`) rather than
 switching every mark over to the DOM-based pins used for tracked locations
 elsewhere on this map — those would be meaningfully heavier at this data's real scale (a
+
+**Clicking a mark's popup** (Location and Live tabs both) also shows two
+distances, filled in a moment after the popup opens rather than blocking
+it — a real GPS position and a tracked-location lookup both take a moment,
+and most marks are never clicked at all, so this only ever runs for one
+that actually is:
+- **Nearest loc.** — straight-line distance to whichever tracked location
+  (the list above) is physically closest, plus its name — a reference
+  point (which location's tide/weather calibration is relevant here), not
+  something being travelled to.
+- **From you** — straight-line distance from the device's current GPS
+  position, plus a rough paddling time at a flat 6 km/h (distance ÷ speed,
+  not a real route — see `fillMarkPopupDistances` in `charts.js`). Shows
+  "Location unavailable" if GPS is denied or the browser doesn't support
+  it, same graceful-degrade as everywhere else this site touches GPS.
 couple thousand points and growing); the custom shapes stay on the same
 canvas renderer circles always used here, confirmed against the real
 dataset (2,532 marks load and shape in well under half a second).
