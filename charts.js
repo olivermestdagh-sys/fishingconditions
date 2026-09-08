@@ -1346,9 +1346,11 @@ function formatDurationMinutes(totalMinutes) {
  * route, not a real routing lookup the way getDriveTimeMinutes above is
  * for an actual road destination (most fishing marks aren't one). Good
  * enough for "is this close or a proper trip", not meant as a precise ETA.
- * "Nearest location" gets a plain distance only, no travel time — it's a
- * reference point (which tracked location's tide/weather calibration is
- * relevant here), not somewhere being travelled to from here.
+ * "Nearest location" gets the same paddling-time estimate too (Oliver's
+ * own call) — it's still a reference point (which tracked location's
+ * tide/weather calibration is relevant here) rather than somewhere
+ * actually being travelled to from your current position, but knowing
+ * roughly how far that is in time terms is still useful on its own.
  *
  * `popupEl` is captured at call time by whichever caller invokes this
  * (either a popupopen handler for a freshly-bound, never-yet-opened
@@ -1369,7 +1371,8 @@ async function fillMarkPopupDistances(popupEl, mark) {
   if (nearestEl) {
     if (nearest && nearest.lat != null && nearest.lng != null) {
       const km = distanceMetersBetween(mark.lat, mark.lng, nearest.lat, nearest.lng) / 1000;
-      nearestEl.textContent = `${km.toFixed(1)} km — ${nearest.name}`;
+      const minutes = (km / 6) * 60;
+      nearestEl.textContent = `${km.toFixed(1)} km (~${formatDurationMinutes(minutes)} paddling) — ${nearest.name}`;
     } else {
       nearestEl.textContent = "Unavailable";
     }

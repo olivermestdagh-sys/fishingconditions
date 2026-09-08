@@ -645,11 +645,12 @@ it — a real GPS position and a tracked-location lookup both take a moment,
 and most marks are never clicked at all, so this only ever runs for one
 that actually is:
 - **Nearest loc.** — straight-line distance to whichever tracked location
-  (the list above) is physically closest, plus its name — a reference
-  point (which location's tide/weather calibration is relevant here), not
-  something being travelled to.
+  (the list above) is physically closest, plus a rough paddling time at a
+  flat 6 km/h and its name — still a reference point (which location's
+  tide/weather calibration is relevant here) rather than somewhere you're
+  necessarily headed, but useful to see in time terms too.
 - **From you** — straight-line distance from the device's current GPS
-  position, plus a rough paddling time at a flat 6 km/h (distance ÷ speed,
+  position, plus the same rough paddling time at 6 km/h (distance ÷ speed,
   not a real route — see `fillMarkPopupDistances` in `charts.js`). Shows
   "Location unavailable" if GPS is denied or the browser doesn't support
   it, same graceful-degrade as everywhere else this site touches GPS.
