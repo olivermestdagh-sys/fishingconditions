@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Olie's Kayak and Surf Fishing Conditions – Sync</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Olie's Kayak and Surf Fishing Conditions</h1>
+  <div id="status" class="updated">Marks sync</div>
+</header>
+
+<nav class="tabnav">
+  <a href="index.html">Week Ahead</a>
+  <a href="conditions.html">Location</a>
+  <a href="live.html">Live</a>
+  <a href="sync.html" class="active">Sync</a>
+  <a href="locations.html">Settings</a>
+</nav>
+
+<main>
+  <section id="syncNotConnected" class="summary-card" style="display:none;">
+    <div class="summary-title" style="margin-bottom:6px;">Not connected</div>
+    <p class="footnote" style="margin:0;text-align:left;">
+      Importing/exporting marks needs the same GitHub connection as everything else that writes
+      to this repo — connect from the <a href="locations.html">Settings</a> tab first, then come back here.
+    </p>
+  </section>
+
+  <div id="syncMain" style="display:none;">
+
+    <section class="summary-card">
+      <div class="summary-title" style="margin-bottom:6px;">Import from a device export</div>
+      <p class="footnote" style="margin:0 0 12px;text-align:left;">
+        Pick a Garmin GPX or a Lowrance <code>.usr</code> (format 6) file exported from your sounder's own
+        "export waypoints" option. Every waypoint is matched against what's already in
+        <code>data/marks.json</code> before anything is saved — spots the device saved more than once
+        (a common thing chartplotters do when you drift back over the same mark) are merged into one, and
+        anything within 20m of a mark already tracked is shown but left unchecked, so nothing gets
+        imported twice. Review and edit below, then import only what you actually want kept.
+      </p>
+      <input type="file" id="syncFileInput" accept=".gpx,.usr" />
+      <div id="parseStatus" style="margin-top:10px;font-size:0.85rem;"></div>
+    </section>
+
+    <section id="reviewSection" class="summary-card" style="display:none;">
+      <div class="summary-title" style="margin-bottom:6px;">Review candidates</div>
+      <div id="syncSummary" class="footnote" style="margin:0 0 12px;text-align:left;"></div>
+
+      <div class="filter-row" style="margin-bottom:10px;align-items:center;">
+        <div style="flex:2;min-width:200px;">
+          <input type="text" id="syncSearchBox" placeholder="Filter by species or name…" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" id="btnSelectAllNew" class="btn-secondary">Select all new</button>
+          <button type="button" id="btnDeselectAll" class="btn-secondary">Deselect all</button>
+        </div>
+      </div>
+
+      <div id="reviewList" class="sync-review-list"></div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;">
+        <button type="button" id="btnShowMore" class="btn-secondary" style="display:none;">Show 100 more</button>
+        <span id="reviewCount" class="footnote" style="margin:0;"></span>
+      </div>
+
+      <div style="margin-top:16px;">
+        <button type="button" id="btnImportSelected" class="btn-primary">Import selected marks</button>
+      </div>
+      <div id="importStatus" style="margin-top:10px;font-size:0.85rem;"></div>
+    </section>
+
+    <section class="summary-card">
+      <div class="summary-title" style="margin-bottom:6px;">Export to a device</div>
+      <p class="footnote" style="margin:0 0 12px;text-align:left;">
+        Downloads every mark currently in <code>data/marks.json</code> as a single GPX file — Garmin units
+        and Lowrance sounders that accept GPX import (confirmed on Oliver's own unit) can load it directly.
+      </p>
+      <button type="button" id="btnExportGpx" class="btn-primary">Export all marks as GPX</button>
+      <div id="exportStatus" style="margin-top:10px;font-size:0.85rem;"></div>
+    </section>
+
+  </div>
+</main>
+
+<script src="charts.js"></script>
+<script src="sync.js"></script>
+</body>
+</html>
