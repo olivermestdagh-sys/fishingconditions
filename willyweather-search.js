@@ -50,6 +50,32 @@
  *     PREVIEW_FORECAST_DAYS) always passes this explicitly, so the default
  *     here is really just a fallback for a malformed/missing request.
  *
+ *   GET /weather?id=<willyweatherId>&startDate=<YYYY-MM-DD>&days=<n>
+ *     Same endpoint, PAST-date mode — added for the marks Sync tab and
+ *     manual mark entry's historical conditions lookup (see
+ *     lookupHistoricalMarkConditions, charts.js), which need a real tide
+ *     reading for a date that's usually well before today, not a forward
+ *     forecast. When startDate is present, the upstream request is
+ *     deliberately much leaner than the plain /weather call above: only
+ *     `forecasts=tides` (nothing else that caller needs), and NO
+ *     observationalGraphs at all (that's WillyWeather's TODAY's realtime
+ *     data specifically — meaningless, and possibly invalid, for a
+ *     non-today startDate). This also keeps this pay-per-call API's usage
+ *     down for what's otherwise a much narrower request than the live
+ *     preview's.
+ *     UNVERIFIED ASSUMPTION, worth flagging plainly: this assumes
+ *     WillyWeather's weather.json genuinely honors startDate for a PAST
+ *     date the same way it does for a future one. It's a standard,
+ *     documented parameter for this API, but it was never actually
+ *     confirmed against a real call while this was built (no network path
+ *     to willyweather.com.au from that dev environment, and no API key on
+ *     hand there either). The caller (lookupTideConditionAt, charts.js)
+ *     includes its own sanity check on the returned dates specifically
+ *     because of this — if it's ever wrong, Tide Condition on new/imported
+ *     marks will just silently stay blank rather than saving a wrong
+ *     guess, and that check's own console.error is the first place to
+ *     look.
+ *
  * DEPLOYING THIS (one-time — see also the README.md section this links
  * from):
  *   1. Free account at https://dash.cloudflare.com/sign-up (no card needed).
@@ -223,6 +249,13 @@ function clampWeatherDays(raw) {
  * unwrapped from the outer fetch/parse machinery) — the browser-side
  * build_readings() port needs the same nested forecasts/observationalGraphs
  * shape WillyWeather itself returns, not a hand-picked subset of fields.
+ *
+ * `startDate` (optional, YYYY-MM-DD) switches this into the leaner
+ * past-date mode described in the ENDPOINTS comment above — validated here
+ * as a basic YYYY-MM-DD shape check (not a real calendar-date check; an
+ * invalid-but-shaped date is WillyWeather's own problem to reject, same as
+ * the numeric-only `id` check below doesn't try to verify the id is REAL,
+ * just well-formed).
  */
 async function handleWeather(url, env) {
   if (!env.WILLYWEATHER_API_KEY) {
@@ -236,9 +269,18 @@ async function handleWeather(url, env) {
   }
   const days = clampWeatherDays(url.searchParams.get("days"));
 
+  const startDate = url.searchParams.get("startDate");
+  if (startDate && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+    return jsonResponse({ error: "startDate must be YYYY-MM-DD." }, 400, env);
+  }
+
+  const forecasts = startDate ? "tides" : "temperature,wind,rainfallprobability,tides,sunrisesunset";
+  const observationalParam = startDate ? "" : "&observationalGraphs=temperature,wind";
+  const startDateParam = startDate ? `&startDate=${startDate}` : "";
+
   const upstreamUrl =
     `https://api.willyweather.com.au/v2/${env.WILLYWEATHER_API_KEY}/locations/${id}/weather.json` +
-    `?forecasts=temperature,wind,rainfallprobability,tides,sunrisesunset&days=${days}&observationalGraphs=temperature,wind`;
+    `?forecasts=${forecasts}&days=${days}${startDateParam}${observationalParam}`;
 
   try {
     const upstreamRes = await fetch(upstreamUrl, { headers: { "Content-Type": "application/json" } });

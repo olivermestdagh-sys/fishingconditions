@@ -1080,6 +1080,62 @@ const TIDE_SLACK_WINDOW_MS = 10 * 60000;
 const TIDE_RUN_TRANSITION_ZONE_MS = 2 * 3600000;
 
 /**
+ * The pure classification core of "our defined tide rules" — given a
+ * sorted list of real tide extrema ({t, height, type}) and a target time,
+ * returns one of the Tide Condition pick-list values, or null if there
+ * isn't a real low AND high extreme bracketing targetMs to measure
+ * against (e.g. right at the edge of whatever window of extrema was
+ * supplied). Extracted out of computeQuickMarkDefaults below so the exact
+ * same rules can also classify an arbitrary PAST time for a mark (see
+ * lookupTideConditionAt) — that caller builds its own `extrema` directly
+ * from WillyWeather's real high/low events (already exactly what this
+ * function wants, no synthetic hourly grid needed), while
+ * computeQuickMarkDefaults keeps building them via findTideExtrema over
+ * whatever location rows are already loaded, unchanged.
+ *
+ * Rules: working outward from whichever extreme (low or high) is closer —
+ * within TIDE_SLACK_WINDOW_MS of it, "Slack Low"/"Slack High"; within
+ * TIDE_RUN_TRANSITION_ZONE_MS of it (but past the slack window), "Start
+ * Run *" if that extreme was just LEFT or "Last Run *" if it's still
+ * COMING UP, In/Out matching whether the tide is rising or falling
+ * through this stretch; otherwise (more than 2 hours from both
+ * surrounding extremes) the plain "Running In"/"Running Out".
+ */
+function classifyTideConditionFromExtrema(extrema, targetMs) {
+  let prev = null, next = null;
+  for (const ex of extrema) {
+    if (ex.t <= targetMs) prev = ex;
+    else {
+      next = ex;
+      break;
+    }
+  }
+  if (!prev || !next) return null;
+
+  const distToPrev = targetMs - prev.t;
+  const distToNext = next.t - targetMs;
+  const runningIn = prev.type === "low" && next.type === "high";
+  const runningOut = prev.type === "high" && next.type === "low";
+
+  if (distToPrev <= TIDE_SLACK_WINDOW_MS) return prev.type === "high" ? "Slack High" : "Slack Low";
+  if (distToNext <= TIDE_SLACK_WINDOW_MS) return next.type === "high" ? "Slack High" : "Slack Low";
+  if (runningIn) {
+    if (distToPrev <= TIDE_RUN_TRANSITION_ZONE_MS) return "Start Run In";
+    if (distToNext <= TIDE_RUN_TRANSITION_ZONE_MS) return "Last Run In";
+    return "Running In";
+  }
+  if (runningOut) {
+    if (distToPrev <= TIDE_RUN_TRANSITION_ZONE_MS) return "Start Run Out";
+    if (distToNext <= TIDE_RUN_TRANSITION_ZONE_MS) return "Last Run Out";
+    return "Running Out";
+  }
+  // Two consecutive extrema of the SAME type (two lows/two highs in a row)
+  // shouldn't happen with well-formed tide data — null rather than guessed
+  // if it ever does.
+  return null;
+}
+
+/**
  * Best-effort Tide Condition guess for the exact moment someone taps their
  * own position on the Live tab to start a mark (see startNewMarkEntry's
  * `defaults` param, wired up in live.js). `rows` is that location's own
@@ -1087,66 +1143,28 @@ const TIDE_RUN_TRANSITION_ZONE_MS = 2 * 3600000;
  * since a tide half-cycle can be close to that on its own and this needs
  * the surrounding low/high safely inside whatever's passed in.
  *
- * Weather Condition is deliberately NOT defaulted here at all, in either
- * direction — not computed, and not carried over from "last value used"
- * either (see saveLastMarkFieldValues' own exclusion of it). Real weather
- * DESCRIPTION data (cloud cover, rain probability) isn't part of this
- * pipeline — conditions.json only ever carries temp/wind/pressure/tide,
- * nothing that distinguishes Clear from Cloudy from Overcast from Rain. The
- * only real signal available (wind speed) could only ever detect "Windy"
- * and nothing else, which made for a worse default than no default at all:
- * confidently right sometimes, silently wrong (or just blank when it should
- * say Rain) the rest of the time, with no way to tell which from the form
- * alone. Left for the person to pick every time instead.
+ * Weather Condition is deliberately NOT defaulted here — this function
+ * only ever runs synchronously against whatever's already loaded for the
+ * CURRENTLY VIEWED location, and conditions.json (what `rows` is built
+ * from) never carried real weather-description data (cloud cover, rain
+ * probability), only temp/wind/pressure/tide. That gap is now actually
+ * closed — see lookupHistoricalMarkConditions below, which DOES fill
+ * Weather Condition (and Barometer/Wind) via a real Open-Meteo lookup —
+ * but that path is asynchronous (a network round trip), so it's wired up
+ * separately in startNewMarkEntry rather than folded into this synchronous
+ * function.
  *
  * Tide Condition: derived from the location's own real tide curve
- * (findTideExtrema) relative to right now. Working outward from whichever
- * extreme (low or high) is closer — within TIDE_SLACK_WINDOW_MS of it,
- * "Slack Low"/"Slack High"; within TIDE_RUN_TRANSITION_ZONE_MS of it (but
- * past the slack window), "Start Run *" if that extreme was just LEFT or
- * "Last Run *" if it's still COMING UP, In/Out matching whether the tide is
- * rising or falling through this stretch; otherwise (more than 2 hours from
- * both surrounding extremes) the plain "Running In"/"Running Out". Left
- * unset (falling back to "last value used") if there isn't a real low AND
- * high surrounding right now to measure any of this against.
+ * (findTideExtrema) relative to right now, via classifyTideConditionFromExtrema
+ * above. Left unset (falling back to "last value used") if there isn't a
+ * real low AND high surrounding right now to measure any of this against.
  */
 function computeQuickMarkDefaults(rows) {
   const defaults = {};
-
   const nowMs = nowInNaiveEncoding();
   const extrema = findTideExtrema(rows);
-  let prev = null, next = null;
-  for (const ex of extrema) {
-    if (ex.t <= nowMs) prev = ex;
-    else {
-      next = ex;
-      break;
-    }
-  }
-  if (prev && next) {
-    const distToPrev = nowMs - prev.t; // time since the extreme just left
-    const distToNext = next.t - nowMs; // time until the extreme coming up
-    const runningIn = prev.type === "low" && next.type === "high";
-    const runningOut = prev.type === "high" && next.type === "low";
-
-    if (distToPrev <= TIDE_SLACK_WINDOW_MS) {
-      defaults.tideCondition = prev.type === "high" ? "Slack High" : "Slack Low";
-    } else if (distToNext <= TIDE_SLACK_WINDOW_MS) {
-      defaults.tideCondition = next.type === "high" ? "Slack High" : "Slack Low";
-    } else if (runningIn) {
-      if (distToPrev <= TIDE_RUN_TRANSITION_ZONE_MS) defaults.tideCondition = "Start Run In";
-      else if (distToNext <= TIDE_RUN_TRANSITION_ZONE_MS) defaults.tideCondition = "Last Run In";
-      else defaults.tideCondition = "Running In";
-    } else if (runningOut) {
-      if (distToPrev <= TIDE_RUN_TRANSITION_ZONE_MS) defaults.tideCondition = "Start Run Out";
-      else if (distToNext <= TIDE_RUN_TRANSITION_ZONE_MS) defaults.tideCondition = "Last Run Out";
-      else defaults.tideCondition = "Running Out";
-    }
-    // Two consecutive extrema of the SAME type (two lows/two highs in a row)
-    // shouldn't happen with well-formed tide data — left unset rather than
-    // guessed if it ever does.
-  }
-
+  const tideCondition = classifyTideConditionFromExtrema(extrema, nowMs);
+  if (tideCondition) defaults.tideCondition = tideCondition;
   return defaults;
 }
 
@@ -1214,6 +1232,8 @@ function buildMarkPopupViewHtml(mark) {
   for (const f of MARK_POPUP_OPTIONAL_FIELDS) row(f.displayLabel, mark[f.key]);
   row("Size", mark.size != null ? `${mark.size} cm` : null);
   row("Barometer", mark.barometer != null ? `${mark.barometer} hPa` : null);
+  const windParts = [mark.windDirection, mark.windSpeed != null ? `${mark.windSpeed} km/h` : null].filter(Boolean);
+  row("Wind", windParts.length ? windParts.join(" ") : null);
   row("Notes", mark.notes);
   row("Source", mark.source);
   const canEdit = !!getConnection();
@@ -1264,6 +1284,15 @@ function buildMarkPopupEditHtml(mark, markLists) {
         </label>
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Barometer (hPa)
           <input type="number" name="barometer" min="0" step="0.1" value="${mark.barometer != null ? mark.barometer : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
+        </label>
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Wind Direction
+          <select name="windDirection" style="${MARK_POPUP_INPUT_STYLE}">
+            <option value=""></option>
+            ${SHORE_OPTIONS.map((d) => `<option value="${d}" ${mark.windDirection === d ? "selected" : ""}>${d}</option>`).join("")}
+          </select>
+        </label>
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Wind Speed (km/h)
+          <input type="number" name="windSpeed" min="0" step="1" value="${mark.windSpeed != null ? mark.windSpeed : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Notes
           <textarea name="notes" rows="2" style="${MARK_POPUP_INPUT_STYLE}resize:vertical;">${escapeHtml(mark.notes || "")}</textarea>
@@ -1318,6 +1347,13 @@ function collectMarkFormValues(form, originalMark) {
   if (barometerRaw) {
     const barometerNum = Number(barometerRaw);
     if (Number.isFinite(barometerNum)) updated.barometer = barometerNum; // hPa, not rounded — see the field's own schema comment
+  }
+  const windDirectionRaw = val("windDirection");
+  if (windDirectionRaw) updated.windDirection = windDirectionRaw; // already one of SHORE_OPTIONS' 16 compass points — the <select> only ever offers those
+  const windSpeedRaw = val("windSpeed");
+  if (windSpeedRaw) {
+    const windSpeedNum = Math.round(Number(windSpeedRaw));
+    if (Number.isFinite(windSpeedNum)) updated.windSpeed = windSpeedNum; // whole km/h — see the field's own schema comment
   }
   const notes = val("notes");
   if (notes) updated.notes = notes;
@@ -1549,6 +1585,8 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         if (!("notes" in updated)) delete mark.notes;
         if (!("size" in updated)) delete mark.size;
         if (!("barometer" in updated)) delete mark.barometer;
+        if (!("windDirection" in updated)) delete mark.windDirection;
+        if (!("windSpeed" in updated)) delete mark.windSpeed;
         saveLastMarkFieldValues(mark); // every successful save, create or edit — see that function's own comment
 
         if (options.isNew && options.state) {
@@ -2098,6 +2136,11 @@ function showMapClickChoiceDialog() {
  * actually pressed — Cancel (see wireMarkPopupButtons' isNew branch) just
  * removes this temporary marker again, leaving marks.json untouched.
  *
+ * Separately, and asynchronously, Weather/Tide/Barometer/Wind get a
+ * best-effort real-data fill-in a moment after the popup opens — see
+ * fillMarkFormFromHistoricalLookup just below — without blocking the popup
+ * itself on that network round trip.
+ *
  * `state` is the same object loadAndRenderMarks populates for this map (see
  * createMarkLayerState) — on a successful save, wireMarkPopupButtons adds
  * the new mark/marker into it, so it behaves exactly like any other mark
@@ -2129,6 +2172,44 @@ function startNewMarkEntry(map, lat, lng, state, defaults = {}) {
   marker.openPopup();
   const popupEl = marker.getPopup().getElement();
   wireMarkPopupButtons(popupEl, marker, draft, state.markLists, { isNew: true, map, state });
+
+  // Best-effort auto-fill of Weather/Tide/Barometer/Wind from a real
+  // historical lookup (see lookupHistoricalMarkConditions above) — fired
+  // off in the background rather than awaited, since it's a network round
+  // trip and the popup should open immediately regardless of how long
+  // that takes.
+  fillMarkFormFromHistoricalLookup(popupEl, lat, lng, draft.dateTime);
+}
+
+/**
+ * See startNewMarkEntry's own call site, just above. Only ever fills a
+ * field that's STILL BLANK by the time the lookup resolves — checked
+ * live against the form's own current value at that moment, not a
+ * snapshot taken earlier, so it never clobbers anything the "You are
+ * here" quick-entry already set (see computeQuickMarkDefaults/defaults
+ * above) or anything the person already typed while waiting.
+ *
+ * `popupEl` is captured at call time in startNewMarkEntry — if that
+ * popup's content has since been replaced (saved back to view mode) or
+ * removed entirely (cancelled), the `[name="..."]` queries below simply
+ * find nothing on this now-stale element and quietly no-op; there's no
+ * separate "is this still the same open popup" check needed beyond that.
+ */
+async function fillMarkFormFromHistoricalLookup(popupEl, lat, lng, dateTimeNaive) {
+  const result = await lookupHistoricalMarkConditions(lat, lng, dateTimeNaive);
+  const form = popupEl && popupEl.querySelector("[data-mark-form]");
+  if (!form) return;
+
+  const fillIfBlank = (name, value) => {
+    if (value == null || value === "") return;
+    const el = form.querySelector(`[name="${name}"]`);
+    if (el && !el.value) el.value = value;
+  };
+  fillIfBlank("weatherCondition", result.weatherCondition);
+  fillIfBlank("tideCondition", result.tideCondition);
+  fillIfBlank("barometer", result.barometer);
+  fillIfBlank("windDirection", result.windDirection);
+  fillIfBlank("windSpeed", result.windSpeed);
 }
 
 /**
@@ -2386,6 +2467,20 @@ const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
  *                sounder reading is often given to one decimal place (e.g.
  *                1013.2), and there was no "whole units only" convention
  *                asked for here the way there was for size in centimetres.
+ *     windDirection: string, optional — one of the 16 compass points (e.g.
+ *                "SW"). NOT sourced from MARK_LIST_FIELDS/mark_lists.json —
+ *                the compass is a fixed physical set, not an editable
+ *                Settings-tab pick-list the way Species/Bait/etc are, so
+ *                its <select> options come straight from COMPASS_DEGREES
+ *                instead (see buildMarkPopupEditHtml).
+ *     windSpeed: number, optional — whole km/h, matching this site's wind
+ *                units everywhere else (KAYAK_WIND_THRESHOLD_KMH, the
+ *                "Wind Forecast (km/h)" chart series, etc).
+ *     (windDirection, windSpeed, barometer, weatherCondition, and
+ *     tideCondition can all be auto-filled via a real historical lookup —
+ *     see lookupHistoricalMarkConditions below — but every one of them
+ *     stays a normal editable field afterward; the lookup only ever
+ *     pre-fills, it never locks a field or marks it as machine-sourced.)
  *     source:    string, optional — "Manual" for any mark created through
  *                this site's own UI (see startNewMarkEntry), "gpx-import"
  *                on the batch migrated once from the old
@@ -3348,6 +3443,278 @@ function attachFishingConditionScores(rows, sunTimes, dailyTideRanges, pressureB
       row._t, sun.sunrise, sun.sunset, sstByDate
     );
   }
+}
+
+// --- Historical mark conditions lookup (weather/wind/barometer/tide) -------
+//
+// Auto-fills weatherCondition/tideCondition/barometer/windDirection/
+// windSpeed for a mark at a given (lat, lng, dateTime) — see
+// lookupHistoricalMarkConditions below, the single entry point everything
+// else in this section builds toward. Scope, per how this was designed:
+// ONLY runs for a brand-new mark, either created manually (startNewMarkEntry)
+// or accepted through the Sync tab's import (sync.js) — never a retroactive
+// bulk backfill over marks.json's existing ~2,500 marks. That's a real cost
+// consideration, not just tidiness: WillyWeather is billed per call, so
+// backfilling every existing mark would mean thousands of billed calls for
+// a one-off convenience; doing it only at creation/import time keeps this
+// to one WillyWeather call + one Open-Meteo call per NEW mark, same order
+// of magnitude as everything else this site already calls per mark.
+//
+// Two independent data sources, fetched in parallel (see
+// lookupHistoricalMarkConditions):
+//   - Wind (direction/speed), Barometer, and Weather Condition all come
+//     from Open-Meteo's historical archive API — free, keyless, documented
+//     back to 1940 (archive-api.open-meteo.com/v1/archive). Same
+//     parameter names/units this site's live pressure fetch already uses
+//     (pressure_msl, timezone=auto for naive-local timestamps), plus
+//     windspeed_10m/winddirection_10m/weathercode.
+//   - Tide Condition comes from WillyWeather, via the willyweather-search
+//     Worker, using "our defined rules" (classifyTideConditionFromExtrema
+//     above) applied to real historical tide events — snapped to whichever
+//     TRACKED location (config/locations.json) is nearest the mark's own
+//     coordinate, per Oliver's own call: an arbitrary mark's point has no
+//     manually-verified tideOffset of its own, but every tracked location
+//     does, so borrowing the nearest one's calibration is the practical
+//     answer rather than leaving Tide Condition unset for anything that
+//     isn't itself a tracked location.
+//
+// TWO THINGS WORTH KNOWING BEFORE TRUSTING THIS BLINDLY, neither of which
+// could be verified directly while building this (no network path to
+// either external API from the dev sandbox this was built in, and no
+// WillyWeather key on hand even if there had been):
+//   1. This assumes WillyWeather's weather.json genuinely honors a
+//      `startDate` query param for a PAST date the way it does for a
+//      future one. It's a standard, documented parameter for this API, but
+//      lookupTideConditionAt below includes a real sanity check (the
+//      returned tide events actually have to bracket the requested date)
+//      specifically because this was never confirmed against a real call —
+//      if WillyWeather silently ignored it and returned "today onward"
+//      instead, that check is what catches it rather than silently saving
+//      a wrong Tide Condition.
+//   2. willyweather-search.js (the Worker) needed a matching change to
+//      forward startDate at all — that file isn't part of this site's
+//      normal GitHub-upload deploy flow, it has to be manually
+//      copy-pasted into Cloudflare's dashboard and redeployed (see that
+//      file's own header). If Tide Condition never fills in, checking
+//      whether that redeploy actually happened is the first thing to
+//      check, before assuming the code itself is wrong.
+
+const OPEN_METEO_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive";
+
+/**
+ * Open-Meteo's WMO weathercode collapsed onto this site's own 4-value
+ * Weather Condition pick-list (config/mark_lists.json) — there's no exact
+ * match for every WMO code, so this groups by what a person glancing
+ * outside would actually call it: 0-1 (clear/mainly clear) -> Clear, 2
+ * (partly cloudy) -> Cloudy, 3 (overcast) and 45/48 (fog) -> Overcast,
+ * everything else (drizzle, rain, snow, showers, thunderstorms — the site's
+ * pick-list has no separate Snow option, and snow at these coastal
+ * Victorian marks is vanishingly unlikely anyway) -> Rain. Returns null for
+ * an unrecognised/missing code rather than guessing.
+ */
+function weatherCodeToCondition(code) {
+  if (code == null) return null;
+  if (code === 0 || code === 1) return "Clear";
+  if (code === 2) return "Cloudy";
+  if (code === 3 || code === 45 || code === 48) return "Overcast";
+  return "Rain";
+}
+
+/**
+ * One hour's wind/pressure/weathercode from Open-Meteo's historical
+ * archive, for the exact calendar day dateStr ("YYYY-MM-DD") falls on —
+ * returns the raw `hourly` object (parallel time[]/value[] arrays, same
+ * shape openMeteoHourlyLookup already expects) or null on any failure.
+ * `timezone=auto` (same convention fetchOpenMeteoPressureHourly already
+ * uses) makes Open-Meteo return timestamps in the COORDINATE's own local
+ * time — for Victorian marks, that's Melbourne wall-clock time, matching
+ * this site's naive-string convention with no further conversion needed.
+ */
+async function fetchOpenMeteoHistoricalHourly(lat, lng, dateStr) {
+  if (lat == null || lng == null || !dateStr) return null;
+  try {
+    const res = await fetch(
+      `${OPEN_METEO_ARCHIVE_URL}?latitude=${lat}&longitude=${lng}&start_date=${dateStr}&end_date=${dateStr}` +
+      `&hourly=windspeed_10m,winddirection_10m,pressure_msl,weathercode&timezone=auto`
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.hourly || null;
+  } catch (err) {
+    console.error("Open-Meteo historical fetch failed:", err);
+    return null;
+  }
+}
+
+// Cached once per page load — a Sync import can look up conditions for a
+// dozen-plus marks in one batch, and every one of them needs the SAME
+// static list of tracked locations to snap against, so this avoids
+// re-fetching config/locations.json from scratch for every single mark.
+let _trackedLocationsForLookupCache = null;
+
+/** Fresh (cache-busted) config/locations.json, for findNearestTrackedLocation
+ * below — same file/pattern loadTideOffsets already fetches, but that
+ * function only MERGES tideOffset onto an already-loaded conditions.json
+ * location list; this needs the full list (lat/lng/willyweatherId/
+ * tideOffset) standalone, for pages (like sync.html) that never load
+ * conditions.json at all. */
+async function loadTrackedLocationsForLookup() {
+  if (_trackedLocationsForLookupCache) return _trackedLocationsForLookupCache;
+  try {
+    const res = await fetch(`config/locations.json?_=${Date.now()}`, { cache: "no-store" });
+    _trackedLocationsForLookupCache = res.ok ? await res.json() : [];
+  } catch (err) {
+    console.error("Could not load config/locations.json for nearest-location lookup:", err);
+    _trackedLocationsForLookupCache = [];
+  }
+  return _trackedLocationsForLookupCache;
+}
+
+/** Local equirectangular-projection point-to-point distance in metres —
+ * same approach as overpassSegmentDistanceM (point-to-segment) above,
+ * just between two plain points; plenty accurate at the scale a
+ * "nearest tracked location" search runs at across Port Phillip/Western
+ * Port. */
+function distanceMetersBetween(lat1, lng1, lat2, lng2) {
+  const lat0 = ((lat1 + lat2) / 2) * (Math.PI / 180);
+  const kx = 111320 * Math.cos(lat0);
+  const ky = 110540;
+  const dx = (lng2 - lng1) * kx;
+  const dy = (lat2 - lat1) * ky;
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * Whichever tracked location (config/locations.json) is physically nearest
+ * (lat, lng) — no distance cutoff, always returns the closest one that has
+ * both a willyweatherId and real coordinates, per Oliver's own call: snap
+ * to nearest unconditionally rather than falling back to "no calibration"
+ * past some threshold. Returns null only if locations.json failed to load
+ * or genuinely has no usable entries.
+ */
+async function findNearestTrackedLocation(lat, lng) {
+  const locations = await loadTrackedLocationsForLookup();
+  let best = null;
+  let bestDist = Infinity;
+  for (const loc of locations) {
+    if (typeof loc.lat !== "number" || typeof loc.lng !== "number" || !loc.willyweatherId) continue;
+    const d = distanceMetersBetween(lat, lng, loc.lat, loc.lng);
+    if (d < bestDist) {
+      bestDist = d;
+      best = loc;
+    }
+  }
+  return best;
+}
+
+/** "YYYY-MM-DD HH:MM:SS" naive-string ms value -> "YYYY-MM-DD" (UTC
+ * getters, per this site's naive convention — see parseNaive). */
+function naiveDateOnlyStr(ms) {
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
+/**
+ * Real historical Tide Condition for (lat, lng) at targetMs — snaps to the
+ * nearest tracked location (findNearestTrackedLocation) for its
+ * willyweatherId/tideOffset, fetches that station's real tide events for a
+ * 3-day window centred on targetMs's own day (a full day either side, so
+ * there are always real extrema bracketing targetMs even right at a day
+ * boundary — a tide half-cycle is ~6.2h, nowhere near wide enough to need
+ * more), shifts each event's time by the location's own tideOffset exactly
+ * the way applyTideOffsetToRows shifts a whole curve (algebraically
+ * equivalent for a pure time-shift: shifting every extremum's timestamp by
+ * +offsetMinutes reproduces the same "read this station's curve
+ * offsetMinutes earlier" effect, without needing to rebuild and re-scan a
+ * synthetic hourly grid the way applyTideOffsetToRows/findTideExtrema do
+ * for the live chart), then classifies via classifyTideConditionFromExtrema
+ * — the exact same rules computeQuickMarkDefaults already uses, just fed
+ * real past events instead of "now".
+ *
+ * Returns null on any failure, including the sanity check described in
+ * this section's own header comment: if the returned tide events don't
+ * actually bracket targetMs, that's treated as "this lookup didn't really
+ * work" rather than risking a wrong classification from data that quietly
+ * wasn't for the date requested.
+ */
+async function lookupTideConditionAt(lat, lng, targetMs) {
+  if (!WILLYWEATHER_SEARCH_WORKER_URL) return null;
+  const nearest = await findNearestTrackedLocation(lat, lng);
+  if (!nearest) return null;
+
+  const startDateStr = naiveDateOnlyStr(targetMs - 86400000);
+  try {
+    const res = await fetch(`${WILLYWEATHER_SEARCH_WORKER_URL}/weather?id=${encodeURIComponent(nearest.willyweatherId)}&startDate=${startDateStr}&days=3`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const tideDays = ((data.forecasts || {}).tides || {}).days || [];
+    const rawEntries = [];
+    for (const day of tideDays) {
+      for (const entry of day.entries || []) rawEntries.push(entry);
+    }
+    if (rawEntries.length === 0) return null;
+
+    const offsetMs = (nearest.tideOffset || 0) * 60000;
+    const extrema = rawEntries
+      .map((e) => ({ t: parseNaive(e.dateTime) + offsetMs, height: e.height, type: e.type }))
+      .filter((e) => Number.isFinite(e.t) && (e.type === "high" || e.type === "low"))
+      .sort((a, b) => a.t - b.t);
+
+    if (extrema.length === 0 || extrema[0].t > targetMs || extrema[extrema.length - 1].t < targetMs) {
+      console.error(
+        "Historical tide lookup: returned events don't bracket the requested date — " +
+        "startDate may not be honored by WillyWeather as expected, or the Worker hasn't " +
+        "been redeployed with startDate support yet (see willyweather-search.js)."
+      );
+      return null;
+    }
+
+    return classifyTideConditionFromExtrema(extrema, targetMs);
+  } catch (err) {
+    console.error("Historical tide lookup failed:", err);
+    return null;
+  }
+}
+
+/**
+ * The single entry point for this whole section — looks up best-effort
+ * weatherCondition/tideCondition/barometer/windDirection/windSpeed for a
+ * mark at (lat, lng, dateTimeNaive). Returns a plain object with whichever
+ * fields actually resolved; any that failed or found nothing are simply
+ * absent (never throws, never returns a partially-wrong guess) — same
+ * sparse-object convention every other optional mark field already
+ * follows. Runs the WillyWeather tide lookup and the Open-Meteo weather
+ * lookup in parallel since they're fully independent of each other.
+ */
+async function lookupHistoricalMarkConditions(lat, lng, dateTimeNaive) {
+  const result = {};
+  const targetMs = parseNaive(dateTimeNaive);
+  if (targetMs == null || lat == null || lng == null) return result;
+  const dateStr = dateTimeNaive.slice(0, 10);
+  const hourKey = dateTimeNaive.slice(0, 13);
+
+  const [tideCondition, hourly] = await Promise.all([
+    lookupTideConditionAt(lat, lng, targetMs),
+    fetchOpenMeteoHistoricalHourly(lat, lng, dateStr),
+  ]);
+
+  if (tideCondition) result.tideCondition = tideCondition;
+
+  if (hourly && Array.isArray(hourly.time)) {
+    const speed = openMeteoHourlyLookup(hourly.time, hourly.windspeed_10m)[hourKey];
+    const dir = openMeteoHourlyLookup(hourly.time, hourly.winddirection_10m)[hourKey];
+    const pressure = openMeteoHourlyLookup(hourly.time, hourly.pressure_msl)[hourKey];
+    const code = openMeteoHourlyLookup(hourly.time, hourly.weathercode)[hourKey];
+
+    if (speed != null) result.windSpeed = Math.round(speed);
+    if (dir != null) result.windDirection = previewDegreesToCompass(dir);
+    if (pressure != null) result.barometer = Math.round(pressure * 10) / 10;
+    const cond = weatherCodeToCondition(code);
+    if (cond) result.weatherCondition = cond;
+  }
+
+  return result;
 }
 
 // --- Shore direction guess (OpenStreetMap coastline bearing) ---------------
