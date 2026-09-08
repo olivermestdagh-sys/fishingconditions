@@ -1806,8 +1806,44 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
           options.isNew = false; // this popup now behaves like any other existing mark's
         }
 
-        marker.setPopupContent(buildMarkPopupViewHtml(mark));
-        wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options);
+        // If Type changed to something needing a different SHAPE (see
+        // MARK_TYPE_SHAPE_CLASS/createMarkShapeLayer above — POI/Mark/
+        // Catch each draw as a different shape now, not just a colour),
+        // Leaflet has no way to swap an existing layer's class in place —
+        // the only option is tearing down the old marker and creating a
+        // fresh one of the right shape at the same spot, then repointing
+        // every reference at it (state's own markersById map, and
+        // everything below) so nothing keeps working with the now-removed
+        // old instance. Reopens the popup fresh on the new marker rather
+        // than the setPopupContent used for the common case (same shape,
+        // just new field values) — an existing OPEN popup can be updated
+        // in place without disturbing it, but a brand new layer has no
+        // popup bound to update in the first place. A visible popup
+        // "blink" here is an acceptable trade — changing a mark's own
+        // Type mid-edit is a rare action, nowhere near as common as
+        // everything else this save handler already does silently.
+        const desiredShapeClass = MARK_TYPE_SHAPE_CLASS[mark.type] || L.CircleMarker;
+        let effectivePopupEl = popupEl;
+        if (marker.constructor !== desiredShapeClass && options.map) {
+          const latlng = marker.getLatLng();
+          const freshStyle = markStyleFor(mark, options.state);
+          options.map.removeLayer(marker);
+          marker = createMarkShapeLayer(latlng, mark.type, {
+            renderer: (options.state && options.state.canvasRenderer) || undefined,
+            radius: freshStyle.radius,
+            color: freshStyle.color,
+            weight: freshStyle.weight,
+            fillColor: freshStyle.fillColor,
+            fillOpacity: 0.85,
+          }).addTo(options.map);
+          marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
+          marker.openPopup();
+          effectivePopupEl = marker.getPopup().getElement();
+          if (options.state) options.state.markersById.set(mark.id, marker);
+        } else {
+          marker.setPopupContent(buildMarkPopupViewHtml(mark));
+        }
+        wireMarkPopupButtons(effectivePopupEl, marker, mark, markListsCache, options);
         marker.unbindTooltip();
         marker.bindTooltip(markTooltipText(mark, options.state), { direction: "top" });
         const style = markStyleFor(mark, options.state);
@@ -1885,13 +1921,18 @@ function parseGpxWaypoints(gpxText) {
  * these points need to be genuinely private, they can't live in this repo
  * at all.
  *
- * Rendered as Leaflet circleMarkers on a dedicated canvas renderer
- * (L.canvas()), deliberately NOT the custom SVG divIcon pins
- * (buildMapPinDivIcon) used for tracked fishing LOCATIONS elsewhere on this
- * same map. At this data's actual scale (a couple thousand points from the
- * GPX migration alone, and growing), building and painting that many
- * individual HTML/SVG elements would be meaningfully heavier than Leaflet's
- * own canvas-rendered circles, which are built for exactly this point count.
+ * Rendered as Leaflet circleMarkers (or SquareMarker/CrossMarker — see
+ * createMarkShapeLayer/MARK_TYPE_SHAPE_CLASS above, one shape per Mark
+ * Type, matching the same shape convention the Lowrance GPX export uses —
+ * see gpxSymForMark, sync.js) on a dedicated canvas renderer (L.canvas()),
+ * deliberately NOT the custom SVG divIcon pins (buildMapPinDivIcon) used
+ * for tracked fishing LOCATIONS elsewhere on this same map. At this data's
+ * actual scale (a couple thousand points from the GPX migration alone, and
+ * growing), building and painting that many individual HTML/SVG elements
+ * would be meaningfully heavier than Leaflet's own canvas-rendered vector
+ * shapes, which are built for exactly this point count — confirmed
+ * directly: the full real dataset (2,532 marks) loads and shapes in well
+ * under half a second.
  *
  * `state` (see createMarkLayerState) is created by the CALLER, before this
  * resolves, and populated here rather than owned locally — the caller wires
@@ -1904,6 +1945,118 @@ function parseGpxWaypoints(gpxText) {
  * own independent copy with no risk of one page's edits leaking into the
  * other's in-memory state before a reload.
  */
+/**
+ * Two small Leaflet vector-layer subclasses that behave exactly like
+ * L.CircleMarker — same "radius defined in pixels, stays a constant
+ * screen size regardless of zoom" behaviour, same click/tooltip/popup
+ * API, same circular hit-testing for clicks (L.CircleMarker's own
+ * _containsPoint, inherited unchanged — close enough at a marker this
+ * small, and if anything more forgiving for a Cross shape's empty
+ * corners) — but paint a SQUARE or CROSS instead of a circle.
+ *
+ * Exists so marks on THIS site's own map use the same shape-per-Mark-Type
+ * convention as the Lowrance GPX export (see gpxSymForMark, sync.js:
+ * POI -> circle, Mark -> square, Catch -> cross) for real visual
+ * consistency between the two, not just "both draw dots in roughly the
+ * same colour".
+ *
+ * Colour itself deliberately stays exactly as it already was (see
+ * markStyleFor below) — the site's own richer per-species palette, NOT
+ * reduced to Lowrance's 7-colour set the way the GPX export's colours
+ * are. That reduction only matters for the device's own real hardware
+ * limitation; checked directly against real data while building the GPX
+ * export, several distinct species with no individually-configured
+ * colour already collapse onto the same "blue" fallback once
+ * nearest-matched to 7 colours (Snook/Scallops/Trevally/Leather Jacket/
+ * Elephant Fish/Wrasse/Garfish/Port Jackson Shark, specifically) — fine
+ * for a device that has no way around the limit, but applying that same
+ * reduction here would make this map meaningfully worse at telling
+ * species apart at a glance for no reason, since this map doesn't share
+ * that constraint.
+ *
+ * ONLY ever created via createMarkShapeLayer below, on the SAME shared
+ * Canvas renderer every mark on a given map uses (see
+ * state.canvasRenderer) — both this class's own _updatePath (which calls
+ * the Canvas renderer's _updatePoly, the same method L.Polygon/L.Polyline
+ * use internally) and CircleMarker's default _updatePath (which calls the
+ * renderer's _updateCircle) exist ONLY on L.Canvas, not L.SVG — Leaflet's
+ * OTHER built-in renderer, which is actually the map's own DEFAULT unless
+ * a layer is explicitly told to use L.canvas() the way this site's marks
+ * layer always deliberately is (see loadAndRenderMarks's own comment on
+ * why marks use canvas specifically). Creating one of these shapes
+ * without an explicit canvas renderer would throw once Leaflet tried to
+ * actually draw it.
+ */
+const SquareMarker = L.CircleMarker.extend({
+  _project() {
+    L.CircleMarker.prototype._project.call(this);
+    if (!this._point) return;
+    const p = this._point;
+    const r = this._radius;
+    this._parts = [[
+      L.point(p.x - r, p.y - r),
+      L.point(p.x + r, p.y - r),
+      L.point(p.x + r, p.y + r),
+      L.point(p.x - r, p.y + r),
+    ]];
+  },
+  _updatePath() {
+    this._renderer._updatePoly(this, true);
+  },
+});
+
+/**
+ * A "+" shape (not a diagonal "x") — reads more clearly at this marker's
+ * actual on-screen size (a handful of pixels) than a thin diagonal cross
+ * would once anti-aliased down that small. Built as one 12-point closed
+ * outline (a plus-sign silhouette) rather than two separate crossing
+ * strokes, so it still fills/strokes as a single shape the same way
+ * SquareMarker's square and the inherited circle do. See SquareMarker's
+ * own comment just above for everything else (this shares the identical
+ * approach, just a different pixel-space outline).
+ */
+const CrossMarker = L.CircleMarker.extend({
+  _project() {
+    L.CircleMarker.prototype._project.call(this);
+    if (!this._point) return;
+    const p = this._point;
+    const r = this._radius;
+    const arm = r * 0.42; // half-thickness of each bar of the plus
+    this._parts = [[
+      L.point(p.x - arm, p.y - r), L.point(p.x + arm, p.y - r),
+      L.point(p.x + arm, p.y - arm), L.point(p.x + r, p.y - arm),
+      L.point(p.x + r, p.y + arm), L.point(p.x + arm, p.y + arm),
+      L.point(p.x + arm, p.y + r), L.point(p.x - arm, p.y + r),
+      L.point(p.x - arm, p.y + arm), L.point(p.x - r, p.y + arm),
+      L.point(p.x - r, p.y - arm), L.point(p.x - arm, p.y - arm),
+    ]];
+  },
+  _updatePath() {
+    this._renderer._updatePoly(this, true);
+  },
+});
+
+// Mirrors LOWRANCE_TYPE_SHAPES in sync.js (POI -> circle, Mark -> square,
+// Catch -> cross) — kept as a separate constant rather than importing one
+// from the other, since this file (charts.js) is shared/loaded on pages
+// sync.js never is, and vice versa; a genuinely shared constant would need
+// its own third file just for this, which isn't worth it for one small
+// lookup table. POI (or any type not listed — including a genuinely new
+// Mark Type someone adds later, until this map is specifically taught
+// about it) intentionally has NO entry, falling through to plain
+// L.CircleMarker in createMarkShapeLayer just below — matches
+// gpxSymForMark's own "circle" default in spirit.
+const MARK_TYPE_SHAPE_CLASS = { Mark: SquareMarker, Catch: CrossMarker, Fish: CrossMarker };
+
+/** Creates whichever shape layer matches a mark's own Type (see
+ * MARK_TYPE_SHAPE_CLASS just above). Always pass a Canvas renderer in
+ * `options.renderer` — see SquareMarker/CrossMarker's own comment on why
+ * that's required, not optional, for anything but a plain circle. */
+function createMarkShapeLayer(latlng, type, options) {
+  const ShapeClass = MARK_TYPE_SHAPE_CLASS[type] || L.CircleMarker;
+  return new ShapeClass(latlng, options);
+}
+
 async function loadAndRenderMarks(map, state) {
   if (!getConnection()) return;
 
@@ -1930,10 +2083,11 @@ async function loadAndRenderMarks(map, state) {
   }
 
   const renderer = L.canvas({ padding: 0.5 });
+  state.canvasRenderer = renderer; // reused by startNewMarkEntry below for a freshly-created mark, so every shape on this map — loaded or brand new — draws on the same Canvas renderer (see SquareMarker/CrossMarker's own comment on why that's required)
   for (const mark of marks) {
     if (mark.lat == null || mark.lng == null) continue;
     const style = markStyleFor(mark, state);
-    const marker = L.circleMarker([mark.lat, mark.lng], {
+    const marker = createMarkShapeLayer([mark.lat, mark.lng], mark.type, {
       renderer,
       radius: style.radius,
       color: style.color,
@@ -1965,7 +2119,7 @@ async function loadAndRenderMarks(map, state) {
     // isn't in state.marksById until saved — this handler correctly no-ops
     // for it; startNewMarkEntry wires that popup's buttons itself, directly.
     if (!mark || !marker) return;
-    wireMarkPopupButtons(popupEl, marker, mark, state.markLists, { state });
+    wireMarkPopupButtons(popupEl, marker, mark, state.markLists, { state, map });
   });
 
   initMarkControls(map, state);
@@ -2290,7 +2444,7 @@ function initMarkControls(map, state) {
  */
 function createMarkLayerState() {
   const saved = loadMarkViewSettings();
-  return { marksById: new Map(), markersById: new Map(), markLists: [], groupByKey: saved.groupByKey, filters: saved.filters };
+  return { marksById: new Map(), markersById: new Map(), markLists: [], groupByKey: saved.groupByKey, filters: saved.filters, canvasRenderer: null };
 }
 
 /**
@@ -2372,7 +2526,18 @@ function startNewMarkEntry(map, lat, lng, state, defaults = {}) {
     if (defaults[f.key]) draft[f.key] = defaults[f.key];
   }
   const style = markStyleFor(draft, state);
-  const marker = L.circleMarker([lat, lng], {
+  // Reuses the same Canvas renderer loadAndRenderMarks already created for
+  // this map (stashed on state.canvasRenderer) rather than letting Leaflet
+  // fall back to its own default renderer (SVG, since this map is never
+  // created with preferCanvas) — required for anything but a plain circle,
+  // see SquareMarker/CrossMarker's own comment in createMarkShapeLayer.
+  // Falls back to creating one fresh here only if somehow called before
+  // loadAndRenderMarks has run at all (defensive; shouldn't happen in
+  // practice, since marks can't be clicked-to-create before the layer
+  // that would receive the click has loaded).
+  if (!state.canvasRenderer) state.canvasRenderer = L.canvas({ padding: 0.5 });
+  const marker = createMarkShapeLayer([lat, lng], draft.type, {
+    renderer: state.canvasRenderer,
     radius: style.radius,
     color: style.color,
     weight: style.weight,
