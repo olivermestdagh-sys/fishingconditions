@@ -2591,6 +2591,46 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
   margin-right: 4px;
 }
 
+/* Raises Leaflet's own popup PANE (not just this one popup's own wrapper —
+   see below for why that distinction matters) above every other floating
+   layer on the site. Leaflet's default popup pane sits at z-index:700 (its
+   own leaflet.css, between markerPane and tooltipPane in Leaflet's fixed
+   scheme) — comfortably below TWO of this site's own floating layers that
+   can genuinely overlap it on a small mobile screen: the Live tab's
+   bottom-sheet .location-hover-panel (2000, "the minimised location/graph
+   panel") and the mark filter modal, which reuses .ww-candidate-overlay
+   (10000, "the filter window"). That left a mark's entry/edit popup
+   trapped BEHIND both, unreachable — exactly what Oliver reported. A
+   popup is a "finish this or cancel it" interaction by nature; it should
+   always be the front-most thing on screen wherever it opens, so this is
+   pushed well clear of every other z-index on the site (10001 was
+   previously the highest, .chart-modal-close) rather than just nudged
+   past these two specific layers, in case something else floats even
+   higher later.
+   Targets the PANE, every popup on the map shares ONE .leaflet-popup-pane
+   element (Leaflet doesn't create a separate pane per popup) — a z-index
+   set on an individual .leaflet-popup instead (e.g. scoped to just
+   .mark-popup-leaflet, matching every other rule in this file that
+   deliberately scopes to THIS popup only) can't win a stacking fight
+   against something outside the pane if the pane itself is still capped
+   at 700: children can't escape their own parent's stacking context.
+   Applying this to the whole pane does mean every popup on the map
+   (tracked-location info, WillyWeather preview, not just marks) now sits
+   above the hover panel and filter modal too — judged the right call
+   given a popup is always meant to be the topmost thing regardless of
+   which one it is, not a regression specific to marks.
+   Selector specificity note: plain `.leaflet-popup-pane` alone would tie
+   leaflet.css's own same-specificity rule, and since style.css loads
+   BEFORE leaflet.css in every page's <head>, the tie would go to
+   leaflet.css (later rule wins when specificity is equal) — silently
+   undoing this override. The extra `.leaflet-container` ancestor class
+   here (present on every Leaflet map's own root element) raises this
+   rule's specificity past that tie, the same technique already relied on
+   by .mark-popup-leaflet .leaflet-popup-content just above. */
+.leaflet-container .leaflet-popup-pane {
+  z-index: 10500;
+}
+
 /* Floating "colour by" + Filters control bar over the Location/Live maps
    (see initMarkControls, charts.js) — starts hidden (display:none, set in
    HTML) until marks actually load. top:56px rather than 10px specifically
