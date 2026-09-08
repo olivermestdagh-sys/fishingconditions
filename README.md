@@ -630,6 +630,26 @@ do too (no need for a real binary `.usr` writer — a much heavier, riskier
 thing to get right without a real unit to test an exported file against,
 and unnecessary since GPX import works).
 
+Each waypoint's `<name>` is the mark's **species** (falling back to its
+own `name` field, then a generic label, only if there's no species at
+all) — most of the old migrated batch has a place name in `name`
+("Williamstown", "Leopold"), which is far less useful on a chartplotter
+than the actual catch; that place name is kept in `<desc>` instead rather
+than lost. Each waypoint also gets a `<sym>` — a Fish-type mark gets
+Lowrance's "fish" icon in whatever colour its species is configured with
+in `config/mark_lists.json` (the same colour the site's own map paints
+that species' pins with), a POI gets a plain diamond. Worth knowing: this
+is a best-effort substitute, not a restoration of whatever icon a mark
+literally had on the device originally — the Sync tab's own `.usr` parser
+reads past a waypoint's icon/colour bytes without keeping either value, so
+that original information is already gone for every mark imported so far.
+It's also unverified against a real device: the "shape,colour" `<sym>`
+convention comes from a reverse-engineered mapping for Lowrance's binary
+`.usr` format specifically, not confirmed against how Lowrance's own GPX
+*import* parses a plain `<sym>` string — worth checking a small test
+export on the actual sounder rather than assuming every species shows its
+intended colour.
+
 Gated behind the same GitHub connection as everything else that writes to
 this repo (see "Editing locations from the site itself" below) — connect
 from Settings first.

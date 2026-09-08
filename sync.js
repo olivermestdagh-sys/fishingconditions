@@ -507,19 +507,111 @@ function naiveToGpxTime(naive) {
   return String(naive).replace(" ", "T") + "Z";
 }
 
+// Lowrance's own icon-color naming convention for GPX <sym> — "shape,color"
+// (e.g. "fish,blue") — matches the reverse-engineered lowranceusr4 icon
+// table this project already used when building the .usr PARSER (see
+// parseUsrWaypoints's header comment; same table, same source). Used here
+// on EXPORT so a re-imported mark shows something more useful than every
+// chartplotter's own default fallback icon (a plain blue circle — exactly
+// what Oliver saw before this existed, since there was no <sym> tag at
+// all).
+//
+// IMPORTANT HONESTY NOTE: this is NOT a restoration of whatever icon a
+// mark originally had on the device. parseUsrWaypoints reads straight past
+// a waypoint's own icon_id/color_id bytes (just to keep the byte offset
+// correct for the fields after them) without keeping either value — by
+// the time a mark reaches marks.json, that original icon information is
+// already gone, for every mark imported so far. What this does instead is
+// derive a colour from the mark's own SPECIES, using the same colour
+// already configured for it in config/mark_lists.json (the same colour the
+// site's own map already paints that species' pins with) — matched to the
+// nearest of Lowrance's 8 basic named colours. It's the best available
+// substitute given what's actually stored, not a literal reconstruction.
+// It's also UNVERIFIED against a real device: this "shape,color" string
+// convention comes from a reverse-engineered mapping for Lowrance's binary
+// .usr format specifically, not confirmed against how Lowrance's own GPX
+// IMPORT parses a plain <sym> string. Worst case if it's not honoured:
+// exactly today's behaviour (a default icon) — it can't make things worse,
+// but it's worth checking a small test export on the actual sounder before
+// assuming every species is showing its intended colour.
+const LOWRANCE_NAMED_COLORS = {
+  blue: [0, 0, 255],
+  magenta: [255, 0, 255],
+  orange: [255, 165, 0],
+  yellow: [255, 255, 0],
+  green: [0, 128, 0],
+  aqua: [0, 255, 255],
+  white: [255, 255, 255],
+  red: [255, 0, 0],
+};
+
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** Nearest of Lowrance's 8 basic named colours to a #rrggbb hex value, by
+ * plain squared-RGB-distance — good enough for "which named colour does
+ * this look most like", not colour-science-accurate. Returns null for an
+ * unparseable/missing hex. */
+function nearestLowranceColorName(hex) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return null;
+  let best = null;
+  let bestDist = Infinity;
+  for (const name in LOWRANCE_NAMED_COLORS) {
+    const [r, g, b] = LOWRANCE_NAMED_COLORS[name];
+    const dist = (rgb[0] - r) ** 2 + (rgb[1] - g) ** 2 + (rgb[2] - b) ** 2;
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = name;
+    }
+  }
+  return best;
+}
+
+/** The <sym> value for one mark on export — see this section's own header
+ * comment for the honesty caveats. A POI gets a plain diamond (Lowrance's
+ * own generic waypoint shape per the same reference table); a Fish mark
+ * gets the "fish" shape in whatever colour its species is configured with
+ * in config/mark_lists.json (falling back to green — the first-listed
+ * colour for the "fish" icon in the same source table — for a species
+ * with no colour configured, or no species at all). */
+function gpxSymForMark(m) {
+  if (m.type === "POI") return "diamond,blue";
+  const entry = markLists.find((r) => r.field === "Species" && r.value === m.species);
+  const colorName = entry && entry.color ? nearestLowranceColorName(entry.color) : null;
+  return `fish,${colorName || "green"}`;
+}
+
 function buildGpxDocument(marks) {
   const wpts = marks
     .map((m) => {
+      // Species now goes in <name> (see below), so repeating it here would
+      // be redundant — <desc> instead carries the mark's own `name` when
+      // it's something DIFFERENT and worth keeping (most of the old
+      // gpx-import batch has a real place name here, e.g. "Williamstown"),
+      // plus any notes.
       const descParts = [];
-      if (m.species) descParts.push(m.species);
+      if (m.name && m.name !== m.species) descParts.push(m.name);
       if (m.notes) descParts.push(m.notes);
       const desc = descParts.join(" — ");
       const timeTag = m.dateTime ? `<time>${escapeXml(naiveToGpxTime(m.dateTime))}</time>` : "";
       const descTag = desc ? `<desc>${escapeXml(desc)}</desc>` : "";
+      // Species first, per Oliver's own call — most marks' `name` is a
+      // place name (Williamstown, Leopold, etc, from the old gpx-import
+      // migration), which is far less useful on a chartplotter than the
+      // actual catch. Falls back to name (still better than nothing) and
+      // then a generic label only when a mark has neither.
+      const nameTag = escapeXml(m.species || m.name || "Mark");
+      const symTag = `<sym>${escapeXml(gpxSymForMark(m))}</sym>`;
       return (
         `  <wpt lat="${m.lat}" lon="${m.lng}">\n` +
-        `    <name>${escapeXml(m.name || m.species || "Mark")}</name>\n` +
+        `    <name>${nameTag}</name>\n` +
         (descTag ? `    ${descTag}\n` : "") +
+        `    ${symTag}\n` +
         (timeTag ? `    ${timeTag}\n` : "") +
         `  </wpt>`
       );
