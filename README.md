@@ -545,8 +545,13 @@ Species, Weather Condition, Tide Condition, Water Condition, Bait, Rig, Rod,
 and Berley — each one picked from `config/mark_lists.json` rather than typed
 free text, so a value like "Whiting" is always spelled the same way for
 filtering/export later rather than drifting into near-duplicates ("whiting",
-"small whiting"). The full field-by-field shape is documented as a comment
-above `MARK_LIST_FIELDS` in `charts.js`.
+"small whiting"). Size (cm), Barometer (hPa), Wind Direction, and Wind Speed
+(km/h) round it out as plain measurements rather than pick-list fields —
+there's nothing to draw a Settings-tab list from for a number, and Wind
+Direction's 16 compass points are a fixed physical set, not something that
+would ever need editing the way Species or Bait might. The full field-by-field
+shape is documented as a comment above `MARK_LIST_FIELDS`/`MARKS_FILE_PATH`
+in `charts.js`.
 
 **Editing the pick-lists**: the Settings tab's "Fishing Mark Lists" section
 lets you add or remove options for each of the nine fields above (Mark Type
@@ -589,11 +594,11 @@ nothing is written until you actually hit Import.
    coordinate or description drifted slightly on the device since. Garmin
    GPX has no equivalent persistent ID, so this step never applies there.
 2. **Distance only** (both device types) — anything within 20m of a mark
-   already in `data/marks.json` is treated as already tracked. No name or
-   species check — deliberately simple, per how this was designed. A
-   matched candidate isn't hidden, just shown unchecked by default, so a
-   genuinely different catch recorded a few metres from an old mark is
-   still visible and one click from being imported anyway.
+   already in `data/marks.json` is treated as already tracked and left out
+   of the review list entirely — no name or species check, deliberately
+   simple, per how this was designed. Only genuinely new spots are real
+   import candidates; the summary line still reports how many were matched
+   and skipped, for transparency, without listing them individually.
 
 Before matching, waypoints from the SAME file that sit within 20m of each
 other AND resolve to the same species are merged into one candidate —
@@ -616,6 +621,58 @@ and unnecessary since GPX import works).
 Gated behind the same GitHub connection as everything else that writes to
 this repo (see "Editing locations from the site itself" below) — connect
 from Settings first.
+
+## Auto-filling Weather/Tide/Barometer/Wind on a mark
+
+A brand-new mark — created manually on the map, or accepted through the
+Sync tab's import — gets a best-effort, real-data guess for Weather
+Condition, Tide Condition, Barometer, Wind Direction, and Wind Speed,
+looked up for its own exact GPS point and Date/Time. Every one of these
+stays a normal editable field afterward; the lookup only ever pre-fills a
+blank field, it never locks one or overwrites something already set (by
+you, or by the Live tab's own "You are here" tide guess — see below).
+
+**Scope, deliberately**: this only ever runs for a NEW mark — never a
+retroactive backfill over the marks already sitting in `data/marks.json`.
+WillyWeather bills per call, so backfilling thousands of existing marks in
+one go would mean thousands of billed calls for a one-off convenience;
+only looking this up at creation/import time keeps it to one WillyWeather
+call plus one Open-Meteo call per NEW mark.
+
+**Where the data comes from**:
+
+- **Wind, Barometer, Weather Condition** — Open-Meteo's historical archive
+  API (`archive-api.open-meteo.com`), free and keyless, hourly data back
+  to 1940. Weather Condition comes from Open-Meteo's WMO weather code,
+  collapsed onto this site's own Clear/Cloudy/Overcast/Rain pick-list.
+- **Tide Condition** — WillyWeather's real tide predictions for that exact
+  past date, via the `willyweather-search` Worker, run through "our
+  defined rules" (the same Slack/Running/Last Run/Start Run logic the Live
+  tab's own quick-entry already uses — see `classifyTideConditionFromExtrema`
+  in `charts.js`). Since an arbitrary mark's coordinate has no
+  manually-verified tide offset of its own, this **snaps to whichever
+  tracked location (the one above) is physically nearest** and borrows
+  its calibration — always, with no distance cutoff.
+
+**Requires a Worker redeploy.** The `willyweather-search` Worker needed a
+code change (a `startDate` parameter, so it can fetch a PAST tide window
+instead of only "today onward") to make this work at all. Like any other
+change to that file, it isn't picked up by the normal GitHub upload flow —
+it has to be manually pasted into Cloudflare's dashboard and redeployed
+(see the deploy steps at the top of `willyweather-search.js`). Tide
+Condition will simply stay blank on new marks until that's done; Weather/
+Wind/Barometer don't depend on the Worker at all and work regardless.
+
+**One assumption worth knowing about**: this relies on WillyWeather's own
+API actually honouring that `startDate` parameter for a past date the way
+it does for a future one. It's a standard, documented parameter for their
+API, but it was never confirmed against a real live call while this was
+built. There's a safety check built in — if the tide data that comes back
+doesn't actually cover the date that was asked for, Tide Condition is left
+blank rather than risking a wrong guess, and a message is logged to the
+browser console explaining why. Worth keeping an eye on the first few
+marks created after this ships, just to confirm Tide Condition is coming
+through as expected.
 
 ## Editing locations from the site itself
 

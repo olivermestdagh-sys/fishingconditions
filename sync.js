@@ -684,6 +684,45 @@ function setAllSelected(value) {
   renderReviewList();
 }
 
+// How many marks' historical-conditions lookups (see
+// lookupHistoricalMarkConditions, charts.js) run at once during an import —
+// each one is a real, billed WillyWeather call plus an Open-Meteo call, so
+// this deliberately stays modest rather than firing every mark in a batch
+// simultaneously. Doesn't need to be tuned per-import-size; a small pool
+// just spreads the same total work out over a bit more wall-clock time.
+const SYNC_LOOKUP_CONCURRENCY = 4;
+
+/**
+ * Runs `worker(item, index)` for every item in `items`, at most `limit` at
+ * once, rather than a plain Promise.all firing everything simultaneously.
+ * `onProgress(doneCount, total)`, if given, fires after each item finishes
+ * (success or failure) — used here to keep the import status text moving
+ * instead of sitting on one static message for however long a whole batch
+ * takes. A single item throwing is caught and recorded as `null` in that
+ * slot rather than aborting the rest of the batch.
+ */
+async function runWithConcurrencyLimit(items, limit, worker, onProgress) {
+  let nextIndex = 0;
+  let doneCount = 0;
+  const results = new Array(items.length);
+  async function runOne() {
+    while (nextIndex < items.length) {
+      const i = nextIndex++;
+      try {
+        results[i] = await worker(items[i], i);
+      } catch (err) {
+        console.error("Historical conditions lookup failed for one mark:", err);
+        results[i] = null;
+      }
+      doneCount++;
+      if (onProgress) onProgress(doneCount, items.length);
+    }
+  }
+  const runners = Array.from({ length: Math.min(limit, items.length) }, runOne);
+  await Promise.all(runners);
+  return results;
+}
+
 async function handleImportClick() {
   const statusEl = document.getElementById("importStatus");
   const toImport = candidates.filter((c) => c.selected);
@@ -694,11 +733,29 @@ async function handleImportClick() {
   }
   const btn = document.getElementById("btnImportSelected");
   btn.disabled = true;
-  statusEl.textContent = `Importing ${toImport.length} mark${toImport.length === 1 ? "" : "s"}…`;
+  statusEl.textContent = `Looking up conditions for ${toImport.length} mark${toImport.length === 1 ? "" : "s"}…`;
   statusEl.style.color = "";
 
+  // Real historical weather/tide/barometer/wind lookup per mark (see
+  // lookupHistoricalMarkConditions, charts.js) — device-imported marks
+  // never carry this data themselves, so every one of them is a genuine
+  // fill-in-the-blanks case, not just a maybe. Runs BEFORE the actual
+  // marks.json write below, so a failed lookup for one mark never risks
+  // the batch commit itself — it just means that one mark imports without
+  // those extra fields, same as if they'd been left blank by hand.
+  const conditionsByIndex = await runWithConcurrencyLimit(
+    toImport,
+    SYNC_LOOKUP_CONCURRENCY,
+    (c) => lookupHistoricalMarkConditions(c.lat, c.lng, c.dateTime || nowAsNaiveString()),
+    (done, total) => {
+      statusEl.textContent = `Looking up conditions: ${done} of ${total}…`;
+    }
+  );
+  statusEl.textContent = `Importing ${toImport.length} mark${toImport.length === 1 ? "" : "s"}…`;
+
   const nowStr = nowAsNaiveString();
-  const newMarks = toImport.map((c) => {
+  const newMarks = toImport.map((c, i) => {
+    const looked = conditionsByIndex[i] || {};
     const mark = {
       id: makeMarkId(),
       lat: c.lat,
@@ -712,6 +769,11 @@ async function handleImportClick() {
     if (c.species) mark.species = c.species;
     if (c.notes) mark.notes = c.notes;
     if (c.sourceUuid) mark.sourceUuid = c.sourceUuid;
+    if (looked.weatherCondition) mark.weatherCondition = looked.weatherCondition;
+    if (looked.tideCondition) mark.tideCondition = looked.tideCondition;
+    if (looked.barometer != null) mark.barometer = looked.barometer;
+    if (looked.windDirection) mark.windDirection = looked.windDirection;
+    if (looked.windSpeed != null) mark.windSpeed = looked.windSpeed;
     return mark;
   });
 
