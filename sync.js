@@ -637,6 +637,36 @@ function downloadTextFile(filename, mimeType, text) {
   URL.revokeObjectURL(url);
 }
 
+/** "fishing-marks-YYYY-MM-DD-HHMM.gpx" — date AND time (not just the date,
+ * per Oliver's own call), so exporting more than once in a day doesn't
+ * quietly overwrite an earlier download of the same name. Colons are
+ * stripped from the time portion since they're one of the characters
+ * Windows won't allow in a filename at all (see sanitizeExportFilename's
+ * own comment on the rest). */
+function defaultExportFilename() {
+  const now = nowAsNaiveString(); // "YYYY-MM-DD HH:MM:SS"
+  const datePart = now.slice(0, 10);
+  const timePart = now.slice(11, 16).replace(":", "");
+  return `fishing-marks-${datePart}-${timePart}.gpx`;
+}
+
+/** Whatever the person actually typed into the File name field, made safe
+ * to save as-is: strips the handful of characters Windows (the strictest
+ * common filesystem) won't allow in a filename at all (\/:*?"<>|), and
+ * makes sure it ends in .gpx regardless of whether they typed that
+ * themselves — a bare "Lang Lang Trip" becomes "Lang Lang Trip.gpx" rather
+ * than downloading with no extension at all. Falls back to
+ * defaultExportFilename() if the field was left blank or ends up empty
+ * after stripping. */
+function sanitizeExportFilename(raw) {
+  let name = String(raw || "").trim();
+  if (!name) return defaultExportFilename();
+  name = name.replace(/[\\/:*?"<>|]/g, "").trim();
+  if (!name) return defaultExportFilename();
+  if (!/\.gpx$/i.test(name)) name += ".gpx";
+  return name;
+}
+
 async function handleExportClick() {
   const statusEl = document.getElementById("exportStatus");
   statusEl.textContent = "Building export…";
@@ -657,9 +687,10 @@ async function handleExportClick() {
       return;
     }
     const gpx = buildGpxDocument(marks);
-    const stamp = nowAsNaiveString().slice(0, 10);
-    downloadTextFile(`fishing-marks-${stamp}.gpx`, "application/gpx+xml", gpx);
-    statusEl.textContent = `Exported ${marks.length} marks as fishing-marks-${stamp}.gpx — load this onto your Garmin or Lowrance via its GPX import option.`;
+    const filenameInput = document.getElementById("exportFilenameInput");
+    const filename = sanitizeExportFilename(filenameInput ? filenameInput.value : "");
+    downloadTextFile(filename, "application/gpx+xml", gpx);
+    statusEl.textContent = `Exported ${marks.length} marks as ${filename} — load this onto your Garmin or Lowrance via its GPX import option.`;
     statusEl.style.color = "#16a34a";
   } catch (err) {
     console.error("GPX export failed:", err);
@@ -1082,6 +1113,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   document.getElementById("btnImportSelected").addEventListener("click", handleImportClick);
   document.getElementById("btnExportGpx").addEventListener("click", handleExportClick);
+  const filenameInput = document.getElementById("exportFilenameInput");
+  if (filenameInput) filenameInput.value = defaultExportFilename();
   document.getElementById("syncSearchBox").addEventListener("input", (e) => {
     searchFilter = e.target.value.trim().toLowerCase();
     visibleCount = 100;
