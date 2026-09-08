@@ -1320,6 +1320,73 @@ function markListOptionsHtml(markLists, listLabel, currentValue) {
  * correct on its own terms, independent of whatever gates marks display
  * further up, rather than relying on that outer gate alone.
  */
+/** "95" -> "1h 35m"; under an hour stays as "42 min". Rounds to the
+ * nearest minute — this is a rough distance÷speed estimate to begin with
+ * (see fillMarkPopupDistances), false precision down to seconds wouldn't
+ * mean anything real. */
+function formatDurationMinutes(totalMinutes) {
+  const mins = Math.round(totalMinutes);
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+/**
+ * Fills in "Nearest location" and "From you" on an already-open mark VIEW
+ * popup — two pieces of orientation context that need a live lookup (the
+ * tracked-locations list, and the browser's own GPS position) rather than
+ * anything already sitting on the mark object itself, so — same pattern as
+ * fillMarkFormFromHistoricalLookup above — they're filled in a moment
+ * after the popup shows rather than blocking it opening at all.
+ *
+ * "From you" includes an estimated travel time at a flat 6 km/h (a rough
+ * kayak-paddling speed) — genuinely just distance÷speed, a straight-line
+ * estimate that doesn't account for current, wind, or the real paddling
+ * route, not a real routing lookup the way getDriveTimeMinutes above is
+ * for an actual road destination (most fishing marks aren't one). Good
+ * enough for "is this close or a proper trip", not meant as a precise ETA.
+ * "Nearest location" gets a plain distance only, no travel time — it's a
+ * reference point (which tracked location's tide/weather calibration is
+ * relevant here), not somewhere being travelled to from here.
+ *
+ * `popupEl` is captured at call time by whichever caller invokes this
+ * (either a popupopen handler for a freshly-bound, never-yet-opened
+ * popup, or explicitly right after an already-open popup's content is
+ * swapped back to view mode) — if the popup's since closed or been
+ * replaced, the querySelector calls below simply find nothing on this
+ * now-stale element and quietly no-op, same reasoning as the historical-
+ * lookup fill above.
+ */
+async function fillMarkPopupDistances(popupEl, mark) {
+  if (!popupEl || mark.lat == null || mark.lng == null) return;
+  const [nearest, gps] = await Promise.all([
+    findNearestTrackedLocation(mark.lat, mark.lng),
+    requestGpsPosition(),
+  ]);
+
+  const nearestEl = popupEl.querySelector('[data-mark-distance-row="nearest"] span:last-child');
+  if (nearestEl) {
+    if (nearest && nearest.lat != null && nearest.lng != null) {
+      const km = distanceMetersBetween(mark.lat, mark.lng, nearest.lat, nearest.lng) / 1000;
+      nearestEl.textContent = `${km.toFixed(1)} km — ${nearest.name}`;
+    } else {
+      nearestEl.textContent = "Unavailable";
+    }
+  }
+
+  const fromYouEl = popupEl.querySelector('[data-mark-distance-row="fromyou"] span:last-child');
+  if (fromYouEl) {
+    if (gps) {
+      const km = distanceMetersBetween(mark.lat, mark.lng, gps.lat, gps.lng) / 1000;
+      const minutes = (km / 6) * 60;
+      fromYouEl.textContent = `${km.toFixed(1)} km (~${formatDurationMinutes(minutes)} paddling)`;
+    } else {
+      fromYouEl.textContent = "Location unavailable";
+    }
+  }
+}
+
 function buildMarkPopupViewHtml(mark) {
   const rows = [];
   const row = (label, value) => {
@@ -1344,6 +1411,12 @@ function buildMarkPopupViewHtml(mark) {
   }
   if (applicable.includes("notes")) row("Notes", mark.notes);
   row("Source", mark.source);
+  // Filled in asynchronously right after this popup actually shows — see
+  // fillMarkPopupDistances above for why these two can't just be plain
+  // row() calls like everything above (they need a live GPS/lookup, not
+  // anything already sitting on `mark`).
+  rows.push(`<div data-mark-distance-row="nearest" style="display:flex;gap:6px;font-size:0.85rem;margin-bottom:3px;"><span style="font-weight:600;min-width:64px;">Nearest loc.</span><span>Calculating…</span></div>`);
+  rows.push(`<div data-mark-distance-row="fromyou" style="display:flex;gap:6px;font-size:0.85rem;margin-bottom:3px;"><span style="font-weight:600;min-width:64px;">From you</span><span>Calculating…</span></div>`);
   const canEdit = !!getConnection();
   return `
     <div data-mark-id="${escapeHtml(mark.id)}" style="min-width:200px;">
@@ -1767,6 +1840,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         return;
       }
       marker.setPopupContent(buildMarkPopupViewHtml(mark));
+      fillMarkPopupDistances(popupEl, mark);
       wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options);
     });
   }
@@ -1856,6 +1930,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         } else {
           marker.setPopupContent(buildMarkPopupViewHtml(mark));
         }
+        fillMarkPopupDistances(effectivePopupEl, mark);
         wireMarkPopupButtons(effectivePopupEl, marker, mark, markListsCache, options);
         marker.unbindTooltip();
         marker.bindTooltip(markTooltipText(mark, options.state), { direction: "top" });
@@ -2179,6 +2254,11 @@ async function loadAndRenderMarks(map, state) {
     }, state.markLists).addTo(map);
     marker.bindTooltip(markTooltipText(mark, state), { direction: "top" });
     marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
+    // Only fires the actual distance lookups the first time each mark's
+    // popup is genuinely opened by a click — with a couple thousand marks
+    // loaded, computing this eagerly for every single one regardless of
+    // whether it's ever clicked would be wasted work at real scale.
+    marker.on("popupopen", () => fillMarkPopupDistances(marker.getPopup().getElement(), mark));
     state.marksById.set(mark.id, mark);
     state.markersById.set(mark.id, marker);
   }
