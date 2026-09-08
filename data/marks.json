@@ -27845,9 +27845,7 @@
       "type": "POI",
       "dateTime": "2026-07-10 09:11:36",
       "createdAt": "2026-09-08 13:45:50",
-      "source": "lowrance-import",
-      "species": "Unknown",
-      "sourceUuid": "e9bbec25a00ecd449c22a7b6685e9f1e"
+      "source": "lowrance-import"
     },
     {
       "id": "m_1788839150373_9oo36",
