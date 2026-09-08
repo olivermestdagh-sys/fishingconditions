@@ -34,8 +34,6 @@ let existingMarks = []; // loaded once from data/marks.json — used both to
                          // just added too, without a re-fetch.
 let markLists = []; // config/mark_lists.json rows — species pick-list options
 let knownSpecies = [];
-let knownWeatherConditions = [];
-let knownTideConditions = [];
 let candidates = []; // the current file's parsed+deduped candidate marks —
                       // see collapseRawWaypoints/buildCandidatesFromRaw
 let visibleCount = 100; // how many of `candidates` (after search filtering)
@@ -624,14 +622,28 @@ function renderCandidateRow(c, i) {
   // always genuinely new. See reviewableCandidates' own comment.
   const visitBadge = c.visitCount > 1 ? `<span class="pill sync-pill-visits">${c.visitCount} visits merged</span>` : "";
 
-  // Weather/Tide/Wind Direction pick from the same lists a manually-edited
-  // mark's own popup uses (see buildMarkPopupEditHtml, charts.js) — an
-  // empty leading <option> for "not looked up / not set", same convention
-  // as every other optional field here. SHORE_OPTIONS is charts.js's own
-  // 16-point compass list (already loaded on this page, same reuse
-  // buildMarkPopupEditHtml itself makes for Wind Direction).
-  const selectOptionsHtml = (values, current) =>
-    values.map((v) => `<option value="${escapeHtml(v)}" ${v === current ? "selected" : ""}>${escapeHtml(v)}</option>`).join("");
+  // Every OTHER pick-list field a mark can carry (Mark Type, Weather/Tide/
+  // Water Condition, Bait, Rig, Rod, Berley) — driven straight off
+  // MARK_LIST_FIELDS/markListOptionsHtml, the exact same list+lookup the
+  // main mark-edit popup itself uses (buildMarkPopupEditHtml, charts.js),
+  // rather than a second hand-maintained copy that could drift out of
+  // sync with it (an earlier version of this row DID drift: Mark Type was
+  // hardcoded to just Fish/POI here, ignoring anything else added via the
+  // Settings tab, and Water/Bait/Rig/Rod/Berley weren't shown at all).
+  // Species is excluded from this loop and handled separately above/below
+  // it — it gets its own "(new)" labelling for an unrecognised device
+  // species name, which is common and worth flagging distinctly; that
+  // doesn't apply to any of these other fields.
+  const otherListFieldsHtml = MARK_LIST_FIELDS.filter((f) => f.key !== "species")
+    .map(
+      (f) => `<select data-role="${f.key}" data-idx="${i}" title="${escapeHtml(f.label)}">${markListOptionsHtml(markLists, f.label, c[f.key])}</select>`
+    )
+    .join("");
+
+  // Wind Direction isn't in MARK_LIST_FIELDS at all — same as the main
+  // popup, it's sourced from SHORE_OPTIONS (charts.js's fixed 16-point
+  // compass list), not an editable Settings-tab pick-list.
+  const windDirectionOptions = SHORE_OPTIONS.map((d) => `<option value="${d}" ${d === c.windDirection ? "selected" : ""}>${d}</option>`).join("");
 
   return `
     <div class="sync-row" data-idx="${i}">
@@ -642,26 +654,20 @@ function renderCandidateRow(c, i) {
         <div class="sync-row-badges">
           <span class="pill sync-pill-new">new</span>${visitBadge}
           <span class="sync-row-coords">${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}</span>
-          <span class="sync-row-date">${escapeHtml(c.dateTime || "")}</span>
         </div>
         <div class="sync-row-inputs">
-          <select data-role="species" data-idx="${i}" title="Species">${speciesOptions}${extraOption}</select>
           <input type="text" data-role="name" data-idx="${i}" value="${escapeHtml(c.name)}" placeholder="Display name" title="Name" />
-          <select data-role="type" data-idx="${i}" title="Mark Type">
-            <option value="Fish" ${c.type === "Fish" ? "selected" : ""}>Fish</option>
-            <option value="POI" ${c.type === "POI" ? "selected" : ""}>POI</option>
+          <input type="datetime-local" data-role="dateTime" data-idx="${i}" step="1" value="${naiveToDatetimeLocal(c.dateTime)}" title="Date/Time" />
+          <select data-role="species" data-idx="${i}" title="Species">
+            <option value="">—</option>${speciesOptions}${extraOption}
           </select>
+          ${otherListFieldsHtml}
         </div>
         <div class="sync-row-inputs">
-          <select data-role="weatherCondition" data-idx="${i}" title="Weather Condition">
-            <option value=""${c.weatherCondition ? "" : " selected"}>Weather…</option>${selectOptionsHtml(knownWeatherConditions, c.weatherCondition)}
-          </select>
-          <select data-role="tideCondition" data-idx="${i}" title="Tide Condition">
-            <option value=""${c.tideCondition ? "" : " selected"}>Tide…</option>${selectOptionsHtml(knownTideConditions, c.tideCondition)}
-          </select>
+          <input type="number" data-role="size" data-idx="${i}" value="${c.size != null ? c.size : ""}" min="0" step="1" placeholder="Size (cm)" title="Size (cm)" />
           <input type="number" data-role="barometer" data-idx="${i}" value="${c.barometer != null ? c.barometer : ""}" min="0" step="0.1" placeholder="hPa" title="Barometer (hPa)" />
           <select data-role="windDirection" data-idx="${i}" title="Wind Direction">
-            <option value=""${c.windDirection ? "" : " selected"}>Wind dir…</option>${selectOptionsHtml(SHORE_OPTIONS, c.windDirection)}
+            <option value=""${c.windDirection ? "" : " selected"}>Wind</option>${windDirectionOptions}
           </select>
           <input type="number" data-role="windSpeed" data-idx="${i}" value="${c.windSpeed != null ? c.windSpeed : ""}" min="0" step="1" placeholder="km/h" title="Wind Speed (km/h)" />
         </div>
@@ -782,6 +788,12 @@ async function handleImportClick() {
     if (c.species) mark.species = c.species;
     if (c.notes) mark.notes = c.notes;
     if (c.sourceUuid) mark.sourceUuid = c.sourceUuid;
+    if (c.waterCondition) mark.waterCondition = c.waterCondition;
+    if (c.bait) mark.bait = c.bait;
+    if (c.rig) mark.rig = c.rig;
+    if (c.rod) mark.rod = c.rod;
+    if (c.berley) mark.berley = c.berley;
+    if (c.size != null) mark.size = c.size;
     if (c.weatherCondition) mark.weatherCondition = c.weatherCondition;
     if (c.tideCondition) mark.tideCondition = c.tideCondition;
     if (c.barometer != null) mark.barometer = c.barometer;
@@ -872,6 +884,19 @@ async function handleFileInputChange(e) {
       sourceLabel,
       matchedExisting: g.matchedExisting,
       selected: !g.matchedExisting, // only genuinely new spots pre-checked
+      // Every other mark field this review row now also exposes for
+      // editing (see renderCandidateRow) — blank until either the
+      // historical lookup fills some of them in (weatherCondition/
+      // tideCondition/barometer/windDirection/windSpeed) or the person
+      // edits one by hand. waterCondition/bait/rig/rod/berley/size have
+      // no lookup source at all (nothing feeds them automatically); they
+      // start blank and stay that way unless hand-edited.
+      waterCondition: undefined,
+      bait: undefined,
+      rig: undefined,
+      rod: undefined,
+      berley: undefined,
+      size: undefined,
       // Filled in below, for reviewable candidates only — see
       // lookupHistoricalMarkConditions, charts.js. Left undefined (not
       // shown) for anything the lookup didn't resolve.
@@ -955,8 +980,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   existingMarks = marksRes.ok ? (await marksRes.json()).marks || [] : [];
   markLists = listsRes.ok ? await listsRes.json() : [];
   knownSpecies = markLists.filter((r) => r.field === "Species").map((r) => r.value);
-  knownWeatherConditions = markLists.filter((r) => r.field === "Weather Condition").map((r) => r.value);
-  knownTideConditions = markLists.filter((r) => r.field === "Tide Condition").map((r) => r.value);
 
   document.getElementById("syncFileInput").addEventListener("change", handleFileInputChange);
   document.getElementById("btnSelectAllNew").addEventListener("click", () => setAllSelected(true));
@@ -977,6 +1000,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   // fully replaced on every render (renderReviewList/btnShowMore/search),
   // so listeners attached to the container itself, rather than to
   // individual rows, keep working without needing to be re-wired each time.
+  // All the pick-list <select> fields (Mark Type, Species, and everything
+  // in MARK_LIST_FIELDS) plus Wind Direction share one plain
+  // "just copy the value across" handling — listed explicitly here rather
+  // than inferred from the DOM, so a stray/unexpected data-role on some
+  // other element can never silently get treated as a mark field.
+  const SYNC_SELECT_ROLES = new Set([...MARK_LIST_FIELDS.map((f) => f.key), "windDirection"]);
   document.getElementById("reviewList").addEventListener("change", (e) => {
     const idx = Number(e.target.dataset.idx);
     if (Number.isNaN(idx)) return;
@@ -984,11 +1013,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!c) return;
     const role = e.target.dataset.role;
     if (role === "select") c.selected = e.target.checked;
-    else if (role === "species") c.species = e.target.value;
-    else if (role === "type") c.type = e.target.value;
-    else if (role === "weatherCondition") c.weatherCondition = e.target.value || undefined;
-    else if (role === "tideCondition") c.tideCondition = e.target.value || undefined;
-    else if (role === "windDirection") c.windDirection = e.target.value || undefined;
+    else if (SYNC_SELECT_ROLES.has(role)) c[role] = e.target.value || undefined;
   });
   document.getElementById("reviewList").addEventListener("input", (e) => {
     const idx = Number(e.target.dataset.idx);
@@ -998,7 +1023,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     const role = e.target.dataset.role;
     if (role === "name") c.name = e.target.value;
     else if (role === "notes") c.notes = e.target.value;
-    else if (role === "barometer") {
+    else if (role === "dateTime") c.dateTime = datetimeLocalToNaive(e.target.value);
+    else if (role === "size") {
+      const v = e.target.value;
+      c.size = v === "" ? undefined : Math.round(Number(v));
+    } else if (role === "barometer") {
       const v = e.target.value;
       c.barometer = v === "" ? undefined : Number(v);
     } else if (role === "windSpeed") {
