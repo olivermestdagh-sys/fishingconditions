@@ -1807,7 +1807,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         }
 
         // If Type changed to something needing a different SHAPE (see
-        // MARK_TYPE_SHAPE_CLASS/createMarkShapeLayer above — POI/Mark/
+        // MARK_TYPE_SHAPE_GETTER/createMarkShapeLayer above — POI/Mark/
         // Catch each draw as a different shape now, not just a colour),
         // Leaflet has no way to swap an existing layer's class in place —
         // the only option is tearing down the old marker and creating a
@@ -1822,7 +1822,8 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         // "blink" here is an acceptable trade — changing a mark's own
         // Type mid-edit is a rare action, nowhere near as common as
         // everything else this save handler already does silently.
-        const desiredShapeClass = MARK_TYPE_SHAPE_CLASS[mark.type] || L.CircleMarker;
+        const desiredShapeGetter = MARK_TYPE_SHAPE_GETTER[mark.type];
+        const desiredShapeClass = desiredShapeGetter ? desiredShapeGetter() : L.CircleMarker;
         let effectivePopupEl = popupEl;
         if (marker.constructor !== desiredShapeClass && options.map) {
           const latlng = marker.getLatLng();
@@ -1921,10 +1922,11 @@ function parseGpxWaypoints(gpxText) {
  * these points need to be genuinely private, they can't live in this repo
  * at all.
  *
- * Rendered as Leaflet circleMarkers (or SquareMarker/CrossMarker — see
- * createMarkShapeLayer/MARK_TYPE_SHAPE_CLASS above, one shape per Mark
- * Type, matching the same shape convention the Lowrance GPX export uses —
- * see gpxSymForMark, sync.js) on a dedicated canvas renderer (L.canvas()),
+ * Rendered as Leaflet circleMarkers (or the SquareMarker/CrossMarker
+ * classes built by getSquareMarkerClass/getCrossMarkerClass above), one
+ * shape per Mark Type, matching the same shape convention the Lowrance
+ * GPX export uses — see gpxSymForMark, sync.js) on a dedicated canvas
+ * renderer (L.canvas()),
  * deliberately NOT the custom SVG divIcon pins (buildMapPinDivIcon) used
  * for tracked fishing LOCATIONS elsewhere on this same map. At this data's
  * actual scale (a couple thousand points from the GPX migration alone, and
@@ -1986,24 +1988,48 @@ function parseGpxWaypoints(gpxText) {
  * why marks use canvas specifically). Creating one of these shapes
  * without an explicit canvas renderer would throw once Leaflet tried to
  * actually draw it.
+ *
+ * BUILT LAZILY (see getSquareMarkerClass/getCrossMarkerClass below), NOT
+ * as plain top-level `const X = L.CircleMarker.extend(...)` the way an
+ * earlier version of this had them — that unconditionally touched the
+ * Leaflet global the instant charts.js itself was evaluated, which broke
+ * outright on any page that loads charts.js without ever loading Leaflet
+ * at all. index.html (Week Ahead) is exactly that page — no map, so no
+ * `<script src=".../leaflet.js">` tag — and "L is not defined" throwing
+ * at module-scope aborts the ENTIRE script, not just the one function
+ * that needed it: every other shared function/constant in this file never
+ * got defined either, which is what actually broke Week Ahead completely
+ * (and looked like unrelated symptoms — filters "not responding" was
+ * just as much a casualty, on that same broken page, of the same crash,
+ * not a second bug). Deferring the `.extend()` call until a shape is
+ * actually first requested — which only ever happens from a page that DID
+ * load Leaflet, since that's the only kind of page with a map to put a
+ * mark on in the first place — means charts.js itself never touches `L`
+ * just by being loaded.
  */
-const SquareMarker = L.CircleMarker.extend({
-  _project() {
-    L.CircleMarker.prototype._project.call(this);
-    if (!this._point) return;
-    const p = this._point;
-    const r = this._radius;
-    this._parts = [[
-      L.point(p.x - r, p.y - r),
-      L.point(p.x + r, p.y - r),
-      L.point(p.x + r, p.y + r),
-      L.point(p.x - r, p.y + r),
-    ]];
-  },
-  _updatePath() {
-    this._renderer._updatePoly(this, true);
-  },
-});
+let _squareMarkerClass = null;
+function getSquareMarkerClass() {
+  if (!_squareMarkerClass) {
+    _squareMarkerClass = L.CircleMarker.extend({
+      _project() {
+        L.CircleMarker.prototype._project.call(this);
+        if (!this._point) return;
+        const p = this._point;
+        const r = this._radius;
+        this._parts = [[
+          L.point(p.x - r, p.y - r),
+          L.point(p.x + r, p.y - r),
+          L.point(p.x + r, p.y + r),
+          L.point(p.x - r, p.y + r),
+        ]];
+      },
+      _updatePath() {
+        this._renderer._updatePoly(this, true);
+      },
+    });
+  }
+  return _squareMarkerClass;
+}
 
 /**
  * A "+" shape (not a diagonal "x") — reads more clearly at this marker's
@@ -2011,49 +2037,60 @@ const SquareMarker = L.CircleMarker.extend({
  * would once anti-aliased down that small. Built as one 12-point closed
  * outline (a plus-sign silhouette) rather than two separate crossing
  * strokes, so it still fills/strokes as a single shape the same way
- * SquareMarker's square and the inherited circle do. See SquareMarker's
- * own comment just above for everything else (this shares the identical
- * approach, just a different pixel-space outline).
+ * SquareMarker's square and the inherited circle do. See
+ * getSquareMarkerClass's own comment just above for everything else (this
+ * shares the identical lazy-creation approach and reasoning, just a
+ * different pixel-space outline).
  */
-const CrossMarker = L.CircleMarker.extend({
-  _project() {
-    L.CircleMarker.prototype._project.call(this);
-    if (!this._point) return;
-    const p = this._point;
-    const r = this._radius;
-    const arm = r * 0.42; // half-thickness of each bar of the plus
-    this._parts = [[
-      L.point(p.x - arm, p.y - r), L.point(p.x + arm, p.y - r),
-      L.point(p.x + arm, p.y - arm), L.point(p.x + r, p.y - arm),
-      L.point(p.x + r, p.y + arm), L.point(p.x + arm, p.y + arm),
-      L.point(p.x + arm, p.y + r), L.point(p.x - arm, p.y + r),
-      L.point(p.x - arm, p.y + arm), L.point(p.x - r, p.y + arm),
-      L.point(p.x - r, p.y - arm), L.point(p.x - arm, p.y - arm),
-    ]];
-  },
-  _updatePath() {
-    this._renderer._updatePoly(this, true);
-  },
-});
+let _crossMarkerClass = null;
+function getCrossMarkerClass() {
+  if (!_crossMarkerClass) {
+    _crossMarkerClass = L.CircleMarker.extend({
+      _project() {
+        L.CircleMarker.prototype._project.call(this);
+        if (!this._point) return;
+        const p = this._point;
+        const r = this._radius;
+        const arm = r * 0.42; // half-thickness of each bar of the plus
+        this._parts = [[
+          L.point(p.x - arm, p.y - r), L.point(p.x + arm, p.y - r),
+          L.point(p.x + arm, p.y - arm), L.point(p.x + r, p.y - arm),
+          L.point(p.x + r, p.y + arm), L.point(p.x + arm, p.y + arm),
+          L.point(p.x + arm, p.y + r), L.point(p.x - arm, p.y + r),
+          L.point(p.x - arm, p.y + arm), L.point(p.x - r, p.y + arm),
+          L.point(p.x - r, p.y - arm), L.point(p.x - arm, p.y - arm),
+        ]];
+      },
+      _updatePath() {
+        this._renderer._updatePoly(this, true);
+      },
+    });
+  }
+  return _crossMarkerClass;
+}
 
-// Mirrors LOWRANCE_TYPE_SHAPES in sync.js (POI -> circle, Mark -> square,
-// Catch -> cross) — kept as a separate constant rather than importing one
-// from the other, since this file (charts.js) is shared/loaded on pages
-// sync.js never is, and vice versa; a genuinely shared constant would need
-// its own third file just for this, which isn't worth it for one small
-// lookup table. POI (or any type not listed — including a genuinely new
-// Mark Type someone adds later, until this map is specifically taught
-// about it) intentionally has NO entry, falling through to plain
-// L.CircleMarker in createMarkShapeLayer just below — matches
-// gpxSymForMark's own "circle" default in spirit.
-const MARK_TYPE_SHAPE_CLASS = { Mark: SquareMarker, Catch: CrossMarker, Fish: CrossMarker };
+// Mirrors LOWRANCE_TYPE_SHAPES in sync.js — Mark -> circle, POI -> square,
+// Catch -> cross (Oliver's own call, updated from an earlier POI-> circle/
+// Mark->square split). Holds GETTER FUNCTIONS, not the classes themselves
+// (see getSquareMarkerClass/getCrossMarkerClass's own comment on why) —
+// kept as a separate constant rather than importing one from sync.js,
+// since this file is shared/loaded on pages sync.js never is, and vice
+// versa; a genuinely shared constant would need its own third file just
+// for this, which isn't worth it for one small lookup table. Mark (or any
+// type not listed — including a genuinely new Mark Type someone adds
+// later, until this map is specifically taught about it) intentionally
+// has NO entry, falling through to plain L.CircleMarker in
+// createMarkShapeLayer just below — matches gpxSymForMark's own "circle"
+// default in spirit.
+const MARK_TYPE_SHAPE_GETTER = { POI: getSquareMarkerClass, Catch: getCrossMarkerClass, Fish: getCrossMarkerClass };
 
 /** Creates whichever shape layer matches a mark's own Type (see
- * MARK_TYPE_SHAPE_CLASS just above). Always pass a Canvas renderer in
- * `options.renderer` — see SquareMarker/CrossMarker's own comment on why
+ * MARK_TYPE_SHAPE_GETTER just above). Always pass a Canvas renderer in
+ * `options.renderer` — see getSquareMarkerClass's own comment on why
  * that's required, not optional, for anything but a plain circle. */
 function createMarkShapeLayer(latlng, type, options) {
-  const ShapeClass = MARK_TYPE_SHAPE_CLASS[type] || L.CircleMarker;
+  const getShapeClass = MARK_TYPE_SHAPE_GETTER[type];
+  const ShapeClass = getShapeClass ? getShapeClass() : L.CircleMarker;
   return new ShapeClass(latlng, options);
 }
 

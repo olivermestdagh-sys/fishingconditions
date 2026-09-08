@@ -522,12 +522,14 @@ function naiveToGpxTime(naive) {
 // available") to genuinely support a 7-colour palette via this exact
 // "shape,color" string syntax. That's what this now uses instead.
 //
-// Each Mark Type gets its own SHAPE (Oliver's own call): POI -> circle,
-// Mark -> square, Catch -> cross. Colour represents SPECIES, not
-// available at all for a POI (no species to represent — see
-// gpxSymForMark) — matched to the nearest of the 7-colour palette below
-// from whatever hex colour that species already has configured in
-// config/mark_lists.json (the same colour the site's own map paints that
+// Each Mark Type gets its own SHAPE (Oliver's own call, corrected to this
+// mapping after an initial round): Mark -> circle (the default — see
+// gpxSymForMark's own fallback), POI -> square, Catch -> cross. Colour
+// represents SPECIES, not available at all for a POI (no species to
+// represent — see gpxSymForMark) — matched to the nearest of the 7-colour
+// palette below from whatever hex colour that species already has
+// configured in config/mark_lists.json (the same colour the site's own
+// map paints that
 // species' pins with), rather than requiring an exact hex match. This
 // also naturally satisfies "limit the colours used for species to those
 // the Lowrance unit can use" without needing to change any species'
@@ -552,7 +554,7 @@ function naiveToGpxTime(naive) {
 //      correct — if any of them differ, this palette (and
 //      nearestLowranceColorName's own matching) is the one place to
 //      adjust.
-const LOWRANCE_TYPE_SHAPES = { POI: "circle", Mark: "square", Catch: "cross", Fish: "cross" };
+const LOWRANCE_TYPE_SHAPES = { POI: "square", Catch: "cross", Fish: "cross" };
 const LOWRANCE_NAMED_COLORS = {
   blue: [0, 0, 255],
   magenta: [255, 0, 255],
