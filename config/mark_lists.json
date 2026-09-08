@@ -237,5 +237,13 @@
     "field": "Bait",
     "value": "Squid Jig",
     "color": "#f7f026"
+  },
+  {
+    "field": "Mark Type",
+    "value": "Mark"
+  },
+  {
+    "field": "Mark Type",
+    "value": "Catch"
   }
 ]
