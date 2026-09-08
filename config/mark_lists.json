@@ -232,5 +232,10 @@
   {
     "field": "Species",
     "value": "Unknown"
+  },
+  {
+    "field": "Bait",
+    "value": "Squid Jig",
+    "color": "#f7f026"
   }
 ]
