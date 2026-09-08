@@ -2283,6 +2283,27 @@ function getConnection() {
   }
 }
 
+/**
+ * Hides the "Sync" nav link entirely when there's no GitHub connection —
+ * the Sync tab is pure write/admin functionality (import/export marks via
+ * the GitHub Contents API), gated the same way every other write-capable
+ * feature on this site already is, so there's nothing useful behind it
+ * without a connection; showing the link would just lead to sync.html's
+ * own "not connected" card rather than anywhere actually useful. Runs on
+ * every page load — the same identical `.tabnav` markup (including the
+ * Sync link) is duplicated in every page's own HTML rather than templated,
+ * so this one shared listener (charts.js loads on every page) covers all
+ * of them from a single place instead of needing the same few lines
+ * copy-pasted into week.js/app.js/live.js/locationsadmin.js/sync.js too.
+ * No live-updating while sitting on a page — connecting/disconnecting on
+ * Settings only takes effect for THIS check on the next page load/
+ * navigation, same as every other per-page use of getConnection() here.
+ */
+document.addEventListener("DOMContentLoaded", () => {
+  const syncNavLink = document.querySelector('.tabnav a[href="sync.html"]');
+  if (syncNavLink && !getConnection()) syncNavLink.style.display = "none";
+});
+
 function utf8ToBase64(str) {
   return btoa(unescape(encodeURIComponent(str)));
 }
