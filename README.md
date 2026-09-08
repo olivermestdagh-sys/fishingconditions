@@ -705,10 +705,10 @@ all) — most of the old migrated batch has a place name in `name`
 ("Williamstown", "Leopold"), which is far less useful on a chartplotter
 than the actual catch; that place name is kept in `<desc>` instead rather
 than lost. Each waypoint also gets a `<sym>` — a different **shape per
-Mark Type** (Mark -> `diamond`, the default; POI -> `square`; Catch ->
-`x`), coloured by **species** (not applicable for a POI, which has none,
-so it gets its shape bare with no colour) — matched to the nearest of
-Lowrance's own 7-colour palette (blue/magenta/orange/yellow/green/aqua/
+Mark Type** (Mark -> `circle`, the default; POI -> `diamond`; Catch ->
+`cross`), coloured by **species** (not applicable for a POI, which has
+none, so it gets its shape bare with no colour) — matched to the nearest
+of Lowrance's own 7-colour palette (blue/magenta/red/yellow/green/cyan/
 white) from whatever colour that species already has configured in
 `config/mark_lists.json` (the same colour the site's own map paints that
 species' pins with). This also means species colours never need to be
@@ -719,30 +719,29 @@ Worth knowing: this is a best-effort substitute, not a restoration of
 whatever icon a mark literally had on the device originally — the Sync
 tab's own `.usr` parser reads past a waypoint's icon/colour bytes without
 keeping either value, so that original information is already gone for
-every mark imported so far. This has been wrong **twice** already, both
-times in the same way (a symbol spec the device doesn't actually recognise
-silently falls back to a plain blue default) — worth being upfront about
-rather than glossing over:
+every mark imported so far. Getting the shape/colour NAMES themselves
+right took a few real attempts, worth being upfront about rather than
+glossing over:
 1. An early version used Lowrance's "fish" icon with a colour suffix.
    Real testing found the fish icon has no colour option on the device at
    all.
-2. The next version switched to `circle`/`square`/`cross` — the exact
-   names Oliver could see as on-device icon options himself. Real testing
-   found every mark came through blue anyway. The current best guess is
-   that the device's own on-screen names for its icons and the internal
-   identifiers a GPX `<sym>` string actually has to match aren't
-   necessarily the same vocabulary. `diamond` and `x` (used now) are the
-   two shapes that genuinely do appear, by name, with a confirmed 7-colour
-   palette, in the same authoritative reverse-engineered Lowrance icon
-   table this project already relies on elsewhere — `circle`, `square`,
-   and `cross` never actually appeared in that table at all, which in
-   hindsight was a real signal worth weighting more heavily the first
-   time.
-
-Given the history above, treat this as still not fully proven — genuinely
-worth exporting one small test file and checking a few different-coloured
-species actually come through distinctly on the unit, rather than trusting
-it blind a third time.
+2. The next version switched to `circle`/`square`/`cross`, then
+   `diamond`/`x` — both guessed from secondary sources (forum posts, a
+   reverse-engineered `.usr`-format icon table) rather than the device
+   itself, and both wrong in different ways.
+3. **This is now confirmed directly**, not guessed: Oliver exported a real
+   GPX straight from his own HDS Live-7 after manually setting 7 waypoints
+   on the unit — one of each of its real colours, across circle/cross/
+   diamond shapes. That file is the actual ground truth this now matches:
+   `circle,blue` `circle,yellow` `circle,white` `circle,green`
+   `circle,cyan` `cross,magenta` `diamond,red`. The earlier version had
+   the shapes half-right (what looked like a separate "square" was
+   actually a diamond) but two of the seven colour names wrong — `orange`
+   and `aqua`, which should have been `red` and `cyan` — which, combined
+   with several species having no configured colour and falling back to
+   this code's own hardcoded blue default, was enough to look like a
+   total failure ("every mark came through blue") rather than a two-word
+   mixup.
 
 Gated behind the same GitHub connection as everything else that writes to
 this repo (see "Editing locations from the site itself" below) — connect
