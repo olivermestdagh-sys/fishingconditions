@@ -522,10 +522,35 @@ function naiveToGpxTime(naive) {
 // available") to genuinely support a 7-colour palette via this exact
 // "shape,color" string syntax. That's what this now uses instead.
 //
-// Each Mark Type gets its own SHAPE (Oliver's own call, corrected to this
-// mapping after an initial round): Mark -> circle (the default — see
-// gpxSymForMark's own fallback), POI -> square, Catch -> cross. Colour
-// represents SPECIES, not available at all for a POI (no species to
+// Each Mark Type gets its own SHAPE. REVISED AGAIN from the previous
+// round's circle/square/cross (Oliver's own on-device menu names) after
+// real-world testing found every mark came through blue regardless of
+// species — the exact same "unrecognised symbol spec falls back to a
+// plain blue default" behaviour the very first version of this feature
+// hit with the "fish" icon. Circle/square/cross are real, selectable
+// on-device icon options (confirmed by Oliver's own menu), but that
+// doesn't mean those exact ENGLISH WORDS are what a GPX <sym> string
+// needs to say to select them — the device's own on-screen names and the
+// internal identifiers GPX import actually matches against aren't
+// necessarily the same vocabulary, and this site has no way to see that
+// internal mapping directly. What IS directly confirmed, from the same
+// authoritative reverse-engineered lowranceusr4 icon table already relied
+// on elsewhere in this file, is that icons named "diamond" and "x"
+// specifically support the full 7-colour palette below — "circle" and
+// "cross" don't even appear as named rows in that table at all, which in
+// hindsight was already a yellow flag before this bug report confirmed
+// it. Switched to Mark -> diamond, Catch -> x on that stronger evidence;
+// POI -> square is UNCHANGED, since POI never gets a colour suffix at
+// all (see gpxSymForMark) — nothing about square's own colour support was
+// actually implicated by "everything came through blue", so there was no
+// specific reason to touch it this round.
+// WORTH DOING: export one small test file after this change with a
+// handful of different species (different colours) and confirm on the
+// unit that they actually come through distinctly, rather than trusting
+// this blind a third time — I have no way to verify this against real
+// hardware from here.
+//
+// Colour represents SPECIES, not available at all for a POI (no species to
 // represent — see gpxSymForMark) — matched to the nearest of the 7-colour
 // palette below from whatever hex colour that species already has
 // configured in config/mark_lists.json (the same colour the site's own
@@ -554,7 +579,7 @@ function naiveToGpxTime(naive) {
 //      correct — if any of them differ, this palette (and
 //      nearestLowranceColorName's own matching) is the one place to
 //      adjust.
-const LOWRANCE_TYPE_SHAPES = { POI: "square", Catch: "cross", Fish: "cross" };
+const LOWRANCE_TYPE_SHAPES = { POI: "square", Catch: "x", Fish: "x" };
 const LOWRANCE_NAMED_COLORS = {
   blue: [0, 0, 255],
   magenta: [255, 0, 255],
@@ -603,7 +628,7 @@ function nearestLowranceColorName(hex) {
  * colour configured, or no species value at all on an otherwise
  * non-POI record. */
 function gpxSymForMark(m) {
-  const shape = LOWRANCE_TYPE_SHAPES[m.type] || "circle";
+  const shape = LOWRANCE_TYPE_SHAPES[m.type] || "diamond";
   if (m.type === "POI") return shape;
   const entry = markLists.find((r) => r.field === "Species" && r.value === m.species);
   const colorName = entry && entry.color ? nearestLowranceColorName(entry.color) : null;
@@ -652,7 +677,43 @@ function buildGpxDocument(marks) {
   );
 }
 
-function downloadTextFile(filename, mimeType, text) {
+/**
+ * Saves `text` as a file, PREFERRING the File System Access API's native
+ * "Save As" dialog (window.showSaveFilePicker) when the browser supports
+ * it — Chromium-based browsers only (Chrome, Edge, and similar; not
+ * Firefox or Safari, which don't implement this API at all) — since
+ * that's genuinely the only way a web page can let someone choose WHERE a
+ * file goes, not just what it's named. Plain <a download> (the fallback,
+ * and the only option this used before) can only suggest a filename; the
+ * actual save location is entirely up to the browser's own download
+ * settings, with no way for this page to ask for one.
+ *
+ * Returns "saved" (via the picker), "saved-fallback" (via plain
+ * download), or "cancelled" (the person explicitly backed out of the
+ * picker — NOT treated as a failure, and deliberately does NOT fall
+ * through to the plain-download fallback in that case: silently
+ * downloading anyway after someone hits Cancel would be a confusing "I
+ * said no and it saved anyway" experience). A genuine error from the
+ * picker (not a cancellation) does fall through to the plain-download
+ * fallback, so a real failure in the native dialog still ends with the
+ * file actually saved somewhere rather than just lost.
+ */
+async function saveTextFile(filename, mimeType, text) {
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [{ description: "GPX file", accept: { [mimeType]: [".gpx"] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(text);
+      await writable.close();
+      return "saved";
+    } catch (err) {
+      if (err.name === "AbortError") return "cancelled";
+      console.error("showSaveFilePicker failed, falling back to plain download:", err);
+    }
+  }
   const blob = new Blob([text], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -662,6 +723,7 @@ function downloadTextFile(filename, mimeType, text) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+  return "saved-fallback";
 }
 
 /** "fishing-marks-YYYY-MM-DD-HHMM.gpx" — date AND time (not just the date,
@@ -716,8 +778,15 @@ async function handleExportClick() {
     const gpx = buildGpxDocument(marks);
     const filenameInput = document.getElementById("exportFilenameInput");
     const filename = sanitizeExportFilename(filenameInput ? filenameInput.value : "");
-    downloadTextFile(filename, "application/gpx+xml", gpx);
-    statusEl.textContent = `Exported ${marks.length} marks as ${filename} — load this onto your Garmin or Lowrance via its GPX import option.`;
+    statusEl.textContent = window.showSaveFilePicker ? "Choose where to save…" : "Downloading…";
+    const outcome = await saveTextFile(filename, "application/gpx+xml", gpx);
+    if (outcome === "cancelled") {
+      statusEl.textContent = "Export cancelled.";
+      statusEl.style.color = "";
+      return;
+    }
+    const savedNote = outcome === "saved-fallback" ? " (saved to your browser's default download location — this browser doesn't support choosing a folder)" : "";
+    statusEl.textContent = `Exported ${marks.length} marks as ${filename}${savedNote} — load this onto your Garmin or Lowrance via its GPX import option.`;
     statusEl.style.color = "#16a34a";
   } catch (err) {
     console.error("GPX export failed:", err);

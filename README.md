@@ -686,7 +686,14 @@ data comes from and its own caveats.
 once in a day doesn't quietly overwrite an earlier download), editable to
 whatever you'd rather call it (e.g. "Lang Lang Trip") — `.gpx` gets added
 automatically if you don't type it yourself, and characters a filename
-can't contain are stripped. Garmin units take the result directly;
+can't contain are stripped. Hitting **Export** opens your browser's own
+native "Save As" dialog (Chrome/Edge and similar — this needs the File
+System Access API, which Firefox and Safari don't implement; those
+browsers fall back to a plain download to your default downloads folder,
+same as before, with a note in the status message saying so), so you
+choose the actual save location yourself rather than always landing in the
+same default folder. Cancelling that dialog cancels the export cleanly —
+nothing gets saved anywhere. Garmin units take the result directly;
 Lowrance sounders that accept GPX import do too (no need for a real
 binary `.usr` writer — a much heavier, riskier thing to get right without
 a real unit to test an exported file against, and unnecessary since GPX
@@ -698,12 +705,11 @@ all) — most of the old migrated batch has a place name in `name`
 ("Williamstown", "Leopold"), which is far less useful on a chartplotter
 than the actual catch; that place name is kept in `<desc>` instead rather
 than lost. Each waypoint also gets a `<sym>` — a different **shape per
-Mark Type** (Mark -> circle, the default; POI -> square; Catch -> cross),
-coloured by
-**species** (not applicable for a POI, which has none, so it gets its
-shape bare with no colour) — matched to the nearest of Lowrance's own
-7-colour palette (blue/magenta/orange/yellow/green/aqua/white) from
-whatever colour that species already has configured in
+Mark Type** (Mark -> `diamond`, the default; POI -> `square`; Catch ->
+`x`), coloured by **species** (not applicable for a POI, which has none,
+so it gets its shape bare with no colour) — matched to the nearest of
+Lowrance's own 7-colour palette (blue/magenta/orange/yellow/green/aqua/
+white) from whatever colour that species already has configured in
 `config/mark_lists.json` (the same colour the site's own map paints that
 species' pins with). This also means species colours never need to be
 manually restricted to Lowrance-safe ones in `mark_lists.json` itself —
@@ -713,16 +719,30 @@ Worth knowing: this is a best-effort substitute, not a restoration of
 whatever icon a mark literally had on the device originally — the Sync
 tab's own `.usr` parser reads past a waypoint's icon/colour bytes without
 keeping either value, so that original information is already gone for
-every mark imported so far. An earlier version of this used Lowrance's
-"fish" icon with a colour suffix, which turned out to be wrong — real
-testing directly on Oliver's own HDS 7 found the fish icon has no colour
-option on the actual device at all. The circle/square/cross shapes above
-come from multiple independently-confirmed real-user reports of Lowrance's
-actual GPX symbol vocabulary, not just the same theoretical `.usr`-format
-reference table that led to the "fish" mistake — but the exact 7-colour
-palette wasn't independently confirmed for square/cross specifically (only
-circle/diamond/x), so it's still worth a small test export on the actual
-sounder before assuming every species shows its intended colour.
+every mark imported so far. This has been wrong **twice** already, both
+times in the same way (a symbol spec the device doesn't actually recognise
+silently falls back to a plain blue default) — worth being upfront about
+rather than glossing over:
+1. An early version used Lowrance's "fish" icon with a colour suffix.
+   Real testing found the fish icon has no colour option on the device at
+   all.
+2. The next version switched to `circle`/`square`/`cross` — the exact
+   names Oliver could see as on-device icon options himself. Real testing
+   found every mark came through blue anyway. The current best guess is
+   that the device's own on-screen names for its icons and the internal
+   identifiers a GPX `<sym>` string actually has to match aren't
+   necessarily the same vocabulary. `diamond` and `x` (used now) are the
+   two shapes that genuinely do appear, by name, with a confirmed 7-colour
+   palette, in the same authoritative reverse-engineered Lowrance icon
+   table this project already relies on elsewhere — `circle`, `square`,
+   and `cross` never actually appeared in that table at all, which in
+   hindsight was a real signal worth weighting more heavily the first
+   time.
+
+Given the history above, treat this as still not fully proven — genuinely
+worth exporting one small test file and checking a few different-coloured
+species actually come through distinctly on the unit, rather than trusting
+it blind a third time.
 
 Gated behind the same GitHub connection as everything else that writes to
 this repo (see "Editing locations from the site itself" below) — connect
