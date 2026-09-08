@@ -594,29 +594,50 @@ location tags — type a new value, hit Add (or Enter), then "Save mark
 lists" to commit it. Removing an option doesn't touch any mark that already
 used it; it just won't be offered again.
 
+**Controlling how a mark looks on the Lowrance sounder (and, opt-in, on
+this site's own map)**: two of the pick-lists carry an extra, more specific
+choice, each its own small dropdown right next to the usual chip (rather
+than free text or a colour wheel — a typo or an unsupported value here is
+exactly how the GPX export ended up wrong twice before it was finally
+confirmed against a real device export, see below):
+
+- **Species** gets a **Lowrance colour** picker — one of the 7 real,
+  confirmed waypoint colours the unit actually supports (blue, magenta,
+  red, yellow, green, cyan, white). This is separate from that species'
+  ordinary hex `color` swatch, which keeps working exactly as it always
+  has for anything that hasn't set this.
+- **Mark Type** gets a **shape** picker — one of the 3 real, confirmed
+  shapes (circle, diamond, cross).
+
+Both are **opt-in, on purpose**: a species with no Lowrance colour chosen
+keeps its existing hex colour (or the map's hash-based fallback) exactly as
+before, and exports with a plain default; a Mark Type with no shape chosen
+keeps the same built-in default it always had (Mark → circle, POI →
+diamond, Catch → cross). Nothing changes for anything you haven't
+deliberately touched. Once you DO pick one, it drives both the Lowrance
+export (see below) and this site's own map consistently — the same colour,
+the same shape, in both places, rather than each guessing independently
+(which is exactly how they used to drift apart).
+
 **Displaying marks on the map**: the Location and Live tab maps both plot
 every mark in `data/marks.json` (see `loadAndRenderMarks` in `charts.js`),
 gated behind having a GitHub connection set up on the Settings tab — same
 "don't clutter the map for random public visitors, but not real access
 control" caveat as the rest of this site's GitHub-gated features (the file
 itself is still a plain public URL). Each mark's **shape matches its Mark
-Type** — Mark a circle (the default), POI a square, Catch a cross — the
-same convention
-the Lowrance GPX export uses (see "Syncing marks with a Garmin or Lowrance
-device" below), so the two are visually consistent with each other.
-**Colour**, unlike the GPX export, stays the site's own richer palette
-rather than being reduced to Lowrance's 7-colour set — derived from each
-mark's Species (or its Mark Type, for anything without one) via a simple
-hash (or a manually-configured colour from `config/mark_lists.json` when
-one's set), so every distinct species gets its own stable, distinguishable
-colour on THIS map regardless of what the actual device can show; reducing
-to 7 colours here too would make several otherwise-distinct species land on
-the same fallback colour, which only matters for the device's own hardware
-limit, not for a map that has no such constraint. Hover/tap a point for its
-name, species, and date. Built on two small custom Leaflet layers
-(`SquareMarker`/`CrossMarker` in `charts.js`) rather than switching every
-mark over to the DOM-based pins used for tracked locations elsewhere on
-this map — those would be meaningfully heavier at this data's real scale (a
+Type** (see above — circle/diamond/cross, whichever's configured or
+defaulted), the same convention the Lowrance GPX export uses, so the two
+stay visually consistent. **Colour** stays the site's own richer palette by
+default — derived from each mark's Species (or its Mark Type, for anything
+without one) via a simple hash, or a manually-configured hex colour, so
+every distinct species gets its own stable, distinguishable colour on THIS
+map even without opting into a Lowrance colour — UNLESS that species has
+opted into a Lowrance colour above, in which case this map uses that exact
+colour too, for genuine consistency with the device. Hover/tap a point for
+its name, species, and date. Built on two small custom Leaflet layers
+(`getDiamondMarkerClass`/`getCrossMarkerClass` in `charts.js`) rather than
+switching every mark over to the DOM-based pins used for tracked locations
+elsewhere on this map — those would be meaningfully heavier at this data's real scale (a
 couple thousand points and growing); the custom shapes stay on the same
 canvas renderer circles always used here, confirmed against the real
 dataset (2,532 marks load and shape in well under half a second).
@@ -704,16 +725,16 @@ own `name` field, then a generic label, only if there's no species at
 all) — most of the old migrated batch has a place name in `name`
 ("Williamstown", "Leopold"), which is far less useful on a chartplotter
 than the actual catch; that place name is kept in `<desc>` instead rather
-than lost. Each waypoint also gets a `<sym>` — a different **shape per
-Mark Type** (Mark -> `circle`, the default; POI -> `diamond`; Catch ->
-`cross`), coloured by **species** (not applicable for a POI, which has
-none, so it gets its shape bare with no colour) — matched to the nearest
-of Lowrance's own 7-colour palette (blue/magenta/red/yellow/green/cyan/
-white) from whatever colour that species already has configured in
-`config/mark_lists.json` (the same colour the site's own map paints that
-species' pins with). This also means species colours never need to be
-manually restricted to Lowrance-safe ones in `mark_lists.json` itself —
-the reduction to 7 named colours happens only at export time.
+than lost. Each waypoint also gets a `<sym>` — shape from that mark's own
+Mark Type, colour from its Species, both read straight from whatever's
+configured in the Settings tab's "Fishing Mark Lists" section (see
+"Controlling how a mark looks on the Lowrance sounder" above) rather than
+guessed at export time the way an earlier version of this worked. A
+species or Mark Type that hasn't had one of these chosen falls back to a
+plain default (blue colour, circle/diamond/cross per Mark Type as
+before) — nothing here forces every species onto one of the 7 colours,
+that's only ever the case for a species Oliver's deliberately picked one
+for.
 
 Worth knowing: this is a best-effort substitute, not a restoration of
 whatever icon a mark literally had on the device originally — the Sync
@@ -742,6 +763,12 @@ glossing over:
    this code's own hardcoded blue default, was enough to look like a
    total failure ("every mark came through blue") rather than a two-word
    mixup.
+
+That history is also why this no longer GUESSES a colour from a species'
+hex at all — the guessing itself (matching hex to "nearest" of the 7
+names) is exactly how two wrong names went unnoticed for as long as they
+did. Shape and colour are now real, deliberate Settings-tab choices (see
+above) rather than anything derived.
 
 Gated behind the same GitHub connection as everything else that writes to
 this repo (see "Editing locations from the site itself" below) — connect

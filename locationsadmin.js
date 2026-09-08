@@ -409,8 +409,30 @@ async function onSaveGroups() {
 // by field (one card sub-section per field) so it reads as nine separate
 // lists even though it's a single flat array underneath. `color`, when set
 // (see onSetMarkListValueColor below), is just a plain hex string — purely
-// a display preference for this Settings-tab chip today, not yet read by
-// anything that renders marks on a map.
+// a display preference for this Settings-tab chip and (for Species) this
+// site's own map when nothing more specific has been chosen (see
+// markStyleFor, charts.js).
+//
+// Two fields carry an ADDITIONAL, more specific property, each rendered as
+// its own small <select> alongside the existing hex swatch (see
+// renderMarkLists below) rather than free text or a colour wheel — a typo
+// or an unsupported value here is exactly how two earlier attempts at the
+// Lowrance export ended up wrong (see gpxSymForMark's own comment in
+// sync.js for the full story):
+//   - Species: `lowranceColor`, one of Lowrance's 7 real confirmed
+//     waypoint colours (LOWRANCE_COLOR_OPTIONS below). OPT IN — a species
+//     with none chosen keeps its plain hex `color` (or the map's hash
+//     fallback) exactly as before, on the site's own map; the GPX export
+//     falls back to a plain default for it too, same as before this
+//     existed.
+//   - Mark Type: `shape`, one of Lowrance's 3 real confirmed shapes
+//     (LOWRANCE_SHAPE_OPTIONS below). OPT IN the same way — a Mark Type
+//     with none chosen keeps the hardcoded default shape it always had
+//     (see MARK_TYPE_DEFAULT_SHAPE(_NAME) in sync.js/charts.js).
+// Both drive the Lowrance GPX export (sync.js) AND, once set, this site's
+// own map (charts.js) — the whole point being that the two stay visually
+// consistent with each other once Oliver's deliberately picked something,
+// rather than each side guessing independently.
 
 let markLists = [];
 let markListsSha = null;
@@ -495,12 +517,41 @@ function renderMarkLists() {
       // actually been picked for this value — an unset one still just looks
       // like every other .loc-chip until clicked.
       const colorStyle = v.color ? `background:${v.color};border-color:${v.color};color:${pickReadableTextColor(v.color)};` : "";
+      // Species gets an extra, CONSTRAINED picker for the real Lowrance
+      // colour (separate from the free hex `color` swatch above, which
+      // keeps driving this chip's own look and the map's fallback colour
+      // for anything that hasn't opted into a Lowrance one) — see
+      // onSetMarkListValueLowranceColor's own comment for why this is a
+      // <select> from a fixed list rather than free text or a colour
+      // wheel. Mark Type gets the equivalent for `shape`. Neither renders
+      // for any other field — this is squarely about driving the Lowrance
+      // export (and, opt-in, this site's own map) consistently, not a
+      // general-purpose feature every pick-list field needs.
+      let extraPickerHtml = "";
+      if (key === "species") {
+        const current = v.lowranceColor || "";
+        extraPickerHtml = `
+        <select class="mark-list-lowrance-color-select" data-value="${escAttr}" title="Lowrance colour (optional)"
+          style="font-size:0.7rem;padding:1px 3px;border-radius:5px;border:1px solid var(--grey-200);background:var(--white);color:var(--grey-500);">
+          <option value=""${current ? "" : " selected"}>Lowrance colour…</option>
+          ${LOWRANCE_COLOR_OPTIONS.map((c) => `<option value="${c}" ${c === current ? "selected" : ""}>${c}</option>`).join("")}
+        </select>`;
+      } else if (key === "type") {
+        const current = v.shape || "";
+        extraPickerHtml = `
+        <select class="mark-list-shape-select" data-value="${escAttr}" title="Lowrance/map shape (optional)"
+          style="font-size:0.7rem;padding:1px 3px;border-radius:5px;border:1px solid var(--grey-200);background:var(--white);color:var(--grey-500);">
+          <option value=""${current ? "" : " selected"}>Shape…</option>
+          ${LOWRANCE_SHAPE_OPTIONS.map((s) => `<option value="${s}" ${s === current ? "selected" : ""}>${s}</option>`).join("")}
+        </select>`;
+      }
       return `
       <span class="loc-chip mark-list-color-chip" data-field="${key}" data-value="${escAttr}" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;${colorStyle}">
         <input type="color" class="mark-list-color-input" data-field="${key}" data-value="${escAttr}" value="${v.color || "#e5e7eb"}"
           aria-label="Pick a colour for ${escAttr}"
           style="position:absolute;width:0;height:0;padding:0;border:0;opacity:0;" />
         <span>${escText}</span>
+        ${extraPickerHtml}
         <button type="button" data-remove-mark-value data-field="${key}" data-value="${escAttr}"
           aria-label="Remove ${escAttr}"
           style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>
@@ -526,7 +577,12 @@ function renderMarkLists() {
   // scratch; every modern browser already has a perfectly good native one.
   container.querySelectorAll(".mark-list-color-chip").forEach((chip) => {
     chip.addEventListener("click", (e) => {
+      // Also guards against a click landing on the new Lowrance
+      // colour/shape <select> (species/type chips only) — those need
+      // their own native dropdown to open normally, not this chip's hex
+      // colour picker firing underneath/instead.
       if (e.target.closest("[data-remove-mark-value]")) return;
+      if (e.target.closest(".mark-list-lowrance-color-select, .mark-list-shape-select")) return;
       const colorInput = chip.querySelector(".mark-list-color-input");
       if (colorInput) colorInput.click();
     });
@@ -537,6 +593,20 @@ function renderMarkLists() {
     // update per pick, not a flood of them.
     input.addEventListener("change", (e) => {
       onSetMarkListValueColor(e.currentTarget.dataset.field, e.currentTarget.dataset.value, e.currentTarget.value);
+      renderMarkLists();
+    });
+  });
+  container.querySelectorAll(".mark-list-lowrance-color-select").forEach((select) => {
+    select.addEventListener("click", (e) => e.stopPropagation()); // don't also trigger the chip's own hex-picker click handler
+    select.addEventListener("change", (e) => {
+      onSetMarkListValueLowranceColor(e.currentTarget.dataset.value, e.currentTarget.value);
+      renderMarkLists();
+    });
+  });
+  container.querySelectorAll(".mark-list-shape-select").forEach((select) => {
+    select.addEventListener("click", (e) => e.stopPropagation());
+    select.addEventListener("change", (e) => {
+      onSetMarkListValueShape(e.currentTarget.dataset.value, e.currentTarget.value);
       renderMarkLists();
     });
   });
@@ -587,6 +657,39 @@ function onSetMarkListValueColor(key, value, color) {
   if (!fieldDef) return;
   const entry = markLists.find((r) => r.field === fieldDef.label && r.value === value);
   if (entry) entry.color = color;
+}
+
+// Lowrance's own 7 real waypoint colours and 3 real shapes — confirmed
+// directly against a real GPX export from Oliver's own HDS Live-7 (see
+// gpxSymForMark's own header comment in sync.js for the full story). Used
+// here to build the two CONSTRAINED pickers below (Species' `lowranceColor`
+// and Mark Type's `shape`) — deliberately not free text or a native
+// <input type="color">, which could produce a name the device doesn't
+// actually recognise (exactly how this went wrong twice already).
+const LOWRANCE_COLOR_OPTIONS = ["blue", "magenta", "red", "yellow", "green", "cyan", "white"];
+const LOWRANCE_SHAPE_OPTIONS = ["circle", "diamond", "cross"];
+
+/** Sets or clears a Species value's `lowranceColor` (colorName === "" means
+ * "opt out, go back to this species' plain hex colour / hash fallback on
+ * the map, and a plain default on export" — see markStyleFor, charts.js,
+ * and gpxSymForMark, sync.js). Mirrors onSetMarkListValueColor's own shape
+ * exactly, just a different property and a constrained value set rather
+ * than a free hex string. */
+function onSetMarkListValueLowranceColor(value, colorName) {
+  const entry = markLists.find((r) => r.field === "Species" && r.value === value);
+  if (!entry) return;
+  if (colorName) entry.lowranceColor = colorName;
+  else delete entry.lowranceColor;
+}
+
+/** Sets or clears a Mark Type value's `shape` (shapeName === "" means "opt
+ * out, go back to this type's hardcoded default shape" — see
+ * MARK_TYPE_DEFAULT_SHAPE(_NAME) in sync.js/charts.js). */
+function onSetMarkListValueShape(value, shapeName) {
+  const entry = markLists.find((r) => r.field === "Mark Type" && r.value === value);
+  if (!entry) return;
+  if (shapeName) entry.shape = shapeName;
+  else delete entry.shape;
 }
 
 // Removing an option here does NOT scrub it from any mark that already used

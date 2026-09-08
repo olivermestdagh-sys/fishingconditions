@@ -1024,6 +1024,16 @@ function markStyleFor(mark, state) {
   const value = mark[state.groupByKey];
   if (!value) return MARK_NO_VALUE_STYLE;
   const tileEntry = (state.markLists || []).find((r) => r.field === groupField.label && r.value === value);
+  // An explicitly-chosen Lowrance colour (Settings tab, opt-in — see
+  // LOWRANCE_COLOR_HEX's own comment) takes priority over the older plain
+  // hex `color`, so a species genuinely looks the same here as it will on
+  // the device once someone deliberately picks one. Anything that HASN'T
+  // opted in falls through to exactly the same hex-or-hash behaviour this
+  // always had — nothing changes for a species nobody's touched this
+  // setting for.
+  if (tileEntry && tileEntry.lowranceColor && LOWRANCE_COLOR_HEX[tileEntry.lowranceColor]) {
+    return { color: "#374151", fillColor: LOWRANCE_COLOR_HEX[tileEntry.lowranceColor], radius: 5, weight: 1.5 };
+  }
   if (tileEntry && tileEntry.color) {
     return { color: "#374151", fillColor: tileEntry.color, radius: 5, weight: 1.5 };
   }
@@ -1807,7 +1817,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         }
 
         // If Type changed to something needing a different SHAPE (see
-        // MARK_TYPE_SHAPE_GETTER/createMarkShapeLayer above — POI/Mark/
+        // shapeNameForMarkType/createMarkShapeLayer above — POI/Mark/
         // Catch each draw as a different shape now, not just a colour),
         // Leaflet has no way to swap an existing layer's class in place —
         // the only option is tearing down the old marker and creating a
@@ -1822,7 +1832,9 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         // "blink" here is an acceptable trade — changing a mark's own
         // Type mid-edit is a rare action, nowhere near as common as
         // everything else this save handler already does silently.
-        const desiredShapeGetter = MARK_TYPE_SHAPE_GETTER[mark.type];
+        const markListsForShape = (options.state && options.state.markLists) || [];
+        const desiredShapeName = shapeNameForMarkType(mark.type, markListsForShape);
+        const desiredShapeGetter = LOWRANCE_SHAPE_GETTERS[desiredShapeName];
         const desiredShapeClass = desiredShapeGetter ? desiredShapeGetter() : L.CircleMarker;
         let effectivePopupEl = popupEl;
         if (marker.constructor !== desiredShapeClass && options.map) {
@@ -1836,7 +1848,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
             weight: freshStyle.weight,
             fillColor: freshStyle.fillColor,
             fillOpacity: 0.85,
-          }).addTo(options.map);
+          }, markListsForShape).addTo(options.map);
           marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
           marker.openPopup();
           effectivePopupEl = marker.getPopup().getElement();
@@ -1922,8 +1934,8 @@ function parseGpxWaypoints(gpxText) {
  * these points need to be genuinely private, they can't live in this repo
  * at all.
  *
- * Rendered as Leaflet circleMarkers (or the SquareMarker/CrossMarker
- * classes built by getSquareMarkerClass/getCrossMarkerClass above), one
+ * Rendered as Leaflet circleMarkers (or the diamond/cross classes built
+ * by getDiamondMarkerClass/getCrossMarkerClass above), one
  * shape per Mark Type, matching the same shape convention the Lowrance
  * GPX export uses — see gpxSymForMark, sync.js) on a dedicated canvas
  * renderer (L.canvas()),
@@ -1989,7 +2001,7 @@ function parseGpxWaypoints(gpxText) {
  * without an explicit canvas renderer would throw once Leaflet tried to
  * actually draw it.
  *
- * BUILT LAZILY (see getSquareMarkerClass/getCrossMarkerClass below), NOT
+ * BUILT LAZILY (see getDiamondMarkerClass/getCrossMarkerClass below), NOT
  * as plain top-level `const X = L.CircleMarker.extend(...)` the way an
  * earlier version of this had them — that unconditionally touched the
  * Leaflet global the instant charts.js itself was evaluated, which broke
@@ -2007,20 +2019,20 @@ function parseGpxWaypoints(gpxText) {
  * mark on in the first place — means charts.js itself never touches `L`
  * just by being loaded.
  */
-let _squareMarkerClass = null;
-function getSquareMarkerClass() {
-  if (!_squareMarkerClass) {
-    _squareMarkerClass = L.CircleMarker.extend({
+let _diamondMarkerClass = null;
+function getDiamondMarkerClass() {
+  if (!_diamondMarkerClass) {
+    _diamondMarkerClass = L.CircleMarker.extend({
       _project() {
         L.CircleMarker.prototype._project.call(this);
         if (!this._point) return;
         const p = this._point;
         const r = this._radius;
         this._parts = [[
-          L.point(p.x - r, p.y - r),
-          L.point(p.x + r, p.y - r),
-          L.point(p.x + r, p.y + r),
-          L.point(p.x - r, p.y + r),
+          L.point(p.x, p.y - r),
+          L.point(p.x + r, p.y),
+          L.point(p.x, p.y + r),
+          L.point(p.x - r, p.y),
         ]];
       },
       _updatePath() {
@@ -2028,7 +2040,7 @@ function getSquareMarkerClass() {
       },
     });
   }
-  return _squareMarkerClass;
+  return _diamondMarkerClass;
 }
 
 /**
@@ -2037,8 +2049,8 @@ function getSquareMarkerClass() {
  * would once anti-aliased down that small. Built as one 12-point closed
  * outline (a plus-sign silhouette) rather than two separate crossing
  * strokes, so it still fills/strokes as a single shape the same way
- * SquareMarker's square and the inherited circle do. See
- * getSquareMarkerClass's own comment just above for everything else (this
+ * getDiamondMarkerClass's diamond and the inherited circle do. See
+ * getDiamondMarkerClass's own comment just above for everything else (this
  * shares the identical lazy-creation approach and reasoning, just a
  * different pixel-space outline).
  */
@@ -2069,27 +2081,60 @@ function getCrossMarkerClass() {
   return _crossMarkerClass;
 }
 
-// Mirrors LOWRANCE_TYPE_SHAPES in sync.js — Mark -> circle, POI -> square,
-// Catch -> cross (Oliver's own call, updated from an earlier POI-> circle/
-// Mark->square split). Holds GETTER FUNCTIONS, not the classes themselves
-// (see getSquareMarkerClass/getCrossMarkerClass's own comment on why) —
-// kept as a separate constant rather than importing one from sync.js,
-// since this file is shared/loaded on pages sync.js never is, and vice
-// versa; a genuinely shared constant would need its own third file just
-// for this, which isn't worth it for one small lookup table. Mark (or any
-// type not listed — including a genuinely new Mark Type someone adds
-// later, until this map is specifically taught about it) intentionally
-// has NO entry, falling through to plain L.CircleMarker in
-// createMarkShapeLayer just below — matches gpxSymForMark's own "circle"
-// default in spirit.
-const MARK_TYPE_SHAPE_GETTER = { POI: getSquareMarkerClass, Catch: getCrossMarkerClass, Fish: getCrossMarkerClass };
+// Real, confirmed shape/colour names — see gpxSymForMark's own header
+// comment in sync.js for how these were finally nailed down (a real GPX
+// export straight off Oliver's own HDS Live-7, after two earlier guesses
+// that were each wrong in different ways). "square" here is deliberately
+// NOT one of the three — what looked like a separate square on the unit
+// turned out to already be this same "diamond" shape.
+const LOWRANCE_SHAPE_GETTERS = { circle: () => L.CircleMarker, diamond: getDiamondMarkerClass, cross: getCrossMarkerClass };
 
-/** Creates whichever shape layer matches a mark's own Type (see
- * MARK_TYPE_SHAPE_GETTER just above). Always pass a Canvas renderer in
- * `options.renderer` — see getSquareMarkerClass's own comment on why
- * that's required, not optional, for anything but a plain circle. */
-function createMarkShapeLayer(latlng, type, options) {
-  const getShapeClass = MARK_TYPE_SHAPE_GETTER[type];
+// This site's own approximation of each of Lowrance's 7 real named
+// colours, for translating a person's Settings-tab choice (see the
+// "Fishing Mark Lists" section, locationsadmin.js) into an actual fill
+// colour THIS map can paint with — the device only understands the name,
+// not a hex value, so somewhere a name has to become a colour, and this
+// map is where that happens rather than sync.js (which only ever needs
+// the bare name for the GPX <sym> string).
+const LOWRANCE_COLOR_HEX = {
+  blue: "#0000ff",
+  magenta: "#ff00ff",
+  red: "#ff0000",
+  yellow: "#ffff00",
+  green: "#008000",
+  cyan: "#00ffff",
+  white: "#ffffff",
+};
+
+// Fallback shape per Mark Type, used ONLY when that type's own
+// config/mark_lists.json entry has no `shape` chosen (see
+// shapeNameForMarkType below) — matches this site's original hardcoded
+// behaviour before shape became a real Settings-tab choice, so a repo
+// that hasn't touched the new picker yet looks exactly as it always has.
+// Mark (or any type not listed here at all — including a genuinely new
+// Mark Type someone adds later) intentionally has NO entry, falling
+// through to plain "circle" — matches gpxSymForMark's own default.
+const MARK_TYPE_DEFAULT_SHAPE_NAME = { POI: "diamond", Catch: "cross", Fish: "cross" };
+
+/** Whichever shape NAME applies to a given Mark Type — the person's own
+ * Settings-tab choice (config/mark_lists.json's `shape` property on that
+ * Mark Type's own entry) if they've set one, else the hardcoded default
+ * above. `markLists` is whatever's already loaded for this page (see
+ * state.markLists) — no separate fetch here. */
+function shapeNameForMarkType(type, markLists) {
+  const entry = (markLists || []).find((r) => r.field === "Mark Type" && r.value === type);
+  if (entry && entry.shape && LOWRANCE_SHAPE_GETTERS[entry.shape]) return entry.shape;
+  return MARK_TYPE_DEFAULT_SHAPE_NAME[type] || "circle";
+}
+
+/** Creates whichever shape layer matches a mark's own Type — see
+ * shapeNameForMarkType just above for where that name actually comes
+ * from. Always pass a Canvas renderer in `options.renderer` — see
+ * getDiamondMarkerClass's own comment on why that's required, not
+ * optional, for anything but a plain circle. */
+function createMarkShapeLayer(latlng, type, options, markLists) {
+  const shapeName = shapeNameForMarkType(type, markLists);
+  const getShapeClass = LOWRANCE_SHAPE_GETTERS[shapeName];
   const ShapeClass = getShapeClass ? getShapeClass() : L.CircleMarker;
   return new ShapeClass(latlng, options);
 }
@@ -2120,7 +2165,7 @@ async function loadAndRenderMarks(map, state) {
   }
 
   const renderer = L.canvas({ padding: 0.5 });
-  state.canvasRenderer = renderer; // reused by startNewMarkEntry below for a freshly-created mark, so every shape on this map — loaded or brand new — draws on the same Canvas renderer (see SquareMarker/CrossMarker's own comment on why that's required)
+  state.canvasRenderer = renderer; // reused by startNewMarkEntry below for a freshly-created mark, so every shape on this map — loaded or brand new — draws on the same Canvas renderer (see getDiamondMarkerClass/getCrossMarkerClass's own comment on why that's required)
   for (const mark of marks) {
     if (mark.lat == null || mark.lng == null) continue;
     const style = markStyleFor(mark, state);
@@ -2131,7 +2176,7 @@ async function loadAndRenderMarks(map, state) {
       weight: style.weight,
       fillColor: style.fillColor,
       fillOpacity: 0.85,
-    }).addTo(map);
+    }, state.markLists).addTo(map);
     marker.bindTooltip(markTooltipText(mark, state), { direction: "top" });
     marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
     state.marksById.set(mark.id, mark);
@@ -2567,7 +2612,8 @@ function startNewMarkEntry(map, lat, lng, state, defaults = {}) {
   // this map (stashed on state.canvasRenderer) rather than letting Leaflet
   // fall back to its own default renderer (SVG, since this map is never
   // created with preferCanvas) — required for anything but a plain circle,
-  // see SquareMarker/CrossMarker's own comment in createMarkShapeLayer.
+  // see getDiamondMarkerClass/getCrossMarkerClass's own comment in
+  // createMarkShapeLayer.
   // Falls back to creating one fresh here only if somehow called before
   // loadAndRenderMarks has run at all (defensive; shouldn't happen in
   // practice, since marks can't be clicked-to-create before the layer
@@ -2580,7 +2626,7 @@ function startNewMarkEntry(map, lat, lng, state, defaults = {}) {
     weight: style.weight,
     fillColor: style.fillColor,
     fillOpacity: 0.85,
-  }).addTo(map);
+  }, state.markLists).addTo(map);
   marker.bindPopup(buildMarkPopupEditHtml(draft, state.markLists), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
   marker.openPopup();
   const popupEl = marker.getPopup().getElement();
