@@ -595,16 +595,30 @@ lists" to commit it. Removing an option doesn't touch any mark that already
 used it; it just won't be offered again.
 
 **Displaying marks on the map**: the Location and Live tab maps both plot
-every mark in `data/marks.json` as a small coloured circle (see
-`loadAndRenderMarks` in `charts.js`), gated behind having a GitHub connection
-set up on the Settings tab — same "don't clutter the map for random public
-visitors, but not real access control" caveat as the rest of this site's
-GitHub-gated features (the file itself is still a plain public URL). Colour
-is derived from each mark's Species (or its Mark Type, for anything without
-one) via a simple hash, so every distinct species gets its own stable colour
-without needing a hardcoded lookup table that would need updating every time
-a new species is added to the pick-list. Hover/tap a point for its name,
-species, and date.
+every mark in `data/marks.json` (see `loadAndRenderMarks` in `charts.js`),
+gated behind having a GitHub connection set up on the Settings tab — same
+"don't clutter the map for random public visitors, but not real access
+control" caveat as the rest of this site's GitHub-gated features (the file
+itself is still a plain public URL). Each mark's **shape matches its Mark
+Type** — POI a circle, Mark a square, Catch a cross — the same convention
+the Lowrance GPX export uses (see "Syncing marks with a Garmin or Lowrance
+device" below), so the two are visually consistent with each other.
+**Colour**, unlike the GPX export, stays the site's own richer palette
+rather than being reduced to Lowrance's 7-colour set — derived from each
+mark's Species (or its Mark Type, for anything without one) via a simple
+hash (or a manually-configured colour from `config/mark_lists.json` when
+one's set), so every distinct species gets its own stable, distinguishable
+colour on THIS map regardless of what the actual device can show; reducing
+to 7 colours here too would make several otherwise-distinct species land on
+the same fallback colour, which only matters for the device's own hardware
+limit, not for a map that has no such constraint. Hover/tap a point for its
+name, species, and date. Built on two small custom Leaflet layers
+(`SquareMarker`/`CrossMarker` in `charts.js`) rather than switching every
+mark over to the DOM-based pins used for tracked locations elsewhere on
+this map — those would be meaningfully heavier at this data's real scale (a
+couple thousand points and growing); the custom shapes stay on the same
+canvas renderer circles always used here, confirmed against the real
+dataset (2,532 marks load and shape in well under half a second).
 
 **Not built yet**: the actual "add a mark while out fishing" UI on the Live
 tab, and filtering marks by these fields. Importing/exporting from a
