@@ -2882,9 +2882,6 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
 .sync-pill-new {
   background: var(--cond-5);
 }
-.sync-pill-match {
-  background: var(--grey-500);
-}
 .sync-pill-visits {
   background: var(--blue-700);
 }

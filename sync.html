@@ -39,7 +39,7 @@
         "export waypoints" option. Every waypoint is matched against what's already in
         <code>data/marks.json</code> before anything is saved — spots the device saved more than once
         (a common thing chartplotters do when you drift back over the same mark) are merged into one, and
-        anything within 20m of a mark already tracked is shown but left unchecked, so nothing gets
+        anything within 20m of a mark already tracked is left out of the list entirely, so nothing gets
         imported twice. Review and edit below, then import only what you actually want kept.
       </p>
       <input type="file" id="syncFileInput" accept=".gpx,.usr" />
