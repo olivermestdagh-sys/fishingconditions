@@ -75,14 +75,17 @@
     <section class="summary-card">
       <div class="summary-title" style="margin-bottom:6px;">Export to a device</div>
       <p class="footnote" style="margin:0 0 12px;text-align:left;">
-        Downloads every mark currently in <code>data/marks.json</code> as a single GPX file — Garmin units
-        and Lowrance sounders that accept GPX import (confirmed on Oliver's own unit) can load it directly.
+        Downloads every mark currently in <code>data/marks.json</code> as a GPX file — Lowrance and Garmin
+        each want a slightly different <code>&lt;sym&gt;</code> icon format, so export the one for whichever
+        device you're loading onto (see the Mark Formats in Fishing Mark Lists, on the Settings tab, to
+        control exactly what each device shows).
       </p>
       <div style="margin-bottom:10px;">
         <label for="exportFilenameInput" style="display:block;font-size:0.8rem;font-weight:600;margin-bottom:4px;">File name</label>
         <input type="text" id="exportFilenameInput" style="width:100%;max-width:340px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
       </div>
-      <button type="button" id="btnExportGpx" class="btn-primary">Export all marks as GPX</button>
+      <button type="button" id="btnExportLowrance" class="btn-primary">Export for Lowrance</button>
+      <button type="button" id="btnExportGarmin" class="btn-primary">Export for Garmin</button>
       <div id="exportStatus" style="margin-top:10px;font-size:0.85rem;"></div>
     </section>
 

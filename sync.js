@@ -507,61 +507,98 @@ function naiveToGpxTime(naive) {
   return String(naive).replace(" ", "T") + "Z";
 }
 
-// Lowrance's own GPX <sym> vocabulary for waypoint icons — "shape,color"
-// (e.g. "circle,blue"). CONFIRMED DIRECTLY against a real GPX file Oliver
-// exported from his own HDS Live-7 after manually setting 7 waypoints on
-// the unit itself (one of each of its 7 real colours, on circle/cross/
-// diamond shapes):
+// Lowrance's own GPX <sym> vocabulary for waypoint icons — "shape,color",
+// e.g. "circle,blue", lowercase, no space. CONFIRMED DIRECTLY against a
+// real GPX file Oliver exported from his own HDS Live-7 after manually
+// setting 7 waypoints on the unit itself (one of each of its 7 real
+// colours, on circle/cross/diamond shapes):
 //   circle,blue   circle,yellow   circle,white   circle,green
 //   circle,cyan   cross,magenta   diamond,red
+// Garmin wants the SAME idea — shape,colour — but in Title Case with a
+// space after the comma: "Circle, Yellow", not "circle,yellow". Genuinely
+// two different vocabularies for the same concept, confirmed when a GPX
+// exported for Lowrance failed to import cleanly on a Garmin unit. That's
+// the whole reason every function in this section takes a `device`
+// parameter now.
 //
-// Shape (per Mark Type) and colour (per Species) are now real, editable
-// Settings-tab choices (config/mark_lists.json's own `shape`/`lowranceColor`
-// properties — see the "Fishing Mark Lists" section, locationsadmin.js) —
-// OPT IN, deliberately: a Mark Type with no `shape` chosen keeps the same
-// hardcoded default this always had (see MARK_TYPE_DEFAULT_SHAPE below); a
-// species with no `lowranceColor` chosen keeps exporting with a plain
-// "blue" default, same as before, while its colour on the site's OWN map
-// (see markStyleFor, charts.js) is untouched — still whatever hex/hash
-// colour it already had. Nothing here GUESSES a colour from a species' hex
-// any more (an earlier version did — matching hex to the nearest of these
-// 7 names — which is exactly how two wrong colour names slipped through
-// unnoticed for as long as they did); if Oliver wants a species to show a
-// specific Lowrance colour, that's now a deliberate pick, not a derived
-// guess.
+// Shape and colour together are now a single, real, editable Settings-tab
+// choice — a "Mark Format" (config/mark_lists.json's field: "Mark Format"
+// entries — see the "Fishing Mark Lists" section, locationsadmin.js),
+// carrying its OWN literal <sym> text for EACH device plus an icon/colour
+// for this site's own map, rather than this code deriving one string from
+// a colour name and a shape name separately the way two earlier versions
+// did (both of which turned out wrong — see resolveMarkFormat/
+// legacySymForMark below for what happens when nothing's been assigned).
+// Species' own assigned format wins over its Mark Type's, mirroring
+// resolveMarkFormat in charts.js exactly (kept as a separate small copy
+// here rather than importing one, since sync.js and charts.js load on
+// different pages).
+
+/** Mirrors resolveMarkFormat in charts.js exactly — see that copy's own
+ * comment for the species-then-type priority and why. */
+function resolveMarkFormat(m) {
+  if (m.species) {
+    const speciesEntry = markLists.find((r) => r.field === "Species" && r.value === m.species);
+    if (speciesEntry && speciesEntry.format) {
+      const format = markLists.find((r) => r.field === "Mark Format" && r.value === speciesEntry.format);
+      if (format) return format;
+    }
+  }
+  const typeEntry = markLists.find((r) => r.field === "Mark Type" && r.value === m.type);
+  if (typeEntry && typeEntry.format) {
+    const format = markLists.find((r) => r.field === "Mark Format" && r.value === typeEntry.format);
+    if (format) return format;
+  }
+  return null;
+}
+
+// Legacy fallback shape per Mark Type, used ONLY when neither a mark's
+// species nor its Type has a Mark Format assigned at all (see
+// legacySymForMark below) — matches this site's original hardcoded
+// behaviour from before Mark Formats existed, so a repo that hasn't
+// touched any of this yet exports exactly as it always did.
 const MARK_TYPE_DEFAULT_SHAPE = { POI: "diamond", Catch: "cross", Fish: "cross" };
 
-/** Whichever shape NAME applies to a given Mark Type — mirrors
- * shapeNameForMarkType in charts.js exactly (same field names, same
- * fallback), kept as a separate small function rather than importing one
- * from the other file, since sync.js and charts.js are loaded on
- * different pages; a genuinely shared function would need its own third
- * file just for this. */
-function shapeNameForMarkType(type) {
-  const entry = markLists.find((r) => r.field === "Mark Type" && r.value === type);
-  if (entry && entry.shape) return entry.shape;
-  return MARK_TYPE_DEFAULT_SHAPE[type] || "circle";
+function capitalizeWord(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-/** The <sym> value for one mark on export. A POI gets its shape bare, no
- * colour suffix at all — colour represents species, and a POI
- * structurally has none (see the Mark/POI/Catch field split,
- * MARK_TYPE_FIELD_KEYS in charts.js) — so there's nothing to derive one
- * from. A Mark or Catch (or legacy Fish) gets its own shape in whatever
- * Lowrance colour its species has been explicitly given in
- * config/mark_lists.json's `lowranceColor` (see this section's own header
- * comment on why that's a deliberate pick, not a guess from hex), falling
- * back to blue for a species with no colour chosen yet, or no species
- * value at all on an otherwise non-POI record. */
-function gpxSymForMark(m) {
-  const shape = shapeNameForMarkType(m.type);
-  if (m.type === "POI") return shape;
-  const entry = markLists.find((r) => r.field === "Species" && r.value === m.species);
-  const colorName = entry && entry.lowranceColor ? entry.lowranceColor : null;
-  return `${shape},${colorName || "blue"}`;
+/** Builds the fallback <sym> string for a mark with no Mark Format
+ * assigned at all — same shape-by-Mark-Type and plain "blue" default this
+ * always had, just formatted for whichever device was asked for (see this
+ * section's own header comment on the two real, different conventions).
+ * `device` is "lowrance" (lowercase, no space) or "garmin" (Title Case,
+ * space after the comma). */
+function legacySymForMark(m, device) {
+  const shape = MARK_TYPE_DEFAULT_SHAPE[m.type] || "circle";
+  if (m.type === "POI") return device === "garmin" ? capitalizeWord(shape) : shape;
+  return device === "garmin" ? `${capitalizeWord(shape)}, Blue` : `${shape},blue`;
 }
 
-function buildGpxDocument(marks) {
+/** The <sym> value for one mark on export, for a given device ("lowrance"
+ * or "garmin"). A resolved Mark Format (see resolveMarkFormat above)
+ * supplies its OWN literal text for whichever device is asked for —
+ * lowranceSym or garminSym, exactly as typed into the Settings tab, no
+ * reformatting applied here — this site doesn't yet know either device's
+ * full accepted-value list to validate or reshape against (see the Mark
+ * Format section's own comment, locationsadmin.js, on why those stay free
+ * text for now), so getting the exact text right is deliberately Oliver's
+ * own call, made once per format rather than guessed at export time. If
+ * NEITHER the mark's species nor its Type has a format assigned at all,
+ * falls back to legacySymForMark above. A format that has SOME device's
+ * sym text set but not the other's (e.g. only ever filled in for Lowrance
+ * so far) falls back to the legacy default for the device that's still
+ * blank, rather than exporting an empty <sym>. */
+function gpxSymForMark(m, device) {
+  const format = resolveMarkFormat(m);
+  if (format) {
+    const sym = device === "garmin" ? format.garminSym : format.lowranceSym;
+    if (sym) return sym;
+  }
+  return legacySymForMark(m, device);
+}
+
+function buildGpxDocument(marks, device) {
   const wpts = marks
     .map((m) => {
       // Species now goes in <name> (see below), so repeating it here would
@@ -584,7 +621,7 @@ function buildGpxDocument(marks) {
       // point, so it always wins there regardless of anything a stray
       // legacy `species` value on an old record might still hold.
       const nameTag = escapeXml(m.type === "POI" ? (m.name || "Mark") : (m.species || m.name || "Mark"));
-      const symTag = `<sym>${escapeXml(gpxSymForMark(m))}</sym>`;
+      const symTag = `<sym>${escapeXml(gpxSymForMark(m, device))}</sym>`;
       return (
         `  <wpt lat="${m.lat}" lon="${m.lng}">\n` +
         `    <name>${nameTag}</name>\n` +
@@ -682,7 +719,7 @@ function sanitizeExportFilename(raw) {
   return name;
 }
 
-async function handleExportClick() {
+async function handleExportClick(device) {
   const statusEl = document.getElementById("exportStatus");
   statusEl.textContent = "Building export…";
   statusEl.style.color = "";
@@ -701,9 +738,15 @@ async function handleExportClick() {
       statusEl.textContent = "No marks to export yet.";
       return;
     }
-    const gpx = buildGpxDocument(marks);
+    const gpx = buildGpxDocument(marks, device);
     const filenameInput = document.getElementById("exportFilenameInput");
-    const filename = sanitizeExportFilename(filenameInput ? filenameInput.value : "");
+    // Tags on which device this export is for (fishing-marks-lowrance-...,
+    // fishing-marks-garmin-...) — exporting both back to back, which is a
+    // completely reasonable thing to do with two separate buttons now,
+    // would otherwise silently overwrite one file with the other if
+    // they'd land on the exact same name.
+    const baseFilename = sanitizeExportFilename(filenameInput ? filenameInput.value : "");
+    const filename = baseFilename.replace(/\.gpx$/i, `-${device}.gpx`);
     statusEl.textContent = window.showSaveFilePicker ? "Choose where to save…" : "Downloading…";
     const outcome = await saveTextFile(filename, "application/gpx+xml", gpx);
     if (outcome === "cancelled") {
@@ -712,7 +755,8 @@ async function handleExportClick() {
       return;
     }
     const savedNote = outcome === "saved-fallback" ? " (saved to your browser's default download location — this browser doesn't support choosing a folder)" : "";
-    statusEl.textContent = `Exported ${marks.length} marks as ${filename}${savedNote} — load this onto your Garmin or Lowrance via its GPX import option.`;
+    const deviceLabel = device === "garmin" ? "Garmin" : "Lowrance";
+    statusEl.textContent = `Exported ${marks.length} marks as ${filename}${savedNote} — load this onto your ${deviceLabel} via its GPX import option.`;
     statusEl.style.color = "#16a34a";
   } catch (err) {
     console.error("GPX export failed:", err);
@@ -1178,7 +1222,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderReviewList();
   });
   document.getElementById("btnImportSelected").addEventListener("click", handleImportClick);
-  document.getElementById("btnExportGpx").addEventListener("click", handleExportClick);
+  document.getElementById("btnExportLowrance").addEventListener("click", () => handleExportClick("lowrance"));
+  document.getElementById("btnExportGarmin").addEventListener("click", () => handleExportClick("garmin"));
   const filenameInput = document.getElementById("exportFilenameInput");
   if (filenameInput) filenameInput.value = defaultExportFilename();
   document.getElementById("syncSearchBox").addEventListener("input", (e) => {
