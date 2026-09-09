@@ -1,105 +1,104 @@
 [
   {
     "field": "Mark Type",
-    "value": "POI",
-    "shape": "diamond"
+    "value": "POI"
   },
   {
     "field": "Species",
     "value": "Whiting",
     "color": "#ffff00",
-    "lowranceColor": "yellow"
+    "format": "Yellow"
   },
   {
     "field": "Species",
     "value": "Gummy Shark",
     "color": "#0000ff",
-    "lowranceColor": "blue"
+    "format": "Blue"
   },
   {
     "field": "Species",
     "value": "Flathead",
     "color": "#ff00ff",
-    "lowranceColor": "magenta"
+    "format": "Magenta"
   },
   {
     "field": "Species",
     "value": "Snapper",
     "color": "#fc0303",
-    "lowranceColor": "red"
+    "format": "Red"
   },
   {
     "field": "Species",
     "value": "Squid",
     "color": "#00ff00",
-    "lowranceColor": "green"
+    "format": "Green"
   },
   {
     "field": "Species",
     "value": "Kingfish",
     "color": "#0000ff",
-    "lowranceColor": "blue"
+    "format": "Blue"
   },
   {
     "field": "Species",
     "value": "Tuna",
     "color": "#122d63",
-    "lowranceColor": "blue"
+    "format": "Blue"
   },
   {
     "field": "Species",
     "value": "Crayfish",
     "color": "#ffffff",
-    "lowranceColor": "white"
+    "format": "White"
   },
   {
     "field": "Species",
     "value": "Snook",
-    "lowranceColor": "white"
+    "format": "White"
   },
   {
     "field": "Species",
     "value": "Scallops",
-    "lowranceColor": "white"
+    "format": "White"
   },
   {
     "field": "Species",
     "value": "Grass Whiting",
     "color": "#00ff00",
-    "lowranceColor": "green"
+    "format": "Green"
   },
   {
     "field": "Species",
     "value": "Trevally",
-    "lowranceColor": "white"
+    "format": "White"
   },
   {
     "field": "Species",
     "value": "Leather Jacket",
-    "lowranceColor": "green"
+    "format": "Green"
   },
   {
     "field": "Species",
     "value": "Elephant Fish",
-    "lowranceColor": "blue",
-    "color": "#0000ff"
+    "color": "#0000ff",
+    "format": "Blue"
   },
   {
     "field": "Species",
     "value": "Wrasse",
-    "lowranceColor": "green",
-    "color": "#00ff00"
+    "color": "#00ff00",
+    "format": "Green"
   },
   {
     "field": "Species",
     "value": "Garfish",
-    "lowranceColor": "white"
+    "format": "White"
   },
   {
     "field": "Species",
     "value": "Port Jackson Shark",
-    "lowranceColor": "blue",
-    "color": "#0000ff"
+    "color": "#0000ff",
+    "format": "Blue"
   },
   {
     "field": "Weather Condition",
@@ -249,7 +248,7 @@
   {
     "field": "Species",
     "value": "Unknown",
-    "lowranceColor": "white"
+    "format": "White"
   },
   {
     "field": "Bait",
@@ -258,12 +257,58 @@
   },
   {
     "field": "Mark Type",
-    "value": "Mark",
-    "shape": "circle"
+    "value": "Mark"
   },
   {
     "field": "Mark Type",
-    "value": "Catch",
-    "shape": "cross"
+    "value": "Catch"
+  },
+  {
+    "field": "Mark Format",
+    "value": "Blue",
+    "icon": "circle",
+    "color": "#0000ff",
+    "lowranceSym": "circle,blue",
+    "garminSym": "Circle, Blue"
+  },
+  {
+    "field": "Mark Format",
+    "value": "Green",
+    "icon": "circle",
+    "color": "#008000",
+    "lowranceSym": "circle,green",
+    "garminSym": "Circle, Green"
+  },
+  {
+    "field": "Mark Format",
+    "value": "Magenta",
+    "icon": "circle",
+    "color": "#ff00ff",
+    "lowranceSym": "circle,magenta",
+    "garminSym": "Circle, Magenta"
+  },
+  {
+    "field": "Mark Format",
+    "value": "Red",
+    "icon": "circle",
+    "color": "#ff0000",
+    "lowranceSym": "circle,red",
+    "garminSym": "Circle, Red"
+  },
+  {
+    "field": "Mark Format",
+    "value": "White",
+    "icon": "circle",
+    "color": "#ffffff",
+    "lowranceSym": "circle,white",
+    "garminSym": "Circle, White"
+  },
+  {
+    "field": "Mark Format",
+    "value": "Yellow",
+    "icon": "circle",
+    "color": "#ffff00",
+    "lowranceSym": "circle,yellow",
+    "garminSym": "Circle, Yellow"
   }
 ]
