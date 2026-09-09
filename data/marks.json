@@ -22922,17 +22922,6 @@
       "species": "Squid"
     },
     {
-      "id": "m_1893456002333_dvh82",
-      "lat": -38.0667667,
-      "lng": 146.4860833,
-      "name": "Cape Wellington",
-      "type": "Mark",
-      "dateTime": "2026-01-01 00:00:00",
-      "createdAt": "2026-01-01 00:00:00",
-      "source": "gpx-import",
-      "species": "Kingfish"
-    },
-    {
       "id": "m_1893456002334_7efbx",
       "lat": -38.1072333,
       "lng": 144.7280167,
