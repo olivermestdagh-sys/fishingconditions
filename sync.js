@@ -740,13 +740,16 @@ async function handleExportClick(device) {
     }
     const gpx = buildGpxDocument(marks, device);
     const filenameInput = document.getElementById("exportFilenameInput");
-    // Tags on which device this export is for (fishing-marks-lowrance-...,
-    // fishing-marks-garmin-...) — exporting both back to back, which is a
-    // completely reasonable thing to do with two separate buttons now,
-    // would otherwise silently overwrite one file with the other if
-    // they'd land on the exact same name.
+    // Device name goes FIRST (lowrance-fishing-marks-..., not
+    // fishing-marks-...-lowrance) — Oliver's own call, and it also means
+    // the two exports sort next to each other by device when browsing a
+    // downloads folder, rather than by date first. Still tags every
+    // export with which device it's for either way — exporting both back
+    // to back, a completely reasonable thing to do with two separate
+    // buttons now, would otherwise silently overwrite one file with the
+    // other if they'd land on the exact same name.
     const baseFilename = sanitizeExportFilename(filenameInput ? filenameInput.value : "");
-    const filename = baseFilename.replace(/\.gpx$/i, `-${device}.gpx`);
+    const filename = `${device}-${baseFilename}`;
     statusEl.textContent = window.showSaveFilePicker ? "Choose where to save…" : "Downloading…";
     const outcome = await saveTextFile(filename, "application/gpx+xml", gpx);
     if (outcome === "cancelled") {

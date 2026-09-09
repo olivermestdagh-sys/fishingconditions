@@ -1023,24 +1023,35 @@ function markStyleFor(mark, state) {
   const groupField = MARK_LIST_FIELDS.find((f) => f.key === state.groupByKey) || MARK_LIST_FIELDS[0];
   const value = mark[state.groupByKey];
   if (!value) return MARK_NO_VALUE_STYLE;
-  // A resolved Mark Format's own colour (a real hex value — see
-  // resolveMarkFormat's own comment, and "an icon + a colour picker for
-  // the web site" in locationsadmin.js's Mark Format section, no name-to-
-  // hex translation needed the way an earlier lowranceColor-name version
-  // of this needed) takes priority, but ONLY when actually grouping by
-  // Species or Mark Type specifically — those are the two fields a format
-  // can be assigned to at all, so it's the deliberate "this is what this
-  // mark actually looks like" choice for THOSE views. Grouping by
-  // something else entirely (Weather Condition, Bait, ...) keeps that
-  // field's own plain hex-or-hash behaviour untouched — a format has
-  // nothing meaningful to say about wanting to see marks coloured by tide
-  // condition, say.
+  // A resolved Mark Format's own colour (a real hex value — see "an icon +
+  // a colour picker for the web site" in locationsadmin.js's Mark Format
+  // section) takes priority — every pick-list field's values can have a
+  // Format assigned now (Oliver's own call to extend this past just
+  // Species/Mark Type), so this applies to whatever field is currently
+  // being grouped by. Species/Mark Type specifically go through
+  // resolveMarkFormat's own species-wins-over-type priority (see its own
+  // comment); every OTHER field just checks that field's own value
+  // directly, since there's no equivalent priority relationship between
+  // two different fields to resolve.
   if (state.groupByKey === "species" || state.groupByKey === "type") {
     const format = resolveMarkFormat(mark, state.markLists);
     if (format && format.color) {
       return { color: "#374151", fillColor: format.color, radius: 5, weight: 1.5 };
     }
+  } else {
+    const tileEntry = (state.markLists || []).find((r) => r.field === groupField.label && r.value === value);
+    if (tileEntry && tileEntry.format) {
+      const format = (state.markLists || []).find((r) => r.field === "Mark Format" && r.value === tileEntry.format);
+      if (format && format.color) {
+        return { color: "#374151", fillColor: format.color, radius: 5, weight: 1.5 };
+      }
+    }
   }
+  // Legacy hex fallback — a value that hasn't been given a Format at all
+  // still respects a plain `color` if one happens to already be sitting on
+  // it from before Mark Formats existed (the Settings tab no longer offers
+  // a way to SET a new one — see this section's own header comment in
+  // locationsadmin.js — but old data that already has one keeps working).
   const tileEntry = (state.markLists || []).find((r) => r.field === groupField.label && r.value === value);
   if (tileEntry && tileEntry.color) {
     return { color: "#374151", fillColor: tileEntry.color, radius: 5, weight: 1.5 };
@@ -1432,7 +1443,18 @@ function buildMarkPopupViewHtml(mark) {
   return `
     <div data-mark-id="${escapeHtml(mark.id)}" style="min-width:200px;">
       ${rows.join("")}
-      ${canEdit ? `<button type="button" class="btn-secondary" data-mark-edit style="margin-top:8px;padding:4px 10px;font-size:0.85rem;">Edit</button>` : ""}
+      ${canEdit ? `
+      <div style="margin-top:8px;display:flex;gap:6px;align-items:center;">
+        <button type="button" class="btn-secondary" data-mark-edit style="padding:4px 10px;font-size:0.85rem;">Edit</button>
+        <button type="button" class="btn-secondary" data-mark-delete style="padding:4px 10px;font-size:0.85rem;color:#dc2626;">Delete</button>
+      </div>
+      <div data-mark-delete-confirm style="display:none;margin-top:8px;padding:8px;border:1px solid #fecaca;background:#fef2f2;border-radius:6px;font-size:0.85rem;">
+        <div style="margin-bottom:6px;">Delete this mark? This can't be undone.</div>
+        <button type="button" class="btn-secondary" data-mark-delete-confirm-yes style="padding:4px 10px;font-size:0.85rem;background:#dc2626;color:#fff;border-color:#dc2626;">Yes, delete</button>
+        <button type="button" class="btn-secondary" data-mark-delete-cancel style="padding:4px 10px;font-size:0.85rem;">Cancel</button>
+      </div>
+      <div data-mark-delete-status style="margin-top:6px;font-size:0.8rem;"></div>
+      ` : ""}
     </div>
   `;
 }
@@ -1715,6 +1737,59 @@ async function saveMarkToGitHub(updatedMark) {
 }
 
 /**
+ * Deletes one mark from data/marks.json entirely — same GET-current-sha-
+ * then-PUT-whole-file pattern as saveMarkToGitHub just above (this repo's
+ * only way to write anything, being a static site with no server of its
+ * own), just filtering the mark OUT of the array instead of adding or
+ * replacing one. Never throws (same convention as saveMarkToGitHub) —
+ * returns {success:false, error} instead, so the popup's own Delete
+ * handler can show the error text directly rather than needing its own
+ * try/catch.
+ */
+async function deleteMarkFromGitHub(markId) {
+  const conn = getConnection();
+  if (!conn || !conn.owner || !conn.repo || !conn.token) {
+    return { success: false, error: "Not connected to GitHub — connect from the Settings tab first." };
+  }
+  try {
+    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARKS_FILE_PATH}?ref=${BRANCH}`, {
+      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+    });
+    if (!getRes.ok) throw new Error(`Could not read current file (${getRes.status})`);
+    const getJson = await getRes.json();
+    const decoded = decodeURIComponent(escape(atob(getJson.content.replace(/\n/g, ""))));
+    const marksJson = JSON.parse(decoded);
+    if (!Array.isArray(marksJson.marks)) marksJson.marks = [];
+    marksJson.marks = marksJson.marks.filter((m) => m.id !== markId);
+
+    const content = JSON.stringify(marksJson, null, 2) + "\n";
+    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARKS_FILE_PATH}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${conn.token}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: `Delete mark ${markId} via site`,
+        content: utf8ToBase64(content),
+        sha: getJson.sha,
+        branch: BRANCH,
+      }),
+    });
+    if (!putRes.ok) {
+      const errBody = await putRes.json().catch(() => ({}));
+      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
+    }
+    return { success: true };
+  } catch (err) {
+    console.error("deleteMarkFromGitHub failed:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+
+/**
  * Appends MANY new marks to data/marks.json in a single commit — the Sync
  * tab's bulk-import save (see sync.js), as opposed to saveMarkToGitHub just
  * above, which is a single add-or-update used by the interactive map
@@ -1836,6 +1911,57 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       L.DomEvent.stop(e);
       marker.setPopupContent(buildMarkPopupEditHtml(mark, markListsCache));
       wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options);
+    });
+  }
+
+  // Delete needs an inline are-you-sure step rather than acting on a
+  // single click — this is the only genuinely irreversible action
+  // anywhere on a mark's own popup (Cancel just discards unsaved edits;
+  // this removes the mark from data/marks.json outright). Clicking
+  // Delete just reveals the confirm block below (data-mark-delete-
+  // confirm) rather than deleting anything yet.
+  const deleteBtn = popupEl.querySelector("[data-mark-delete]");
+  const deleteConfirmBlock = popupEl.querySelector("[data-mark-delete-confirm]");
+  if (deleteBtn && deleteConfirmBlock) {
+    deleteBtn.addEventListener("click", (e) => {
+      L.DomEvent.stop(e);
+      deleteConfirmBlock.style.display = "block";
+    });
+  }
+  const deleteCancelBtn = popupEl.querySelector("[data-mark-delete-cancel]");
+  if (deleteCancelBtn && deleteConfirmBlock) {
+    deleteCancelBtn.addEventListener("click", (e) => {
+      L.DomEvent.stop(e);
+      deleteConfirmBlock.style.display = "none";
+    });
+  }
+  const deleteConfirmYesBtn = popupEl.querySelector("[data-mark-delete-confirm-yes]");
+  if (deleteConfirmYesBtn) {
+    deleteConfirmYesBtn.addEventListener("click", async (e) => {
+      L.DomEvent.stop(e);
+      const statusEl = popupEl.querySelector("[data-mark-delete-status]");
+      deleteConfirmYesBtn.disabled = true;
+      if (statusEl) statusEl.textContent = "Deleting…";
+      const result = await deleteMarkFromGitHub(mark.id);
+      if (!result.success) {
+        deleteConfirmYesBtn.disabled = false;
+        if (statusEl) {
+          statusEl.textContent = "Delete failed: " + result.error;
+          statusEl.style.color = "#dc2626";
+        }
+        return;
+      }
+      // Success — remove the marker from the map and both of state's own
+      // lookup maps (marksById/markersById), same bookkeeping loadAndRenderMarks
+      // itself does when a mark is first added, just in reverse. isNew marks
+      // (created via startNewMarkEntry, never actually saved) never reach this
+      // code path at all — Cancel is what removes those, not Delete.
+      marker.closePopup();
+      if (options.map) options.map.removeLayer(marker);
+      if (options.state) {
+        options.state.marksById.delete(mark.id);
+        options.state.markersById.delete(mark.id);
+      }
     });
   }
 
