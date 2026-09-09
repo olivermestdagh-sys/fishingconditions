@@ -549,16 +549,23 @@ async function onSaveGroups() {
 // --- Fishing Mark Lists (Settings tab) --------------------------------------
 //
 // Same read/render/add/remove/save shape as Location Groups just above, just
-// two-dimensional: markLists is a flat {field, value, color?} array (see
+// two-dimensional: markLists is a flat {field, value, format?} array (see
 // MARK_LIST_FIELDS in charts.js) covering ALL nine pick-list fields at
 // once, rather than one array per field — one file, one sha, one save
 // button, rather than nine of everything. The UI still renders it grouped
 // by field (one card sub-section per field) so it reads as nine separate
-// lists even though it's a single flat array underneath. `color`, when set
-// (see onSetMarkListValueColor below), is just a plain hex string — purely
-// a display preference for this Settings-tab chip and (for any OTHER
-// field's values, that haven't opted into a Mark Format below) this site's
-// own map when nothing more specific has been chosen.
+// lists even though it's a single flat array underneath.
+//
+// EVERY value on EVERY field picks a Mark Format (see below) via the same
+// small <select> next to its chip — a value with none chosen just looks
+// like a plain chip; one WITH a format picked shows that format's own
+// "colour for the website" as its background (see resolveTileFormatColor
+// below). There's no other way to colour a tile any more — an earlier
+// version had a separate free hex colour picker (click the chip, native
+// <input type="color">) alongside the Format picker, which meant a tile's
+// look and its Format could disagree with each other; removed in favour of
+// Format being the single source of truth for how anything here looks, on
+// this page AND on the map.
 //
 // MARK FORMATS — a tenth, DIFFERENT kind of entry in the same flat array
 // (field: "Mark Format"), not one of MARK_LIST_FIELDS' nine real per-mark
@@ -626,8 +633,8 @@ async function loadMarkLists() {
 }
 
 // Simple relative-luminance check so a chip's label text stays readable
-// against WHATEVER background colour was picked (see
-// onSetMarkListValueColor below) — light backgrounds get dark text, dark
+// against WHATEVER background colour a resolved Mark Format supplies (see
+// resolveTileFormatColor above) — light backgrounds get dark text, dark
 // backgrounds get white text, rather than picking one fixed text colour
 // that would go illegible against roughly half of all possible picks.
 function pickReadableTextColor(hex) {
@@ -668,33 +675,32 @@ function renderMarkLists() {
     row.innerHTML = values.map((v) => {
       const escAttr = v.value.replace(/"/g, "&quot;");
       const escText = v.value.replace(/</g, "&lt;");
-      // Only overrides the chip's default white/grey look when a colour has
-      // actually been picked for this value — an unset one still just looks
-      // like every other .loc-chip until clicked.
-      const colorStyle = v.color ? `background:${v.color};border-color:${v.color};color:${pickReadableTextColor(v.color)};` : "";
-      // Species AND Mark Type get a single <select> picking one of the
-      // named Mark Formats (see this section's own header comment on why
-      // that replaced two separate colour/shape pickers) — a value with
-      // none chosen keeps this chip's plain hex swatch above driving its
-      // look here and its fallback on the map, same as any other field.
-      let extraPickerHtml = "";
-      if (key === "species" || key === "type") {
-        const current = v.format || "";
-        const formatNames = markLists.filter((r) => r.field === "Mark Format").map((r) => r.value);
-        extraPickerHtml = `
+      // Tile colour now comes ONLY from the chosen Mark Format's own
+      // "colour for the website" (see resolveTileFormatColor below) — no
+      // more per-tile hex picker (removed, see this section's own header
+      // comment on why: one consistent mechanism for every field, instead
+      // of a Format AND a separate free hex colour that could disagree
+      // with each other).
+      const tileColor = resolveTileFormatColor(v);
+      const colorStyle = tileColor ? `background:${tileColor};border-color:${tileColor};color:${pickReadableTextColor(tileColor)};` : "";
+      // Every field's values get the same Mark Format <select> now — an
+      // earlier version of this only offered it for Species/Mark Type;
+      // Oliver's own call to extend it to every pick-list field, so
+      // Weather Condition/Bait/Rig/etc can all drive a consistent
+      // icon+colour (and, for Species/Mark Type specifically, the
+      // Lowrance/Garmin export) the same way.
+      const current = v.format || "";
+      const formatNames = markLists.filter((r) => r.field === "Mark Format").map((r) => r.value);
+      const formatSelectHtml = `
         <select class="mark-list-format-select" data-field-label="${label}" data-value="${escAttr}" title="Mark Format (optional)"
           style="font-size:0.7rem;padding:1px 3px;border-radius:5px;border:1px solid var(--grey-200);background:var(--white);color:var(--grey-500);">
           <option value=""${current ? "" : " selected"}>Format…</option>
           ${formatNames.map((f) => `<option value="${f.replace(/"/g, "&quot;")}" ${f === current ? "selected" : ""}>${f.replace(/</g, "&lt;")}</option>`).join("")}
         </select>`;
-      }
       return `
-      <span class="loc-chip mark-list-color-chip" data-field="${key}" data-value="${escAttr}" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;${colorStyle}">
-        <input type="color" class="mark-list-color-input" data-field="${key}" data-value="${escAttr}" value="${v.color || "#e5e7eb"}"
-          aria-label="Pick a colour for ${escAttr}"
-          style="position:absolute;width:0;height:0;padding:0;border:0;opacity:0;" />
+      <span class="loc-chip" data-field="${key}" data-value="${escAttr}" style="display:inline-flex;align-items:center;gap:6px;${colorStyle}">
         <span>${escText}</span>
-        ${extraPickerHtml}
+        ${formatSelectHtml}
         <button type="button" data-remove-mark-value data-field="${key}" data-value="${escAttr}"
           aria-label="Remove ${escAttr}"
           style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>
@@ -705,42 +711,10 @@ function renderMarkLists() {
 
   container.querySelectorAll("button[data-remove-mark-value]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
-      // Stops the click from also bubbling up into this same chip's own
-      // click-to-open-the-colour-picker handler just below — removing a
-      // value and immediately popping a colour picker for the (now gone)
-      // chip underneath the cursor would be a confusing double-action from
-      // one click.
-      e.stopPropagation();
       onRemoveMarkListValue(e.currentTarget.dataset.field, e.currentTarget.dataset.value);
     });
   });
-  // Clicking anywhere on a chip OTHER than its × button opens that value's
-  // colour picker — done by forwarding the click to a visually-hidden
-  // <input type="color"> rather than building a custom swatch picker from
-  // scratch; every modern browser already has a perfectly good native one.
-  container.querySelectorAll(".mark-list-color-chip").forEach((chip) => {
-    chip.addEventListener("click", (e) => {
-      // Also guards against a click landing on the new Mark Format
-      // <select> (species/type chips only) — that needs its own native
-      // dropdown to open normally, not this chip's hex colour picker
-      // firing underneath/instead.
-      if (e.target.closest("[data-remove-mark-value]")) return;
-      if (e.target.closest(".mark-list-format-select")) return;
-      const colorInput = chip.querySelector(".mark-list-color-input");
-      if (colorInput) colorInput.click();
-    });
-  });
-  container.querySelectorAll(".mark-list-color-input").forEach((input) => {
-    // "change" (fires once the picker closes with a value committed), not
-    // "input" (fires continuously while dragging inside the picker) — one
-    // update per pick, not a flood of them.
-    input.addEventListener("change", (e) => {
-      onSetMarkListValueColor(e.currentTarget.dataset.field, e.currentTarget.dataset.value, e.currentTarget.value);
-      renderMarkLists();
-    });
-  });
   container.querySelectorAll(".mark-list-format-select").forEach((select) => {
-    select.addEventListener("click", (e) => e.stopPropagation()); // don't also trigger the chip's own hex-picker click handler
     select.addEventListener("change", (e) => {
       onSetMarkListValueFormat(e.currentTarget.dataset.fieldLabel, e.currentTarget.dataset.value, e.currentTarget.value);
       renderMarkLists();
@@ -803,11 +777,18 @@ function onAddMarkListValue(key) {
 // a mark just references the value string itself, never the colour, so
 // recolouring (or un-colouring) an option doesn't touch anything that
 // already used it.
-function onSetMarkListValueColor(key, value, color) {
-  const fieldDef = MARK_LIST_FIELDS.find((f) => f.key === key);
-  if (!fieldDef) return;
-  const entry = markLists.find((r) => r.field === fieldDef.label && r.value === value);
-  if (entry) entry.color = color;
+/** Resolves the "colour for the website" a tile should show — the
+ * assigned Mark Format's own `color` (see this section's own header
+ * comment on why that's now the ONLY way a tile gets a colour, no more
+ * per-tile hex picker), or null if the value has no format assigned at
+ * all (or the format itself has no colour set). Doesn't fall back to a
+ * hash-based colour the way the map's own markStyleFor does in charts.js
+ * — this is just for the Settings-tab chip's own look, not trying to
+ * make every unconfigured value visually distinct here too. */
+function resolveTileFormatColor(entry) {
+  if (!entry.format) return null;
+  const format = markLists.find((r) => r.field === "Mark Format" && r.value === entry.format);
+  return format && format.color ? format.color : null;
 }
 
 // Website icon choices for a Mark Format — matches
@@ -817,12 +798,14 @@ function onSetMarkListValueColor(key, value, color) {
 // shape the map has no way to render.
 const MARK_ICON_OPTIONS = ["circle", "diamond", "cross"];
 
-/** Sets or clears a Species/Mark Type value's `format` (formatName === ""
+/** Sets or clears any pick-list value's `format` (formatName === ""
  * means "opt out, go back to this value's own fallback" — see
- * resolveMarkFormat, charts.js, and its sync.js equivalent). `fieldLabel`
- * is "Species" or "Mark Type" directly (not a MARK_LIST_FIELDS key/lookup
- * — the caller already has the label in scope from its own render loop),
- * mirroring onSetMarkListValueColor's own shape otherwise. */
+ * resolveMarkFormat, charts.js, and its sync.js equivalent, for Species/
+ * Mark Type specifically; resolveTileFormatColor above and markStyleFor,
+ * charts.js, for every other field). `fieldLabel` is the field's own
+ * label ("Species", "Mark Type", "Bait", ...) directly, not a
+ * MARK_LIST_FIELDS key/lookup — the caller already has the label in scope
+ * from its own render loop. */
 function onSetMarkListValueFormat(fieldLabel, value, formatName) {
   const entry = markLists.find((r) => r.field === fieldLabel && r.value === value);
   if (!entry) return;

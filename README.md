@@ -601,16 +601,24 @@ Species/Mark Type/etc): an icon and a colour for this site's own map, plus
 the literal `<sym>` text each device's GPX export should use for it —
 `lowranceSym` and `garminSym`, kept separately because the two devices
 genuinely want different text for the same idea (see "Syncing marks with a
-Garmin or Lowrance device" below). Species and Mark Type values each pick
-one of these Formats from a single dropdown, rather than picking a colour
-and a shape as two disconnected choices the way an earlier version of this
-had them. The icon is a constrained pick (circle/diamond/cross — the only
-three shapes this site's map and Lowrance both actually support); the two
-`<sym>` fields are deliberately free text for now rather than a dropdown —
-this site doesn't yet know either device's full accepted-value list (see
-below for why guessing at that list has gone wrong twice already), so
-getting the exact text right is your own call, made once per Format rather
-than derived automatically.
+Garmin or Lowrance device" below). **Every value on every one of the nine
+pick-list fields** picks one of these Formats from a single dropdown next
+to its own chip — not just Species and Mark Type, which is as far as an
+earlier version of this went. The icon is a constrained pick (circle/
+diamond/cross — the only three shapes this site's map and Lowrance both
+actually support); the two `<sym>` fields are deliberately free text for
+now rather than a dropdown — this site doesn't yet know either device's
+full accepted-value list (see below for why guessing at that list has gone
+wrong twice already), so getting the exact text right is your own call,
+made once per Format rather than derived automatically.
+
+**A tile's colour comes from its assigned Format, full stop** — click a
+value's Format dropdown and pick one, and that Format's own "colour for
+the website" becomes the tile's background here. There's no separate way
+to colour a tile any more; an earlier version had a free hex colour picker
+you could open by clicking the chip itself, alongside the Format picker,
+which meant the two could disagree with each other. One mechanism now,
+not two.
 
 **Resolution order, when both a mark's species and its own Mark Type have
 a Format assigned**: the **species'** Format wins. Species is the more
@@ -659,6 +667,18 @@ that actually is:
   not a real route — see `fillMarkPopupDistances` in `charts.js`). Shows
   "Location unavailable" if GPS is denied or the browser doesn't support
   it, same graceful-degrade as everywhere else this site touches GPS.
+
+**Edit and Delete** buttons sit at the bottom of the popup, gated behind
+having a GitHub connection (same as everywhere else that writes to this
+repo) — Edit swaps the popup into the same form `startNewMarkEntry` uses
+for a brand-new mark, Save/Cancel working exactly the same way. **Delete**
+needs a genuine confirmation step before it does anything — clicking it
+just reveals an inline "delete this mark? this can't be undone" block
+with its own Yes/Cancel, rather than acting on the first click the way
+Cancel or Save do. Confirming removes the mark from `data/marks.json`
+outright (see `deleteMarkFromGitHub`, `charts.js` — same GET-current-then-
+PUT-whole-file pattern every other write on this site uses) and takes its
+marker straight off the map, no page reload needed.
 couple thousand points and growing); the custom shapes stay on the same
 canvas renderer circles always used here, confirmed against the real
 dataset (2,532 marks load and shape in well under half a second).
@@ -727,10 +747,12 @@ data comes from and its own caveats.
 `fishing-marks-YYYY-MM-DD-HHMM.gpx` (date AND time, so exporting more than
 once in a day doesn't quietly overwrite an earlier download), editable to
 whatever you'd rather call it (e.g. "Lang Lang Trip"). **Two buttons**,
-**Export for Lowrance** and **Export for Garmin** — each tags the base
-name with which device it's for (`...-lowrance.gpx` / `...-garmin.gpx`,
-so exporting both back to back never overwrites one with the other) and
-writes the `<sym>` text in that device's own convention (see below).
+**Export for Lowrance** and **Export for Garmin** — each tags the FRONT of
+the base name with which device it's for (`lowrance-fishing-marks-...` /
+`garmin-fishing-marks-...`, so exporting both back to back never overwrites
+one with the other, and the two sort next to each other by device in a
+downloads folder) and writes the `<sym>` text in that device's own
+convention (see below).
 `.gpx` gets added automatically if you don't type it yourself, and
 characters a filename can't contain are stripped. Hitting either button
 opens your browser's own native "Save As" dialog (Chrome/Edge and similar
