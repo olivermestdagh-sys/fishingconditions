@@ -1,7 +1,8 @@
 [
   {
     "field": "Mark Type",
-    "value": "POI"
+    "value": "POI",
+    "format": "Blue Diamond"
   },
   {
     "field": "Species",
@@ -257,7 +258,8 @@
   },
   {
     "field": "Mark Type",
-    "value": "Mark"
+    "value": "Mark",
+    "format": "White Circle"
   },
   {
     "field": "Mark Type",
@@ -311,5 +313,47 @@
     "icon": "diamond",
     "lowranceSym": "diamond,blue",
     "garminSym": "Diamond, Blue"
+  },
+  {
+    "field": "Mark Format",
+    "value": "Green Cross",
+    "icon": "cross",
+    "lowranceSym": "cross,green",
+    "garminSym": "Cross, Green"
+  },
+  {
+    "field": "Mark Format",
+    "value": "Magenta Cross",
+    "icon": "cross",
+    "lowranceSym": "cross,magenta",
+    "garminSym": "Cross, Magenta"
+  },
+  {
+    "field": "Mark Format",
+    "value": "Red Cross",
+    "icon": "cross",
+    "lowranceSym": "cross,red",
+    "garminSym": "Cross, Red"
+  },
+  {
+    "field": "Mark Format",
+    "value": "White Cross",
+    "icon": "cross",
+    "lowranceSym": "cross,white",
+    "garminSym": "Cross, White"
+  },
+  {
+    "field": "Mark Format",
+    "value": "Blue Cross",
+    "icon": "cross",
+    "lowranceSym": "cross,blue",
+    "garminSym": "Cross, Blue"
+  },
+  {
+    "field": "Mark Format",
+    "value": "Yellow Cross",
+    "icon": "cross",
+    "lowranceSym": "cross,yellow",
+    "garminSym": "Cross, Yellow"
   }
 ]
