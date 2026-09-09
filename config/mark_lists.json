@@ -304,5 +304,12 @@
     "icon": "circle",
     "lowranceSym": "circle,yellow",
     "garminSym": "Circle, Yellow"
+  },
+  {
+    "field": "Mark Format",
+    "value": "Blue Diamond",
+    "icon": "diamond",
+    "lowranceSym": "diamond,blue",
+    "garminSym": "Diamond, Blue"
   }
 ]
