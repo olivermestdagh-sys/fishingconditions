@@ -265,49 +265,43 @@
   },
   {
     "field": "Mark Format",
-    "value": "Blue",
+    "value": "Blue Circle",
     "icon": "circle",
-    "color": "#0000ff",
     "lowranceSym": "circle,blue",
     "garminSym": "Circle, Blue"
   },
   {
     "field": "Mark Format",
-    "value": "Green",
+    "value": "Green Circle",
     "icon": "circle",
-    "color": "#008000",
     "lowranceSym": "circle,green",
     "garminSym": "Circle, Green"
   },
   {
     "field": "Mark Format",
-    "value": "Magenta",
+    "value": "Magenta Circle",
     "icon": "circle",
-    "color": "#ff00ff",
     "lowranceSym": "circle,magenta",
     "garminSym": "Circle, Magenta"
   },
   {
     "field": "Mark Format",
-    "value": "Red",
+    "value": "Red Circle",
     "icon": "circle",
-    "color": "#ff0000",
     "lowranceSym": "circle,red",
     "garminSym": "Circle, Red"
   },
   {
     "field": "Mark Format",
-    "value": "White",
+    "value": "White Circle",
     "icon": "circle",
-    "color": "#ffffff",
     "lowranceSym": "circle,white",
     "garminSym": "Circle, White"
   },
   {
     "field": "Mark Format",
-    "value": "Yellow",
+    "value": "Yellow Circle",
     "icon": "circle",
-    "color": "#ffff00",
     "lowranceSym": "circle,yellow",
     "garminSym": "Circle, Yellow"
   }
