@@ -1023,17 +1023,25 @@ function markStyleFor(mark, state) {
   const groupField = MARK_LIST_FIELDS.find((f) => f.key === state.groupByKey) || MARK_LIST_FIELDS[0];
   const value = mark[state.groupByKey];
   if (!value) return MARK_NO_VALUE_STYLE;
-  const tileEntry = (state.markLists || []).find((r) => r.field === groupField.label && r.value === value);
-  // An explicitly-chosen Lowrance colour (Settings tab, opt-in — see
-  // LOWRANCE_COLOR_HEX's own comment) takes priority over the older plain
-  // hex `color`, so a species genuinely looks the same here as it will on
-  // the device once someone deliberately picks one. Anything that HASN'T
-  // opted in falls through to exactly the same hex-or-hash behaviour this
-  // always had — nothing changes for a species nobody's touched this
-  // setting for.
-  if (tileEntry && tileEntry.lowranceColor && LOWRANCE_COLOR_HEX[tileEntry.lowranceColor]) {
-    return { color: "#374151", fillColor: LOWRANCE_COLOR_HEX[tileEntry.lowranceColor], radius: 5, weight: 1.5 };
+  // A resolved Mark Format's own colour (a real hex value — see
+  // resolveMarkFormat's own comment, and "an icon + a colour picker for
+  // the web site" in locationsadmin.js's Mark Format section, no name-to-
+  // hex translation needed the way an earlier lowranceColor-name version
+  // of this needed) takes priority, but ONLY when actually grouping by
+  // Species or Mark Type specifically — those are the two fields a format
+  // can be assigned to at all, so it's the deliberate "this is what this
+  // mark actually looks like" choice for THOSE views. Grouping by
+  // something else entirely (Weather Condition, Bait, ...) keeps that
+  // field's own plain hex-or-hash behaviour untouched — a format has
+  // nothing meaningful to say about wanting to see marks coloured by tide
+  // condition, say.
+  if (state.groupByKey === "species" || state.groupByKey === "type") {
+    const format = resolveMarkFormat(mark, state.markLists);
+    if (format && format.color) {
+      return { color: "#374151", fillColor: format.color, radius: 5, weight: 1.5 };
+    }
   }
+  const tileEntry = (state.markLists || []).find((r) => r.field === groupField.label && r.value === value);
   if (tileEntry && tileEntry.color) {
     return { color: "#374151", fillColor: tileEntry.color, radius: 5, weight: 1.5 };
   }
@@ -1894,7 +1902,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         }
 
         // If Type changed to something needing a different SHAPE (see
-        // shapeNameForMarkType/createMarkShapeLayer above — POI/Mark/
+        // shapeNameForMark/createMarkShapeLayer above — POI/Mark/
         // Catch each draw as a different shape now, not just a colour),
         // Leaflet has no way to swap an existing layer's class in place —
         // the only option is tearing down the old marker and creating a
@@ -1910,7 +1918,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         // Type mid-edit is a rare action, nowhere near as common as
         // everything else this save handler already does silently.
         const markListsForShape = (options.state && options.state.markLists) || [];
-        const desiredShapeName = shapeNameForMarkType(mark.type, markListsForShape);
+        const desiredShapeName = shapeNameForMark(mark, markListsForShape);
         const desiredShapeGetter = LOWRANCE_SHAPE_GETTERS[desiredShapeName];
         const desiredShapeClass = desiredShapeGetter ? desiredShapeGetter() : L.CircleMarker;
         let effectivePopupEl = popupEl;
@@ -1918,7 +1926,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
           const latlng = marker.getLatLng();
           const freshStyle = markStyleFor(mark, options.state);
           options.map.removeLayer(marker);
-          marker = createMarkShapeLayer(latlng, mark.type, {
+          marker = createMarkShapeLayer(latlng, mark, {
             renderer: (options.state && options.state.canvasRenderer) || undefined,
             radius: freshStyle.radius,
             color: freshStyle.color,
@@ -2167,51 +2175,65 @@ function getCrossMarkerClass() {
 // turned out to already be this same "diamond" shape.
 const LOWRANCE_SHAPE_GETTERS = { circle: () => L.CircleMarker, diamond: getDiamondMarkerClass, cross: getCrossMarkerClass };
 
-// This site's own approximation of each of Lowrance's 7 real named
-// colours, for translating a person's Settings-tab choice (see the
-// "Fishing Mark Lists" section, locationsadmin.js) into an actual fill
-// colour THIS map can paint with — the device only understands the name,
-// not a hex value, so somewhere a name has to become a colour, and this
-// map is where that happens rather than sync.js (which only ever needs
-// the bare name for the GPX <sym> string).
-const LOWRANCE_COLOR_HEX = {
-  blue: "#0000ff",
-  magenta: "#ff00ff",
-  red: "#ff0000",
-  yellow: "#ffff00",
-  green: "#008000",
-  cyan: "#00ffff",
-  white: "#ffffff",
-};
-
-// Fallback shape per Mark Type, used ONLY when that type's own
-// config/mark_lists.json entry has no `shape` chosen (see
-// shapeNameForMarkType below) — matches this site's original hardcoded
-// behaviour before shape became a real Settings-tab choice, so a repo
-// that hasn't touched the new picker yet looks exactly as it always has.
+// Fallback shape per Mark Type, used ONLY when neither the mark's species
+// NOR its own Type has a Mark Format assigned at all (see
+// resolveMarkFormat/shapeNameForMark below) — matches this site's
+// original hardcoded behaviour from before Mark Formats existed, so a repo
+// that hasn't touched any of this yet looks exactly as it always has.
 // Mark (or any type not listed here at all — including a genuinely new
 // Mark Type someone adds later) intentionally has NO entry, falling
 // through to plain "circle" — matches gpxSymForMark's own default.
 const MARK_TYPE_DEFAULT_SHAPE_NAME = { POI: "diamond", Catch: "cross", Fish: "cross" };
 
-/** Whichever shape NAME applies to a given Mark Type — the person's own
- * Settings-tab choice (config/mark_lists.json's `shape` property on that
- * Mark Type's own entry) if they've set one, else the hardcoded default
- * above. `markLists` is whatever's already loaded for this page (see
- * state.markLists) — no separate fetch here. */
-function shapeNameForMarkType(type, markLists) {
-  const entry = (markLists || []).find((r) => r.field === "Mark Type" && r.value === type);
-  if (entry && entry.shape && LOWRANCE_SHAPE_GETTERS[entry.shape]) return entry.shape;
-  return MARK_TYPE_DEFAULT_SHAPE_NAME[type] || "circle";
+/**
+ * Resolves the Mark Format (config/mark_lists.json's field: "Mark Format"
+ * entries — see the "Fishing Mark Lists" section, locationsadmin.js) that
+ * represents a given mark, if any. SPECIES' own assigned format wins when
+ * both it and the mark's Type have one — species is the more specific
+ * signal (a Catch is more meaningfully identified by what it IS than by
+ * which of the three Mark Types it happens to be) — Mark Type's own
+ * format is the fallback, which mainly matters for POI, since a POI
+ * structurally has no species to carry a format of its own at all (see
+ * MARK_TYPE_FIELD_KEYS). Returns null if NEITHER has one assigned —
+ * callers fall back to their own hardcoded legacy default in that case
+ * (shapeNameForMark just below for shape; markStyleFor's own hex-or-hash
+ * for colour; gpxSymForMark's own plain default in sync.js for export).
+ */
+function resolveMarkFormat(mark, markLists) {
+  const lists = markLists || [];
+  if (mark.species) {
+    const speciesEntry = lists.find((r) => r.field === "Species" && r.value === mark.species);
+    if (speciesEntry && speciesEntry.format) {
+      const format = lists.find((r) => r.field === "Mark Format" && r.value === speciesEntry.format);
+      if (format) return format;
+    }
+  }
+  const typeEntry = lists.find((r) => r.field === "Mark Type" && r.value === mark.type);
+  if (typeEntry && typeEntry.format) {
+    const format = lists.find((r) => r.field === "Mark Format" && r.value === typeEntry.format);
+    if (format) return format;
+  }
+  return null;
 }
 
-/** Creates whichever shape layer matches a mark's own Type — see
- * shapeNameForMarkType just above for where that name actually comes
- * from. Always pass a Canvas renderer in `options.renderer` — see
- * getDiamondMarkerClass's own comment on why that's required, not
- * optional, for anything but a plain circle. */
-function createMarkShapeLayer(latlng, type, options, markLists) {
-  const shapeName = shapeNameForMarkType(type, markLists);
+/** Whichever shape NAME applies to a given mark — its resolved Mark
+ * Format's own `icon` (see resolveMarkFormat above) if one applies, else
+ * the hardcoded per-Type default (MARK_TYPE_DEFAULT_SHAPE_NAME above),
+ * same as before Mark Formats existed. `markLists` is whatever's already
+ * loaded for this page (see state.markLists) — no separate fetch here. */
+function shapeNameForMark(mark, markLists) {
+  const format = resolveMarkFormat(mark, markLists);
+  if (format && format.icon && LOWRANCE_SHAPE_GETTERS[format.icon]) return format.icon;
+  return MARK_TYPE_DEFAULT_SHAPE_NAME[mark.type] || "circle";
+}
+
+/** Creates whichever shape layer matches a mark — see shapeNameForMark
+ * just above for where that name actually comes from. Always pass a
+ * Canvas renderer in `options.renderer` — see getDiamondMarkerClass's own
+ * comment on why that's required, not optional, for anything but a plain
+ * circle. */
+function createMarkShapeLayer(latlng, mark, options, markLists) {
+  const shapeName = shapeNameForMark(mark, markLists);
   const getShapeClass = LOWRANCE_SHAPE_GETTERS[shapeName];
   const ShapeClass = getShapeClass ? getShapeClass() : L.CircleMarker;
   return new ShapeClass(latlng, options);
@@ -2247,7 +2269,7 @@ async function loadAndRenderMarks(map, state) {
   for (const mark of marks) {
     if (mark.lat == null || mark.lng == null) continue;
     const style = markStyleFor(mark, state);
-    const marker = createMarkShapeLayer([mark.lat, mark.lng], mark.type, {
+    const marker = createMarkShapeLayer([mark.lat, mark.lng], mark, {
       renderer,
       radius: style.radius,
       color: style.color,
@@ -2702,7 +2724,7 @@ function startNewMarkEntry(map, lat, lng, state, defaults = {}) {
   // practice, since marks can't be clicked-to-create before the layer
   // that would receive the click has loaded).
   if (!state.canvasRenderer) state.canvasRenderer = L.canvas({ padding: 0.5 });
-  const marker = createMarkShapeLayer([lat, lng], draft.type, {
+  const marker = createMarkShapeLayer([lat, lng], draft, {
     renderer: state.canvasRenderer,
     radius: style.radius,
     color: style.color,

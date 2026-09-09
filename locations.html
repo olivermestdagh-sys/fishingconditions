@@ -76,6 +76,20 @@
       marks themselves (<code>config/mark_lists.json</code>).
     </p>
     <div id="markListsGroups"></div>
+    <div class="mark-list-field-group" id="markFormatsFieldGroup" style="margin-bottom:16px;">
+      <label class="loc-edit-label" style="display:block;margin-bottom:6px;">Mark Formats</label>
+      <p class="footnote" style="margin:0 0 8px;text-align:left;">
+        A named bundle of "how this looks" — an icon + colour for this site's own map, and the
+        exact <code>&lt;sym&gt;</code> text each device's export should use. Species and Mark
+        Type values above pick one of these instead of a colour/shape directly.
+      </p>
+      <div id="markFormatsRows" style="margin-bottom:8px;"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input type="text" id="newMarkFormatInput" placeholder="Add a Mark Format name, e.g. Yellow Circle"
+          style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+        <button type="button" id="btnAddMarkFormat" class="btn-secondary">+ Add</button>
+      </div>
+    </div>
     <div style="margin-top:14px;">
       <button id="btnSaveMarkLists" class="btn-primary">Save mark lists</button>
     </div>

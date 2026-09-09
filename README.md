@@ -594,46 +594,52 @@ location tags — type a new value, hit Add (or Enter), then "Save mark
 lists" to commit it. Removing an option doesn't touch any mark that already
 used it; it just won't be offered again.
 
-**Controlling how a mark looks on the Lowrance sounder (and, opt-in, on
-this site's own map)**: two of the pick-lists carry an extra, more specific
-choice, each its own small dropdown right next to the usual chip (rather
-than free text or a colour wheel — a typo or an unsupported value here is
-exactly how the GPX export ended up wrong twice before it was finally
-confirmed against a real device export, see below):
+**Mark Formats — controlling exactly how a mark looks, on the Lowrance,
+the Garmin, and this site's own map, all from one place.** A Mark Format
+is a named bundle (its own sub-list in "Fishing Mark Lists", alongside
+Species/Mark Type/etc): an icon and a colour for this site's own map, plus
+the literal `<sym>` text each device's GPX export should use for it —
+`lowranceSym` and `garminSym`, kept separately because the two devices
+genuinely want different text for the same idea (see "Syncing marks with a
+Garmin or Lowrance device" below). Species and Mark Type values each pick
+one of these Formats from a single dropdown, rather than picking a colour
+and a shape as two disconnected choices the way an earlier version of this
+had them. The icon is a constrained pick (circle/diamond/cross — the only
+three shapes this site's map and Lowrance both actually support); the two
+`<sym>` fields are deliberately free text for now rather than a dropdown —
+this site doesn't yet know either device's full accepted-value list (see
+below for why guessing at that list has gone wrong twice already), so
+getting the exact text right is your own call, made once per Format rather
+than derived automatically.
 
-- **Species** gets a **Lowrance colour** picker — one of the 7 real,
-  confirmed waypoint colours the unit actually supports (blue, magenta,
-  red, yellow, green, cyan, white). This is separate from that species'
-  ordinary hex `color` swatch, which keeps working exactly as it always
-  has for anything that hasn't set this.
-- **Mark Type** gets a **shape** picker — one of the 3 real, confirmed
-  shapes (circle, diamond, cross).
-
-Both are **opt-in, on purpose**: a species with no Lowrance colour chosen
-keeps its existing hex colour (or the map's hash-based fallback) exactly as
-before, and exports with a plain default; a Mark Type with no shape chosen
-keeps the same built-in default it always had (Mark → circle, POI →
-diamond, Catch → cross). Nothing changes for anything you haven't
-deliberately touched. Once you DO pick one, it drives both the Lowrance
-export (see below) and this site's own map consistently — the same colour,
-the same shape, in both places, rather than each guessing independently
-(which is exactly how they used to drift apart).
+**Resolution order, when both a mark's species and its own Mark Type have
+a Format assigned**: the **species'** Format wins. Species is the more
+specific signal — a Catch is more meaningfully identified by what it IS
+than by which of the three Mark Types it happens to be. A Mark Type's own
+Format assignment mainly matters for **POI**, which structurally has no
+species to carry one of its own at all. **Everything here is opt-in**: a
+species or Mark Type with nothing assigned keeps exactly the fallback it
+always had — this site's map falls back to a plain hex colour or its
+hash-based default; the GPX export falls back to a hardcoded shape-by-
+Mark-Type and a plain default colour, same as before Mark Formats existed.
+A Format that's only had ONE device's `<sym>` filled in so far (say,
+Lowrance but not yet Garmin) falls back to that same hardcoded default for
+whichever device is still blank, rather than exporting an empty tag.
 
 **Displaying marks on the map**: the Location and Live tab maps both plot
 every mark in `data/marks.json` (see `loadAndRenderMarks` in `charts.js`),
 gated behind having a GitHub connection set up on the Settings tab — same
 "don't clutter the map for random public visitors, but not real access
 control" caveat as the rest of this site's GitHub-gated features (the file
-itself is still a plain public URL). Each mark's **shape matches its Mark
-Type** (see above — circle/diamond/cross, whichever's configured or
-defaulted), the same convention the Lowrance GPX export uses, so the two
-stay visually consistent. **Colour** stays the site's own richer palette by
-default — derived from each mark's Species (or its Mark Type, for anything
-without one) via a simple hash, or a manually-configured hex colour, so
-every distinct species gets its own stable, distinguishable colour on THIS
-map even without opting into a Lowrance colour — UNLESS that species has
-opted into a Lowrance colour above, in which case this map uses that exact
-colour too, for genuine consistency with the device. Hover/tap a point for
+itself is still a plain public URL). Each mark's **shape and colour** come
+from its resolved Mark Format (see "Mark Formats" above — species' own
+assignment wins over its Mark Type's), the exact same resolution the
+Lowrance/Garmin export uses, so the map stays visually consistent with
+both once you've deliberately picked something. A mark with nothing
+resolved falls back to the same shape-by-Mark-Type default as export, and
+to this site's own richer colour palette — a species' plain hex `color`
+if it has one, else a stable colour derived from a simple hash — rather
+than being forced onto whatever's set for export. Hover/tap a point for
 its name, species, and date. Built on two small custom Leaflet layers
 (`getDiamondMarkerClass`/`getCrossMarkerClass` in `charts.js`) rather than
 switching every mark over to the DOM-based pins used for tracked locations
@@ -717,45 +723,53 @@ pre-filled from a real historical lookup for anything Catch-level — see
 data comes from and its own caveats.
 
 **Export** downloads every mark in `data/marks.json` as one GPX file. A
-**File name** field lets you name it before downloading — pre-filled with
+**File name** field sets the base name before downloading — pre-filled with
 `fishing-marks-YYYY-MM-DD-HHMM.gpx` (date AND time, so exporting more than
 once in a day doesn't quietly overwrite an earlier download), editable to
-whatever you'd rather call it (e.g. "Lang Lang Trip") — `.gpx` gets added
-automatically if you don't type it yourself, and characters a filename
-can't contain are stripped. Hitting **Export** opens your browser's own
-native "Save As" dialog (Chrome/Edge and similar — this needs the File
-System Access API, which Firefox and Safari don't implement; those
-browsers fall back to a plain download to your default downloads folder,
-same as before, with a note in the status message saying so), so you
-choose the actual save location yourself rather than always landing in the
-same default folder. Cancelling that dialog cancels the export cleanly —
-nothing gets saved anywhere. Garmin units take the result directly;
-Lowrance sounders that accept GPX import do too (no need for a real
-binary `.usr` writer — a much heavier, riskier thing to get right without
-a real unit to test an exported file against, and unnecessary since GPX
-import works).
+whatever you'd rather call it (e.g. "Lang Lang Trip"). **Two buttons**,
+**Export for Lowrance** and **Export for Garmin** — each tags the base
+name with which device it's for (`...-lowrance.gpx` / `...-garmin.gpx`,
+so exporting both back to back never overwrites one with the other) and
+writes the `<sym>` text in that device's own convention (see below).
+`.gpx` gets added automatically if you don't type it yourself, and
+characters a filename can't contain are stripped. Hitting either button
+opens your browser's own native "Save As" dialog (Chrome/Edge and similar
+— this needs the File System Access API, which Firefox and Safari don't
+implement; those browsers fall back to a plain download to your default
+downloads folder, same as before, with a note in the status message
+saying so), so you choose the actual save location yourself rather than
+always landing in the same default folder. Cancelling that dialog cancels
+the export cleanly — nothing gets saved anywhere.
 
 Each waypoint's `<name>` is the mark's **species** (falling back to its
 own `name` field, then a generic label, only if there's no species at
 all) — most of the old migrated batch has a place name in `name`
 ("Williamstown", "Leopold"), which is far less useful on a chartplotter
 than the actual catch; that place name is kept in `<desc>` instead rather
-than lost. Each waypoint also gets a `<sym>` — shape from that mark's own
-Mark Type, colour from its Species, both read straight from whatever's
-configured in the Settings tab's "Fishing Mark Lists" section (see
-"Controlling how a mark looks on the Lowrance sounder" above) rather than
-guessed at export time the way an earlier version of this worked. A
-species or Mark Type that hasn't had one of these chosen falls back to a
-plain default (blue colour, circle/diamond/cross per Mark Type as
-before) — nothing here forces every species onto one of the 7 colours,
-that's only ever the case for a species Oliver's deliberately picked one
-for.
+than lost. Each waypoint also gets a `<sym>` — the mark's resolved **Mark
+Format** (see "Mark Formats" above) supplies its own literal text for
+whichever device you exported for, exactly as typed into the Settings
+tab, no reformatting applied. A mark with no Format resolved (neither its
+species nor its Mark Type has one assigned) falls back to a plain default
+— circle/diamond/cross by Mark Type, a flat "blue" colour — same as
+before Mark Formats existed.
+
+**Two real, different conventions, confirmed against real hardware, not
+guessed**: Lowrance wants lowercase with no space (`circle,yellow`);
+Garmin wants Title Case with a space after the comma (`Circle, Yellow`).
+A file built for one device failed to import cleanly on the other, which
+is exactly why every Format carries two separate `<sym>` fields (and why
+export is now two buttons instead of one) rather than one string this
+code tries to reshape automatically — this site doesn't yet know either
+device's full accepted-value list well enough to trust an automatic
+transform, so getting the exact text right for each device is Oliver's
+own call, made once per Format.
 
 Worth knowing: this is a best-effort substitute, not a restoration of
 whatever icon a mark literally had on the device originally — the Sync
 tab's own `.usr` parser reads past a waypoint's icon/colour bytes without
 keeping either value, so that original information is already gone for
-every mark imported so far. Getting the shape/colour NAMES themselves
+every mark imported so far. Getting the shape/colour vocabulary itself
 right took a few real attempts, worth being upfront about rather than
 glossing over:
 1. An early version used Lowrance's "fish" icon with a colour suffix.
@@ -765,25 +779,28 @@ glossing over:
    `diamond`/`x` — both guessed from secondary sources (forum posts, a
    reverse-engineered `.usr`-format icon table) rather than the device
    itself, and both wrong in different ways.
-3. **This is now confirmed directly**, not guessed: Oliver exported a real
-   GPX straight from his own HDS Live-7 after manually setting 7 waypoints
-   on the unit — one of each of its real colours, across circle/cross/
-   diamond shapes. That file is the actual ground truth this now matches:
+3. Confirmed directly against a real GPX Oliver exported straight from
+   his own HDS Live-7 after manually setting 7 waypoints on the unit —
+   one of each of its real colours, across circle/cross/diamond shapes:
    `circle,blue` `circle,yellow` `circle,white` `circle,green`
-   `circle,cyan` `cross,magenta` `diamond,red`. The earlier version had
-   the shapes half-right (what looked like a separate "square" was
-   actually a diamond) but two of the seven colour names wrong — `orange`
-   and `aqua`, which should have been `red` and `cyan` — which, combined
-   with several species having no configured colour and falling back to
-   this code's own hardcoded blue default, was enough to look like a
-   total failure ("every mark came through blue") rather than a two-word
-   mixup.
+   `circle,cyan` `cross,magenta` `diamond,red`. That confirmed the real
+   shape names (what looked like a separate "square" was actually a
+   diamond) and caught two wrong colour names (`orange`/`aqua`, should
+   have been `red`/`cyan`) that — combined with several species having no
+   configured colour and falling back to a hardcoded blue default — was
+   enough to look like a total failure ("every mark came through blue")
+   rather than a two-word mixup.
+4. Loading a Lowrance-formatted file onto a Garmin unit then surfaced the
+   casing/spacing difference between the two devices, which is what
+   led to Mark Formats carrying a separate `<sym>` per device at all,
+   rather than one shared string.
 
-That history is also why this no longer GUESSES a colour from a species'
-hex at all — the guessing itself (matching hex to "nearest" of the 7
-names) is exactly how two wrong names went unnoticed for as long as they
-did. Shape and colour are now real, deliberate Settings-tab choices (see
-above) rather than anything derived.
+This history is also why nothing here GUESSES a colour or shape from
+anything else any more (an earlier version matched a species' hex to the
+"nearest" of Lowrance's 7 names, which is exactly how two wrong names went
+unnoticed for as long as they did) — every Format's exact text is a
+deliberate, once-made choice on the Settings tab, not derived at export
+time.
 
 Gated behind the same GitHub connection as everything else that writes to
 this repo (see "Editing locations from the site itself" below) — connect
@@ -880,6 +897,13 @@ There's now a **Locations** tab that lets you view and edit `config/locations.js
 without going into GitHub's file editor. Since this is a static site with no server,
 saving works by committing directly to your repo from your browser — which needs a
 GitHub token with permission to do that.
+
+**Every section on this tab is foldable** — click any heading (GitHub
+connection, Location Groups, Fishing Mark Lists, Locations, and each of
+Fishing Mark Lists' own ten sub-lists) to show or hide its content. State
+is remembered per section (localStorage), so folding away what you're not
+using stays folded next time — this page's own list of settings keeps
+growing, and most visits only need one or two of these open at once.
 
 **One-time setup:**
 
