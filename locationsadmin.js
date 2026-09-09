@@ -167,6 +167,59 @@ function formatHM(h, m) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
+// Tracks whether the CURRENTLY saved owner/repo/token actually work — set
+// by verifyGithubToken below, checked before showing any section past the
+// connection card itself. Not just "is there a non-empty string sitting
+// in localStorage" (all onConnect ever checked before this existed) —
+// every section below is genuinely unusable without a working, WRITE-
+// capable connection (every one of them ends in a Save button that would
+// just fail), so there's no reason for the page to look editable when
+// it isn't.
+let connectionVerified = false;
+
+/**
+ * Confirms a given owner/repo/token combination is real and can actually
+ * WRITE to that repo — a single cheap GET, not a test write. GitHub's own
+ * repo response includes a `permissions` object for the token making the
+ * request (when it's authenticated with access to the repo), showing
+ * `push` (write) alongside `pull` (read) — checked explicitly rather than
+ * just trusting a 200 response, since a token scoped read-only would still
+ * get one, then fail every Save button on this page anyway. Returns false
+ * (never throws) for a missing conn, a bad/expired token (401), a repo
+ * name that doesn't exist or isn't visible to this token (404), or any
+ * network failure.
+ */
+async function verifyGithubToken(conn) {
+  if (!conn || !conn.owner || !conn.repo || !conn.token) return false;
+  try {
+    const res = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}`, {
+      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+    });
+    if (!res.ok) return false;
+    const json = await res.json();
+    return !!(json.permissions && json.permissions.push);
+  } catch (err) {
+    console.error("Token verification failed:", err);
+    return false;
+  }
+}
+
+function hideConnectedSections() {
+  document.getElementById("groupsSection").style.display = "none";
+  document.getElementById("markListsSection").style.display = "none";
+  document.getElementById("locationsSection").style.display = "none";
+}
+
+/** Runs every section's own load-and-render, in the same parallel/then-
+ * sequential shape init() already used — shared between init() (page
+ * load, when a saved connection already verifies) and onConnect() (a
+ * fresh connect, which needs the exact same thing to actually populate
+ * anything, not just Locations the way onConnect alone used to). */
+async function loadAllConnectedSections() {
+  await Promise.all([loadLocationGroups(), loadLocationCoords(), loadHomeLocation(), loadMarkLists()]);
+  await loadLocations();
+}
+
 function setStatus(text, isError) {
   const el = document.getElementById("status");
   el.textContent = text;
@@ -213,6 +266,17 @@ async function init() {
   document.getElementById("btnSaveGroups").addEventListener("click", onSaveGroups);
   document.getElementById("btnSaveMarkLists").addEventListener("click", onSaveMarkLists);
 
+  connectionVerified = await verifyGithubToken(conn);
+  if (!connectionVerified) {
+    hideConnectedSections();
+    if (conn) {
+      setStatus("That token isn't working — check it's still valid and has write access to this repo, then reconnect below.", true);
+    } else {
+      setStatus("Connect to GitHub above to manage locations, groups, and mark lists.", false);
+    }
+    return;
+  }
+
   // Groups, coords, home, and mark lists all need to be ready before the
   // first renderRows() (called at the end of loadLocations, which renders
   // the map too) — well, mark lists don't actually feed renderRows() the
@@ -220,8 +284,7 @@ async function init() {
   // for them yet), but there's no reason to make it wait its turn behind
   // ones that do. All four are independent of `locations` itself and of
   // each other, so they load in parallel rather than one after another.
-  await Promise.all([loadLocationGroups(), loadLocationCoords(), loadHomeLocation(), loadMarkLists()]);
-  await loadLocations();
+  await loadAllConnectedSections();
 }
 
 /**
@@ -292,7 +355,7 @@ async function loadLocationGroups() {
     console.error(err);
     locationGroups = [];
   }
-  document.getElementById("groupsSection").style.display = "block";
+  if (connectionVerified) document.getElementById("groupsSection").style.display = "block"; // defense-in-depth — see connectionVerified's own comment
   renderGroupsList();
 }
 
@@ -466,7 +529,7 @@ async function loadMarkLists() {
     console.error(err);
     markLists = [];
   }
-  document.getElementById("markListsSection").style.display = "block";
+  if (connectionVerified) document.getElementById("markListsSection").style.display = "block";
   renderMarkLists();
 }
 
@@ -794,7 +857,7 @@ async function loadLocations() {
     selectedLocationIdx = null;
   }
 
-  document.getElementById("locationsSection").style.display = "block";
+  if (connectionVerified) document.getElementById("locationsSection").style.display = "block";
   renderRows();
 }
 
@@ -1435,7 +1498,7 @@ function wireRowListeners(list) {
   });
 }
 
-function onConnect() {
+async function onConnect() {
   const owner = document.getElementById("ghOwner").value.trim();
   const repo = document.getElementById("ghRepo").value.trim();
   const token = document.getElementById("ghToken").value.trim();
@@ -1443,8 +1506,17 @@ function onConnect() {
     setStatus("Fill in username, repo, and token first", true);
     return;
   }
-  localStorage.setItem("ghConnection", JSON.stringify({ owner, repo, token }));
-  loadLocations();
+  setStatus("Checking connection…", false);
+  const conn = { owner, repo, token };
+  connectionVerified = await verifyGithubToken(conn);
+  if (!connectionVerified) {
+    hideConnectedSections();
+    setStatus("Could not verify that token — check it's correct, still valid, and has write access to this repo.", true);
+    return;
+  }
+  localStorage.setItem("ghConnection", JSON.stringify(conn));
+  setStatus("Connected.", false);
+  await loadAllConnectedSections();
 }
 
 function onDisconnect() {
@@ -1453,7 +1525,9 @@ function onDisconnect() {
   document.getElementById("ghRepo").value = "";
   document.getElementById("ghToken").value = "";
   currentSha = null;
-  loadLocations();
+  connectionVerified = false;
+  hideConnectedSections();
+  setStatus("Connect to GitHub above to manage locations, groups, and mark lists.", false);
 }
 
 function validateLocations() {

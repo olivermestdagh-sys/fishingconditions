@@ -645,12 +645,11 @@ it — a real GPS position and a tracked-location lookup both take a moment,
 and most marks are never clicked at all, so this only ever runs for one
 that actually is:
 - **Nearest loc.** — straight-line distance to whichever tracked location
-  (the list above) is physically closest, plus a rough paddling time at a
-  flat 6 km/h and its name — still a reference point (which location's
-  tide/weather calibration is relevant here) rather than somewhere you're
-  necessarily headed, but useful to see in time terms too.
+  (the list above) is physically closest, plus its name — a reference
+  point (which location's tide/weather calibration is relevant here), not
+  something being travelled to.
 - **From you** — straight-line distance from the device's current GPS
-  position, plus the same rough paddling time at 6 km/h (distance ÷ speed,
+  position, plus a rough paddling time at a flat 6 km/h (distance ÷ speed,
   not a real route — see `fillMarkPopupDistances` in `charts.js`). Shows
   "Location unavailable" if GPS is denied or the browser doesn't support
   it, same graceful-degrade as everywhere else this site touches GPS.
@@ -899,13 +898,25 @@ GitHub token with permission to do that.
    the token in, then "Save connection". It's stored only in your browser's local
    storage — never sent anywhere except directly to GitHub's API.
 
+Clicking "Save connection" actually checks the token against GitHub before doing
+anything else — a real API call (confirming both that it's valid and that it has
+**write** access to this repo specifically), not just "is something typed into the
+box". Everything below the connection card (Location Groups, Fishing Mark Lists,
+Locations) only ever shows once that check passes — a wrong, expired, or read-only
+token leaves the rest of the page hidden with a clear message instead of showing
+sections whose Save buttons would just fail. The same check runs again on every page
+load for whatever connection's already saved, so a token that's since expired or been
+revoked correctly hides everything again rather than leaving the page looking usable.
+
 After that, edit/add/remove locations on that tab and click **Save changes** (or
 **Save & refresh data now** to also trigger an immediate data pull instead of waiting
 for the next scheduled run).
 
 **If you ever want to revoke access**: either click "Forget token" on the site (clears
-it from that device only), or delete/revoke the token itself from GitHub's Developer
-settings page (immediately invalidates it everywhere).
+it from that device only, and immediately hides every section below the connection
+card again), or delete/revoke the token itself from GitHub's Developer settings page
+(immediately invalidates it everywhere — the next page load's own check will notice
+and hide those sections here too).
 
 ## Troubleshooting
 
