@@ -76,18 +76,34 @@
       marks themselves (<code>config/mark_lists.json</code>).
     </p>
     <div id="markListsGroups"></div>
-    <div class="mark-list-field-group" id="markFormatsFieldGroup" style="margin-bottom:16px;">
-      <label class="loc-edit-label" style="display:block;margin-bottom:6px;">Mark Formats</label>
+    <div class="mark-list-field-group" id="markShapeFormatsFieldGroup" style="margin-bottom:16px;">
+      <label class="loc-edit-label" style="display:block;margin-bottom:6px;">Mark Shape Formats</label>
       <p class="footnote" style="margin:0 0 8px;text-align:left;">
-        A named bundle of "how this looks" — an icon + colour for this site's own map, and the
-        exact <code>&lt;sym&gt;</code> text each device's export should use. Species and Mark
-        Type values above pick one of these instead of a colour/shape directly.
+        A named shape — an icon for this site's own map, and the exact shape text FRAGMENT
+        each device's export should use for it. Every value above can pick one; it only actually
+        affects anything for Species and Mark Type (a species-level pick overrides its Mark
+        Type's own shape — the exception, not the everyday case; leave a species' shape unset to
+        keep it varying by Mark Type as usual).
       </p>
-      <div id="markFormatsRows" style="margin-bottom:8px;"></div>
+      <div id="markShapeFormatsRows" style="margin-bottom:8px;"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <input type="text" id="newMarkFormatInput" placeholder="Add a Mark Format name, e.g. Yellow Circle"
+        <input type="text" id="newMarkShapeFormatInput" placeholder="Add a shape name, e.g. Circle"
           style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
-        <button type="button" id="btnAddMarkFormat" class="btn-secondary">+ Add</button>
+        <button type="button" id="btnAddMarkShapeFormat" class="btn-secondary">+ Add</button>
+      </div>
+    </div>
+    <div class="mark-list-field-group" id="markColorFormatsFieldGroup" style="margin-bottom:16px;">
+      <label class="loc-edit-label" style="display:block;margin-bottom:6px;">Mark Colour Formats</label>
+      <p class="footnote" style="margin:0 0 8px;text-align:left;">
+        A named colour — a swatch for this site's own map, and the exact colour text FRAGMENT
+        each device's export should use for it. This is the everyday one to set per species —
+        shape stays with Mark Type, colour varies by species.
+      </p>
+      <div id="markColorFormatsRows" style="margin-bottom:8px;"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input type="text" id="newMarkColorFormatInput" placeholder="Add a colour name, e.g. Yellow"
+          style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+        <button type="button" id="btnAddMarkColorFormat" class="btn-secondary">+ Add</button>
       </div>
     </div>
     <div style="margin-top:14px;">

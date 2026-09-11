@@ -348,7 +348,8 @@ async function init() {
   });
   document.getElementById("btnSaveGroups").addEventListener("click", onSaveGroups);
   document.getElementById("btnSaveMarkLists").addEventListener("click", onSaveMarkLists);
-  document.getElementById("btnAddMarkFormat").addEventListener("click", onAddMarkFormat);
+  document.getElementById("btnAddMarkShapeFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Shape Format", "newMarkShapeFormatInput"));
+  document.getElementById("btnAddMarkColorFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Colour Format", "newMarkColorFormatInput"));
 
   connectionVerified = await verifyGithubToken(conn);
   if (!connectionVerified) {
@@ -549,52 +550,71 @@ async function onSaveGroups() {
 // --- Fishing Mark Lists (Settings tab) --------------------------------------
 //
 // Same read/render/add/remove/save shape as Location Groups just above, just
-// two-dimensional: markLists is a flat {field, value, format?} array (see
+// two-dimensional: markLists is a flat {field, value, ...} array (see
 // MARK_LIST_FIELDS in charts.js) covering ALL nine pick-list fields at
 // once, rather than one array per field — one file, one sha, one save
 // button, rather than nine of everything. The UI still renders it grouped
 // by field (one card sub-section per field) so it reads as nine separate
 // lists even though it's a single flat array underneath.
 //
-// EVERY value on EVERY field picks a Mark Format (see below) via the same
-// small <select> next to its chip — a value with none chosen just looks
-// like a plain chip; one WITH a format picked shows that format's own
-// "colour for the website" as its background (see resolveTileFormatColor
-// below). There's no other way to colour a tile any more — an earlier
-// version had a separate free hex colour picker (click the chip, native
-// <input type="color">) alongside the Format picker, which meant a tile's
-// look and its Format could disagree with each other; removed in favour of
-// Format being the single source of truth for how anything here looks, on
-// this page AND on the map.
+// EVERY value on EVERY field picks a Mark Shape Format AND a Mark Colour
+// Format (see below) via two small <select>s next to its chip — a value
+// with neither chosen just looks like a plain chip; one with a Colour
+// Format picked shows that format's own "colour for the website" as its
+// background (see resolveTileFormatColor below — shape has no colour of
+// its own to contribute to a tile's look). There's no other way to colour
+// a tile any more — an earlier version had a separate free hex colour
+// picker (click the chip, native <input type="color">) alongside the
+// Format picker, which meant a tile's look and its Format could disagree
+// with each other; removed in favour of Colour Format being the single
+// source of truth for how anything here looks, on this page AND on the
+// map.
 //
-// MARK FORMATS — a tenth, DIFFERENT kind of entry in the same flat array
-// (field: "Mark Format"), not one of MARK_LIST_FIELDS' nine real per-mark
-// fields, since a mark itself never HAS a "Mark Format" property directly.
-// Each one is just a name plus four properties (see renderMarkFormats
-// below): `icon` + `color` for THIS SITE's own map (icon one of
-// MARK_ICON_OPTIONS; colour a free, unrestricted hex — this map has no
-// Lowrance-style colour-count limit), and `lowranceSym`/`garminSym` — the
-// LITERAL <sym> text each device's GPX export should use for this format.
-// Both are free text for now, deliberately, not a constrained picker —
-// Oliver doesn't yet have either device's full accepted-value list (see
-// gpxSymForMark's own comment in sync.js for why guessing at that list
-// from secondary sources already went wrong more than once); a dropdown
-// sourced from a real confirmed list is a natural upgrade here later, not
-// a redesign.
+// MARK SHAPE FORMATS and MARK COLOUR FORMATS — two DIFFERENT kinds of
+// entry in the same flat array (field: "Mark Shape Format" / "Mark Colour
+// Format"), not among MARK_LIST_FIELDS' nine real per-mark fields, since a
+// mark itself never HAS either property directly. REVISED from an earlier
+// version that bundled shape and colour into a single "Mark Format"
+// together — bundling meant assigning a species a colour ALSO silently
+// overrode its shape (species winning over Mark Type, same priority
+// either way), losing the "a Catch reads as a cross, a Mark reads as a
+// circle, regardless of species" distinction the moment any species got a
+// colour of its own. Splitting them into two independent lists fixes that
+// (see resolveMarkShapeFormat/resolveMarkColorFormat, charts.js, for the
+// full resolution logic, and renderMarkSubFormatList below for the shared
+// render function both lists go through). Each Shape Format entry is a
+// name plus `icon` (one of MARK_ICON_OPTIONS, for this site's own map)
+// and `lowranceSym`/`garminSym` (the literal shape-only TEXT FRAGMENT each
+// device's export should use); each Colour Format entry is a name plus
+// `color` (a free, unrestricted hex — this map has no Lowrance-style
+// colour-count limit) and its own `lowranceSym`/`garminSym` (the literal
+// colour-only fragment). Both devices' fields are free text for now,
+// deliberately, not a constrained picker — Oliver doesn't yet have either
+// device's full accepted-value list (see gpxSymForMark's own comment in
+// sync.js for why guessing at that list from secondary sources already
+// went wrong more than once); a dropdown sourced from a real confirmed
+// list is a natural upgrade here later, not a redesign. The two fragments
+// get concatenated shape-then-colour with NO separator added by this
+// code — each fragment already carries whatever punctuation it needs
+// baked in (Oliver's own call, made once per Format).
 //
-// Species AND Mark Type values now each carry a `format` property instead
-// of the colour-name / shape-name properties an earlier version of this
-// had them carry directly (see onSetMarkListValueFormat below) — a single
-// <select> picking one of these named Mark Formats, rather than picking a
-// colour and a shape as two separate, unconnected choices. OPT IN, same as
-// before: a value with no format chosen keeps exactly the fallback
+// Species AND Mark Type values each carry `shapeFormat`/`colorFormat`
+// properties (see onSetMarkListValueSubFormat below) instead of the
+// single `format` an earlier version had them carry. OPT IN, same as
+// before: a value with neither chosen keeps exactly the fallback
 // behaviour it always had (plain hex `color`/hash on this site's map,
 // hardcoded shape-by-Mark-Type and a plain default colour on export — see
-// resolveMarkFormat, charts.js, and its sync.js equivalent). Once BOTH a
-// species and its mark's own Type have a format assigned, the SPECIES'
-// format wins (see resolveMarkFormat's own comment on why) — Mark Type's
-// own format assignment mainly matters for POI, which has no species to
-// carry one at all.
+// resolveMarkShapeFormat/resolveMarkColorFormat, charts.js, and their
+// sync.js equivalents). Whenever BOTH a species and its mark's own Type
+// have a Format assigned on the SAME axis, the SPECIES' wins (species is
+// the more specific signal) — but Oliver's own explicit call is that a
+// species-level SHAPE assignment is meant to stay the exception, not the
+// everyday case (leave it unset and shape keeps coming from Mark Type as
+// usual — a Catch still reads as a cross, a Mark still reads as a
+// circle, regardless of species); a species-level COLOUR assignment, by
+// contrast, is the everyday case this whole split exists for. Mark
+// Type's own Format assignments (either axis) mainly matter for POI,
+// which has no species to carry one of its own at all.
 
 let markLists = [];
 let markListsSha = null;
@@ -675,32 +695,41 @@ function renderMarkLists() {
     row.innerHTML = values.map((v) => {
       const escAttr = v.value.replace(/"/g, "&quot;");
       const escText = v.value.replace(/</g, "&lt;");
-      // Tile colour now comes ONLY from the chosen Mark Format's own
-      // "colour for the website" (see resolveTileFormatColor below) — no
-      // more per-tile hex picker (removed, see this section's own header
-      // comment on why: one consistent mechanism for every field, instead
-      // of a Format AND a separate free hex colour that could disagree
-      // with each other).
+      // Tile colour comes from the assigned Mark COLOUR Format's own
+      // "colour for the website" only — shape has no colour of its own to
+      // contribute here (see resolveTileFormatColor below).
       const tileColor = resolveTileFormatColor(v);
       const colorStyle = tileColor ? `background:${tileColor};border-color:${tileColor};color:${pickReadableTextColor(tileColor)};` : "";
-      // Every field's values get the same Mark Format <select> now — an
-      // earlier version of this only offered it for Species/Mark Type;
-      // Oliver's own call to extend it to every pick-list field, so
-      // Weather Condition/Bait/Rig/etc can all drive a consistent
-      // icon+colour (and, for Species/Mark Type specifically, the
-      // Lowrance/Garmin export) the same way.
-      const current = v.format || "";
-      const formatNames = markLists.filter((r) => r.field === "Mark Format").map((r) => r.value);
-      const formatSelectHtml = `
-        <select class="mark-list-format-select" data-field-label="${label}" data-value="${escAttr}" title="Mark Format (optional)"
+      // EVERY field's values get BOTH a Shape Format and a Colour Format
+      // <select> (Oliver's own call) — though shape only actually
+      // AFFECTS anything for Species/Mark Type (see resolveMarkShapeFormat,
+      // charts.js): those are the only two fields a mark's actual shape
+      // gets resolved from. Assigning a Shape Format to, say, a Weather
+      // Condition value is harmless but currently inert — nothing reads
+      // it back. Colour, by contrast, genuinely does apply everywhere (see
+      // markStyleFor, charts.js) via whichever field the map happens to
+      // be grouped by.
+      const shapeNames = markLists.filter((r) => r.field === "Mark Shape Format").map((r) => r.value);
+      const colorNames = markLists.filter((r) => r.field === "Mark Colour Format").map((r) => r.value);
+      const currentShape = v.shapeFormat || "";
+      const currentColor = v.colorFormat || "";
+      const shapeSelectHtml = `
+        <select class="mark-list-shapeformat-select" data-field-label="${label}" data-value="${escAttr}" title="Mark Shape Format (optional)"
           style="font-size:0.7rem;padding:1px 3px;border-radius:5px;border:1px solid var(--grey-200);background:var(--white);color:var(--grey-500);">
-          <option value=""${current ? "" : " selected"}>Format…</option>
-          ${formatNames.map((f) => `<option value="${f.replace(/"/g, "&quot;")}" ${f === current ? "selected" : ""}>${f.replace(/</g, "&lt;")}</option>`).join("")}
+          <option value=""${currentShape ? "" : " selected"}>Shape…</option>
+          ${shapeNames.map((f) => `<option value="${f.replace(/"/g, "&quot;")}" ${f === currentShape ? "selected" : ""}>${f.replace(/</g, "&lt;")}</option>`).join("")}
+        </select>`;
+      const colorSelectHtml = `
+        <select class="mark-list-colorformat-select" data-field-label="${label}" data-value="${escAttr}" title="Mark Colour Format (optional)"
+          style="font-size:0.7rem;padding:1px 3px;border-radius:5px;border:1px solid var(--grey-200);background:var(--white);color:var(--grey-500);">
+          <option value=""${currentColor ? "" : " selected"}>Colour…</option>
+          ${colorNames.map((f) => `<option value="${f.replace(/"/g, "&quot;")}" ${f === currentColor ? "selected" : ""}>${f.replace(/</g, "&lt;")}</option>`).join("")}
         </select>`;
       return `
       <span class="loc-chip" data-field="${key}" data-value="${escAttr}" style="display:inline-flex;align-items:center;gap:6px;${colorStyle}">
         <span>${escText}</span>
-        ${formatSelectHtml}
+        ${shapeSelectHtml}
+        ${colorSelectHtml}
         <button type="button" data-remove-mark-value data-field="${key}" data-value="${escAttr}"
           aria-label="Remove ${escAttr}"
           style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>
@@ -714,9 +743,15 @@ function renderMarkLists() {
       onRemoveMarkListValue(e.currentTarget.dataset.field, e.currentTarget.dataset.value);
     });
   });
-  container.querySelectorAll(".mark-list-format-select").forEach((select) => {
+  container.querySelectorAll(".mark-list-shapeformat-select").forEach((select) => {
     select.addEventListener("change", (e) => {
-      onSetMarkListValueFormat(e.currentTarget.dataset.fieldLabel, e.currentTarget.dataset.value, e.currentTarget.value);
+      onSetMarkListValueSubFormat(e.currentTarget.dataset.fieldLabel, e.currentTarget.dataset.value, "shapeFormat", e.currentTarget.value);
+      renderMarkLists();
+    });
+  });
+  container.querySelectorAll(".mark-list-colorformat-select").forEach((select) => {
+    select.addEventListener("change", (e) => {
+      onSetMarkListValueSubFormat(e.currentTarget.dataset.fieldLabel, e.currentTarget.dataset.value, "colorFormat", e.currentTarget.value);
       renderMarkLists();
     });
   });
@@ -735,10 +770,11 @@ function renderMarkLists() {
     });
   });
 
-  renderMarkFormats();
+  renderMarkSubFormatList("Mark Shape Format", "markShapeFormatsRows", "newMarkShapeFormatInput");
+  renderMarkSubFormatList("Mark Colour Format", "markColorFormatsRows", "newMarkColorFormatInput");
 
-  // Each of these ten sub-lists gets its own fold, same reasoning as the
-  // top-level sections in init() — this is specifically the "growing
+  // Each of these eleven sub-lists gets its own fold, same reasoning as
+  // the top-level sections in init() — this is specifically the "growing
   // list" this whole feature was asked to address, so these default to
   // COLLAPSED regardless of what the top-level Fishing Mark Lists card
   // itself is set to. Re-applied on every render (see makeCollapsible's
@@ -748,7 +784,8 @@ function renderMarkLists() {
     const group = container.querySelector(`.mark-list-chip-row[data-field="${key}"]`).closest(".mark-list-field-group");
     makeCollapsible(group, `settingsCollapsed:markListField:${key}`, true);
   });
-  makeCollapsible(document.getElementById("markFormatsFieldGroup"), "settingsCollapsed:markFormats", true);
+  makeCollapsible(document.getElementById("markShapeFormatsFieldGroup"), "settingsCollapsed:markShapeFormats", true);
+  makeCollapsible(document.getElementById("markColorFormatsFieldGroup"), "settingsCollapsed:markColorFormats", true);
 }
 
 function onAddMarkListValue(key) {
@@ -778,164 +815,181 @@ function onAddMarkListValue(key) {
 // recolouring (or un-colouring) an option doesn't touch anything that
 // already used it.
 /** Resolves the "colour for the website" a tile should show — the
- * assigned Mark Format's own `color` (see this section's own header
- * comment on why that's now the ONLY way a tile gets a colour, no more
- * per-tile hex picker), or null if the value has no format assigned at
- * all (or the format itself has no colour set). Doesn't fall back to a
- * hash-based colour the way the map's own markStyleFor does in charts.js
- * — this is just for the Settings-tab chip's own look, not trying to
- * make every unconfigured value visually distinct here too. */
+ * assigned Mark COLOUR Format's own `color` (see this section's own
+ * header comment on why that's now the ONLY way a tile gets a colour, no
+ * more per-tile hex picker), or null if the value has no Colour Format
+ * assigned at all (or the format itself has no colour set). Doesn't fall
+ * back to a hash-based colour the way the map's own markStyleFor does in
+ * charts.js — this is just for the Settings-tab chip's own look, not
+ * trying to make every unconfigured value visually distinct here too. */
 function resolveTileFormatColor(entry) {
-  if (!entry.format) return null;
-  const format = markLists.find((r) => r.field === "Mark Format" && r.value === entry.format);
+  if (!entry.colorFormat) return null;
+  const format = markLists.find((r) => r.field === "Mark Colour Format" && r.value === entry.colorFormat);
   return format && format.color ? format.color : null;
 }
 
-// Website icon choices for a Mark Format — matches
+// Website icon choices for a Mark Shape Format — matches
 // LOWRANCE_SHAPE_GETTERS/getDiamondMarkerClass/getCrossMarkerClass in
 // charts.js exactly (the only three shapes this site's own map actually
 // knows how to draw), so an icon choice made here can never reference a
 // shape the map has no way to render.
 const MARK_ICON_OPTIONS = ["circle", "diamond", "cross"];
 
-/** Sets or clears any pick-list value's `format` (formatName === ""
- * means "opt out, go back to this value's own fallback" — see
- * resolveMarkFormat, charts.js, and its sync.js equivalent, for Species/
- * Mark Type specifically; resolveTileFormatColor above and markStyleFor,
- * charts.js, for every other field). `fieldLabel` is the field's own
- * label ("Species", "Mark Type", "Bait", ...) directly, not a
+/** Sets or clears a pick-list value's `shapeFormat` or `colorFormat`
+ * (formatName === "" means "opt out, go back to this value's own
+ * fallback" — see resolveMarkShapeFormat/resolveMarkColorFormat,
+ * charts.js, and their sync.js equivalents). `fieldLabel` is the field's
+ * own label ("Species", "Mark Type", "Bait", ...) directly, not a
  * MARK_LIST_FIELDS key/lookup — the caller already has the label in scope
- * from its own render loop. */
-function onSetMarkListValueFormat(fieldLabel, value, formatName) {
+ * from its own render loop. `prop` is "shapeFormat" or "colorFormat" —
+ * the two axes are otherwise identical in how they're set/cleared, so one
+ * function handles both rather than two near-duplicates. */
+function onSetMarkListValueSubFormat(fieldLabel, value, prop, formatName) {
   const entry = markLists.find((r) => r.field === fieldLabel && r.value === value);
   if (!entry) return;
-  if (formatName) entry.format = formatName;
-  else delete entry.format;
+  if (formatName) entry[prop] = formatName;
+  else delete entry[prop];
 }
 
 /**
- * Renders the Mark Format list — a genuinely different shape from every
- * other list on this page (see this section's own header comment for
- * why), so it gets its own render function rather than fitting through
- * the generic MARK_LIST_FIELDS loop above: each entry is a small row (not
- * a pill chip) carrying four independent properties — icon + colour for
- * this site's own map, and the literal <sym> text for each device's
- * export — rather than a bare value with one optional colour.
+ * Renders EITHER the Mark Shape Format list or the Mark Colour Format
+ * list — same underlying row shape (a name plus a few properties, not a
+ * pill chip the way every other list on this page is), genuinely
+ * parameterized rather than writing two nearly-identical functions, since
+ * the two differ only in WHICH properties they carry: Shape Format has an
+ * `icon` (for this site's own map); Colour Format has a `color` (same
+ * purpose, just colour instead of shape). Both carry `lowranceSym`/
+ * `garminSym` — the literal device text FRAGMENT this piece contributes
+ * to a mark's whole <sym> string on export (see gpxSymForMark's own
+ * comment in sync.js for exactly how the shape fragment and colour
+ * fragment get concatenated, and why any separator between them is
+ * deliberately baked into whichever fragment needs it, Oliver's own call,
+ * not decided by this code).
+ *
+ * REVISED from an earlier version that bundled shape and colour into one
+ * "Mark Format" together — bundling meant assigning a species a colour
+ * ALSO silently overrode its shape, losing the "a Catch reads as a cross,
+ * a Mark reads as a circle, regardless of species" distinction the
+ * moment any species got a colour of its own. Splitting them into two
+ * independent lists fixes that (see resolveMarkShapeFormat/
+ * resolveMarkColorFormat, charts.js, for the full resolution logic).
  */
-function renderMarkFormats() {
-  const container = document.getElementById("markFormatsRows");
+function renderMarkSubFormatList(fieldName, containerId, newInputId) {
+  const container = document.getElementById(containerId);
   if (!container) return;
-  const formats = markLists.filter((r) => r.field === "Mark Format");
-  if (formats.length === 0) {
-    container.innerHTML = `<p class="footnote" style="margin:0 0 8px;text-align:left;">No Mark Formats yet — add one below.</p>`;
+  const isShape = fieldName === "Mark Shape Format";
+  const entries = markLists.filter((r) => r.field === fieldName);
+  if (entries.length === 0) {
+    container.innerHTML = `<p class="footnote" style="margin:0 0 8px;text-align:left;">No ${fieldName}s yet — add one below.</p>`;
   } else {
-    container.innerHTML = formats.map((f) => {
+    container.innerHTML = entries.map((f) => {
       const escAttr = f.value.replace(/"/g, "&quot;");
       const escText = f.value.replace(/</g, "&lt;");
       const escLowrance = (f.lowranceSym || "").replace(/"/g, "&quot;");
       const escGarmin = (f.garminSym || "").replace(/"/g, "&quot;");
+      const sitePickerHtml = isShape
+        ? `<select class="mark-subformat-icon-select" data-field="${fieldName}" data-value="${escAttr}" title="Icon shape for this site's own map"
+            style="font-size:0.8rem;padding:4px 6px;border-radius:5px;border:1px solid var(--grey-200);">
+            <option value=""${f.icon ? "" : " selected"}>Icon…</option>
+            ${MARK_ICON_OPTIONS.map((i) => `<option value="${i}" ${i === f.icon ? "selected" : ""}>${i}</option>`).join("")}
+          </select>`
+        : `<input type="color" class="mark-subformat-color-input" data-field="${fieldName}" data-value="${escAttr}" value="${f.color || "#3388ff"}"
+            title="Colour for this site's own map" style="width:34px;height:30px;padding:0;border:1px solid var(--grey-200);border-radius:5px;" />`;
       return `
-      <div class="mark-format-row" data-value="${escAttr}" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px;border:1px solid var(--grey-200);border-radius:8px;margin-bottom:6px;">
+      <div class="mark-subformat-row" data-field="${fieldName}" data-value="${escAttr}" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px;border:1px solid var(--grey-200);border-radius:8px;margin-bottom:6px;">
         <strong style="min-width:110px;">${escText}</strong>
-        <select class="mark-format-icon-select" data-value="${escAttr}" title="Icon shape for this site's own map"
-          style="font-size:0.8rem;padding:4px 6px;border-radius:5px;border:1px solid var(--grey-200);">
-          <option value=""${f.icon ? "" : " selected"}>Icon…</option>
-          ${MARK_ICON_OPTIONS.map((i) => `<option value="${i}" ${i === f.icon ? "selected" : ""}>${i}</option>`).join("")}
-        </select>
-        <input type="color" class="mark-format-color-input" data-value="${escAttr}" value="${f.color || "#3388ff"}"
-          title="Colour for this site's own map" style="width:34px;height:30px;padding:0;border:1px solid var(--grey-200);border-radius:5px;" />
-        <input type="text" class="mark-format-lowrance-input" data-value="${escAttr}" value="${escLowrance}"
-          placeholder="Lowrance <sym>, e.g. circle,yellow" title="Exact Lowrance <sym> text"
+        ${sitePickerHtml}
+        <input type="text" class="mark-subformat-lowrance-input" data-field="${fieldName}" data-value="${escAttr}" value="${escLowrance}"
+          placeholder="Lowrance &lt;sym&gt; text fragment, e.g. ${isShape ? "circle," : "yellow"}" title="Exact Lowrance <sym> text fragment"
           style="flex:1;min-width:170px;padding:5px 8px;border-radius:5px;border:1px solid var(--grey-200);font-size:0.8rem;" />
-        <input type="text" class="mark-format-garmin-input" data-value="${escAttr}" value="${escGarmin}"
-          placeholder="Garmin <sym>, e.g. Circle, Yellow" title="Exact Garmin <sym> text"
+        <input type="text" class="mark-subformat-garmin-input" data-field="${fieldName}" data-value="${escAttr}" value="${escGarmin}"
+          placeholder="Garmin &lt;sym&gt; text fragment, e.g. ${isShape ? "Circle, " : "Yellow"}" title="Exact Garmin <sym> text fragment"
           style="flex:1;min-width:170px;padding:5px 8px;border-radius:5px;border:1px solid var(--grey-200);font-size:0.8rem;" />
-        <button type="button" data-remove-mark-format data-value="${escAttr}" aria-label="Remove ${escAttr}"
+        <button type="button" data-remove-mark-subformat data-field="${fieldName}" data-value="${escAttr}" aria-label="Remove ${escAttr}"
           style="background:none;border:none;color:var(--grey-500);cursor:pointer;font-size:0.95rem;line-height:1;padding:0 4px;">×</button>
       </div>`;
     }).join("");
   }
 
-  container.querySelectorAll("[data-remove-mark-format]").forEach((btn) => {
-    btn.addEventListener("click", (e) => onRemoveMarkFormat(e.currentTarget.dataset.value));
+  container.querySelectorAll("[data-remove-mark-subformat]").forEach((btn) => {
+    btn.addEventListener("click", (e) => onRemoveMarkSubFormat(e.currentTarget.dataset.field, e.currentTarget.dataset.value));
   });
-  container.querySelectorAll(".mark-format-icon-select").forEach((select) => {
+  container.querySelectorAll(".mark-subformat-icon-select").forEach((select) => {
     select.addEventListener("change", (e) => {
-      onSetMarkFormatProperty(e.currentTarget.dataset.value, "icon", e.currentTarget.value);
+      onSetMarkSubFormatProperty(e.currentTarget.dataset.field, e.currentTarget.dataset.value, "icon", e.currentTarget.value);
     });
   });
-  container.querySelectorAll(".mark-format-color-input").forEach((input) => {
+  container.querySelectorAll(".mark-subformat-color-input").forEach((input) => {
     input.addEventListener("change", (e) => {
-      onSetMarkFormatProperty(e.currentTarget.dataset.value, "color", e.currentTarget.value);
+      onSetMarkSubFormatProperty(e.currentTarget.dataset.field, e.currentTarget.dataset.value, "color", e.currentTarget.value);
     });
   });
   // "input" (not "change") for the two free-text sym fields — these have
   // no picker to "close", so waiting for blur/change would mean a value
   // could be lost if Save gets clicked without ever leaving the field.
-  container.querySelectorAll(".mark-format-lowrance-input").forEach((input) => {
+  container.querySelectorAll(".mark-subformat-lowrance-input").forEach((input) => {
     input.addEventListener("input", (e) => {
-      onSetMarkFormatProperty(e.currentTarget.dataset.value, "lowranceSym", e.currentTarget.value);
+      onSetMarkSubFormatProperty(e.currentTarget.dataset.field, e.currentTarget.dataset.value, "lowranceSym", e.currentTarget.value);
     });
   });
-  container.querySelectorAll(".mark-format-garmin-input").forEach((input) => {
+  container.querySelectorAll(".mark-subformat-garmin-input").forEach((input) => {
     input.addEventListener("input", (e) => {
-      onSetMarkFormatProperty(e.currentTarget.dataset.value, "garminSym", e.currentTarget.value);
+      onSetMarkSubFormatProperty(e.currentTarget.dataset.field, e.currentTarget.dataset.value, "garminSym", e.currentTarget.value);
     });
   });
 
-  const newInput = document.getElementById("newMarkFormatInput");
+  const newInput = document.getElementById(newInputId);
   if (newInput) {
     newInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
-        onAddMarkFormat();
+        onAddMarkSubFormat(fieldName, newInputId);
       }
     });
   }
 }
 
-/** Sets or clears one property on a Mark Format entry itself (icon,
- * colour, lowranceSym, garminSym) — value === "" deletes the property
- * (falls back exactly as if it had never been set — see
- * resolveMarkFormat's own comment, charts.js, on what happens then)
- * rather than storing an empty string. Doesn't re-render — every caller
- * above is a live input the person is actively using (typing text, or a
- * colour/icon they just picked), so redrawing the whole row out from
- * under their cursor would be actively disruptive; the DOM already shows
- * what they just set. */
-function onSetMarkFormatProperty(formatName, prop, value) {
-  const entry = markLists.find((r) => r.field === "Mark Format" && r.value === formatName);
+/** Sets or clears one property on a Mark Shape/Colour Format entry itself
+ * (icon or color, lowranceSym, garminSym) — value === "" deletes the
+ * property (falls back exactly as if it had never been set) rather than
+ * storing an empty string. Doesn't re-render — every caller above is a
+ * live input the person is actively using (typing text, or a colour/icon
+ * they just picked), so redrawing the whole row out from under their
+ * cursor would be actively disruptive; the DOM already shows what they
+ * just set. */
+function onSetMarkSubFormatProperty(fieldName, formatName, prop, value) {
+  const entry = markLists.find((r) => r.field === fieldName && r.value === formatName);
   if (!entry) return;
   if (value) entry[prop] = value;
   else delete entry[prop];
 }
 
-function onAddMarkFormat() {
-  const input = document.getElementById("newMarkFormatInput");
+function onAddMarkSubFormat(fieldName, inputId) {
+  const input = document.getElementById(inputId);
   const value = input.value.trim();
-  const exists = value && markLists.some((r) => r.field === "Mark Format" && r.value.toLowerCase() === value.toLowerCase());
+  const exists = value && markLists.some((r) => r.field === fieldName && r.value.toLowerCase() === value.toLowerCase());
   if (!value || exists) {
     input.value = "";
     return;
   }
-  markLists.push({ field: "Mark Format", value });
+  markLists.push({ field: fieldName, value });
   input.value = "";
-  // Full re-render, not just renderMarkFormats() — Species/Mark Type's own
-  // format <select> options are built from the current Mark Format list
-  // too (see renderMarkLists above), so a newly-added one needs to show up
-  // there immediately, not just in this list.
+  // Full re-render, not just this one list — every tile's own Shape/
+  // Colour Format <select> options are built from the current lists too
+  // (see renderMarkLists above), so a newly-added one needs to show up
+  // there immediately, not just in this sub-list.
   renderMarkLists();
 }
 
-/** Removing a Mark Format does NOT clear it off any Species/Mark Type
- * value that's currently pointing at it (same "removing an option doesn't
- * touch anything that already used it" convention as every other list on
- * this page) — that value just falls back to its own default the next
- * time anything resolves it (see resolveMarkFormat, charts.js), same as
- * if the format had simply never existed. */
-function onRemoveMarkFormat(value) {
-  markLists = markLists.filter((r) => !(r.field === "Mark Format" && r.value === value));
-  renderMarkLists(); // same reasoning as onAddMarkFormat above
+/** Removing a Shape/Colour Format does NOT clear it off any value that's
+ * currently pointing at it (same "removing an option doesn't touch
+ * anything that already used it" convention as every other list on this
+ * page) — that value just falls back to its own default the next time
+ * anything resolves it (see resolveMarkShapeFormat/resolveMarkColorFormat,
+ * charts.js), same as if the Format had simply never existed. */
+function onRemoveMarkSubFormat(fieldName, value) {
+  markLists = markLists.filter((r) => !(r.field === fieldName && r.value === value));
+  renderMarkLists(); // same reasoning as onAddMarkSubFormat above
 }
 
 // Removing an option here does NOT scrub it from any mark that already used
