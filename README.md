@@ -560,8 +560,12 @@ so a mark logged from memory afterwards still shows the real catch time) —
 every mark has these three regardless of type. A Mark additionally carries
 Species; a Catch adds Weather Condition, Tide Condition, Water Condition,
 Bait, Rig, Rod, Berley, Size (cm), Barometer (hPa), Temperature (°C), Water
-Temperature (°C), Water Depth (m), Wind Direction, Wind Speed (km/h), and
-free-text Notes. The pick-list fields (Species, and everything from Weather
+Temperature (°C), Water Depth (m), Wind Direction, Wind Speed (km/h),
+free-text Notes, and a **Released** checkbox — stored as `released: true`
+only when actually checked (never `released: false`; unchecked just means
+the property isn't there at all, same "presence means yes" convention as
+the rest of this codebase's own optional boolean-shaped fields). The
+pick-list fields (Species, and everything from Weather
 Condition through Berley) are picked from `config/mark_lists.json` rather
 than typed free text, so a value like "Whiting" is always spelled the same
 way for filtering/export later rather than drifting into near-duplicates
@@ -695,10 +699,25 @@ that actually is:
   "Location unavailable" if GPS is denied or the browser doesn't support
   it, same graceful-degrade as everywhere else this site touches GPS.
 
-**Edit and Delete** buttons sit at the bottom of the popup, gated behind
-having a GitHub connection (same as everywhere else that writes to this
-repo) — Edit swaps the popup into the same form `startNewMarkEntry` uses
-for a brand-new mark, Save/Cancel working exactly the same way. **Delete**
+**Edit, Copy, and Delete** buttons sit at the bottom of the popup, gated
+behind having a GitHub connection (same as everywhere else that writes to
+this repo) — Edit swaps the popup into the same form `startNewMarkEntry`
+uses for a brand-new mark, Save/Cancel working exactly the same way.
+**Copy** starts a brand-new, unsaved mark at the SAME location, with
+every applicable field cloned from the original — species, all catch
+detail, notes, Released, and its Date/Time too (see
+`startCopiedMarkEntry`, `charts.js`) — everything except the identity
+fields (this is a genuinely separate mark, not the same record moved).
+Opens straight into the same edit form, ready to adjust before saving —
+most commonly the Date/Time, for "caught another one here later": **any**
+edit form's Date/Time field, changing it re-runs the historical lookup and
+OVERWRITES Weather/Tide/Barometer/Temperature/Water Temperature/Wind for
+the new moment (see `refreshMarkFormConditionsForNewTime`), rather than
+only filling blanks the way a brand-new mark's very first lookup does —
+the old values reflect the wrong time the instant it changes, so leaving
+them would be actively misleading. A field the fresh lookup doesn't
+resolve (a network hiccup, or a date outside Open-Meteo's own archive
+coverage) is left exactly as it was rather than blanked out. **Delete**
 needs a genuine confirmation step before it does anything — clicking it
 just reveals an inline "delete this mark? this can't be undone" block
 with its own Yes/Cancel, rather than acting on the first click the way

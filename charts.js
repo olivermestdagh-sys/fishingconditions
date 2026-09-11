@@ -1116,7 +1116,7 @@ const MARK_TYPE_FIELD_KEYS = {
   Mark: ["species"],
   Catch: [
     "species", "weatherCondition", "tideCondition", "waterCondition", "bait", "rig", "rod", "berley",
-    "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed", "notes",
+    "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed", "notes", "released",
   ],
 };
 MARK_TYPE_FIELD_KEYS.Fish = MARK_TYPE_FIELD_KEYS.Catch;
@@ -1425,6 +1425,7 @@ function buildMarkPopupViewHtml(mark) {
     row("Wind", windParts.length ? windParts.join(" ") : null);
   }
   if (applicable.includes("notes")) row("Notes", mark.notes);
+  if (applicable.includes("released")) row("Released", mark.released ? "Yes" : null);
   row("Source", mark.source);
   // Filled in asynchronously right after this popup actually shows — see
   // fillMarkPopupDistances above for why these two can't just be plain
@@ -1439,6 +1440,7 @@ function buildMarkPopupViewHtml(mark) {
       ${canEdit ? `
       <div style="margin-top:8px;display:flex;gap:6px;align-items:center;">
         <button type="button" class="btn-secondary" data-mark-edit style="padding:4px 10px;font-size:0.85rem;">Edit</button>
+        <button type="button" class="btn-secondary" data-mark-copy style="padding:4px 10px;font-size:0.85rem;">Copy</button>
         <button type="button" class="btn-secondary" data-mark-delete style="padding:4px 10px;font-size:0.85rem;color:#dc2626;">Delete</button>
       </div>
       <div data-mark-delete-confirm style="display:none;margin-top:8px;padding:8px;border:1px solid #fecaca;background:#fef2f2;border-radius:6px;font-size:0.85rem;">
@@ -1537,6 +1539,12 @@ function buildMarkPopupEditHtml(mark, markLists) {
         <div data-field-group="notes">
           <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Notes
             <textarea name="notes" rows="2" style="${MARK_POPUP_INPUT_STYLE}resize:vertical;">${escapeHtml(mark.notes || "")}</textarea>
+          </label>
+        </div>
+        <div data-field-group="released">
+          <label style="display:flex;align-items:center;gap:6px;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">
+            <input type="checkbox" name="released" ${mark.released ? "checked" : ""} />
+            Released
           </label>
         </div>
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Source
@@ -1659,6 +1667,10 @@ function collectMarkFormValues(form, originalMark) {
   if (applicable.includes("notes")) {
     const notes = val("notes");
     if (notes) updated.notes = notes;
+  }
+  if (applicable.includes("released")) {
+    const releasedInput = form.querySelector('[name="released"]');
+    if (releasedInput && releasedInput.checked) updated.released = true;
   }
   return updated;
 }
@@ -1896,6 +1908,25 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       applyMarkFieldVisibility(form, typeSelect.value);
       typeSelect.addEventListener("change", () => applyMarkFieldVisibility(form, typeSelect.value));
     }
+    // Refreshes Weather/Tide/Barometer/Temperature/Water Temperature/Wind
+    // for whatever the Date/Time field's just been changed TO — see
+    // refreshMarkFormConditionsForNewTime's own comment above for why
+    // this overwrites rather than only filling blanks. Most useful right
+    // after "Copy" (same location, new time), but wired here generally —
+    // any edit's date/time change gets the same refresh. Skipped for a
+    // POI/Mark-level form, same cost-conscious check the initial fill
+    // uses (see startNewMarkEntry's own comment) — nothing to refresh if
+    // the form can't show a single one of these fields to begin with.
+    const dateTimeInput = form.querySelector('[name="dateTime"]');
+    if (dateTimeInput) {
+      dateTimeInput.addEventListener("change", () => {
+        const currentType = typeSelect ? typeSelect.value : mark.type;
+        if (!fieldKeysForMarkType(currentType).includes("weatherCondition")) return;
+        const naive = datetimeLocalToNaive(dateTimeInput.value);
+        if (!naive) return;
+        refreshMarkFormConditionsForNewTime(form, mark.lat, mark.lng, naive);
+      });
+    }
   }
 
   const editBtn = popupEl.querySelector("[data-mark-edit]");
@@ -1904,6 +1935,21 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       L.DomEvent.stop(e);
       marker.setPopupContent(buildMarkPopupEditHtml(mark, markListsCache));
       wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options);
+    });
+  }
+
+  // Copy — starts a brand-new draft at the same location, pre-filled from
+  // this mark, in its own edit popup (see startCopiedMarkEntry above).
+  // Needs a real map reference, which isn't in `options` for the plain
+  // "existing mark, editing" call path the way it is for a NEW mark (see
+  // startNewMarkEntry's own options.map) — options.map was added
+  // specifically so this (and the Delete flow above) can reach it; see
+  // loadAndRenderMarks's own popupopen wiring, which passes it through.
+  const copyBtn = popupEl.querySelector("[data-mark-copy]");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", (e) => {
+      L.DomEvent.stop(e);
+      if (options.map && options.state) startCopiedMarkEntry(options.map, mark, options.state);
     });
   }
 
@@ -2005,6 +2051,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         Object.assign(mark, updated);
         for (const f of MARK_POPUP_OPTIONAL_FIELDS) if (!(f.key in updated)) delete mark[f.key];
         if (!("notes" in updated)) delete mark.notes;
+        if (!("released" in updated)) delete mark.released;
         if (!("size" in updated)) delete mark.size;
         if (!("barometer" in updated)) delete mark.barometer;
         if (!("temperature" in updated)) delete mark.temperature;
@@ -2921,6 +2968,61 @@ function startNewMarkEntry(map, lat, lng, state, defaults = {}) {
 }
 
 /**
+ * Starts a new, unsaved DRAFT mark at the SAME location as an existing
+ * one, with every applicable field cloned from it (species, all catch
+ * detail, notes, released, and its Date/Time too) — the "Copy" button on
+ * a mark's own view popup. Deliberately does NOT copy the identity-ish
+ * fields (id, createdAt, source, sourceUuid) — this is a genuinely new,
+ * separate mark, not the same record moved to a new time. Opens directly
+ * in edit mode, exactly like a brand-new mark from startNewMarkEntry, so
+ * every field — most commonly Date/Time, for "I caught another one here
+ * later" — can be adjusted before anything is actually saved. Changing
+ * Date/Time in the form that opens re-runs the historical lookup and
+ * OVERWRITES Weather/Tide/Barometer/etc for the new moment (see
+ * refreshMarkFormConditionsForNewTime, wired in wireMarkPopupButtons) —
+ * this function does NOT run that lookup itself at open time, since the
+ * copy already carries the source mark's own real values for its
+ * original time; only actually changing the time makes those stale
+ * enough to be worth refetching.
+ */
+function startCopiedMarkEntry(map, sourceMark, state) {
+  const draft = {
+    id: makeMarkId(),
+    lat: sourceMark.lat,
+    lng: sourceMark.lng,
+    name: sourceMark.name || "",
+    type: sourceMark.type || "",
+    dateTime: sourceMark.dateTime || nowAsNaiveString(),
+    createdAt: null, // set for real only once actually saved — see wireMarkPopupButtons
+    source: "Manual", // this copy is authored through this site's own UI, regardless of how the ORIGINAL mark got here
+  };
+  const applicable = fieldKeysForMarkType(draft.type);
+  const COPYABLE_KEYS = [
+    "species", "weatherCondition", "tideCondition", "waterCondition", "bait", "rig", "rod", "berley",
+    "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed",
+    "notes", "released",
+  ];
+  for (const key of COPYABLE_KEYS) {
+    if (applicable.includes(key) && sourceMark[key] != null) draft[key] = sourceMark[key];
+  }
+
+  const style = markStyleFor(draft, state);
+  if (!state.canvasRenderer) state.canvasRenderer = L.canvas({ padding: 0.5 });
+  const marker = createMarkShapeLayer([draft.lat, draft.lng], draft, {
+    renderer: state.canvasRenderer,
+    radius: style.radius,
+    color: style.color,
+    weight: style.weight,
+    fillColor: style.fillColor,
+    fillOpacity: 0.85,
+  }, state.markLists).addTo(map);
+  marker.bindPopup(buildMarkPopupEditHtml(draft, state.markLists), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
+  marker.openPopup();
+  const popupEl = marker.getPopup().getElement();
+  wireMarkPopupButtons(popupEl, marker, draft, state.markLists, { isNew: true, map, state });
+}
+
+/**
  * See startNewMarkEntry's own call site, just above. Only ever fills a
  * field that's STILL BLANK by the time the lookup resolves — checked
  * live against the form's own current value at that moment, not a
@@ -2951,6 +3053,58 @@ async function fillMarkFormFromHistoricalLookup(popupEl, lat, lng, dateTimeNaive
   fillIfBlank("waterTemperature", result.waterTemperature);
   fillIfBlank("windDirection", result.windDirection);
   fillIfBlank("windSpeed", result.windSpeed);
+}
+
+/**
+ * REFRESHES Weather/Tide/Barometer/Temperature/Water Temperature/Wind on
+ * an already-open mark EDIT form after its own Date/Time field changes —
+ * unlike fillMarkFormFromHistoricalLookup above (which only fills a field
+ * that's STILL BLANK, for a brand-new mark that's never had a real value
+ * at all), this OVERWRITES whatever's currently in each field, since the
+ * whole point of changing the time is that the OLD values reflect the
+ * WRONG moment now. Most useful right after "Copy" on an existing mark
+ * (same location, same everything, but a different time — see
+ * startCopiedMarkEntry below), though it fires for ANY edit's date/time
+ * change, new mark or existing. A field the fresh lookup DIDN'T resolve
+ * (a network hiccup, or a date past Open-Meteo's own archive coverage)
+ * is left exactly as it was rather than being blanked out — a partial
+ * lookup failure should never destroy a value that was already there.
+ * Skipped entirely for a POI/Mark-level form the same way the initial
+ * fill is (see fieldKeysForMarkType's own check at the call site below)
+ * — nothing to refresh if the form can't show or save a single one of
+ * these fields in the first place.
+ */
+async function refreshMarkFormConditionsForNewTime(formEl, lat, lng, dateTimeNaive) {
+  const result = await lookupHistoricalMarkConditions(lat, lng, dateTimeNaive);
+  // A plain <input> (barometer, temperature, ...) accepts any value directly.
+  // A <select> (weatherCondition, tideCondition, windDirection) does NOT —
+  // setting .value to something with no matching <option> silently no-ops,
+  // leaving the field blank rather than showing the new value. The initial
+  // render (markListOptionsHtml) already handles this by adding the
+  // current value as its own <option> if it's missing from the official
+  // list; this does the same thing here, so a freshly-looked-up value (say
+  // a weather condition Open-Meteo returned that isn't in
+  // config/mark_lists.json's own Weather Condition list) still actually
+  // shows and gets saved, instead of silently vanishing.
+  const overwriteIfResolved = (name, value) => {
+    if (value == null || value === "") return;
+    const el = formEl.querySelector(`[name="${name}"]`);
+    if (!el) return;
+    if (el.tagName === "SELECT" && !Array.from(el.options).some((opt) => opt.value === String(value))) {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = value;
+      el.appendChild(opt);
+    }
+    el.value = value;
+  };
+  overwriteIfResolved("weatherCondition", result.weatherCondition);
+  overwriteIfResolved("tideCondition", result.tideCondition);
+  overwriteIfResolved("barometer", result.barometer);
+  overwriteIfResolved("temperature", result.temperature);
+  overwriteIfResolved("waterTemperature", result.waterTemperature);
+  overwriteIfResolved("windDirection", result.windDirection);
+  overwriteIfResolved("windSpeed", result.windSpeed);
 }
 
 /**
@@ -3232,6 +3386,14 @@ const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
  *                chart/map, while createdAt stays useful for sanity-checking
  *                a backfilled entry later. Never shown as the primary time.
  *     notes:     string, optional — free text.
+ *     released:  boolean, optional — present and `true` if the catch was
+ *                released, absent otherwise (never stored as `false` —
+ *                same "presence means yes, absence means no/unknown"
+ *                convention as every other optional boolean-shaped field
+ *                on this site would use, keeping an unset mark's JSON
+ *                free of a field that never actually applied). Catch-only
+ *                (see MARK_TYPE_FIELD_KEYS above) — a Mark or POI has no
+ *                catch outcome to record in the first place.
  *     size:      number, optional — whole centimetres. Deliberately just a
  *                plain number, not a pick-list field — a measurement, not a
  *                category, so there's nothing to draw a Settings-tab list
