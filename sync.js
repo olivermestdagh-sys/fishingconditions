@@ -521,40 +521,71 @@ function naiveToGpxTime(naive) {
 // the whole reason every function in this section takes a `device`
 // parameter now.
 //
-// Shape and colour together are now a single, real, editable Settings-tab
-// choice — a "Mark Format" (config/mark_lists.json's field: "Mark Format"
-// entries — see the "Fishing Mark Lists" section, locationsadmin.js),
-// carrying its OWN literal <sym> text for EACH device plus an icon/colour
-// for this site's own map, rather than this code deriving one string from
-// a colour name and a shape name separately the way two earlier versions
-// did (both of which turned out wrong — see resolveMarkFormat/
-// legacySymForMark below for what happens when nothing's been assigned).
-// Species' own assigned format wins over its Mark Type's, mirroring
-// resolveMarkFormat in charts.js exactly (kept as a separate small copy
-// here rather than importing one, since sync.js and charts.js load on
-// different pages).
+// SHAPE and COLOUR are two INDEPENDENT axes, each with its own kind of
+// Mark Format (config/mark_lists.json's own field: "Mark Shape Format" /
+// "Mark Colour Format" entries — see the "Fishing Mark Lists" section,
+// locationsadmin.js), REVISED from an earlier version that bundled both
+// into one Format together. Bundling them meant assigning a species a
+// colour ALSO silently overrode its shape (species winning over Mark
+// Type, same priority either way) — losing the "a Catch reads as a cross,
+// a Mark reads as a circle, regardless of species" distinction the moment
+// any species got a colour of its own. Splitting them fixes that: shape
+// still normally comes from Mark Type day to day (a species-level shape
+// assignment is a deliberate override, the exception, not the rule — see
+// resolveMarkShapeFormat's own comment), while colour normally DOES vary
+// by species, which is the whole point of assigning one. gpxSymForMark
+// below resolves each piece independently, then simply concatenates them
+// — no separator added by this code at all, since each Format's own
+// device text already carries whatever punctuation that device wants
+// baked into the fragment itself (Oliver's own call, made once per
+// Format).
+// Species' own assigned Format wins over its Mark Type's for BOTH axes
+// when both are set, mirroring resolveMarkShapeFormat/resolveMarkColorFormat
+// in charts.js exactly (kept as separate small copies here rather than
+// importing them, since sync.js and charts.js load on different pages).
 
-/** Mirrors resolveMarkFormat in charts.js exactly — see that copy's own
- * comment for the species-then-type priority and why. */
-function resolveMarkFormat(m) {
+/** Mirrors resolveMarkShapeFormat in charts.js exactly — see that copy's
+ * own comment for the species-then-type priority, and why a species-level
+ * shape assignment is meant to stay the exception, not the everyday
+ * case. */
+function resolveMarkShapeFormat(m) {
   if (m.species) {
     const speciesEntry = markLists.find((r) => r.field === "Species" && r.value === m.species);
-    if (speciesEntry && speciesEntry.format) {
-      const format = markLists.find((r) => r.field === "Mark Format" && r.value === speciesEntry.format);
+    if (speciesEntry && speciesEntry.shapeFormat) {
+      const format = markLists.find((r) => r.field === "Mark Shape Format" && r.value === speciesEntry.shapeFormat);
       if (format) return format;
     }
   }
   const typeEntry = markLists.find((r) => r.field === "Mark Type" && r.value === m.type);
-  if (typeEntry && typeEntry.format) {
-    const format = markLists.find((r) => r.field === "Mark Format" && r.value === typeEntry.format);
+  if (typeEntry && typeEntry.shapeFormat) {
+    const format = markLists.find((r) => r.field === "Mark Shape Format" && r.value === typeEntry.shapeFormat);
+    if (format) return format;
+  }
+  return null;
+}
+
+/** Mirrors resolveMarkColorFormat in charts.js exactly — see that copy's
+ * own comment for the species-then-type priority (colour is meant to be
+ * the everyday case for a species-level assignment, unlike shape above). */
+function resolveMarkColorFormat(m) {
+  if (m.species) {
+    const speciesEntry = markLists.find((r) => r.field === "Species" && r.value === m.species);
+    if (speciesEntry && speciesEntry.colorFormat) {
+      const format = markLists.find((r) => r.field === "Mark Colour Format" && r.value === speciesEntry.colorFormat);
+      if (format) return format;
+    }
+  }
+  const typeEntry = markLists.find((r) => r.field === "Mark Type" && r.value === m.type);
+  if (typeEntry && typeEntry.colorFormat) {
+    const format = markLists.find((r) => r.field === "Mark Colour Format" && r.value === typeEntry.colorFormat);
     if (format) return format;
   }
   return null;
 }
 
 // Legacy fallback shape per Mark Type, used ONLY when neither a mark's
-// species nor its Type has a Mark Format assigned at all (see
-// legacySymForMark below) — matches this site's original hardcoded
+// species nor its Type has a Mark Shape Format assigned at all (see
+// legacyShapeFragment below) — matches this site's original hardcoded
 // behaviour from before Mark Formats existed, so a repo that hasn't
 // touched any of this yet exports exactly as it always did.
 const MARK_TYPE_DEFAULT_SHAPE = { POI: "diamond", Catch: "cross", Fish: "cross" };
@@ -563,39 +594,60 @@ function capitalizeWord(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-/** Builds the fallback <sym> string for a mark with no Mark Format
- * assigned at all — same shape-by-Mark-Type and plain "blue" default this
- * always had, just formatted for whichever device was asked for (see this
- * section's own header comment on the two real, different conventions).
- * `device` is "lowrance" (lowercase, no space) or "garmin" (Title Case,
- * space after the comma). */
-function legacySymForMark(m, device) {
-  const shape = MARK_TYPE_DEFAULT_SHAPE[m.type] || "circle";
-  if (m.type === "POI") return device === "garmin" ? capitalizeWord(shape) : shape;
-  return device === "garmin" ? `${capitalizeWord(shape)}, Blue` : `${shape},blue`;
+/** The bare legacy shape WORD for a Mark Type — circle/diamond/cross, no
+ * punctuation attached at all. */
+function legacyShapeWord(type) {
+  return MARK_TYPE_DEFAULT_SHAPE[type] || "circle";
+}
+
+/** The legacy SHAPE fragment for a mark with no Mark Shape Format
+ * resolved, for the shape+colour CONCATENATION case — every Mark Type
+ * concatenates shape and colour now, POI included (see gpxSymForMark
+ * below). Same hardcoded shape-by-Mark-Type this always
+ * had, but WITH its own trailing separator baked in (a comma for
+ * Lowrance, ", " for Garmin) so it still joins correctly with a colour
+ * fragment even when BOTH pieces are falling back to their legacy default
+ * at once — a bare "circle" next to a bare "blue" would otherwise
+ * concatenate into the meaningless "circleblue" with nothing separating
+ * them at all. `device` is "lowrance" (lowercase) or "garmin" (Title
+ * Case). */
+function legacyShapeFragment(type, device) {
+  const shape = legacyShapeWord(type);
+  return device === "garmin" ? `${capitalizeWord(shape)}, ` : `${shape},`;
+}
+
+/** The legacy COLOUR fragment for a mark with no Mark Colour Format
+ * resolved — same plain "blue" default this always had, as a bare
+ * fragment. */
+function legacyColorFragment(device) {
+  return device === "garmin" ? "Blue" : "blue";
 }
 
 /** The <sym> value for one mark on export, for a given device ("lowrance"
- * or "garmin"). A resolved Mark Format (see resolveMarkFormat above)
- * supplies its OWN literal text for whichever device is asked for —
- * lowranceSym or garminSym, exactly as typed into the Settings tab, no
- * reformatting applied here — this site doesn't yet know either device's
- * full accepted-value list to validate or reshape against (see the Mark
- * Format section's own comment, locationsadmin.js, on why those stay free
- * text for now), so getting the exact text right is deliberately Oliver's
- * own call, made once per format rather than guessed at export time. If
- * NEITHER the mark's species nor its Type has a format assigned at all,
- * falls back to legacySymForMark above. A format that has SOME device's
- * sym text set but not the other's (e.g. only ever filled in for Lowrance
- * so far) falls back to the legacy default for the device that's still
- * blank, rather than exporting an empty <sym>. */
+ * or "garmin") — built from two INDEPENDENTLY resolved pieces, shape and
+ * colour (see resolveMarkShapeFormat/resolveMarkColorFormat above), then
+ * simply concatenated shape-fragment-then-colour-fragment, for EVERY Mark
+ * Type including POI (a POI still gets its own colour — from its Mark
+ * Type's own colorFormat, since it has no species to override with — the
+ * same as Mark/Catch, just resolved through the type branch rather than
+ * the species one; there's nothing structurally special about POI here
+ * at export time). No separator added here for a RESOLVED Format's own
+ * text — each Format's own device text already carries whatever
+ * punctuation/spacing that device needs baked in (e.g. a Shape Format's
+ * lowranceSym might literally be "circle," with the trailing comma
+ * included, joining cleanly with a Colour Format's bare "blue"); this
+ * function has no opinion on that itself, it's Oliver's own call, made
+ * once per Format rather than guessed at export time. Either piece
+ * missing a Format for a mark (or a Format that hasn't had this specific
+ * device's text filled in yet) falls back to that piece's own legacy
+ * fragment, so a mark never exports with half its <sym> silently blank. */
 function gpxSymForMark(m, device) {
-  const format = resolveMarkFormat(m);
-  if (format) {
-    const sym = device === "garmin" ? format.garminSym : format.lowranceSym;
-    if (sym) return sym;
-  }
-  return legacySymForMark(m, device);
+  const symField = device === "garmin" ? "garminSym" : "lowranceSym";
+  const shapeFormat = resolveMarkShapeFormat(m);
+  const shapeFragment = (shapeFormat && shapeFormat[symField]) || legacyShapeFragment(m.type, device);
+  const colorFormat = resolveMarkColorFormat(m);
+  const colorFragment = (colorFormat && colorFormat[symField]) || legacyColorFragment(device);
+  return `${shapeFragment}${colorFragment}`;
 }
 
 function buildGpxDocument(marks, device) {

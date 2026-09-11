@@ -594,45 +594,72 @@ location tags — type a new value, hit Add (or Enter), then "Save mark
 lists" to commit it. Removing an option doesn't touch any mark that already
 used it; it just won't be offered again.
 
-**Mark Formats — controlling exactly how a mark looks, on the Lowrance,
-the Garmin, and this site's own map, all from one place.** A Mark Format
-is a named bundle (its own sub-list in "Fishing Mark Lists", alongside
-Species/Mark Type/etc): an icon and a colour for this site's own map, plus
-the literal `<sym>` text each device's GPX export should use for it —
-`lowranceSym` and `garminSym`, kept separately because the two devices
-genuinely want different text for the same idea (see "Syncing marks with a
-Garmin or Lowrance device" below). **Every value on every one of the nine
-pick-list fields** picks one of these Formats from a single dropdown next
-to its own chip — not just Species and Mark Type, which is as far as an
-earlier version of this went. The icon is a constrained pick (circle/
-diamond/cross — the only three shapes this site's map and Lowrance both
-actually support); the two `<sym>` fields are deliberately free text for
-now rather than a dropdown — this site doesn't yet know either device's
-full accepted-value list (see below for why guessing at that list has gone
-wrong twice already), so getting the exact text right is your own call,
-made once per Format rather than derived automatically.
+**Mark Shape Formats and Mark Colour Formats — controlling exactly how a
+mark looks, on the Lowrance, the Garmin, and this site's own map, all from
+one place.** Two separate named lists (their own sub-lists in "Fishing
+Mark Lists", alongside Species/Mark Type/etc), REVISED from an earlier
+version that bundled shape and colour into one "Mark Format" together:
+bundling meant assigning a species a colour ALSO silently overrode its
+shape (species winning over Mark Type either way), losing the "a Catch
+reads as a cross, a Mark reads as a circle, regardless of species"
+distinction the moment any species got a colour of its own. Splitting them
+fixes that:
+- A **Mark Shape Format** is a name plus an icon (for this site's own map
+  — a constrained pick, circle/diamond/cross, the only three shapes this
+  site's map and Lowrance both actually support) and the literal shape
+  *fragment* of the `<sym>` text each device's export should use.
+- A **Mark Colour Format** is a name plus a colour swatch (for this
+  site's own map — a free, unrestricted hex, no Lowrance-style colour-
+  count limit here) and the literal colour *fragment* of the `<sym>` text.
 
-**A tile's colour comes from its assigned Format, full stop** — click a
-value's Format dropdown and pick one, and that Format's own "colour for
-the website" becomes the tile's background here. There's no separate way
-to colour a tile any more; an earlier version had a free hex colour picker
-you could open by clicking the chip itself, alongside the Format picker,
-which meant the two could disagree with each other. One mechanism now,
-not two.
+Both devices' `<sym>` fields are deliberately free text for now rather
+than a dropdown — this site doesn't yet know either device's full
+accepted-value list (see "Syncing marks with a Garmin or Lowrance device"
+below for why guessing at that list has gone wrong twice already), so
+getting the exact text right is your own call, made once per Format. On
+export, the two fragments are simply concatenated shape-then-colour with
+NO separator added by this site at all — each fragment already carries
+whatever punctuation it needs baked in (e.g. a Shape Format's Lowrance
+text might literally be `circle,` with the trailing comma included, so it
+joins cleanly with a Colour Format's bare `yellow`).
+
+**Every value on every one of the nine pick-list fields** gets both a
+Shape Format picker and a Colour Format picker next to its own chip — not
+just Species and Mark Type. Shape only actually *affects* anything for
+Species and Mark Type, though (see "Resolution order" below); assigning
+one to, say, a Weather Condition value is harmless but currently inert.
+Colour, by contrast, genuinely does apply everywhere, via whichever field
+the map happens to be grouped by.
+
+**A tile's colour comes from its assigned Colour Format, full stop** —
+pick one, and that Format's own "colour for the website" becomes the
+tile's background here. There's no separate way to colour a tile any
+more; an earlier version had a free hex colour picker you could open by
+clicking the chip itself, which meant a tile's look and its Format could
+disagree with each other. One mechanism now, not two.
 
 **Resolution order, when both a mark's species and its own Mark Type have
-a Format assigned**: the **species'** Format wins. Species is the more
-specific signal — a Catch is more meaningfully identified by what it IS
-than by which of the three Mark Types it happens to be. A Mark Type's own
-Format assignment mainly matters for **POI**, which structurally has no
-species to carry one of its own at all. **Everything here is opt-in**: a
-species or Mark Type with nothing assigned keeps exactly the fallback it
-always had — this site's map falls back to a plain hex colour or its
-hash-based default; the GPX export falls back to a hardcoded shape-by-
-Mark-Type and a plain default colour, same as before Mark Formats existed.
-A Format that's only had ONE device's `<sym>` filled in so far (say,
-Lowrance but not yet Garmin) falls back to that same hardcoded default for
-whichever device is still blank, rather than exporting an empty tag.
+a Format assigned on the SAME axis**: the **species'** Format wins —
+species is the more specific signal. But the two axes are meant to behave
+differently in practice: **colour** varying by species, with shape
+staying true to Mark Type, is the everyday, intended setup — set a
+Colour Format on each species you care about, leave its Shape Format
+blank, and a Catch still reads as a cross while a Mark still reads as a
+circle, whatever species it is. A species-level **shape** override exists
+for the rare case you genuinely want one species to always look a
+particular way regardless of Mark Type — the exception, not the rule.
+Mark Type's own Format assignments (either axis) mainly matter for POI,
+which has no species to carry one of its own at all — POI gets both a
+shape AND a colour from its own Mark Type entry the same way a Catch or
+Mark would, nothing structurally special about it at export time.
+**Everything here is opt-in**: a species or Mark Type with nothing
+assigned keeps exactly the fallback it always had — this site's map falls
+back to a plain hex colour or its hash-based default; the GPX export
+falls back to a hardcoded shape-by-Mark-Type and a plain default colour,
+same as before Mark Formats existed. Either axis missing a Format (or a
+Format that's only had ONE device's text filled in so far) falls back to
+that piece's own legacy default for whichever's still blank, rather than
+exporting a broken `<sym>`.
 
 **Displaying marks on the map**: the Location and Live tab maps both plot
 every mark in `data/marks.json` (see `loadAndRenderMarks` in `charts.js`),
@@ -768,13 +795,14 @@ own `name` field, then a generic label, only if there's no species at
 all) — most of the old migrated batch has a place name in `name`
 ("Williamstown", "Leopold"), which is far less useful on a chartplotter
 than the actual catch; that place name is kept in `<desc>` instead rather
-than lost. Each waypoint also gets a `<sym>` — the mark's resolved **Mark
-Format** (see "Mark Formats" above) supplies its own literal text for
-whichever device you exported for, exactly as typed into the Settings
-tab, no reformatting applied. A mark with no Format resolved (neither its
-species nor its Mark Type has one assigned) falls back to a plain default
-— circle/diamond/cross by Mark Type, a flat "blue" colour — same as
-before Mark Formats existed.
+than lost. Each waypoint also gets a `<sym>` — built from the mark's
+resolved **Shape Format** and **Colour Format** (see above), each
+supplying its own literal text fragment for whichever device you exported
+for, simply concatenated shape-then-colour with no reformatting applied.
+A mark with either axis unresolved (neither its species nor its Mark Type
+has one assigned on that axis) falls back to a plain default for that
+piece specifically — circle/diamond/cross by Mark Type for shape, a flat
+"blue" for colour — same as before Mark Formats existed.
 
 **Two real, different conventions, confirmed against real hardware, not
 guessed**: Lowrance wants lowercase with no space (`circle,yellow`);
@@ -816,6 +844,14 @@ glossing over:
    casing/spacing difference between the two devices, which is what
    led to Mark Formats carrying a separate `<sym>` per device at all,
    rather than one shared string.
+5. The first version of Mark Formats bundled shape and colour into ONE
+   named choice — assigning a species a colour also silently overrode its
+   shape, since both were resolved together with the same species-wins-
+   over-type priority. That meant a Catch of an assigned species stopped
+   reading as a cross the moment it got a colour. Split into two
+   independent lists (Shape Formats, Colour Formats — see above) so
+   colour can vary by species while shape stays true to Mark Type, which
+   was the actual intended behaviour all along.
 
 This history is also why nothing here GUESSES a colour or shape from
 anything else any more (an earlier version matched a species' hex to the
@@ -922,7 +958,7 @@ GitHub token with permission to do that.
 
 **Every section on this tab is foldable** — click any heading (GitHub
 connection, Location Groups, Fishing Mark Lists, Locations, and each of
-Fishing Mark Lists' own ten sub-lists) to show or hide its content. State
+Fishing Mark Lists' own eleven sub-lists) to show or hide its content. State
 is remembered per section (localStorage), so folding away what you're not
 using stays folded next time — this page's own list of settings keeps
 growing, and most visits only need one or two of these open at once.

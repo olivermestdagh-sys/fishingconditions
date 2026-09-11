@@ -1023,35 +1023,28 @@ function markStyleFor(mark, state) {
   const groupField = MARK_LIST_FIELDS.find((f) => f.key === state.groupByKey) || MARK_LIST_FIELDS[0];
   const value = mark[state.groupByKey];
   if (!value) return MARK_NO_VALUE_STYLE;
-  // A resolved Mark Format's own colour (a real hex value — see "an icon +
-  // a colour picker for the web site" in locationsadmin.js's Mark Format
-  // section) takes priority — every pick-list field's values can have a
-  // Format assigned now (Oliver's own call to extend this past just
-  // Species/Mark Type), so this applies to whatever field is currently
-  // being grouped by. Species/Mark Type specifically go through
-  // resolveMarkFormat's own species-wins-over-type priority (see its own
-  // comment); every OTHER field just checks that field's own value
-  // directly, since there's no equivalent priority relationship between
-  // two different fields to resolve.
-  if (state.groupByKey === "species" || state.groupByKey === "type") {
-    const format = resolveMarkFormat(mark, state.markLists);
-    if (format && format.color) {
-      return { color: "#374151", fillColor: format.color, radius: 5, weight: 1.5 };
-    }
-  } else {
-    const tileEntry = (state.markLists || []).find((r) => r.field === groupField.label && r.value === value);
-    if (tileEntry && tileEntry.format) {
-      const format = (state.markLists || []).find((r) => r.field === "Mark Format" && r.value === tileEntry.format);
-      if (format && format.color) {
-        return { color: "#374151", fillColor: format.color, radius: 5, weight: 1.5 };
-      }
-    }
+  // A resolved Mark COLOUR Format's own colour (a real hex value — see
+  // "an icon + a colour picker for the web site" in locationsadmin.js's
+  // Mark Colour Format section) takes priority — every pick-list field's
+  // values can have one assigned now, so this applies to whatever field
+  // is currently being grouped by. Species/Mark Type specifically go
+  // through resolveMarkColorFormat's own species-wins-over-type priority
+  // (see its own comment); every OTHER field just checks that field's own
+  // value directly (resolveColorFormatForFieldValue), since there's no
+  // equivalent priority relationship between two different fields to
+  // resolve. Shape is handled entirely separately (see shapeNameForMark)
+  // — this function only ever decides colour.
+  const format = state.groupByKey === "species" || state.groupByKey === "type"
+    ? resolveMarkColorFormat(mark, state.markLists)
+    : resolveColorFormatForFieldValue(groupField.label, value, state.markLists);
+  if (format && format.color) {
+    return { color: "#374151", fillColor: format.color, radius: 5, weight: 1.5 };
   }
-  // Legacy hex fallback — a value that hasn't been given a Format at all
-  // still respects a plain `color` if one happens to already be sitting on
-  // it from before Mark Formats existed (the Settings tab no longer offers
-  // a way to SET a new one — see this section's own header comment in
-  // locationsadmin.js — but old data that already has one keeps working).
+  // Legacy hex fallback — a value that hasn't been given a Colour Format
+  // at all still respects a plain `color` if one happens to already be
+  // sitting on it from before Mark Formats existed (the Settings tab no
+  // longer offers a way to SET a new one this way — but old data that
+  // already has one keeps working).
   const tileEntry = (state.markLists || []).find((r) => r.field === groupField.label && r.value === value);
   if (tileEntry && tileEntry.color) {
     return { color: "#374151", fillColor: tileEntry.color, radius: 5, weight: 1.5 };
@@ -2302,8 +2295,8 @@ function getCrossMarkerClass() {
 const LOWRANCE_SHAPE_GETTERS = { circle: () => L.CircleMarker, diamond: getDiamondMarkerClass, cross: getCrossMarkerClass };
 
 // Fallback shape per Mark Type, used ONLY when neither the mark's species
-// NOR its own Type has a Mark Format assigned at all (see
-// resolveMarkFormat/shapeNameForMark below) — matches this site's
+// NOR its own Type has a Mark Shape Format assigned at all (see
+// resolveMarkShapeFormat/shapeNameForMark below) — matches this site's
 // original hardcoded behaviour from before Mark Formats existed, so a repo
 // that hasn't touched any of this yet looks exactly as it always has.
 // Mark (or any type not listed here at all — including a genuinely new
@@ -2312,43 +2305,92 @@ const LOWRANCE_SHAPE_GETTERS = { circle: () => L.CircleMarker, diamond: getDiamo
 const MARK_TYPE_DEFAULT_SHAPE_NAME = { POI: "diamond", Catch: "cross", Fish: "cross" };
 
 /**
- * Resolves the Mark Format (config/mark_lists.json's field: "Mark Format"
- * entries — see the "Fishing Mark Lists" section, locationsadmin.js) that
- * represents a given mark, if any. SPECIES' own assigned format wins when
- * both it and the mark's Type have one — species is the more specific
- * signal (a Catch is more meaningfully identified by what it IS than by
- * which of the three Mark Types it happens to be) — Mark Type's own
- * format is the fallback, which mainly matters for POI, since a POI
- * structurally has no species to carry a format of its own at all (see
- * MARK_TYPE_FIELD_KEYS). Returns null if NEITHER has one assigned —
- * callers fall back to their own hardcoded legacy default in that case
- * (shapeNameForMark just below for shape; markStyleFor's own hex-or-hash
- * for colour; gpxSymForMark's own plain default in sync.js for export).
+ * Resolves the Mark SHAPE Format (config/mark_lists.json's field: "Mark
+ * Shape Format" entries — see the "Fishing Mark Lists" section,
+ * locationsadmin.js) that applies to a given mark, if any. Species' own
+ * assignment wins over its Mark Type's when BOTH are set (species is the
+ * more specific signal, same reasoning as resolveMarkColorFormat below),
+ * but Oliver's own explicit call here is that a species normally has NO
+ * shape of its own at all — shape is meant to keep coming from Mark Type
+ * day to day (so a Catch still reads as a cross and a Mark still reads as
+ * a circle, regardless of species), with a species-level shape being a
+ * deliberate override for that one species specifically, the exception
+ * rather than the everyday case. Returns null if neither has one
+ * assigned — shapeNameForMark below falls back to
+ * MARK_TYPE_DEFAULT_SHAPE_NAME in that case, same as before Mark Shape
+ * Formats existed.
  */
-function resolveMarkFormat(mark, markLists) {
+function resolveMarkShapeFormat(mark, markLists) {
   const lists = markLists || [];
   if (mark.species) {
     const speciesEntry = lists.find((r) => r.field === "Species" && r.value === mark.species);
-    if (speciesEntry && speciesEntry.format) {
-      const format = lists.find((r) => r.field === "Mark Format" && r.value === speciesEntry.format);
+    if (speciesEntry && speciesEntry.shapeFormat) {
+      const format = lists.find((r) => r.field === "Mark Shape Format" && r.value === speciesEntry.shapeFormat);
       if (format) return format;
     }
   }
   const typeEntry = lists.find((r) => r.field === "Mark Type" && r.value === mark.type);
-  if (typeEntry && typeEntry.format) {
-    const format = lists.find((r) => r.field === "Mark Format" && r.value === typeEntry.format);
+  if (typeEntry && typeEntry.shapeFormat) {
+    const format = lists.find((r) => r.field === "Mark Shape Format" && r.value === typeEntry.shapeFormat);
     if (format) return format;
   }
   return null;
 }
 
-/** Whichever shape NAME applies to a given mark — its resolved Mark
- * Format's own `icon` (see resolveMarkFormat above) if one applies, else
- * the hardcoded per-Type default (MARK_TYPE_DEFAULT_SHAPE_NAME above),
- * same as before Mark Formats existed. `markLists` is whatever's already
- * loaded for this page (see state.markLists) — no separate fetch here. */
+/**
+ * Resolves the Mark COLOUR Format (field: "Mark Colour Format") that
+ * applies to a given mark, if any — same species-wins-over-type priority
+ * as resolveMarkShapeFormat above, but for colour this genuinely IS meant
+ * to be the everyday case: colour varying by species, shape staying true
+ * to Mark Type, is exactly the split Oliver asked for. Mark Type's own
+ * colour assignment is still the fallback (mainly relevant for POI, which
+ * has no species to carry a colour of its own at all, or any species that
+ * hasn't been given one yet). Returns null if neither is assigned —
+ * markStyleFor's own hex-or-hash and gpxSymForMark's own plain default in
+ * sync.js fall back in that case, same as before Mark Colour Formats
+ * existed.
+ */
+function resolveMarkColorFormat(mark, markLists) {
+  const lists = markLists || [];
+  if (mark.species) {
+    const speciesEntry = lists.find((r) => r.field === "Species" && r.value === mark.species);
+    if (speciesEntry && speciesEntry.colorFormat) {
+      const format = lists.find((r) => r.field === "Mark Colour Format" && r.value === speciesEntry.colorFormat);
+      if (format) return format;
+    }
+  }
+  const typeEntry = lists.find((r) => r.field === "Mark Type" && r.value === mark.type);
+  if (typeEntry && typeEntry.colorFormat) {
+    const format = lists.find((r) => r.field === "Mark Colour Format" && r.value === typeEntry.colorFormat);
+    if (format) return format;
+  }
+  return null;
+}
+
+/** Resolves whatever Mark Colour Format is assigned DIRECTLY to a single
+ * field's own value — no species/type priority, since that relationship
+ * is specific to those two fields (see resolveMarkColorFormat above for
+ * that one). Used by markStyleFor for every OTHER field's own "colour by
+ * X" map view (Weather Condition, Bait, ...), which can each carry a
+ * Colour Format the same way Species/Mark Type can, just without a
+ * second field to fall back to. */
+function resolveColorFormatForFieldValue(fieldLabel, value, markLists) {
+  const lists = markLists || [];
+  const entry = lists.find((r) => r.field === fieldLabel && r.value === value);
+  if (entry && entry.colorFormat) {
+    return lists.find((r) => r.field === "Mark Colour Format" && r.value === entry.colorFormat) || null;
+  }
+  return null;
+}
+
+/** Whichever shape NAME applies to a given mark — its resolved Mark Shape
+ * Format's own `icon` (see resolveMarkShapeFormat above) if one applies,
+ * else the hardcoded per-Type default (MARK_TYPE_DEFAULT_SHAPE_NAME
+ * above), same as before Mark Formats existed. `markLists` is whatever's
+ * already loaded for this page (see state.markLists) — no separate fetch
+ * here. */
 function shapeNameForMark(mark, markLists) {
-  const format = resolveMarkFormat(mark, markLists);
+  const format = resolveMarkShapeFormat(mark, markLists);
   if (format && format.icon && LOWRANCE_SHAPE_GETTERS[format.icon]) return format.icon;
   return MARK_TYPE_DEFAULT_SHAPE_NAME[mark.type] || "circle";
 }
