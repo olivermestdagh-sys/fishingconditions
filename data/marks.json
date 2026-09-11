@@ -27825,6 +27825,30 @@
       "source": "lowrance-import",
       "species": "Whiting",
       "sourceUuid": "70929483e4c6a8488a642e7b7ee7a378"
+    },
+    {
+      "id": "m_1789090706679_gecoh",
+      "lat": -38.463438,
+      "lng": 145.0388371,
+      "name": "Whiting",
+      "type": "Catch",
+      "dateTime": "2026-09-11 11:38:26",
+      "createdAt": "2026-09-11 11:39:27",
+      "source": "Manual",
+      "species": "Whiting",
+      "weatherCondition": "Clear",
+      "tideCondition": "Slack High",
+      "waterCondition": "Murky",
+      "bait": "Squid",
+      "rig": "Paternoster",
+      "rod": "Raider Bream",
+      "size": 35,
+      "barometer": 1034.8,
+      "temperature": 14.7,
+      "waterTemperature": 13.9,
+      "waterDepth": 8,
+      "windDirection": "WSW",
+      "windSpeed": 4
     }
   ]
 }
