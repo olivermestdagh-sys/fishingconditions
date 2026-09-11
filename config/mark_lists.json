@@ -2,104 +2,105 @@
   {
     "field": "Mark Type",
     "value": "POI",
-    "format": "Blue Diamond"
+    "shapeFormat": "Diamond",
+    "colorFormat": "Blue"
   },
   {
     "field": "Species",
     "value": "Whiting",
     "color": "#ffff00",
-    "format": "Yellow Circle"
+    "colorFormat": "Yellow"
   },
   {
     "field": "Species",
     "value": "Gummy Shark",
     "color": "#0000ff",
-    "format": "Blue Circle"
+    "colorFormat": "Blue"
   },
   {
     "field": "Species",
     "value": "Flathead",
     "color": "#ff00ff",
-    "format": "Magenta Circle"
+    "colorFormat": "Magenta"
   },
   {
     "field": "Species",
     "value": "Snapper",
     "color": "#fc0303",
-    "format": "Red Circle"
+    "colorFormat": "Red"
   },
   {
     "field": "Species",
     "value": "Squid",
     "color": "#00ff00",
-    "format": "Green Circle"
+    "colorFormat": "Green"
   },
   {
     "field": "Species",
     "value": "Kingfish",
     "color": "#0000ff",
-    "format": "Blue Circle"
+    "colorFormat": "Blue"
   },
   {
     "field": "Species",
     "value": "Tuna",
     "color": "#122d63",
-    "format": "Blue Circle"
+    "colorFormat": "Blue"
   },
   {
     "field": "Species",
     "value": "Crayfish",
     "color": "#ffffff",
-    "format": "White Circle"
+    "colorFormat": "White"
   },
   {
     "field": "Species",
     "value": "Snook",
-    "format": "White Circle"
+    "colorFormat": "White"
   },
   {
     "field": "Species",
     "value": "Scallops",
-    "format": "White Circle"
+    "colorFormat": "White"
   },
   {
     "field": "Species",
     "value": "Grass Whiting",
     "color": "#00ff00",
-    "format": "Green Circle"
+    "colorFormat": "Green"
   },
   {
     "field": "Species",
     "value": "Trevally",
-    "format": "White Circle"
+    "colorFormat": "White"
   },
   {
     "field": "Species",
     "value": "Leather Jacket",
-    "format": "White Circle"
+    "colorFormat": "White"
   },
   {
     "field": "Species",
     "value": "Elephant Fish",
     "color": "#ffffff",
-    "format": "White Circle"
+    "colorFormat": "White"
   },
   {
     "field": "Species",
     "value": "Wrasse",
     "color": "#ffffff",
-    "format": "White Circle"
+    "colorFormat": "White"
   },
   {
     "field": "Species",
     "value": "Garfish",
-    "format": "White Circle"
+    "colorFormat": "White"
   },
   {
     "field": "Species",
     "value": "Port Jackson Shark",
     "color": "#ffffff",
-    "format": "White Circle"
+    "colorFormat": "White"
   },
   {
     "field": "Weather Condition",
@@ -249,7 +250,7 @@
   {
     "field": "Species",
     "value": "Unknown",
-    "format": "White Circle"
+    "colorFormat": "White"
   },
   {
     "field": "Bait",
@@ -259,114 +260,76 @@
   {
     "field": "Mark Type",
     "value": "Mark",
-    "format": "White Circle"
+    "shapeFormat": "Circle",
+    "colorFormat": "White"
   },
   {
     "field": "Mark Type",
     "value": "Catch",
-    "format": "White Cross"
+    "shapeFormat": "Cross",
+    "colorFormat": "White"
   },
   {
-    "field": "Mark Format",
-    "value": "Blue Circle",
+    "field": "Mark Shape Format",
+    "value": "Circle",
     "icon": "circle",
-    "lowranceSym": "circle,blue",
-    "garminSym": "Circle, Blue",
-    "color": "#0000ff"
+    "lowranceSym": "circle,",
+    "garminSym": "Circle, "
   },
   {
-    "field": "Mark Format",
-    "value": "Green Circle",
-    "icon": "circle",
-    "lowranceSym": "circle,green",
-    "garminSym": "Circle, Green",
-    "color": "#00ff00"
-  },
-  {
-    "field": "Mark Format",
-    "value": "Magenta Circle",
-    "icon": "circle",
-    "lowranceSym": "circle,magenta",
-    "garminSym": "Circle, Magenta",
-    "color": "#ff00ff"
-  },
-  {
-    "field": "Mark Format",
-    "value": "Red Circle",
-    "icon": "circle",
-    "lowranceSym": "circle,red",
-    "garminSym": "Circle, Red",
-    "color": "#ff0000"
-  },
-  {
-    "field": "Mark Format",
-    "value": "White Circle",
-    "icon": "circle",
-    "lowranceSym": "circle,white",
-    "garminSym": "Circle, White",
-    "color": "#ffffff"
-  },
-  {
-    "field": "Mark Format",
-    "value": "Yellow Circle",
-    "icon": "circle",
-    "lowranceSym": "circle,yellow",
-    "garminSym": "Circle, Yellow",
-    "color": "#ffff00"
-  },
-  {
-    "field": "Mark Format",
-    "value": "Blue Diamond",
+    "field": "Mark Shape Format",
+    "value": "Diamond",
     "icon": "diamond",
-    "lowranceSym": "diamond,blue",
-    "garminSym": "Diamond, Blue",
-    "color": "#0000ff"
+    "lowranceSym": "diamond,",
+    "garminSym": "Diamond, "
   },
   {
-    "field": "Mark Format",
-    "value": "Green Cross",
+    "field": "Mark Shape Format",
+    "value": "Cross",
     "icon": "cross",
-    "lowranceSym": "cross,green",
-    "garminSym": "Cross, Green",
-    "color": "#00ff00"
+    "lowranceSym": "cross,",
+    "garminSym": "Cross, "
   },
   {
-    "field": "Mark Format",
-    "value": "Magenta Cross",
-    "icon": "cross",
-    "lowranceSym": "cross,magenta",
-    "garminSym": "Cross, Magenta",
-    "color": "#ff00ff"
+    "field": "Mark Colour Format",
+    "value": "Blue",
+    "color": "#0000ff",
+    "lowranceSym": "blue",
+    "garminSym": "Blue"
   },
   {
-    "field": "Mark Format",
-    "value": "Red Cross",
-    "icon": "cross",
-    "lowranceSym": "cross,red",
-    "garminSym": "Cross, Red",
-    "color": "#ff0000"
+    "field": "Mark Colour Format",
+    "value": "Green",
+    "color": "#00ff00",
+    "lowranceSym": "green",
+    "garminSym": "Green"
   },
   {
-    "field": "Mark Format",
-    "value": "White Cross",
-    "icon": "cross",
-    "lowranceSym": "cross,white",
-    "garminSym": "Cross, White",
-    "color": "#ffffff"
+    "field": "Mark Colour Format",
+    "value": "Magenta",
+    "color": "#ff00ff",
+    "lowranceSym": "magenta",
+    "garminSym": "Magenta"
   },
   {
-    "field": "Mark Format",
-    "value": "Blue Cross",
-    "icon": "cross",
-    "lowranceSym": "cross,blue",
-    "garminSym": "Cross, Blue"
+    "field": "Mark Colour Format",
+    "value": "Red",
+    "color": "#ff0000",
+    "lowranceSym": "red",
+    "garminSym": "Red"
   },
   {
-    "field": "Mark Format",
-    "value": "Yellow Cross",
-    "icon": "cross",
-    "lowranceSym": "cross,yellow",
-    "garminSym": "Cross, Yellow",
-    "color": "#ffff00"
+    "field": "Mark Colour Format",
+    "value": "White",
+    "color": "#ffffff",
+    "lowranceSym": "white",
+    "garminSym": "White"
+  },
+  {
+    "field": "Mark Colour Format",
+    "value": "Yellow",
+    "color": "#ffff00",
+    "lowranceSym": "yellow",
+    "garminSym": "Yellow"
   }
 ]
