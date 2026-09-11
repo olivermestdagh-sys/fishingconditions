@@ -937,6 +937,11 @@ function renderCandidateRow(c, i) {
           <span data-field-group="windSpeed" style="display:contents"><input type="number" data-role="windSpeed" data-idx="${i}" value="${c.windSpeed != null ? c.windSpeed : ""}" min="0" step="1" placeholder="km/h" title="Wind Speed (km/h)" /></span>
         </div>
         <span data-field-group="notes" style="display:contents"><textarea data-role="notes" data-idx="${i}" rows="2" placeholder="Notes">${escapeHtml(c.notes)}</textarea></span>
+        <span data-field-group="released" style="display:contents">
+          <label style="display:inline-flex;align-items:center;gap:4px;font-size:0.8rem;">
+            <input type="checkbox" data-role="released" data-idx="${i}" ${c.released ? "checked" : ""} /> Released
+          </label>
+        </span>
       </div>
     </div>`;
 }
@@ -1069,6 +1074,7 @@ async function handleImportClick() {
     const applicable = fieldKeysForMarkType(mark.type);
     if (applicable.includes("species") && c.species) mark.species = c.species;
     if (applicable.includes("notes") && c.notes) mark.notes = c.notes;
+    if (applicable.includes("released") && c.released) mark.released = true;
     if (applicable.includes("waterCondition") && c.waterCondition) mark.waterCondition = c.waterCondition;
     if (applicable.includes("bait") && c.bait) mark.bait = c.bait;
     if (applicable.includes("rig") && c.rig) mark.rig = c.rig;
@@ -1193,6 +1199,7 @@ async function handleFileInputChange(e) {
       waterTemperature: undefined,
       windDirection: undefined,
       windSpeed: undefined,
+      released: undefined,
     }));
 
     // Real historical weather/tide/barometer/wind lookup, run up front so
@@ -1325,6 +1332,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const role = e.target.dataset.role;
     if (role === "name") c.name = e.target.value;
     else if (role === "notes") c.notes = e.target.value;
+    else if (role === "released") c.released = e.target.checked;
     else if (role === "dateTime") c.dateTime = datetimeLocalToNaive(e.target.value);
     else if (role === "size") {
       const v = e.target.value;
