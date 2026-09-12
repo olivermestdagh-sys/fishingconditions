@@ -1146,9 +1146,12 @@ async function handleMarkListsCollection(request, url, env) {
     const id = crypto.randomUUID();
     try {
       await env.DB.prepare(
-        "INSERT INTO user_mark_lists (id, user_id, field, value, shape_format, color_format, color, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO user_mark_lists (id, user_id, field, value, shape_format, color_format, color, icon, lowrance_sym, garmin_sym, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       )
-        .bind(id, uid, body.field, body.value, body.shapeFormat ?? null, body.colorFormat ?? null, body.color ?? null, Date.now())
+        .bind(
+          id, uid, body.field, body.value, body.shapeFormat ?? null, body.colorFormat ?? null, body.color ?? null,
+          body.icon ?? null, body.lowranceSym ?? null, body.garminSym ?? null, Date.now()
+        )
         .run();
     } catch (err) {
       return jsonResponse({ error: `"${body.value}" already exists under ${body.field}.` }, 409, env);
@@ -1180,12 +1183,15 @@ async function handleMarkListItem(request, url, env, id) {
       shapeFormat: body.shapeFormat !== undefined ? body.shapeFormat : existing.shape_format,
       colorFormat: body.colorFormat !== undefined ? body.colorFormat : existing.color_format,
       color: body.color !== undefined ? body.color : existing.color,
+      icon: body.icon !== undefined ? body.icon : existing.icon,
+      lowranceSym: body.lowranceSym !== undefined ? body.lowranceSym : existing.lowrance_sym,
+      garminSym: body.garminSym !== undefined ? body.garminSym : existing.garmin_sym,
     };
     try {
       await env.DB.prepare(
-        "UPDATE user_mark_lists SET field=?, value=?, shape_format=?, color_format=?, color=? WHERE id = ? AND user_id = ?"
+        "UPDATE user_mark_lists SET field=?, value=?, shape_format=?, color_format=?, color=?, icon=?, lowrance_sym=?, garmin_sym=? WHERE id = ? AND user_id = ?"
       )
-        .bind(merged.field, merged.value, merged.shapeFormat, merged.colorFormat, merged.color, id, uid)
+        .bind(merged.field, merged.value, merged.shapeFormat, merged.colorFormat, merged.color, merged.icon, merged.lowranceSym, merged.garminSym, id, uid)
         .run();
     } catch (err) {
       return jsonResponse({ error: `"${merged.value}" already exists under ${merged.field}.` }, 409, env);
@@ -1210,6 +1216,9 @@ function rowToMarkList(row) {
     shapeFormat: row.shape_format,
     colorFormat: row.color_format,
     color: row.color,
+    icon: row.icon,
+    lowranceSym: row.lowrance_sym,
+    garminSym: row.garmin_sym,
   };
 }
 
