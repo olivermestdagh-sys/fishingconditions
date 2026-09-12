@@ -1,10 +1,21 @@
 /**
  * account.js — talks to the user-backend Worker (see user-backend.js) to
  * let a signed-in user manage their OWN locations and check-frequency
- * settings. Entirely separate from locationsadmin.js, which edits the
- * site-wide config/locations.json via a GitHub commit — this instead
- * calls a live API and saves per-row, immediately, no GitHub token
- * involved at all.
+ * settings. Entirely separate from locationsadmin.js, which edits
+ * Public's own rows through the same v2 endpoints via ?userId=public —
+ * this always acts as the signed-in user themselves (no override param
+ * needed; that's the default for every v2 endpoint when omitted).
+ *
+ * v2 RECONCILIATION: this used to call the standalone v1 /api/locations
+ * endpoint (a simpler, now-deprecated table). It now calls
+ * /api/tracked-locations — the SAME endpoint Admin's own Locations page
+ * uses — so a personal location and one of Public's curated ones are
+ * genuinely the same kind of thing under the hood, just scoped to
+ * different users. The UI here stays deliberately simpler than the admin
+ * page: one type per location (not several), no per-type drive/setup/
+ * pack-up timing fields exposed (defaulted to "00:00" — nothing here
+ * reads them), no shore field. That's a carried-forward limitation from
+ * the original v1 design, not a new one introduced by this reconciliation.
  *
  * REPLACE THIS after deploying user-backend.js (see that file's own
  * DEPLOYING THIS section) — same one-time pattern as
@@ -13,6 +24,14 @@
 const USER_BACKEND_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev";
 
 const VALID_TYPES = ["Kayak", "Land based"];
+
+// Populated once at init from GET /api/types — every signed-in user gets
+// these two seeded automatically on first sign-in (see seedDefaultTypes,
+// user-backend.js), so this lookup should always succeed for a real
+// account; the one-off migration for accounts that existed before that
+// seeding logic shipped is a separate SQL file, not something this code
+// needs to handle at runtime.
+let typeNameToId = new Map();
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btnSignIn").addEventListener("click", () => {
@@ -44,6 +63,7 @@ async function init() {
   document.getElementById("locationsSection").style.display = "";
   document.getElementById("whoAmI").textContent = `Signed in as ${user.name ? `${user.name} (${user.email})` : user.email}`;
 
+  await loadTypes();
   await Promise.all([loadSettings(), loadLocations()]);
 }
 
@@ -74,7 +94,8 @@ async function signOut() {
 }
 
 // ---------------------------------------------------------------------
-// Settings
+// Settings — unrelated to the v2 locations model entirely (still the v1
+// user_settings table; no v2 equivalent exists, so nothing here changed).
 // ---------------------------------------------------------------------
 
 async function loadSettings() {
@@ -116,24 +137,54 @@ async function saveSettings() {
 }
 
 // ---------------------------------------------------------------------
-// Locations
+// Locations — v2: /api/tracked-locations + /api/types, own-user scoped
+// (no ?userId= override — that's an Admin-only affordance for acting as
+// Public, and this page is never that).
 // ---------------------------------------------------------------------
 
+async function loadTypes() {
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/types`, { credentials: "include" });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const types = await res.json();
+    typeNameToId = new Map(types.map((t) => [t.name, t.id]));
+  } catch (err) {
+    console.error("Failed to load types:", err);
+    // Left empty — saveLocationRow's typeId resolution falls back to
+    // defining a fresh type inline if this lookup comes up empty, so a
+    // failure here degrades rather than blocks location-saving entirely.
+  }
+}
+
 function blankLocation() {
-  return { id: null, name: "", lat: "", lng: "", willyweatherId: null, type: "Kayak", tidal: true };
+  return { accessId: null, name: "", lat: "", lng: "", willyweatherId: null, type: "Kayak", tidal: true };
 }
 
 async function loadLocations() {
   const listEl = document.getElementById("myLocationsList");
   listEl.innerHTML = "";
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/locations`, { credentials: "include" });
+    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations`, { credentials: "include" });
     if (!res.ok) throw new Error(`status ${res.status}`);
-    const locations = await res.json();
-    if (locations.length === 0) {
+    const tracked = await res.json();
+    if (tracked.length === 0) {
       listEl.innerHTML = '<p class="footnote" style="text-align:left;">No locations yet — add one below.</p>';
     }
-    locations.forEach((loc) => addLocationRow(loc));
+    // Reshaped from the API's {accessId, location:{...}, type:{...}, ...}
+    // into the flatter shape this file's own UI already expects — keeps
+    // addLocationRow/saveLocationRow's own logic close to what it was
+    // under v1, rather than threading the nested shape through everywhere.
+    tracked.forEach((row) =>
+      addLocationRow({
+        accessId: row.accessId,
+        name: row.location.name,
+        lat: row.location.lat,
+        lng: row.location.lng,
+        willyweatherId: row.location.willyweatherId,
+        type: row.type.name,
+        tidal: row.location.tidal,
+      })
+    );
   } catch (err) {
     console.error("Failed to load locations:", err);
     listEl.innerHTML = '<p class="footnote" style="text-align:left;">Couldn\'t load your locations — try reloading the page.</p>';
@@ -232,23 +283,74 @@ async function saveLocationRow(card, loc) {
     }
   }
 
-  const body = { name, lat, lng, type, tidal, willyweatherId };
-  const isCreate = !loc.id;
-  const url = isCreate ? `${USER_BACKEND_URL}/api/locations` : `${USER_BACKEND_URL}/api/locations/${loc.id}`;
+  const isCreate = !loc.accessId;
+  // Changing the Type dropdown on an ALREADY-SAVED location isn't a plain
+  // field update — v2's access rows are keyed by (user, location, type),
+  // so "change type" really means "stop tracking under the old type,
+  // start under the new one". Detected here by comparing against what
+  // was loaded/last-saved (loc.type), not the dropdown's own prior DOM
+  // state, since loc IS the source of truth this closure keeps in sync
+  // (see the field updates on `loc` below).
+  const typeChanged = !isCreate && type !== loc.type;
 
   try {
-    const res = await fetch(url, {
-      method: isCreate ? "POST" : "PUT",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error || `status ${res.status}`);
+    if (isCreate || typeChanged) {
+      const typeId = typeNameToId.get(type);
+      const body = { name, lat, lng, willyweatherId, tidal };
+      if (typeId) body.typeId = typeId;
+      else {
+        // Shouldn't happen for a real account (seedDefaultTypes covers
+        // both VALID_TYPES on first sign-in) — falls back to defining it
+        // fresh rather than failing outright if it somehow comes up empty.
+        body.newTypeName = type;
+        body.newTypeBehavesLike = type;
+      }
+      if (!isCreate) {
+        // Switching type: remove the old access row first — if the
+        // create below fails, the old one is already gone, same
+        // trade-off DELETE-then-recreate always has; simplest correct
+        // behaviour for something this infrequent (changing a personal
+        // location's type is rare, not a hot path worth extra
+        // transactional care).
+        await fetch(`${USER_BACKEND_URL}/api/tracked-locations/${loc.accessId}`, { method: "DELETE", credentials: "include" });
+      }
+      const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `status ${res.status}`);
+      }
+      const created = await res.json();
+      loc.accessId = created.accessId;
+      loc.name = created.location.name;
+      loc.lat = created.location.lat;
+      loc.lng = created.location.lng;
+      loc.willyweatherId = created.location.willyweatherId;
+      loc.tidal = created.location.tidal;
+      loc.type = created.type.name;
+      if (!typeNameToId.has(created.type.name)) typeNameToId.set(created.type.name, created.type.id);
+    } else {
+      const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations/${loc.accessId}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, lat, lng, willyweatherId, tidal }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `status ${res.status}`);
+      }
+      const updated = await res.json();
+      loc.name = updated.location.name;
+      loc.lat = updated.location.lat;
+      loc.lng = updated.location.lng;
+      loc.willyweatherId = updated.location.willyweatherId;
+      loc.tidal = updated.location.tidal;
     }
-    const saved = await res.json();
-    Object.assign(loc, saved); // keep this card's closure in sync so a second Save is an update, not another create
     statusEl.textContent = "Saved.";
   } catch (err) {
     console.error("Failed to save location:", err);
@@ -257,14 +359,14 @@ async function saveLocationRow(card, loc) {
 }
 
 async function deleteLocationRow(card, loc) {
-  if (!loc.id) {
+  if (!loc.accessId) {
     // Never saved yet — just remove the card, nothing to delete server-side.
     card.remove();
     return;
   }
   if (!confirm(`Delete "${loc.name}"?`)) return;
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/locations/${loc.id}`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations/${loc.accessId}`, {
       method: "DELETE",
       credentials: "include",
     });

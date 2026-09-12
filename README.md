@@ -1137,11 +1137,40 @@ never counting anything inherited from Public's set.
   Stage 2 — the server checked `body.pack_up` (snake_case) when every
   request actually sends `packUp` (camelCase, matching every other
   field). Fixed in `user-backend.js`.
-- The original `user_locations`/`user_settings` endpoints
-  (`/api/locations`, `/api/settings`) are untouched and still what
-  `account.js` talks to — nothing about the currently-working sign-in
-  flow changed. No WillyWeather-calling cron exists yet either, same as
-  before.
+- **`account.js` is now reconciled onto the same v2 model** —
+  `/api/locations` (the standalone v1 `user_locations` table) is
+  deprecated (kept in `user-backend.js`, functional, but nothing calls
+  it any more). `account.js` now talks to `/api/tracked-locations` +
+  `/api/types` — the SAME endpoints Admin's own Locations page uses,
+  always acting as the signed-in user themselves (no `?userId=`
+  override — that's an Admin-only affordance). The UI stays
+  deliberately simpler than the admin page (one type per location, no
+  drive/setup/pack-up timing fields exposed), a carried-forward
+  limitation from the original v1 design, not a new one.
+
+  Every brand-new signed-in user now gets their own Kayak/Land based
+  `user_types` seeded automatically on first sign-in
+  (`seedDefaultTypes`, `user-backend.js`) — without this, a new
+  account's first "Add location" would have no types to pick from at
+  all. Accounts created before this shipped (i.e. the Admin account
+  itself) needed a one-off backfill —
+  `migration-backfill-oliver-types.sql`.
+
+  Changing an existing location's Type dropdown is handled as a
+  delete-old-access-row-then-create-new one, not a plain field update —
+  v2's access rows are keyed by (user, location, type), so switching
+  type genuinely means starting a new tracking relationship, not
+  editing the old one in place.
+
+  Verified with a real headless-browser test: an existing location
+  loaded with its correct type pre-selected, a brand-new location
+  created with the right `typeId` resolved from the dropdown, changing
+  an existing location's type correctly triggered delete-then-recreate
+  (confirmed both calls happened, in order), and deletion worked
+  cleanly — zero JS exceptions throughout.
+- `/api/settings` (check-frequency scheduling) is untouched — a
+  different concept entirely from locations, with no v2 equivalent.
+  No WillyWeather-calling cron exists yet either, same as before.
 
 ### Pipeline endpoints (`fetch_conditions.py` / GitHub Actions)
 
