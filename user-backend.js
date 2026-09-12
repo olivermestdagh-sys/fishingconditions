@@ -120,6 +120,20 @@ const MIN_CHECK_FREQUENCY_MINUTES = 15; // floor only, not tier-aware yet — se
 const MAX_CHECK_FREQUENCY_MINUTES = 1440; // one check a day, the loosest end
 const VALID_LOCATION_TYPES = new Set(["Kayak", "Land based"]);
 
+// --- v2 (schema-v2.sql) constants ---
+const PUBLIC_USER_ID = "public";
+const MAX_BASIC_CREATED_LOCATIONS = 10; // additional private locations beyond
+                                         // whatever's inherited from Public —
+                                         // counted as locations THIS user
+                                         // created (locations.created_by_user_id),
+                                         // not total tracked count
+const VALID_BEHAVES_LIKE = new Set(["Kayak", "Land based"]); // the only two
+                                         // real scoring algorithms — a
+                                         // user's own custom type name
+                                         // (user_types.name) is free-form,
+                                         // but it must declare one of these
+                                         // two as what it actually scores like
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -150,6 +164,51 @@ export default {
       }
       if (url.pathname === "/api/settings") {
         return handleSettings(request, env);
+      }
+
+      // --- v2 endpoints below: the unified locations/types/groups/mark-lists/
+      // marks model (schema-v2.sql). Deliberately left ALONGSIDE the v1
+      // /api/locations and /api/settings routes above rather than replacing
+      // them — account.js still talks to v1 today, and cutting it over is
+      // its own separate step, not bundled into adding these.
+      if (url.pathname === "/api/types") {
+        return handleTypesCollection(request, url, env);
+      }
+      const typeMatch = url.pathname.match(/^\/api\/types\/([^/]+)$/);
+      if (typeMatch) {
+        return handleTypeItem(request, url, env, typeMatch[1]);
+      }
+      if (url.pathname === "/api/tracked-locations") {
+        return handleTrackedCollection(request, url, env);
+      }
+      const trackedMatch = url.pathname.match(/^\/api\/tracked-locations\/([^/]+)$/);
+      if (trackedMatch) {
+        return handleTrackedItem(request, url, env, trackedMatch[1]);
+      }
+      if (url.pathname === "/api/groups") {
+        return handleGroupsCollection(request, url, env);
+      }
+      const groupMatch = url.pathname.match(/^\/api\/groups\/([^/]+)$/);
+      if (groupMatch) {
+        return handleGroupItem(request, url, env, groupMatch[1]);
+      }
+      const groupMembersMatch = url.pathname.match(/^\/api\/locations\/([^/]+)\/groups$/);
+      if (groupMembersMatch && request.method === "PUT") {
+        return handleLocationGroupMembership(request, url, env, groupMembersMatch[1]);
+      }
+      if (url.pathname === "/api/marklists") {
+        return handleMarkListsCollection(request, url, env);
+      }
+      const markListMatch = url.pathname.match(/^\/api\/marklists\/([^/]+)$/);
+      if (markListMatch) {
+        return handleMarkListItem(request, url, env, markListMatch[1]);
+      }
+      if (url.pathname === "/api/marks") {
+        return handleMarksCollection(request, url, env);
+      }
+      const markMatch = url.pathname.match(/^\/api\/marks\/([^/]+)$/);
+      if (markMatch) {
+        return handleMarkItem(request, url, env, markMatch[1]);
       }
     } catch (err) {
       // Belt-and-braces: an uncaught exception anywhere above should still
@@ -246,6 +305,14 @@ async function handleCallback(request, url, env) {
   }
 
   const user = await upsertUser(env, claims);
+  if (user.id === PUBLIC_USER_ID) {
+    // Can't actually happen through a real Google login (Public's
+    // google_sub, 'sentinel-no-login', isn't a value Google ever issues —
+    // real ones are purely numeric) — this is belt-and-braces only, so a
+    // stray future change elsewhere can't accidentally make it possible.
+    console.error("Refused to issue a session for the Public sentinel user.");
+    return jsonResponse({ error: "Sign-in failed." }, 500, env);
+  }
   const sessionId = randomToken();
   const expiresAt = Date.now() + SESSION_MAX_AGE_SECONDS * 1000;
   await env.DB.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)")
@@ -279,7 +346,10 @@ async function handleLogout(request, env) {
 async function handleMe(request, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
-  return jsonResponse({ id: user.id, email: user.email, name: user.name }, 200, env);
+  // role included now that it's a real column (schema-v2.sql) — the
+  // frontend needs this to decide whether to show any "edit Public's
+  // defaults" affordance at all.
+  return jsonResponse({ id: user.id, email: user.email, name: user.name, role: user.role }, 200, env);
 }
 
 // ---------------------------------------------------------------------
@@ -493,8 +563,859 @@ function validateSettingsInput(body) {
 }
 
 // ---------------------------------------------------------------------
+// v2: Types (schema-v2.sql user_types) — a user's own open-ended vocabulary
+// of location types, each declaring which of the two real scoring
+// behaviours it uses. See VALID_BEHAVES_LIKE above for why that second
+// part is fixed even though the display name isn't.
+// ---------------------------------------------------------------------
+
+async function handleTypesCollection(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  if (request.method === "GET") {
+    const { results } = await env.DB.prepare("SELECT * FROM user_types WHERE user_id = ? ORDER BY created_at ASC")
+      .bind(uid)
+      .all();
+    return jsonResponse(results.map(rowToType), 200, env);
+  }
+
+  if (request.method === "POST") {
+    const body = await readJsonBody(request);
+    const validationError = validateTypeInput(body, { partial: false });
+    if (validationError) return jsonResponse({ error: validationError }, 400, env);
+
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    try {
+      await env.DB.prepare("INSERT INTO user_types (id, user_id, name, behaves_like, created_at) VALUES (?, ?, ?, ?, ?)")
+        .bind(id, uid, body.name, body.behavesLike, now)
+        .run();
+    } catch (err) {
+      // UNIQUE(user_id, name) — the friendliest way to surface this without
+      // a separate pre-check query is to just try the insert and translate
+      // the constraint failure.
+      return jsonResponse({ error: `You already have a type named "${body.name}".` }, 409, env);
+    }
+    const created = await env.DB.prepare("SELECT * FROM user_types WHERE id = ?").bind(id).first();
+    return jsonResponse(rowToType(created), 201, env);
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+async function handleTypeItem(request, url, env, id) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  const existing = await env.DB.prepare("SELECT * FROM user_types WHERE id = ? AND user_id = ?").bind(id, uid).first();
+  if (!existing) return jsonResponse({ error: "Type not found." }, 404, env);
+
+  if (request.method === "PUT") {
+    const body = await readJsonBody(request);
+    const validationError = validateTypeInput(body, { partial: true });
+    if (validationError) return jsonResponse({ error: validationError }, 400, env);
+    const merged = {
+      name: body.name ?? existing.name,
+      behavesLike: body.behavesLike ?? existing.behaves_like,
+    };
+    try {
+      await env.DB.prepare("UPDATE user_types SET name = ?, behaves_like = ? WHERE id = ? AND user_id = ?")
+        .bind(merged.name, merged.behavesLike, id, uid)
+        .run();
+    } catch (err) {
+      return jsonResponse({ error: `You already have a type named "${merged.name}".` }, 409, env);
+    }
+    const updated = await env.DB.prepare("SELECT * FROM user_types WHERE id = ?").bind(id).first();
+    return jsonResponse(rowToType(updated), 200, env);
+  }
+
+  if (request.method === "DELETE") {
+    // Explicit in-use check rather than letting ON DELETE CASCADE silently
+    // wipe every tracked location that used this type — same "explicit
+    // cleanup over silent cascade" reasoning as the rest of this file.
+    const inUse = await env.DB.prepare("SELECT COUNT(*) as n FROM user_location_access WHERE type_id = ?")
+      .bind(id)
+      .first();
+    if (inUse.n > 0) {
+      return jsonResponse(
+        { error: `This type is used by ${inUse.n} tracked location(s) — remove those first.` },
+        409,
+        env
+      );
+    }
+    await env.DB.prepare("DELETE FROM user_types WHERE id = ? AND user_id = ?").bind(id, uid).run();
+    return new Response(null, { status: 204, headers: corsHeaders(env) });
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+function rowToType(row) {
+  return { id: row.id, name: row.name, behavesLike: row.behaves_like };
+}
+
+function validateTypeInput(body, { partial }) {
+  if (!body || typeof body !== "object") return "Request body must be a JSON object.";
+  if (!partial || body.name !== undefined) {
+    if (typeof body.name !== "string" || !body.name.trim()) return "name is required.";
+  }
+  if (!partial || body.behavesLike !== undefined) {
+    if (!VALID_BEHAVES_LIKE.has(body.behavesLike)) {
+      return `behavesLike must be one of: ${[...VALID_BEHAVES_LIKE].join(", ")}.`;
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------
+// v2: Tracked locations (the union of locations + user_location_access +
+// user_types) — this is the central table. A row's existence is what
+// makes a physical place show up in a user's own view at all; there is
+// no separate "public" flag anywhere in this schema (see schema-v2.sql's
+// own top-of-file comment for the reasoning).
+// ---------------------------------------------------------------------
+
+async function handleTrackedCollection(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  if (request.method === "GET") {
+    const { results } = await env.DB.prepare(
+      `SELECT ula.id as access_id, ula.drive_to, ula.drive_back, ula.set_up, ula.pack_up,
+              ula.time_to_spot, ula.time_from_spot,
+              l.id as location_id, l.name, l.lat, l.lng, l.willyweather_id, l.willyweather_name,
+              l.willyweather_region, l.willyweather_state, l.shore, l.tide_offset, l.tide_max_observed,
+              l.created_by_user_id,
+              t.id as type_id, t.name as type_name, t.behaves_like
+       FROM user_location_access ula
+       JOIN locations l ON l.id = ula.location_id
+       JOIN user_types t ON t.id = ula.type_id
+       WHERE ula.user_id = ?
+       ORDER BY l.name ASC`
+    )
+      .bind(uid)
+      .all();
+
+    // Group memberships fetched separately and merged in-process rather
+    // than a second JOIN in the query above — a location can belong to
+    // several of this user's groups at once, which would otherwise
+    // multiply the main result's rows per group.
+    const { results: memberRows } = await env.DB.prepare(
+      `SELECT m.location_id, g.id as group_id, g.name as group_name
+       FROM user_location_group_members m
+       JOIN user_location_groups g ON g.id = m.group_id
+       WHERE m.user_id = ?`
+    )
+      .bind(uid)
+      .all();
+    const groupsByLocation = new Map();
+    for (const m of memberRows) {
+      if (!groupsByLocation.has(m.location_id)) groupsByLocation.set(m.location_id, []);
+      groupsByLocation.get(m.location_id).push({ id: m.group_id, name: m.group_name });
+    }
+
+    return jsonResponse(
+      results.map((row) => rowToTracked(row, groupsByLocation.get(row.location_id) || [])),
+      200,
+      env
+    );
+  }
+
+  if (request.method === "POST") {
+    const body = await readJsonBody(request);
+    const validationError = validateTrackedInput(body);
+    if (validationError) return jsonResponse({ error: validationError }, 400, env);
+
+    // Resolve the type: either an existing one of this user's, or create a
+    // new one inline.
+    let typeId = body.typeId;
+    if (!typeId) {
+      const newId = crypto.randomUUID();
+      try {
+        await env.DB.prepare("INSERT INTO user_types (id, user_id, name, behaves_like, created_at) VALUES (?, ?, ?, ?, ?)")
+          .bind(newId, uid, body.newTypeName, body.newTypeBehavesLike, Date.now())
+          .run();
+      } catch (err) {
+        return jsonResponse({ error: `You already have a type named "${body.newTypeName}".` }, 409, env);
+      }
+      typeId = newId;
+    } else {
+      const type = await env.DB.prepare("SELECT * FROM user_types WHERE id = ? AND user_id = ?").bind(typeId, uid).first();
+      if (!type) return jsonResponse({ error: "typeId not found." }, 404, env);
+    }
+
+    // Resolve the location: attach to an existing one, or create a new
+    // private one (subject to the Basic-tier cap on how many THIS user has
+    // created — inherited/Public locations never count against it).
+    let locationId = body.locationId;
+    if (!locationId) {
+      if (user.role === "basic") {
+        const countRow = await env.DB.prepare("SELECT COUNT(*) as n FROM locations WHERE created_by_user_id = ?")
+          .bind(uid)
+          .first();
+        if (countRow.n >= MAX_BASIC_CREATED_LOCATIONS) {
+          return jsonResponse(
+            { error: `Basic accounts are limited to ${MAX_BASIC_CREATED_LOCATIONS} additional private locations.` },
+            403,
+            env
+          );
+        }
+      }
+      locationId = crypto.randomUUID();
+      await env.DB.prepare(
+        `INSERT INTO locations (id, created_by_user_id, name, lat, lng, willyweather_id, willyweather_name,
+                                 willyweather_region, willyweather_state, shore, tide_offset, tide_max_observed, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+        .bind(
+          locationId,
+          uid,
+          body.name,
+          body.lat,
+          body.lng,
+          body.willyweatherId ?? null,
+          body.willyweatherName ?? null,
+          body.willyweatherRegion ?? null,
+          body.willyweatherState ?? null,
+          body.shore ?? null,
+          body.tideOffset ?? null,
+          body.tideMaxObserved ?? null,
+          Date.now()
+        )
+        .run();
+    } else {
+      const loc = await env.DB.prepare("SELECT id FROM locations WHERE id = ?").bind(locationId).first();
+      if (!loc) return jsonResponse({ error: "locationId not found." }, 404, env);
+    }
+
+    const accessId = crypto.randomUUID();
+    try {
+      await env.DB.prepare(
+        `INSERT INTO user_location_access
+           (id, user_id, location_id, type_id, drive_to, drive_back, set_up, pack_up, time_to_spot, time_from_spot, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+        .bind(
+          accessId,
+          uid,
+          locationId,
+          typeId,
+          body.driveTo ?? "00:00",
+          body.driveBack ?? "00:00",
+          body.setUp ?? "00:00",
+          body.packUp ?? "00:00",
+          body.timeToSpot ?? "00:00",
+          body.timeFromSpot ?? "00:00",
+          Date.now()
+        )
+        .run();
+    } catch (err) {
+      return jsonResponse({ error: "You're already tracking this location under that type." }, 409, env);
+    }
+
+    if (Array.isArray(body.groupIds) && body.groupIds.length) {
+      await insertGroupMemberships(env, uid, locationId, body.groupIds);
+    }
+
+    return jsonResponse(await fetchOneTracked(env, accessId), 201, env);
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+async function handleTrackedItem(request, url, env, accessId) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  const existing = await env.DB.prepare(
+    `SELECT ula.*, l.created_by_user_id as location_owner
+     FROM user_location_access ula
+     JOIN locations l ON l.id = ula.location_id
+     WHERE ula.id = ? AND ula.user_id = ?`
+  )
+    .bind(accessId, uid)
+    .first();
+  if (!existing) return jsonResponse({ error: "Tracked location not found." }, 404, env);
+
+  if (request.method === "PUT") {
+    const body = await readJsonBody(request);
+
+    const scheduling = {
+      driveTo: body.driveTo ?? existing.drive_to,
+      driveBack: body.driveBack ?? existing.drive_back,
+      setUp: body.setUp ?? existing.set_up,
+      packUp: body.pack_up ?? existing.pack_up,
+      timeToSpot: body.timeToSpot ?? existing.time_to_spot,
+      timeFromSpot: body.timeFromSpot ?? existing.time_from_spot,
+    };
+    await env.DB.prepare(
+      `UPDATE user_location_access
+       SET drive_to = ?, drive_back = ?, set_up = ?, pack_up = ?, time_to_spot = ?, time_from_spot = ?
+       WHERE id = ? AND user_id = ?`
+    )
+      .bind(scheduling.driveTo, scheduling.driveBack, scheduling.setUp, scheduling.packUp, scheduling.timeToSpot, scheduling.timeFromSpot, accessId, uid)
+      .run();
+
+    // Editing the PLACE's own base fields (name/lat/lng/etc) is only
+    // allowed for whoever created it — tracking a location (having an
+    // access row) is not the same as owning its base record. An admin
+    // reaches this by passing ?userId=<the owner>, same as everywhere else.
+    const placeFields = ["name", "lat", "lng", "willyweatherId", "willyweatherName", "willyweatherRegion", "willyweatherState", "shore", "tideOffset", "tideMaxObserved"];
+    const wantsPlaceEdit = placeFields.some((f) => body[f] !== undefined);
+    if (wantsPlaceEdit) {
+      if (existing.location_owner !== uid) {
+        return jsonResponse({ error: "You can't edit this location's base details — you didn't create it." }, 403, env);
+      }
+      const place = await env.DB.prepare("SELECT * FROM locations WHERE id = ?").bind(existing.location_id).first();
+      const merged = {
+        name: body.name ?? place.name,
+        lat: body.lat ?? place.lat,
+        lng: body.lng ?? place.lng,
+        willyweatherId: body.willyweatherId !== undefined ? body.willyweatherId : place.willyweather_id,
+        willyweatherName: body.willyweatherName ?? place.willyweather_name,
+        willyweatherRegion: body.willyweatherRegion ?? place.willyweather_region,
+        willyweatherState: body.willyweatherState ?? place.willyweather_state,
+        shore: body.shore ?? place.shore,
+        tideOffset: body.tideOffset ?? place.tide_offset,
+        tideMaxObserved: body.tideMaxObserved ?? place.tide_max_observed,
+      };
+      await env.DB.prepare(
+        `UPDATE locations SET name=?, lat=?, lng=?, willyweather_id=?, willyweather_name=?, willyweather_region=?,
+                               willyweather_state=?, shore=?, tide_offset=?, tide_max_observed=?
+         WHERE id = ?`
+      )
+        .bind(
+          merged.name,
+          merged.lat,
+          merged.lng,
+          merged.willyweatherId,
+          merged.willyweatherName,
+          merged.willyweatherRegion,
+          merged.willyweatherState,
+          merged.shore,
+          merged.tideOffset,
+          merged.tideMaxObserved,
+          existing.location_id
+        )
+        .run();
+    }
+
+    if (Array.isArray(body.groupIds)) {
+      await env.DB.prepare("DELETE FROM user_location_group_members WHERE user_id = ? AND location_id = ?")
+        .bind(uid, existing.location_id)
+        .run();
+      if (body.groupIds.length) await insertGroupMemberships(env, uid, existing.location_id, body.groupIds);
+    }
+
+    return jsonResponse(await fetchOneTracked(env, accessId), 200, env);
+  }
+
+  if (request.method === "DELETE") {
+    // Explicit cleanup, in order, rather than trusting cascade alone (same
+    // reasoning as v1's location delete): schedule_state row first, then
+    // this access row, then — only if this user created the place AND no
+    // other access row anywhere still references it — the place itself
+    // and its now-orphaned group memberships.
+    await env.DB.prepare("DELETE FROM schedule_state WHERE user_location_access_id = ?").bind(accessId).run();
+    await env.DB.prepare("DELETE FROM user_location_access WHERE id = ? AND user_id = ?").bind(accessId, uid).run();
+
+    if (existing.location_owner === uid) {
+      const remaining = await env.DB.prepare("SELECT COUNT(*) as n FROM user_location_access WHERE location_id = ?")
+        .bind(existing.location_id)
+        .first();
+      if (remaining.n === 0) {
+        await env.DB.prepare("DELETE FROM user_location_group_members WHERE location_id = ?").bind(existing.location_id).run();
+        await env.DB.prepare("DELETE FROM locations WHERE id = ?").bind(existing.location_id).run();
+      }
+    }
+
+    return new Response(null, { status: 204, headers: corsHeaders(env) });
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+async function fetchOneTracked(env, accessId) {
+  const row = await env.DB.prepare(
+    `SELECT ula.id as access_id, ula.drive_to, ula.drive_back, ula.set_up, ula.pack_up,
+            ula.time_to_spot, ula.time_from_spot,
+            l.id as location_id, l.name, l.lat, l.lng, l.willyweather_id, l.willyweather_name,
+            l.willyweather_region, l.willyweather_state, l.shore, l.tide_offset, l.tide_max_observed,
+            l.created_by_user_id,
+            t.id as type_id, t.name as type_name, t.behaves_like
+     FROM user_location_access ula
+     JOIN locations l ON l.id = ula.location_id
+     JOIN user_types t ON t.id = ula.type_id
+     WHERE ula.id = ?`
+  )
+    .bind(accessId)
+    .first();
+  return rowToTracked(row, []); // group list omitted on this single-row echo — the
+                                 // list view is what actually needs it; callers
+                                 // that need fresh groups here can re-GET the collection
+}
+
+function rowToTracked(row, groups) {
+  return {
+    accessId: row.access_id,
+    location: {
+      id: row.location_id,
+      name: row.name,
+      lat: row.lat,
+      lng: row.lng,
+      willyweatherId: row.willyweather_id,
+      willyweatherName: row.willyweather_name,
+      willyweatherRegion: row.willyweather_region,
+      willyweatherState: row.willyweather_state,
+      shore: row.shore,
+      tideOffset: row.tide_offset,
+      tideMaxObserved: row.tide_max_observed,
+      createdByUserId: row.created_by_user_id,
+    },
+    type: { id: row.type_id, name: row.type_name, behavesLike: row.behaves_like },
+    driveTo: row.drive_to,
+    driveBack: row.drive_back,
+    setUp: row.set_up,
+    packUp: row.pack_up,
+    timeToSpot: row.time_to_spot,
+    timeFromSpot: row.time_from_spot,
+    groups,
+  };
+}
+
+function validateTrackedInput(body) {
+  if (!body || typeof body !== "object") return "Request body must be a JSON object.";
+  if (!body.typeId && !(body.newTypeName && body.newTypeBehavesLike)) {
+    return "Provide either typeId or (newTypeName and newTypeBehavesLike).";
+  }
+  if (body.newTypeBehavesLike && !VALID_BEHAVES_LIKE.has(body.newTypeBehavesLike)) {
+    return `newTypeBehavesLike must be one of: ${[...VALID_BEHAVES_LIKE].join(", ")}.`;
+  }
+  if (!body.locationId) {
+    if (typeof body.name !== "string" || !body.name.trim()) return "name is required for a new location.";
+    if (typeof body.lat !== "number" || !Number.isFinite(body.lat) || body.lat < -90 || body.lat > 90) {
+      return "lat must be a number between -90 and 90.";
+    }
+    if (typeof body.lng !== "number" || !Number.isFinite(body.lng) || body.lng < -180 || body.lng > 180) {
+      return "lng must be a number between -180 and 180.";
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------
+// v2: Groups (schema-v2.sql user_location_groups / _group_members)
+// ---------------------------------------------------------------------
+
+async function handleGroupsCollection(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  if (request.method === "GET") {
+    const { results } = await env.DB.prepare("SELECT * FROM user_location_groups WHERE user_id = ? ORDER BY name ASC")
+      .bind(uid)
+      .all();
+    return jsonResponse(results.map((r) => ({ id: r.id, name: r.name })), 200, env);
+  }
+
+  if (request.method === "POST") {
+    const body = await readJsonBody(request);
+    if (!body || typeof body.name !== "string" || !body.name.trim()) {
+      return jsonResponse({ error: "name is required." }, 400, env);
+    }
+    const id = crypto.randomUUID();
+    try {
+      await env.DB.prepare("INSERT INTO user_location_groups (id, user_id, name, created_at) VALUES (?, ?, ?, ?)")
+        .bind(id, uid, body.name, Date.now())
+        .run();
+    } catch (err) {
+      return jsonResponse({ error: `You already have a group named "${body.name}".` }, 409, env);
+    }
+    return jsonResponse({ id, name: body.name }, 201, env);
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+async function handleGroupItem(request, url, env, id) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  const existing = await env.DB.prepare("SELECT * FROM user_location_groups WHERE id = ? AND user_id = ?").bind(id, uid).first();
+  if (!existing) return jsonResponse({ error: "Group not found." }, 404, env);
+
+  if (request.method === "PUT") {
+    const body = await readJsonBody(request);
+    if (!body || typeof body.name !== "string" || !body.name.trim()) {
+      return jsonResponse({ error: "name is required." }, 400, env);
+    }
+    try {
+      await env.DB.prepare("UPDATE user_location_groups SET name = ? WHERE id = ? AND user_id = ?").bind(body.name, id, uid).run();
+    } catch (err) {
+      return jsonResponse({ error: `You already have a group named "${body.name}".` }, 409, env);
+    }
+    return jsonResponse({ id, name: body.name }, 200, env);
+  }
+
+  if (request.method === "DELETE") {
+    // No in-use check here, unlike types — a group membership row (schema's
+    // user_location_group_members) has no meaning at all without its
+    // group, so letting ON DELETE CASCADE clear those is the right call,
+    // not a silent data-loss risk the way cascading a type or a place would be.
+    await env.DB.prepare("DELETE FROM user_location_groups WHERE id = ? AND user_id = ?").bind(id, uid).run();
+    return new Response(null, { status: 204, headers: corsHeaders(env) });
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+async function handleLocationGroupMembership(request, url, env, locationId) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  const body = await readJsonBody(request);
+  if (!Array.isArray(body.groupIds)) return jsonResponse({ error: "groupIds must be an array." }, 400, env);
+
+  await env.DB.prepare("DELETE FROM user_location_group_members WHERE user_id = ? AND location_id = ?").bind(uid, locationId).run();
+  if (body.groupIds.length) await insertGroupMemberships(env, uid, locationId, body.groupIds);
+
+  return jsonResponse({ locationId, groupIds: body.groupIds }, 200, env);
+}
+
+async function insertGroupMemberships(env, uid, locationId, groupIds) {
+  for (const groupId of groupIds) {
+    // Silently skips a groupId that isn't actually this user's own — never
+    // trust an id passed in a request body without checking ownership,
+    // even for a low-stakes join table like this one.
+    const owns = await env.DB.prepare("SELECT 1 FROM user_location_groups WHERE id = ? AND user_id = ?").bind(groupId, uid).first();
+    if (!owns) continue;
+    await env.DB.prepare("INSERT OR IGNORE INTO user_location_group_members (user_id, location_id, group_id) VALUES (?, ?, ?)")
+      .bind(uid, locationId, groupId)
+      .run();
+  }
+}
+
+// ---------------------------------------------------------------------
+// v2: Mark lists (schema-v2.sql user_mark_lists) — one generic table for
+// every pick-list category (Mark Type, Species, Bait, Rig, conditions,
+// shape/colour formats), mirroring mark_lists.json's own flat shape.
+// ---------------------------------------------------------------------
+
+async function handleMarkListsCollection(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  if (request.method === "GET") {
+    const field = url.searchParams.get("field");
+    const stmt = field
+      ? env.DB.prepare("SELECT * FROM user_mark_lists WHERE user_id = ? AND field = ? ORDER BY value ASC").bind(uid, field)
+      : env.DB.prepare("SELECT * FROM user_mark_lists WHERE user_id = ? ORDER BY field ASC, value ASC").bind(uid);
+    const { results } = await stmt.all();
+    return jsonResponse(results.map(rowToMarkList), 200, env);
+  }
+
+  if (request.method === "POST") {
+    const body = await readJsonBody(request);
+    const validationError = validateMarkListInput(body, { partial: false });
+    if (validationError) return jsonResponse({ error: validationError }, 400, env);
+    const id = crypto.randomUUID();
+    try {
+      await env.DB.prepare(
+        "INSERT INTO user_mark_lists (id, user_id, field, value, shape_format, color_format, color, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      )
+        .bind(id, uid, body.field, body.value, body.shapeFormat ?? null, body.colorFormat ?? null, body.color ?? null, Date.now())
+        .run();
+    } catch (err) {
+      return jsonResponse({ error: `"${body.value}" already exists under ${body.field}.` }, 409, env);
+    }
+    const created = await env.DB.prepare("SELECT * FROM user_mark_lists WHERE id = ?").bind(id).first();
+    return jsonResponse(rowToMarkList(created), 201, env);
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+async function handleMarkListItem(request, url, env, id) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  const existing = await env.DB.prepare("SELECT * FROM user_mark_lists WHERE id = ? AND user_id = ?").bind(id, uid).first();
+  if (!existing) return jsonResponse({ error: "Mark list entry not found." }, 404, env);
+
+  if (request.method === "PUT") {
+    const body = await readJsonBody(request);
+    const validationError = validateMarkListInput(body, { partial: true });
+    if (validationError) return jsonResponse({ error: validationError }, 400, env);
+    const merged = {
+      field: body.field ?? existing.field,
+      value: body.value ?? existing.value,
+      shapeFormat: body.shapeFormat !== undefined ? body.shapeFormat : existing.shape_format,
+      colorFormat: body.colorFormat !== undefined ? body.colorFormat : existing.color_format,
+      color: body.color !== undefined ? body.color : existing.color,
+    };
+    try {
+      await env.DB.prepare(
+        "UPDATE user_mark_lists SET field=?, value=?, shape_format=?, color_format=?, color=? WHERE id = ? AND user_id = ?"
+      )
+        .bind(merged.field, merged.value, merged.shapeFormat, merged.colorFormat, merged.color, id, uid)
+        .run();
+    } catch (err) {
+      return jsonResponse({ error: `"${merged.value}" already exists under ${merged.field}.` }, 409, env);
+    }
+    const updated = await env.DB.prepare("SELECT * FROM user_mark_lists WHERE id = ?").bind(id).first();
+    return jsonResponse(rowToMarkList(updated), 200, env);
+  }
+
+  if (request.method === "DELETE") {
+    await env.DB.prepare("DELETE FROM user_mark_lists WHERE id = ? AND user_id = ?").bind(id, uid).run();
+    return new Response(null, { status: 204, headers: corsHeaders(env) });
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+function rowToMarkList(row) {
+  return {
+    id: row.id,
+    field: row.field,
+    value: row.value,
+    shapeFormat: row.shape_format,
+    colorFormat: row.color_format,
+    color: row.color,
+  };
+}
+
+function validateMarkListInput(body, { partial }) {
+  if (!body || typeof body !== "object") return "Request body must be a JSON object.";
+  if (!partial || body.field !== undefined) {
+    if (typeof body.field !== "string" || !body.field.trim()) return "field is required.";
+  }
+  if (!partial || body.value !== undefined) {
+    if (typeof body.value !== "string" || !body.value.trim()) return "value is required.";
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------
+// v2: Marks (schema-v2.sql marks) — a user's own logged fishing marks.
+// GET supports simple limit/offset paging (default 200, capped 500) since
+// a real history can run into the thousands of rows — see the migration
+// notes for how many currently exist.
+// ---------------------------------------------------------------------
+
+async function handleMarksCollection(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  if (request.method === "GET") {
+    const limit = Math.min(parseInt(url.searchParams.get("limit"), 10) || 200, 500);
+    const offset = Math.max(parseInt(url.searchParams.get("offset"), 10) || 0, 0);
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM marks WHERE user_id = ? ORDER BY date_time DESC LIMIT ? OFFSET ?"
+    )
+      .bind(uid, limit, offset)
+      .all();
+    return jsonResponse(results.map(rowToMark), 200, env);
+  }
+
+  if (request.method === "POST") {
+    const body = await readJsonBody(request);
+    const validationError = validateMarkInput(body, { partial: false });
+    if (validationError) return jsonResponse({ error: validationError }, 400, env);
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    await insertOrUpdateMark(env, id, uid, body, now);
+    const created = await env.DB.prepare("SELECT * FROM marks WHERE id = ?").bind(id).first();
+    return jsonResponse(rowToMark(created), 201, env);
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+async function handleMarkItem(request, url, env, id) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  const existing = await env.DB.prepare("SELECT * FROM marks WHERE id = ? AND user_id = ?").bind(id, uid).first();
+  if (!existing) return jsonResponse({ error: "Mark not found." }, 404, env);
+
+  if (request.method === "PUT") {
+    const body = await readJsonBody(request);
+    const validationError = validateMarkInput(body, { partial: true });
+    if (validationError) return jsonResponse({ error: validationError }, 400, env);
+    const merged = mergeMarkFields(existing, body);
+    await env.DB.prepare(
+      `UPDATE marks SET lat=?, lng=?, name=?, type=?, date_time=?, source=?, source_uuid=?, species=?, bait=?, rig=?,
+                        rod=?, size=?, released=?, weather_condition=?, tide_condition=?, water_condition=?,
+                        water_depth=?, water_temperature=?, temperature=?, barometer=?, wind_direction=?, wind_speed=?
+       WHERE id = ? AND user_id = ?`
+    )
+      .bind(
+        merged.lat, merged.lng, merged.name, merged.type, merged.dateTime, merged.source, merged.sourceUuid,
+        merged.species, merged.bait, merged.rig, merged.rod, merged.size, merged.released,
+        merged.weatherCondition, merged.tideCondition, merged.waterCondition, merged.waterDepth,
+        merged.waterTemperature, merged.temperature, merged.barometer, merged.windDirection, merged.windSpeed,
+        id, uid
+      )
+      .run();
+    const updated = await env.DB.prepare("SELECT * FROM marks WHERE id = ?").bind(id).first();
+    return jsonResponse(rowToMark(updated), 200, env);
+  }
+
+  if (request.method === "DELETE") {
+    await env.DB.prepare("DELETE FROM marks WHERE id = ? AND user_id = ?").bind(id, uid).run();
+    return new Response(null, { status: 204, headers: corsHeaders(env) });
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+async function insertOrUpdateMark(env, id, uid, body, now) {
+  await env.DB.prepare(
+    `INSERT INTO marks (id, user_id, lat, lng, name, type, date_time, source, source_uuid, species, bait, rig, rod,
+                         size, released, weather_condition, tide_condition, water_condition, water_depth,
+                         water_temperature, temperature, barometer, wind_direction, wind_speed, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      id, uid, body.lat, body.lng, body.name ?? null, body.type, body.dateTime, body.source ?? "manual",
+      body.sourceUuid ?? null, body.species ?? null, body.bait ?? null, body.rig ?? null, body.rod ?? null,
+      body.size ?? null, body.released ? 1 : 0, body.weatherCondition ?? null, body.tideCondition ?? null,
+      body.waterCondition ?? null, body.waterDepth ?? null, body.waterTemperature ?? null, body.temperature ?? null,
+      body.barometer ?? null, body.windDirection ?? null, body.windSpeed ?? null, now
+    )
+    .run();
+}
+
+function mergeMarkFields(existing, body) {
+  return {
+    lat: body.lat ?? existing.lat,
+    lng: body.lng ?? existing.lng,
+    name: body.name !== undefined ? body.name : existing.name,
+    type: body.type ?? existing.type,
+    dateTime: body.dateTime ?? existing.date_time,
+    source: body.source !== undefined ? body.source : existing.source,
+    sourceUuid: body.sourceUuid !== undefined ? body.sourceUuid : existing.source_uuid,
+    species: body.species !== undefined ? body.species : existing.species,
+    bait: body.bait !== undefined ? body.bait : existing.bait,
+    rig: body.rig !== undefined ? body.rig : existing.rig,
+    rod: body.rod !== undefined ? body.rod : existing.rod,
+    size: body.size !== undefined ? body.size : existing.size,
+    released: body.released !== undefined ? (body.released ? 1 : 0) : existing.released,
+    weatherCondition: body.weatherCondition !== undefined ? body.weatherCondition : existing.weather_condition,
+    tideCondition: body.tideCondition !== undefined ? body.tideCondition : existing.tide_condition,
+    waterCondition: body.waterCondition !== undefined ? body.waterCondition : existing.water_condition,
+    waterDepth: body.waterDepth !== undefined ? body.waterDepth : existing.water_depth,
+    waterTemperature: body.waterTemperature !== undefined ? body.waterTemperature : existing.water_temperature,
+    temperature: body.temperature !== undefined ? body.temperature : existing.temperature,
+    barometer: body.barometer !== undefined ? body.barometer : existing.barometer,
+    windDirection: body.windDirection !== undefined ? body.windDirection : existing.wind_direction,
+    windSpeed: body.windSpeed !== undefined ? body.windSpeed : existing.wind_speed,
+  };
+}
+
+function rowToMark(row) {
+  return {
+    id: row.id,
+    lat: row.lat,
+    lng: row.lng,
+    name: row.name,
+    type: row.type,
+    dateTime: row.date_time,
+    source: row.source,
+    sourceUuid: row.source_uuid,
+    species: row.species,
+    bait: row.bait,
+    rig: row.rig,
+    rod: row.rod,
+    size: row.size,
+    released: !!row.released,
+    weatherCondition: row.weather_condition,
+    tideCondition: row.tide_condition,
+    waterCondition: row.water_condition,
+    waterDepth: row.water_depth,
+    waterTemperature: row.water_temperature,
+    temperature: row.temperature,
+    barometer: row.barometer,
+    windDirection: row.wind_direction,
+    windSpeed: row.wind_speed,
+  };
+}
+
+function validateMarkInput(body, { partial }) {
+  if (!body || typeof body !== "object") return "Request body must be a JSON object.";
+  if (!partial || body.lat !== undefined) {
+    if (typeof body.lat !== "number" || !Number.isFinite(body.lat)) return "lat must be a number.";
+  }
+  if (!partial || body.lng !== undefined) {
+    if (typeof body.lng !== "number" || !Number.isFinite(body.lng)) return "lng must be a number.";
+  }
+  if (!partial || body.type !== undefined) {
+    if (typeof body.type !== "string" || !body.type.trim()) return "type is required.";
+  }
+  if (!partial || body.dateTime !== undefined) {
+    if (typeof body.dateTime !== "string" || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(body.dateTime)) {
+      return 'dateTime must be "YYYY-MM-DD HH:MM:SS" (naive, matching the rest of this site).';
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------
+
+/**
+ * Every v2 endpoint operates on an "effective" user id — normally the
+ * caller's own, but an Admin may pass ?userId=<id> (most usefully
+ * ?userId=public) to act on someone else's rows through the exact same
+ * endpoint. This is the ONLY mechanism for editing Public's defaults —
+ * there is no separate "edit the defaults" code path anywhere in this
+ * file. A non-admin passing a userId that isn't their own is rejected
+ * outright, never silently downgraded to "act as yourself instead".
+ */
+function resolveEffectiveUserId(url, callerUser) {
+  const requested = url.searchParams.get("userId");
+  if (!requested || requested === callerUser.id) return { id: callerUser.id };
+  if (callerUser.role !== "admin") {
+    return { error: "Only Admin can act on another user's data." };
+  }
+  return { id: requested };
+}
 
 async function requireUser(request, env) {
   const sessionId = readCookie(request, SESSION_COOKIE);
