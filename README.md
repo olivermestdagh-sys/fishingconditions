@@ -1041,15 +1041,64 @@ block at the top of `user-backend.js` for the full one-time setup
 (Google Cloud OAuth client, Cloudflare D1 database via `schema.sql`, and
 the Worker's own secrets), and for exactly what each endpoint does.
 
-**Current state, honestly:** this is the account/CRUD layer only. Signing
-in and saving your own locations/settings works end-to-end, but nothing
-yet actually calls WillyWeather on a user's behalf on that schedule — the
-`schedule_state` table exists in `schema.sql` so that piece won't need a
-schema migration later, but the cron sweep that would read it, and any
-Stripe billing/tier-gating on top of `check_frequency_minutes`, are not
-built. Every signed-in user today is functionally on the same untiered
-plan, with only a floor (15 minutes) stopping an unreasonably tight
-setting.
+### v2: accounts, tiers, and a unified locations model (`schema-v2.sql`)
+
+The original account layer above (`schema.sql`'s `user_locations`/
+`user_settings`) has been superseded by a richer model in
+`schema-v2.sql`, covering everything the free site's `config/*.json`
+files hold today — locations, location groups, the mark-list pick-values,
+and marks — plus two roles (`admin`/`basic`).
+
+**The core idea:** every user, including a fixed **Public** sentinel
+account (`id = 'public'`, never actually logs in), has their own
+locations-they-track, their own type vocabulary, their own groups, their
+own mark-list pick-values, and their own marks. The free, anonymous site
+is simply what Public's own rows say — there's no separate "defaults vs.
+overrides" table anywhere; Public is just another `user_id` that happens
+to be well-known. `role = 'admin'` can act on ANY user's rows (most
+usefully Public's, via `?userId=public` on any endpoint below) — that's
+the entire mechanism for "editing the free site's defaults", the exact
+same endpoints a Basic user's own browser calls.
+
+Location **type** (Kayak/Land based) stays a fixed, two-value
+`behaves_like` enum under the hood — that's what the actual scoring
+logic switches on — but each user has their own open-ended `user_types`
+vocabulary of DISPLAY names on top of it (so "Kayak", "SUP", "Rock
+ledge" can all exist for one person, each just declaring which of the
+two real behaviours it scores like).
+
+New endpoints, all under the same auth/session model as `/api/locations`
+above, and all accepting an admin-only `?userId=<id>` to act on someone
+else's data:
+- `GET/POST /api/types`, `PUT/DELETE /api/types/:id`
+- `GET/POST /api/tracked-locations`, `PUT/DELETE /api/tracked-locations/:id`
+  — the central one: a row here is a physical place + one of your own
+  types + your own drive/setup/pack-up numbers, all at once
+- `GET/POST /api/groups`, `PUT/DELETE /api/groups/:id`,
+  `PUT /api/locations/:id/groups` (set a location's group membership)
+- `GET/POST /api/marklists`, `PUT/DELETE /api/marklists/:id`
+- `GET/POST /api/marks`, `PUT/DELETE /api/marks/:id` (`GET` paginates,
+  default 200/request, capped 500 — a real history can run into the
+  thousands)
+
+A Basic account is capped at 10 *additional* locations — counted as
+locations they've personally created (`locations.created_by_user_id`),
+never counting anything inherited from Public's set.
+
+**Current state, honestly:** this round is the data model + Worker
+endpoints only, verified by directly exercising every new query against
+real SQLite (not just read over) — a full lifecycle (create a type,
+create a location + track it, group it, add a mark-list entry, log a
+mark, delete and confirm cleanup) runs clean. What's NOT done yet:
+`locationsadmin.js` still saves to `config/*.json` via GitHub commits,
+not these endpoints — none of the site's actual editing UI has been
+cut over. Neither has `fetch_conditions.py`, which still reads
+`config/locations.json` as a local file, not from Public's rows via
+these endpoints. The original `user_locations`/`user_settings`
+endpoints (`/api/locations`, `/api/settings`) are untouched and still
+what `account.js` talks to — nothing about the currently-working
+sign-in flow changed. No WillyWeather-calling cron exists yet either,
+same as before.
 
 ## Troubleshooting
 
