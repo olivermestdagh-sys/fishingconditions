@@ -106,6 +106,15 @@
  *        on success, e.g. https://olivermestdagh-sys.github.io/fishingconditions/account.html
  *      - GOOGLE_REDIRECT_URI (Text) — this Worker's own URL + "/auth/callback",
  *        the exact value entered in Google Console step 1
+ *      - PIPELINE_API_TOKEN (Secret) — a long, random string you generate
+ *        yourself (e.g. `openssl rand -hex 32`, or any password generator).
+ *        This is a completely different credential from everything above —
+ *        it authenticates fetch_conditions.py (GitHub Actions), which has
+ *        no browser and can't hold a session cookie. The SAME value also
+ *        needs setting as the PIPELINE_API_TOKEN secret in the site repo's
+ *        GitHub Actions settings (Settings -> Secrets and variables ->
+ *        Actions), alongside a new PIPELINE_WORKER_URL secret there set to
+ *        this Worker's own URL. See the "Pipeline" section further down.
  *      Save and Deploy again so the new bindings/secrets take effect.
  *   6. Paste this Worker's URL into account.js's USER_BACKEND_URL constant,
  *      then deploy account.html/account.js as usual via GitHub's upload
@@ -209,6 +218,18 @@ export default {
       const markMatch = url.pathname.match(/^\/api\/marks\/([^/]+)$/);
       if (markMatch) {
         return handleMarkItem(request, url, env, markMatch[1]);
+      }
+
+      // --- Pipeline (GitHub Actions) endpoints below: authenticated by a
+      // shared secret header, NOT the session cookie every route above
+      // uses — fetch_conditions.py runs server-to-server with no browser,
+      // so it can never hold a session. See requirePipelineToken below.
+      if (url.pathname === "/api/pipeline/locations" && request.method === "GET") {
+        return handlePipelineLocationsList(request, env);
+      }
+      const pipelineLocMatch = url.pathname.match(/^\/api\/pipeline\/locations\/([^/]+)$/);
+      if (pipelineLocMatch && request.method === "PUT") {
+        return handlePipelineLocationUpdate(request, env, pipelineLocMatch[1]);
       }
     } catch (err) {
       // Belt-and-braces: an uncaught exception anywhere above should still
@@ -1402,6 +1423,145 @@ function validateMarkInput(body, { partial }) {
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------------
+// Pipeline (GitHub Actions / fetch_conditions.py) endpoints — a
+// completely different trust model from everything above: no session, no
+// per-user scoping, just a shared secret this Worker and the GitHub
+// Actions secret both hold. This is what replaces fetch_conditions.py's
+// old direct read/write of config/locations.json — see that file's own
+// updated comments for the other half of this.
+//
+// SHAPE NOTE: the GET below deliberately mirrors the OLD config/
+// locations.json array shape as closely as possible (types[] nested
+// under each location, driveTo/driveBack/etc. spelled the same way) so
+// fetch_conditions.py's existing field-access code needed minimal
+// changes — only load_locations()/write back needed touching, not the
+// scoring logic itself.
+//
+// CRITICAL: each type entry includes BOTH `type` (the admin's own
+// display name — e.g. could be renamed, or a custom type like "SUP") AND
+// `behavesLike` (always exactly "Kayak" or "Land based"). This is why
+// both fields exist rather than just one: fetch_conditions.py's scoring
+// functions do a literal string comparison against "Kayak"/"Land based"
+// and know nothing about custom type names — they need `behavesLike`.
+// Everything ELSE (the output "Type" label users see, this row's own
+// dict key) has to keep using the display name `type`, since two
+// different custom types could share the same `behavesLike` (a "SUP"
+// and a "Kayak" both scoring like Kayak) — using `behavesLike` as a key
+// anywhere would silently collide those together.
+// ---------------------------------------------------------------------
+
+function requirePipelineToken(request, env) {
+  const token = request.headers.get("X-Pipeline-Token");
+  return !!token && !!env.PIPELINE_API_TOKEN && token === env.PIPELINE_API_TOKEN;
+}
+
+async function handlePipelineLocationsList(request, env) {
+  if (!requirePipelineToken(request, env)) {
+    return jsonResponse({ error: "Invalid or missing pipeline token." }, 401, env);
+  }
+
+  const { results: locationRows } = await env.DB.prepare(
+    "SELECT * FROM locations WHERE created_by_user_id = ? ORDER BY name ASC"
+  )
+    .bind(PUBLIC_USER_ID)
+    .all();
+
+  const { results: accessRows } = await env.DB.prepare(
+    `SELECT ula.location_id, ula.drive_to, ula.drive_back, ula.set_up, ula.pack_up, ula.time_to_spot, ula.time_from_spot,
+            t.name as type_name, t.behaves_like
+     FROM user_location_access ula
+     JOIN user_types t ON t.id = ula.type_id
+     WHERE ula.user_id = ?`
+  )
+    .bind(PUBLIC_USER_ID)
+    .all();
+  const typesByLocation = new Map();
+  for (const row of accessRows) {
+    if (!typesByLocation.has(row.location_id)) typesByLocation.set(row.location_id, []);
+    typesByLocation.get(row.location_id).push({
+      type: row.type_name, // display name — see file-level note above
+      behavesLike: row.behaves_like,
+      driveTo: row.drive_to,
+      driveBack: row.drive_back,
+      setUp: row.set_up,
+      packUp: row.pack_up,
+      timeToSpot: row.time_to_spot,
+      timeFromSpot: row.time_from_spot,
+    });
+  }
+
+  const { results: memberRows } = await env.DB.prepare(
+    `SELECT m.location_id, g.name as group_name
+     FROM user_location_group_members m
+     JOIN user_location_groups g ON g.id = m.group_id
+     WHERE m.user_id = ?`
+  )
+    .bind(PUBLIC_USER_ID)
+    .all();
+  const groupsByLocation = new Map();
+  for (const row of memberRows) {
+    if (!groupsByLocation.has(row.location_id)) groupsByLocation.set(row.location_id, []);
+    groupsByLocation.get(row.location_id).push(row.group_name);
+  }
+
+  const output = locationRows.map((loc) => {
+    const groups = groupsByLocation.get(loc.id) || [];
+    return {
+      id: loc.id,
+      name: loc.name,
+      shore: loc.shore,
+      tidal: true, // no per-location tidal:false override exists in this schema yet — every
+                   // Public location is currently a real tidal spot; carried over as a fixed
+                   // true rather than silently dropping the field fetch_conditions.py reads
+      locationGroup: groups[0] || null, // legacy singular field, kept for anything that still reads it
+      locationGroups: groups,
+      tideOffset: loc.tide_offset,
+      willyweatherId: loc.willyweather_id,
+      willyweatherName: loc.willyweather_name,
+      willyweatherRegion: loc.willyweather_region,
+      willyweatherState: loc.willyweather_state,
+      lat: loc.lat,
+      lng: loc.lng,
+      tideMaxObserved: loc.tide_max_observed,
+      types: typesByLocation.get(loc.id) || [],
+    };
+  });
+
+  return jsonResponse(output, 200, env);
+}
+
+async function handlePipelineLocationUpdate(request, env, id) {
+  if (!requirePipelineToken(request, env)) {
+    return jsonResponse({ error: "Invalid or missing pipeline token." }, 401, env);
+  }
+  const existing = await env.DB.prepare("SELECT * FROM locations WHERE id = ?").bind(id).first();
+  if (!existing) return jsonResponse({ error: "Location not found." }, 404, env);
+
+  const body = await readJsonBody(request);
+  const merged = {
+    willyweatherId: body.willyweatherId !== undefined ? body.willyweatherId : existing.willyweather_id,
+    willyweatherName: body.willyweatherName !== undefined ? body.willyweatherName : existing.willyweather_name,
+    willyweatherRegion: body.willyweatherRegion !== undefined ? body.willyweatherRegion : existing.willyweather_region,
+    willyweatherState: body.willyweatherState !== undefined ? body.willyweatherState : existing.willyweather_state,
+    lat: body.lat !== undefined ? body.lat : existing.lat,
+    lng: body.lng !== undefined ? body.lng : existing.lng,
+    tideMaxObserved: body.tideMaxObserved !== undefined ? body.tideMaxObserved : existing.tide_max_observed,
+  };
+  await env.DB.prepare(
+    `UPDATE locations SET willyweather_id=?, willyweather_name=?, willyweather_region=?, willyweather_state=?,
+                           lat=?, lng=?, tide_max_observed=?
+     WHERE id = ?`
+  )
+    .bind(
+      merged.willyweatherId, merged.willyweatherName, merged.willyweatherRegion, merged.willyweatherState,
+      merged.lat, merged.lng, merged.tideMaxObserved, id
+    )
+    .run();
+
+  return jsonResponse({ id, ...merged }, 200, env);
 }
 
 // ---------------------------------------------------------------------
