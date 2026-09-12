@@ -73,6 +73,11 @@ CREATE TABLE IF NOT EXISTS locations (
   shore TEXT,                       -- compass shore-facing direction, e.g. "NW" — feeds Land Based's wind-only shore-angle scoring
   tide_offset REAL,
   tide_max_observed REAL,
+  tidal INTEGER NOT NULL DEFAULT 1, -- 0/1 — strips tide/current data at the scoring source for
+                                     -- inland rivers/lakes regardless of what the tide/marine
+                                     -- APIs return for that coordinate; confirmed against live
+                                     -- data (Metung, VIC) rather than assumed — missed in the
+                                     -- first pass of this schema
   created_at INTEGER NOT NULL
 );
 
@@ -118,6 +123,11 @@ CREATE TABLE IF NOT EXISTS user_location_access (
   pack_up TEXT NOT NULL DEFAULT '00:00',
   time_to_spot TEXT NOT NULL DEFAULT '00:00',
   time_from_spot TEXT NOT NULL DEFAULT '00:00',
+  min_tide_height REAL,             -- nullable — the boat-ramp-access threshold line drawn
+                                     -- on this type's own chart (see README's "Boat ramp
+                                     -- access height"); confirmed against live data (Lang
+                                     -- Lang's Kayak entry) rather than assumed — missed in
+                                     -- the first pass of this schema, same as `tidal` above
   created_at INTEGER NOT NULL,
   UNIQUE (user_id, location_id, type_id)
 );
