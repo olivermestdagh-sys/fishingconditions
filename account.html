@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Olie's Kayak and Surf Fishing Conditions – Account</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Olie's Kayak and Surf Fishing Conditions</h1>
+  <div id="status" class="updated">Loading…</div>
+</header>
+
+<nav class="tabnav">
+  <a href="index.html">Week Ahead</a>
+  <a href="conditions.html">Location</a>
+  <a href="live.html">Live</a>
+  <a href="sync.html">Sync</a>
+  <a href="locations.html">Settings</a>
+  <a href="account.html" class="active">Account</a>
+</nav>
+
+<main>
+
+  <!--
+    Everything on this page is about a SIGNED-IN user's own private data —
+    it has nothing to do with (and never writes to) config/locations.json,
+    the shared list the free site scores conditions for on every other
+    page. Signed out, this page shows nothing but a sign-in button; there
+    is deliberately no "preview" of what a signed-in account looks like.
+  -->
+
+  <section id="signedOutCard" class="summary-card">
+    <div class="summary-title" style="margin-bottom:6px;">Sign in</div>
+    <p class="footnote" style="margin:0 0 12px;text-align:left;">
+      Sign in with Google to save your own locations and choose how often they're checked.
+      This is separate from the tracked locations shown on the other pages.
+    </p>
+    <button id="btnSignIn" class="btn-primary">Sign in with Google</button>
+  </section>
+
+  <section id="signedInCard" class="summary-card" style="display:none;">
+    <div class="summary-title" style="margin-bottom:6px;">Signed in</div>
+    <p class="footnote" id="whoAmI" style="margin:0 0 12px;text-align:left;"></p>
+    <button id="btnSignOut" class="btn-secondary">Sign out</button>
+  </section>
+
+  <section id="settingsSection" class="summary-card" style="display:none;">
+    <div class="summary-title" style="margin-bottom:6px;">Check frequency</div>
+    <p class="footnote" style="margin:0 0 12px;text-align:left;">
+      How often your own locations below get checked, and the daily window to check them in.
+    </p>
+    <div class="filter-row" style="margin-bottom:10px;">
+      <div style="flex:1;min-width:160px;">
+        <label for="checkFrequency">Check every (minutes)</label>
+        <input type="number" id="checkFrequency" min="15" max="1440" step="15" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+      </div>
+      <div style="flex:1;min-width:120px;">
+        <label for="windowStart">Active from</label>
+        <input type="time" id="windowStart" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+      </div>
+      <div style="flex:1;min-width:120px;">
+        <label for="windowEnd">Active until</label>
+        <input type="time" id="windowEnd" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+      </div>
+    </div>
+    <button id="btnSaveSettings" class="btn-primary">Save</button>
+    <div id="settingsStatus" style="margin-top:10px;font-size:0.85rem;"></div>
+  </section>
+
+  <section id="locationsSection" class="table-section" style="display:none;">
+    <h2>My locations</h2>
+    <p class="footnote" style="margin:0 0 12px;text-align:left;">
+      Each row saves independently — Save on a row updates just that location, Delete removes it immediately.
+    </p>
+    <div id="myLocationsList"></div>
+    <button id="btnAddLocation" class="btn-secondary" style="margin-top:10px;">+ Add location</button>
+  </section>
+
+  <footer class="footnote">
+    Data from <a href="https://www.willyweather.com.au/" target="_blank" rel="noopener">WillyWeather</a>.
+  </footer>
+</main>
+
+<script src="charts.js"></script>
+<script src="account.js"></script>
+</body>
+</html>
