@@ -214,12 +214,12 @@ somewhere else. This needs:
 
 1. **Your device's current GPS position** — requested the same way the
    Live page does, with a manual fallback if it's denied.
-2. **A Google Routes API key**, kept in its own `config/settings.json` —
-   separate from the site's actual code, so it survives untouched whenever
-   `week.js` gets updated. Edit that file directly on GitHub
-   (there's no Settings-page form for it) with:
-   ```json
-   { "googleRoutesApiKey": "your-key-here" }
+2. **A Google Routes API key**, stored in D1 (`users.google_routes_api_key`
+   on the Public row) rather than a config file — there's no Settings-page
+   form for it (it rarely changes), so setting or changing it means a
+   direct D1 console `UPDATE`:
+   ```sql
+   UPDATE users SET google_routes_api_key = 'your-key-here' WHERE id = 'public';
    ```
    To get a key: [console.cloud.google.com](https://console.cloud.google.com/) →
    create a project → **enable billing** (required even for free-tier
@@ -483,9 +483,11 @@ this restriction — nothing extra is drawn.
   id cache now — don't be surprised to see `willyweatherId`/`willyweatherName` fields
   appear on entries you never typed in yourself; that's the pipeline caching what it
   resolved, not a bug
-- `config/settings.json` — API keys used client-side (currently just the
-  Google Routes API key) — kept separate from the site's code so it's
-  never overwritten by a code update; edit it from the Settings page
+- `config/settings.json` — **orphaned, safe to delete.** Used to hold the
+  Google Routes API key and home address; both now live in D1
+  (`users.google_routes_api_key`/`home_lat`/`home_lng`) and are served
+  through `GET /api/public/settings` instead. Nothing reads or writes
+  this file any more.
 - `.github/workflows/update.yml` — the schedule that runs the fetch script; commits
   both `data/conditions.json` and `config/locations.json` now (the latter for the id
   cache above)
@@ -671,11 +673,11 @@ that piece's own legacy default for whichever's still blank, rather than
 exporting a broken `<sym>`.
 
 **Displaying marks on the map**: the Location and Live tab maps both plot
-every mark in `data/marks.json` (see `loadAndRenderMarks` in `charts.js`),
-gated behind having a GitHub connection set up on the Settings tab — same
-"don't clutter the map for random public visitors, but not real access
-control" caveat as the rest of this site's GitHub-gated features (the file
-itself is still a plain public URL). Each mark's **shape and colour** come
+every mark (see `loadAndRenderMarks` in `charts.js`), gated behind Admin
+sign-in (`cachedIsAdmin`) — same "don't clutter the map for random public
+visitors, but not real access control" caveat as before (`GET
+/api/public/marks` is itself unauthenticated, same as the old static file
+was). Each mark's **shape and colour** come
 from its resolved Mark Format (see "Mark Formats" above — species' own
 assignment wins over its Mark Type's), the exact same resolution the
 Lowrance/Garmin export uses, so the map stays visually consistent with
@@ -705,8 +707,8 @@ that actually is:
   it, same graceful-degrade as everywhere else this site touches GPS.
 
 **Edit, Copy, and Delete** buttons sit at the bottom of the popup, gated
-behind having a GitHub connection (same as everywhere else that writes to
-this repo) — Edit swaps the popup into the same form `startNewMarkEntry`
+behind Admin sign-in (same as everywhere else that edits data on this
+site now) — Edit swaps the popup into the same form `startNewMarkEntry`
 uses for a brand-new mark, Save/Cancel working exactly the same way.
 **Copy** starts a brand-new, unsaved mark at the SAME location, with
 every applicable field cloned from the original — species, all catch
@@ -884,9 +886,9 @@ unnoticed for as long as they did) — every Format's exact text is a
 deliberate, once-made choice on the Settings tab, not derived at export
 time.
 
-Gated behind the same GitHub connection as everything else that writes to
-this repo (see "Editing locations from the site itself" below) — connect
-from Settings first.
+Gated behind Admin sign-in, same as everything else that edits data on
+this site now (see "User accounts" below) — sign in from the Account
+tab first.
 
 ## Auto-filling Weather/Tide/Barometer/Temperature/Wind on a mark
 
@@ -973,67 +975,19 @@ browser console explaining why. Worth keeping an eye on the first few
 marks created after this ships, just to confirm Tide Condition is coming
 through as expected.
 
-## Editing locations from the site itself
+## Editing locations from the site itself (historical — fully obsolete)
 
-**This section is now outdated** — Location Groups, Fishing Mark Lists,
-Locations itself, marks, and Sync have all moved off the GitHub-token
-flow described below during the v2 migration (see "User accounts"
-further down for the current, accurate picture). All that's actually
-left on the GitHub token now: the Home-address feature and the "Refresh
-data now" button. What's NOT true any more: "Save changes"/"Save &
-refresh data now" as one combined button (Locations now saves every
-field immediately, and refreshing is its own separate button), and
-GitHub write access being needed to edit Locations/Groups/Mark
-Lists/marks/Sync at all — that's Google Admin sign-in now (Account tab).
-
-There's now a **Locations** tab that lets you view and edit `config/locations.json`
-without going into GitHub's file editor. Since this is a static site with no server,
-saving works by committing directly to your repo from your browser — which needs a
-GitHub token with permission to do that.
-
-**Every section on this tab is foldable** — click any heading (GitHub
-connection, Location Groups, Fishing Mark Lists, Locations, and each of
-Fishing Mark Lists' own eleven sub-lists) to show or hide its content. State
-is remembered per section (localStorage), so folding away what you're not
-using stays folded next time — this page's own list of settings keeps
-growing, and most visits only need one or two of these open at once.
-
-**One-time setup:**
-
-1. On GitHub: your profile photo (top right) → **Settings** → **Developer settings**
-   (bottom of the left sidebar) → **Personal access tokens** → **Fine-grained tokens**
-   → **Generate new token**.
-2. Give it a name (e.g. "Kayak site locations editor"), set an expiration (90 days is
-   fine — you'll just regenerate it when it lapses).
-3. **Repository access**: "Only select repositories" → choose this repo. Don't grant
-   access to your other repos.
-4. **Permissions** → **Repository permissions** → set **Contents** to **Read and write**.
-   If you also want the "Save & refresh data now" button to work, also set **Actions**
-   to **Read and write**.
-5. Generate the token, copy it (you won't see it again).
-6. On the site's Locations tab: enter your GitHub username, this repo's name, and paste
-   the token in, then "Save connection". It's stored only in your browser's local
-   storage — never sent anywhere except directly to GitHub's API.
-
-Clicking "Save connection" actually checks the token against GitHub before doing
-anything else — a real API call (confirming both that it's valid and that it has
-**write** access to this repo specifically), not just "is something typed into the
-box". Everything below the connection card (Location Groups, Fishing Mark Lists,
-Locations) only ever shows once that check passes — a wrong, expired, or read-only
-token leaves the rest of the page hidden with a clear message instead of showing
-sections whose Save buttons would just fail. The same check runs again on every page
-load for whatever connection's already saved, so a token that's since expired or been
-revoked correctly hides everything again rather than leaving the page looking usable.
-
-After that, edit/add/remove locations on that tab and click **Save changes** (or
-**Save & refresh data now** to also trigger an immediate data pull instead of waiting
-for the next scheduled run).
-
-**If you ever want to revoke access**: either click "Forget token" on the site (clears
-it from that device only, and immediately hides every section below the connection
-card again), or delete/revoke the token itself from GitHub's Developer settings page
-(immediately invalidates it everywhere — the next page load's own check will notice
-and hide those sections here too).
+**No GitHub token is used anywhere on this site any more.** This entire
+section described a GitHub Personal Access Token flow (create one on
+GitHub, paste it into a "GitHub connection" card, it gated Locations/
+Groups/Mark Lists/marks/Sync/Home-address/Refresh) that has been fully
+retired across the v2 migration — see "User accounts" below for the
+complete, current picture. Every one of those features now runs on
+Google Admin sign-in (Account tab) instead; the last two holdouts (Home
+address, "Refresh data now") were migrated in the same round that also
+found and fixed a real bug — see "A serious bug, found and fixed" further
+down. There is no GitHub connection card left on the Settings page, and
+creating a token for this site serves no purpose any more.
 
 ## User accounts (optional, separate backend)
 
@@ -1137,11 +1091,11 @@ never counting anything inherited from Public's set.
     location) — the old "+ Add location" blank-row button is gone,
     since D1's `locations.lat`/`lng` are `NOT NULL` and that button
     never had coordinates to give it.
-  - The GitHub connection card's job has shrunk to just two things:
-    setting a Home address (still `config/settings.json`, untouched by
-    any of this) and the "Refresh data now" button (a GitHub Actions
-    workflow-dispatch call — inherently a GitHub capability, kept
-    separate from Admin sign-in on purpose).
+  - The GitHub connection card has been removed from the Settings page
+    entirely (see "Home address and Refresh data now" further down) —
+    at the time this specific fix shipped, it had briefly shrunk to just
+    Home address and "Refresh data now" before those two were migrated
+    too.
 
   **A real bug fixed along the way**: `packUp` updates via
   `PUT /api/tracked-locations/:id` had silently never applied since
@@ -1347,6 +1301,66 @@ there before — these are genuine cross-origin Worker calls now, not
 same-origin static files, so a real network failure is a more realistic
 possibility than it used to be, and it should degrade gracefully rather
 than throw uncaught.
+
+### Home address and Refresh data now — the GitHub token retires entirely
+
+The last two features on this project that needed a GitHub token in the
+browser are now off it. The "GitHub connection" card is gone from the
+Settings page entirely — there is nothing left on this site that needs
+a GitHub personal access token stored in localStorage.
+
+- **Home address**: `users.home_lat`/`home_lng`/`google_routes_api_key`
+  (`schema-v2.sql`) hold what `config/settings.json` used to. `GET
+  /api/public/settings` serves it back out publicly and unauthenticated
+  — the same trust model the static file always had (the Routes API key
+  was always meant to be used client-side, protected by an HTTP-referrer
+  restriction in Google Cloud Console, not by secrecy). `PUT
+  /api/admin/home-location` is Admin-only, checked directly against the
+  session's role rather than the usual `?userId=` pattern — there's no
+  "act as yourself" case that makes sense for a single, site-wide address.
+  `week.js`/`live.js`/`locationsadmin.js` all now read from the live
+  endpoint instead of the static file.
+- **Refresh data now**: `POST /api/admin/refresh-data-now` — Admin-only,
+  and the Worker now holds its own GitHub token (`GH_ACTIONS_TOKEN`, a
+  new secret, scoped to Actions:write only — deliberately narrower than
+  the old browser-held token, which also needed Contents:write) and
+  makes the workflow-dispatch call server-side. No GitHub credential of
+  any kind reaches the browser for this any more.
+
+**Verified**: a real headless-browser test confirmed the connection
+card is completely absent from the DOM, `saveHomeLocation` posts the
+right body to the new endpoint with no GitHub auth header at all, and
+`onRefreshDataNow` triggers the server-side dispatch the same way.
+
+### A serious bug, found and fixed, from an earlier round
+
+While testing this round, `locations.html` failed to load at all — a
+real `SyntaxError: Identifier 'USER_BACKEND_URL' has already been
+declared`. Both `charts.js` and `locationsadmin.js` had their own
+top-level `const USER_BACKEND_URL` declaration; `locations.html` loads
+both. A duplicate top-level `const` across two `<script>` tags sharing
+one global scope isn't a harmless redeclaration — it's a fatal syntax
+error that stops the WHOLE second script from running at all, not just
+the duplicated line.
+
+This had been silently broken since the "Add as permanent location" fix
+added `USER_BACKEND_URL` to `charts.js` — meaning **`locations.html` (the
+entire Settings page) and `account.html` (the entire Account page) have
+been completely non-functional** since that round shipped, not just
+whatever this round happened to touch. It went undetected across two
+full rounds because neither round's own tests happened to load
+`locations.html`/`account.html` as a real combined page (each tested
+`charts.js` alongside only the ONE other file each round actually
+changed, never both files that turned out to collide). Fixed by removing
+the duplicate declarations from `locationsadmin.js` and `account.js`,
+keeping the single one in `charts.js` (which loads first on every page
+that needs it) as the only source. Re-verified both pages load cleanly,
+zero JS errors, with a real page-load test this time.
+
+**If you deployed anything between the "Add as permanent location" fix
+and this round, `locations.html` and `account.html` were broken on your
+live site for that whole window** — worth confirming both pages actually
+work again once this deploys.
 
 ## Troubleshooting
 

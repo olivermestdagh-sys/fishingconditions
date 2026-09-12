@@ -1,32 +1,29 @@
-// GITHUB_API, FILE_PATH, BRANCH, getConnection, and utf8ToBase64 now live
-// in charts.js (loaded before this file) — the Location tab's own "Add as
-// permanent location" button (see app.js) needed the same GitHub
-// read/write plumbing this file already had, so they're shared rather
-// than duplicated. GROUPS_FILE_PATH and WORKFLOW_FILE stay here — nothing
-// outside this Settings page touches location GROUPS or triggers a data
-// refresh.
+// utf8ToBase64 lives in charts.js (loaded before this file) — no longer
+// used here (nothing on this page commits to GitHub any more), left
+// there in case another feature needs it later. GROUPS_FILE_PATH stays
+// here only as a comment anchor, same reasoning as before.
 const GROUPS_FILE_PATH = "config/location_groups.json"; // no longer read/written by
                           // this file (see "v2: Location Groups" below) —
                           // kept only as a comment anchor; GROUPS_FILE_PATH
                           // itself is now unused dead code, left rather than
                           // hunting down whether anything else references it
-const SETTINGS_FILE_PATH = "config/settings.json";
-const WORKFLOW_FILE = "update.yml";
 
-// v2 user-backend Worker — same deployed URL as account.js's own
-// USER_BACKEND_URL constant (duplicated here rather than sharing a single
-// source of truth across the two files; a genuine "one shared constants
-// file" refactor is a reasonable future cleanup, not done this round).
-// Location Groups (below) is the only section on this page wired to it so
-// far — Mark Lists and Locations still save via the GitHub token path.
-const USER_BACKEND_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev";
+// v2 user-backend Worker — same URL charts.js's own USER_BACKEND_URL
+// declares (loaded before this file on every page that needs it); no
+// longer declared here too — a duplicate top-level `const` of the same
+// name across two scripts sharing one global scope is a fatal
+// SyntaxError, not a harmless redeclaration, and it silently broke this
+// entire file for a while (see README's "A serious bug, found and fixed"
+// note) until caught by a real page-load test.
 
-// Home address — a single lat/lng, stored in config/settings.json
-// alongside googleRoutesApiKey (NOT config/locations.json; it isn't a
-// fishing location, doesn't need a shore/type/tide config, and shouldn't
-// show up in anything that lists "locations"). Set via the map ("Add
-// Home" button below), read once on load so its pin can show immediately
-// if already set — see loadHomeLocation/saveHomeLocation.
+// Home address — a single site-wide lat/lng, now stored on Public's own
+// D1 row (users.home_lat/home_lng — see schema-v2.sql) alongside
+// google_routes_api_key, rather than config/settings.json. Set via the
+// map ("Add Home" button below), read once on load so its pin can show
+// immediately if already set — see loadHomeLocation/saveHomeLocation.
+// This is the LAST piece of this page that used to need the GitHub
+// token — see README's "Home address and Refresh data now" section for
+// the full story of what replaced it and why.
 let homeLat = null;
 let homeLng = null;
 
@@ -188,62 +185,7 @@ function formatHM(h, m) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-// Tracks whether the CURRENTLY saved owner/repo/token actually work — set
-// by verifyGithubToken below, checked before showing any section past the
-// connection card itself. Not just "is there a non-empty string sitting
-// in localStorage" (all onConnect ever checked before this existed) —
-// every section below is genuinely unusable without a working, WRITE-
-// capable connection (every one of them ends in a Save button that would
-// just fail), so there's no reason for the page to look editable when
-// it isn't.
-let connectionVerified = false;
 
-/**
- * Confirms a given owner/repo/token combination is real and can actually
- * WRITE to that repo — a single cheap GET, not a test write. GitHub's own
- * repo response includes a `permissions` object for the token making the
- * request (when it's authenticated with access to the repo), showing
- * `push` (write) alongside `pull` (read) — checked explicitly rather than
- * just trusting a 200 response, since a token scoped read-only would still
- * get one, then fail every Save button on this page anyway. Returns false
- * (never throws) for a missing conn, a bad/expired token (401), a repo
- * name that doesn't exist or isn't visible to this token (404), or any
- * network failure.
- */
-async function verifyGithubToken(conn) {
-  if (!conn || !conn.owner || !conn.repo || !conn.token) return false;
-  try {
-    const res = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}`, {
-      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
-    });
-    if (!res.ok) return false;
-    const json = await res.json();
-    return !!(json.permissions && json.permissions.push);
-  } catch (err) {
-    console.error("Token verification failed:", err);
-    return false;
-  }
-}
-
-function hideConnectedSections() {
-  // groupsSection, markListsSection, and locationsSection are deliberately
-  // NOT included any more — all three are gated on Admin sign-in
-  // (checkAdmin()) independent of the GitHub connection, and manage their
-  // own visibility entirely inside their own load functions. Nothing is
-  // left to hide here any more, but the function stays (called from the
-  // GitHub-token-failure branch in init()) in case a future GitHub-only
-  // section needs the same treatment.
-}
-
-/** Runs what's still GitHub-token-gated: loadLocationCoords (a public,
- * unauthenticated read in practice, but historically bundled here) and
- * loadHomeLocation (config/settings.json, unrelated to the Locations
- * model). Locations itself, Location Groups, and Fishing Mark Lists are
- * deliberately NOT among these any more (see init() above); all three
- * load independently of whether a GitHub connection exists at all. */
-async function loadAllConnectedSections() {
-  await Promise.all([loadLocationCoords(), loadHomeLocation()]);
-}
 
 /**
  * Makes a whole <section>'s content foldable — automatically, without
@@ -329,23 +271,10 @@ function setSaveStatus(text, isError) {
 }
 
 async function init() {
-  const conn = getConnection();
-  if (conn) {
-    document.getElementById("ghOwner").value = conn.owner || "";
-    document.getElementById("ghRepo").value = conn.repo || "";
-    document.getElementById("ghToken").value = conn.token || "";
-  }
-
-  document.getElementById("btnConnect").addEventListener("click", onConnect);
-  document.getElementById("btnDisconnect").addEventListener("click", onDisconnect);
-
   // Every top-level section on this page, foldable — see makeCollapsible's
-  // own comment on why. Connection stays open by default (it's the entry
-  // point; there's nothing to hide it behind), the other three start
-  // folded — first-time visitors, or a repo with nothing configured in one
-  // of them yet, get a shorter page by default rather than three empty-
-  // looking sections to scroll past.
-  makeCollapsible(document.getElementById("connectionCard"), "settingsCollapsed:connection", false);
+  // own comment on why. All start folded now that there's no separate
+  // "connection" entry point to leave open by default — Admin sign-in
+  // (Account tab) is the only gate this whole page has left.
   makeCollapsible(document.getElementById("groupsSection"), "settingsCollapsed:groups", true);
   makeCollapsible(document.getElementById("markListsSection"), "settingsCollapsed:markLists", true);
   makeCollapsible(document.getElementById("locationsSection"), "settingsCollapsed:locations", true);
@@ -372,63 +301,28 @@ async function init() {
   document.getElementById("btnAddMarkShapeFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Shape Format", "newMarkShapeFormatInput"));
   document.getElementById("btnAddMarkColorFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Colour Format", "newMarkColorFormatInput"));
 
-  // Location Groups AND Fishing Mark Lists: both independent of the GitHub
-  // connection below entirely — gated on Google Admin sign-in instead, via
-  // the SAME checkAdmin() call (one sign-in check, not two). Runs
-  // regardless of what the GitHub token check further down finds.
-  // Location Groups, Fishing Mark Lists, AND Locations itself: all three
-  // independent of the GitHub connection below entirely now — gated on
-  // Google Admin sign-in instead, via the SAME checkAdmin() call. Runs
-  // regardless of what the GitHub token check further down finds.
+  // Everything on this page is now gated on ONE thing: Google Admin
+  // sign-in (Account tab) — Location Groups, Fishing Mark Lists,
+  // Locations, Home address, and the "Refresh data now" trigger. The
+  // GitHub-connection concept that used to gate Home address/Refresh
+  // separately is gone entirely — see README's "Home address and Refresh
+  // data now" section for what replaced it (a Worker-held GitHub token,
+  // never touching the browser, plus two new Admin-only endpoints).
   adminUser = await checkAdmin();
-  await Promise.all([loadLocationGroups(), loadMarkLists(), loadLocations()]);
-
-  // What's left behind the GitHub token now: triggering an immediate data
-  // refresh (onRefreshDataNow, a GitHub Actions workflow-dispatch call —
-  // inherently a GitHub capability, not a Locations-data one) and the Home
-  // address (still saved to config/settings.json via GitHub commit,
-  // unrelated to the Locations model entirely — see saveHomeLocation).
-  connectionVerified = await verifyGithubToken(conn);
-  if (!connectionVerified) {
-    hideConnectedSections();
-    if (conn) {
-      setStatus("That token isn't working — check it's still valid and has write access to this repo, then reconnect below.", true);
-    } else {
-      setStatus("Connect to GitHub above to set a home address or trigger an immediate data refresh.", false);
-    }
-    return;
-  }
-
-  await loadAllConnectedSections();
+  await Promise.all([loadLocationGroups(), loadMarkLists(), loadLocations(), loadLocationCoords(), loadHomeLocation()]);
 }
 
 /**
- * Reads config/settings.json once on load, purely to show the home pin
- * immediately if one's already set — NOT tracking a sha here the way
- * loadLocationGroups does for GROUPS_FILE_PATH, since this page never
- * edits any OTHER field in settings.json (googleRoutesApiKey) and
- * saveHomeLocation below re-reads the file fresh immediately before
- * writing anyway, same "re-check sha right before a write" reasoning as
- * every other save on this page. A missing file, or no connection yet,
- * just means no home is set yet — not an error worth surfacing.
+ * Reads Public's own home_lat/home_lng from D1 (GET /api/public/settings,
+ * unauthenticated — same trust model config/settings.json always had)
+ * once on load, purely to show the home pin immediately if one's already
+ * set. A missing/failed read just means no home is set yet — not an
+ * error worth surfacing, same as before.
  */
 async function loadHomeLocation() {
   try {
-    const conn = getConnection();
-    let settings = {};
-    if (conn && conn.owner && conn.repo && conn.token) {
-      const res = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${SETTINGS_FILE_PATH}?ref=${BRANCH}`, {
-        headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
-      });
-      if (res.ok) {
-        const json = await res.json();
-        const decoded = decodeURIComponent(escape(atob(json.content.replace(/\n/g, ""))));
-        settings = JSON.parse(decoded);
-      }
-    } else {
-      const res = await fetch("config/settings.json", { cache: "no-store" });
-      if (res.ok) settings = await res.json();
-    }
+    const res = await fetch(`${USER_BACKEND_URL}/api/public/settings`, { cache: "no-store" });
+    const settings = res.ok ? await res.json() : {};
     homeLat = settings.homeLat ?? null;
     homeLng = settings.homeLng ?? null;
   } catch (err) {
@@ -1205,6 +1099,7 @@ async function loadLocations() {
     document.getElementById("locationsSection").style.display = "block";
     document.getElementById("locationsSignedOut").style.display = "block";
     document.getElementById("locationsEditor").style.display = "none";
+    setStatus("Sign in as Admin (Account tab) to manage settings.", false);
     return;
   }
 
@@ -1522,46 +1417,24 @@ async function onSettingsMapClick(lat, lng) {
  * the whole file back. Updates the map immediately on success so the
  * house pin appears without needing a reload.
  */
+/**
+ * Writes the clicked point to D1 (Public's home_lat/home_lng — PUT
+ * /api/admin/home-location, Admin-only) rather than committing to
+ * config/settings.json. Updates the map immediately on success so the
+ * house pin appears without needing a reload.
+ */
 async function saveHomeLocation(lat, lng) {
-  const conn = getConnection();
-  if (!conn) {
-    alert("Connect to GitHub first (above) before setting a home address.");
-    return;
-  }
   try {
-    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${SETTINGS_FILE_PATH}?ref=${BRANCH}`, {
-      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
-    });
-    let currentSettings = {};
-    let sha = null;
-    if (getRes.status === 404) {
-      sha = null; // creating the file for the first time
-    } else if (!getRes.ok) {
-      throw new Error(`Could not read current settings file (${getRes.status})`);
-    } else {
-      const json = await getRes.json();
-      sha = json.sha;
-      const decoded = decodeURIComponent(escape(atob(json.content.replace(/\n/g, ""))));
-      currentSettings = JSON.parse(decoded);
-    }
-
-    currentSettings.homeLat = lat;
-    currentSettings.homeLng = lng;
-
-    const content = JSON.stringify(currentSettings, null, 2) + "\n";
-    const body = { message: "Set home location via site", content: utf8ToBase64(content), branch: BRANCH };
-    if (sha) body.sha = sha;
-
-    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${SETTINGS_FILE_PATH}`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/admin/home-location`, {
       method: "PUT",
-      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lat, lng }),
     });
-    if (!putRes.ok) {
-      const errBody = await putRes.json().catch(() => ({}));
-      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
     }
-
     homeLat = lat;
     homeLng = lng;
     renderSettingsLocationMap();
@@ -2214,36 +2087,9 @@ function wireRowListeners(list) {
   });
 }
 
-async function onConnect() {
-  const owner = document.getElementById("ghOwner").value.trim();
-  const repo = document.getElementById("ghRepo").value.trim();
-  const token = document.getElementById("ghToken").value.trim();
-  if (!owner || !repo || !token) {
-    setStatus("Fill in username, repo, and token first", true);
-    return;
-  }
-  setStatus("Checking connection…", false);
-  const conn = { owner, repo, token };
-  connectionVerified = await verifyGithubToken(conn);
-  if (!connectionVerified) {
-    hideConnectedSections();
-    setStatus("Could not verify that token — check it's correct, still valid, and has write access to this repo.", true);
-    return;
-  }
-  localStorage.setItem("ghConnection", JSON.stringify(conn));
-  setStatus("Connected.", false);
-  await loadAllConnectedSections();
-}
-
-function onDisconnect() {
-  localStorage.removeItem("ghConnection");
-  document.getElementById("ghOwner").value = "";
-  document.getElementById("ghRepo").value = "";
-  document.getElementById("ghToken").value = "";
-  connectionVerified = false;
-  hideConnectedSections();
-  setStatus("Connect to GitHub above to set a home address or trigger an immediate data refresh.", false);
-}
+// onConnect/onDisconnect removed entirely — there's no GitHub connection
+// left on this page to manage. See README's "Home address and Refresh
+// data now" section for what replaced them.
 
 // validateLocations/onSave removed entirely — every field edit above now
 // saves immediately (or via createLocation/removeLocation/
@@ -2251,36 +2097,25 @@ function onDisconnect() {
 // there's nothing left to validate-then-batch-commit.
 
 /**
- * "Refresh data now" — all that's left of the old onSave(true) path.
- * Locations save themselves as you edit them now, so this button no
- * longer needs to save anything first; it just triggers the GitHub
- * Actions workflow immediately rather than waiting for the next
- * scheduled run. Still needs the GitHub connection above — triggering a
- * workflow run is inherently a GitHub Actions capability, not a
- * Locations-data one, so this is deliberately NOT gated on Admin sign-in
- * the way editing locations/groups/mark lists is.
+ * "Refresh data now" — triggers the site's GitHub Actions workflow
+ * immediately rather than waiting for the next scheduled run, via
+ * POST /api/admin/refresh-data-now. The Worker holds its own GitHub
+ * token (a secret, scoped to Actions:write only) and makes the actual
+ * dispatch call server-side — no GitHub token of any kind touches this
+ * browser any more. Admin-gated (checked server-side against the
+ * session's own role), matching everything else on this page now.
  */
 async function onRefreshDataNow() {
-  const conn = getConnection();
-  if (!conn) {
-    setSaveStatus("Connect to GitHub first (above) to trigger a refresh.", true);
-    return;
-  }
   setSaveStatus("Triggering data refresh…");
   try {
-    const dispatchRes = await fetch(
-      `${GITHUB_API}/repos/${conn.owner}/${conn.repo}/actions/workflows/${WORKFLOW_FILE}/dispatches`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${conn.token}`,
-          Accept: "application/vnd.github+json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ ref: BRANCH }),
-      }
-    );
-    if (!dispatchRes.ok) throw new Error(`GitHub returned ${dispatchRes.status}`);
+    const res = await fetch(`${USER_BACKEND_URL}/api/admin/refresh-data-now`, {
+      method: "POST",
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
     setSaveStatus("Refresh triggered — check the Actions tab, then the Conditions tab in a minute or two.");
   } catch (err) {
     console.error("Failed to trigger refresh:", err);

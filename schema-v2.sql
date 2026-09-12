@@ -37,6 +37,14 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT NOT NULL,
   name TEXT,
   role TEXT NOT NULL DEFAULT 'basic', -- 'admin' | 'basic' | 'public' (Public sentinel only)
+  home_lat REAL,                    -- ONLY meaningful on the Public sentinel row —
+  home_lng REAL,                    -- the site's own configured home address, used for
+                                     -- drive-time-to-home on the Live tab; Admin-only to set
+  google_routes_api_key TEXT,       -- ditto — the client-side Google Routes API key, same
+                                     -- security model as before (referrer-restricted in
+                                     -- Google Cloud Console, not secret-by-obscurity — this
+                                     -- is served back out through a public, unauthenticated
+                                     -- endpoint, same as it was a public static file before)
   created_at INTEGER NOT NULL
 );
 

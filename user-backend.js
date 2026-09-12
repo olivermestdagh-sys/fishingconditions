@@ -115,6 +115,17 @@
  *        GitHub Actions settings (Settings -> Secrets and variables ->
  *        Actions), alongside a new PIPELINE_WORKER_URL secret there set to
  *        this Worker's own URL. See the "Pipeline" section further down.
+ *      - GH_ACTIONS_TOKEN (Secret) — a GitHub Personal Access Token
+ *        (fine-grained, same repo, permissions -> Actions: Read and write,
+ *        nothing else — deliberately narrower than the old browser-held
+ *        token, which also needed Contents:write). This is what lets
+ *        "Refresh data now" (locationsadmin.js) trigger a workflow run
+ *        without any GitHub token ever touching the browser — the Worker
+ *        holds this one, server-side, instead. See "Admin-only endpoints"
+ *        further down.
+ *      - GH_REPO_OWNER (Text) — e.g. olivermestdagh-sys
+ *      - GH_REPO_NAME (Text) — e.g. fishingconditions
+ *      - GH_WORKFLOW_FILE (Text) — the workflow's filename, e.g. update.yml
  *      Save and Deploy again so the new bindings/secrets take effect.
  *   6. Paste this Worker's URL into account.js's USER_BACKEND_URL constant,
  *      then deploy account.html/account.js as usual via GitHub's upload
@@ -241,6 +252,25 @@ export default {
       }
       if (url.pathname === "/api/public/marks" && request.method === "GET") {
         return handlePublicMarks(env);
+      }
+      if (url.pathname === "/api/public/settings" && request.method === "GET") {
+        return handlePublicSettings(env);
+      }
+
+      // --- Admin-only endpoints below: not scoped by effective-user-id
+      // like the rest of this file — these always act on Public's own row
+      // (there's exactly one site-wide home address / refresh trigger, not
+      // a per-user concept), and require role === "admin" directly rather
+      // than going through resolveEffectiveUserId. See each handler's own
+      // comment for why.
+      if (url.pathname === "/api/admin/home-location" && request.method === "PUT") {
+        return handleAdminHomeLocation(request, env);
+      }
+      if (url.pathname === "/api/admin/refresh-data-now" && request.method === "POST") {
+        const user = await requireUser(request, env);
+        if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+        if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
+        return handleAdminRefreshDataNow(env);
       }
     } catch (err) {
       // Belt-and-braces: an uncaught exception anywhere above should still
@@ -1674,6 +1704,108 @@ async function handlePublicMarks(env) {
       "Cache-Control": "public, max-age=60",
     },
   });
+}
+
+/**
+ * Public counterpart to handlePublicMarkLists/handlePublicMarks above —
+ * this is what lets week.js/live.js/locationsadmin.js read the site's own
+ * home address and Google Routes API key LIVE from D1 instead of the
+ * static config/settings.json file they used to. Same trust model as
+ * before: the Routes API key was already sitting in a public, unauthenticated
+ * static file — it's meant to be used client-side and protected by an
+ * HTTP-referrer restriction in Google Cloud Console, not by secrecy, so
+ * serving it back out through an open endpoint changes nothing about its
+ * actual security. Read-only; there is no public write path.
+ */
+async function handlePublicSettings(env) {
+  const row = await env.DB.prepare("SELECT home_lat, home_lng, google_routes_api_key FROM users WHERE id = ?")
+    .bind(PUBLIC_USER_ID)
+    .first();
+  return new Response(
+    JSON.stringify({
+      homeLat: row ? row.home_lat : null,
+      homeLng: row ? row.home_lng : null,
+      googleRoutesApiKey: row ? row.google_routes_api_key : null,
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "public, max-age=60",
+      },
+    }
+  );
+}
+
+/**
+ * Sets the site's own home address (Public's home_lat/home_lng) —
+ * replaces locationsadmin.js's old saveHomeLocation, which committed to
+ * config/settings.json via the GitHub Contents API. Admin-only, checked
+ * directly against the session's own role rather than going through
+ * resolveEffectiveUserId/?userId= — there's no "act as yourself" case
+ * that makes sense here (a Basic user setting their OWN home address
+ * would do nothing; there is no per-user home address anywhere on this
+ * site, only the one site-wide value everyone's drive-time-to-home
+ * calculation on the Live tab actually uses).
+ */
+async function handleAdminHomeLocation(request, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
+
+  const body = await readJsonBody(request);
+  if (typeof body.lat !== "number" || typeof body.lng !== "number") {
+    return jsonResponse({ error: "lat and lng must both be numbers." }, 400, env);
+  }
+  await env.DB.prepare("UPDATE users SET home_lat = ?, home_lng = ? WHERE id = ?")
+    .bind(body.lat, body.lng, PUBLIC_USER_ID)
+    .run();
+  return jsonResponse({ homeLat: body.lat, homeLng: body.lng }, 200, env);
+}
+
+/**
+ * Triggers the site's GitHub Actions data-refresh workflow — replaces
+ * locationsadmin.js's old onRefreshDataNow, which called GitHub's
+ * workflow-dispatch API directly from the BROWSER using the same PAT
+ * stored in localStorage as everything else on the old GitHub-connection
+ * card. That PAT no longer needs to exist in the browser at all: this
+ * Worker holds its own GitHub token (GH_ACTIONS_TOKEN, scoped to Actions:
+ * write only — deliberately narrower than the old browser-held token,
+ * which also needed Contents:write for everything else that token used
+ * to do) as a secret, and makes the dispatch call server-side on the
+ * Admin session's behalf. Admin-only, same direct role check as
+ * handleAdminHomeLocation above, for the same reason.
+ */
+async function handleAdminRefreshDataNow(env) {
+  requireEnv(env, ["GH_ACTIONS_TOKEN", "GH_REPO_OWNER", "GH_REPO_NAME", "GH_WORKFLOW_FILE"]);
+  // NOTE: this function is only ever reached via the route above, which
+  // does not itself check requireUser/role — callers MUST check before
+  // calling it. Kept as a plain export-free helper rather than duplicating
+  // the auth check here since the one route above is its only caller.
+  try {
+    const dispatchRes = await fetch(
+      `https://api.github.com/repos/${env.GH_REPO_OWNER}/${env.GH_REPO_NAME}/actions/workflows/${env.GH_WORKFLOW_FILE}/dispatches`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.GH_ACTIONS_TOKEN}`,
+          Accept: "application/vnd.github+json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ref: "main" }),
+      }
+    );
+    if (!dispatchRes.ok) {
+      const text = await dispatchRes.text().catch(() => "");
+      console.error(`GitHub workflow dispatch returned ${dispatchRes.status}: ${text.slice(0, 300)}`);
+      return jsonResponse({ error: `GitHub returned ${dispatchRes.status}.` }, 502, env);
+    }
+    return jsonResponse({ triggered: true }, 200, env);
+  } catch (err) {
+    console.error("Failed to trigger workflow dispatch:", err);
+    return jsonResponse({ error: "Could not reach GitHub." }, 502, env);
+  }
 }
 
 // ---------------------------------------------------------------------

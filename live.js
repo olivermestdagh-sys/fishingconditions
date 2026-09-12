@@ -1,5 +1,10 @@
 const DATA_URL = "data/conditions.json";
-const SETTINGS_URL = "config/settings.json";
+const SETTINGS_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev/api/public/settings";
+// Points at the live, unauthenticated user-backend endpoint (D1, Public's
+// own row) rather than the static config/settings.json file it used to —
+// same migration pattern as MARK_LISTS_FILE_PATH/MARKS_FILE_PATH
+// (charts.js): same response shape ({googleRoutesApiKey, homeLat,
+// homeLng}), so nothing below this constant needed to change at all.
 const TIMINGS_STORAGE_KEY = "liveHomeTimings";
 
 // Same convention as week.js's own PIXELS_PER_HOUR — a genuinely
@@ -493,7 +498,7 @@ async function init() {
       homeLng = settings.homeLng ?? null;
     }
   } catch (err) {
-    console.error("Could not load settings.json:", err);
+    console.error("Could not load settings:", err);
   }
 
   let savedTimings = null;
