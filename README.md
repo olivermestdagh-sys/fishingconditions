@@ -975,6 +975,19 @@ through as expected.
 
 ## Editing locations from the site itself
 
+**This section is now partly outdated** — Location Groups, Fishing Mark
+Lists, and Locations itself all moved off the GitHub-token flow
+described below during the v2 migration (see "User accounts" further
+down for the current, accurate picture). What's still true here: the
+GitHub token itself, the Home-address feature, the "Refresh data now"
+button, and the fishing-marks/Sync features (still unmigrated — see
+"GPS fishing marks"/"Syncing marks" sections). What's NOT true any
+more: "Save changes"/"Save & refresh data now" as one combined
+button (Locations now saves every field immediately, and refreshing
+is its own separate button), and GitHub write access being needed to
+edit Locations/Groups/Mark Lists at all — that's Google Admin sign-in
+now (Account tab).
+
 There's now a **Locations** tab that lets you view and edit `config/locations.json`
 without going into GitHub's file editor. Since this is a static site with no server,
 saving works by committing directly to your repo from your browser — which needs a
@@ -1253,6 +1266,31 @@ cycle, and worth knowing if a change seems to not have landed yet.
 `config/mark_lists.json` itself is now orphaned the same way
 `config/location_groups.json` already was — nothing reads or writes it
 any more. Safe to delete from the repo whenever convenient.
+
+### "Add as permanent location" — fixed, and gated on Admin sign-in now
+
+The Location tab's preview feature used to commit a new entry straight
+to `config/locations.json` via the GitHub token (`saveNewLocationToGitHub`,
+`charts.js`) — a real bug once that file became a generated export (see
+"the pipeline is also cut over" above): the commit would succeed, then
+get silently overwritten by the next scheduled pipeline run within a
+few hours, since it was never actually added to D1 at all.
+
+Fixed by replacing it with `saveNewLocationToD1`, which POSTs through
+`/api/tracked-locations?userId=public` — the same endpoint Admin's own
+Locations page and `account.js` both use. The button's visibility check
+(`canEditLocations`, `app.js`) now reads a cached Admin-session flag
+(`cachedIsAdmin`, refreshed once per page load via `refreshAdminStatus()`
+— both in `charts.js`) instead of checking for a GitHub connection —
+the first place on this site where "signed in as Admin" replaces the
+GitHub token as the actual permission gate, rather than just being an
+option alongside it.
+
+**This is a narrow fix, not the broader migration.** Marks (adding/
+editing/deleting a catch or POI from the map) and the Sync page both
+still gate on the GitHub token exactly as before — those are separate,
+larger features that would need their own dedicated migration to move
+onto Admin-session gating, not something this fix touched.
 
 ## Troubleshooting
 

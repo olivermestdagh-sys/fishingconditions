@@ -3199,6 +3199,111 @@ document.addEventListener("DOMContentLoaded", () => {
   if (syncNavLink && !getConnection()) syncNavLink.style.display = "none";
 });
 
+// ---------------------------------------------------------------------
+// Admin-session gating — the newer alternative to getConnection() above.
+// Only "Add as permanent location" (app.js) uses this so far; every other
+// write-capable feature on this site (marks, Sync) still gates on the
+// GitHub token, same as it always has — those are a separate, larger
+// migration, not part of this one. Same USER_BACKEND_URL value as
+// account.js/locationsadmin.js each define locally (duplicated rather
+// than centralized — matches the existing convention across those two
+// files already).
+// ---------------------------------------------------------------------
+
+const USER_BACKEND_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev";
+
+let cachedIsAdmin = false; // refreshed once via refreshAdminStatus() at page
+                           // init (see app.js) — read synchronously
+                           // everywhere else (canEditLocations, app.js) so
+                           // every EXISTING call site (several of them
+                           // synchronous) needed zero restructuring into
+                           // async, at the cost of a small (one page-load)
+                           // staleness window: signing in/out on the
+                           // Account tab in another tab won't be reflected
+                           // here until this page's own next load.
+async function refreshAdminStatus() {
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/auth/me`, { credentials: "include" });
+    if (!res.ok) {
+      cachedIsAdmin = false;
+      return;
+    }
+    const user = await res.json();
+    cachedIsAdmin = user.role === "admin";
+  } catch (err) {
+    console.error("Admin status check failed:", err);
+    cachedIsAdmin = false;
+  }
+}
+
+/**
+ * Replaces saveNewLocationToGitHub for "Add as permanent location"
+ * (app.js) — POSTs through the same /api/tracked-locations endpoint
+ * Admin's own Locations page and account.js both use, as Public
+ * (?userId=public), rather than committing straight to
+ * config/locations.json. This is the actual bug fix: that file is now a
+ * generated EXPORT (see fetch_conditions.py's export_locations_json()) —
+ * a raw GitHub commit to it would have been silently overwritten by the
+ * next scheduled pipeline run within a few hours, since it was never
+ * actually added to D1 at all. Requires the caller to already know
+ * they're signed in as Admin (cachedIsAdmin) — checked here again anyway
+ * (server-side, via requireUser/role) since a stale client-side cache is
+ * never trusted for the actual permission, only for whether to show the
+ * button at all.
+ *
+ * newLoc is the same minimal shape onAddPreviewAsLocation (app.js) always
+ * built for the old GitHub path — name/shore/types (exactly one entry,
+ * this feature only ever offers a single Kayak-or-Land-based type, not
+ * several)/lat/lng/tidal/willyweatherId/Name/Region/State. Returns
+ * { success: true } or { success: false, error }, same contract the old
+ * function had, so app.js's own calling code needed no changes beyond the
+ * function name itself.
+ */
+async function saveNewLocationToD1(newLoc) {
+  try {
+    const typesRes = await fetch(`${USER_BACKEND_URL}/api/types?userId=public`, { credentials: "include" });
+    if (!typesRes.ok) throw new Error(`Could not load types (${typesRes.status})`);
+    const publicTypes = await typesRes.json();
+    const typeName = newLoc.types[0].type;
+    const existing = publicTypes.find((t) => t.name === typeName);
+
+    const body = {
+      name: newLoc.name,
+      lat: newLoc.lat,
+      lng: newLoc.lng,
+      shore: newLoc.shore,
+      tidal: newLoc.tidal,
+      willyweatherId: newLoc.willyweatherId,
+      willyweatherName: newLoc.willyweatherName,
+      willyweatherRegion: newLoc.willyweatherRegion,
+      willyweatherState: newLoc.willyweatherState,
+    };
+    if (existing) body.typeId = existing.id;
+    else {
+      // Shouldn't happen for Kayak/Land based specifically (seeded for
+      // Public in the very first migration) — falls back to defining it
+      // fresh rather than failing outright if it somehow comes up empty.
+      body.newTypeName = typeName;
+      body.newTypeBehavesLike = typeName;
+    }
+
+    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations?userId=public`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    return { success: true };
+  } catch (err) {
+    console.error("Failed to save new location:", err);
+    return { success: false, error: err.message };
+  }
+}
+
 function utf8ToBase64(str) {
   return btoa(unescape(encodeURIComponent(str)));
 }
@@ -3230,70 +3335,12 @@ function defaultTypeConfig(type) {
 }
 
 /**
- * Appends ONE new location object to config/locations.json on GitHub and
- * commits it directly — same GitHub Contents API read-sha/write pattern
- * locationsadmin.js's own onSave uses, just scoped to adding a single new
- * entry rather than overwriting a whole in-memory array (the Location tab,
- * unlike Settings, never loads the full locations list into memory, so
- * this reads the current file fresh right before writing rather than
- * trusting a copy that could be stale). Requires an existing GitHub
- * connection (see getConnection) — callers should check that BEFORE even
- * showing the option to save (see showAddPermanentButton, app.js), not
- * just before calling this.
- *
- * Blocks on an exact name collision (rather than silently creating a
- * confusing second entry with the same name — every page on this site
- * assumes location names are unique, e.g. locationKey()'s name::type
- * keying, the Settings map's marker-per-name grouping).
- *
- * Returns { success: true } or { success: false, error: "..." } — never
- * throws, so callers can show the error text directly without their own
- * try/catch.
+ * saveNewLocationToGitHub removed entirely — replaced by saveNewLocationToD1
+ * above, which POSTs through /api/tracked-locations?userId=public instead
+ * of committing straight to config/locations.json (now a generated export,
+ * not a source of truth — a raw commit here would have been silently
+ * overwritten within a few hours by the next scheduled pipeline run).
  */
-async function saveNewLocationToGitHub(newLoc) {
-  const conn = getConnection();
-  if (!conn || !conn.owner || !conn.repo || !conn.token) {
-    return { success: false, error: "Not connected to GitHub — connect from the Settings tab first." };
-  }
-  try {
-    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${FILE_PATH}?ref=${BRANCH}`, {
-      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
-    });
-    if (!getRes.ok) throw new Error(`Could not read current file (${getRes.status})`);
-    const getJson = await getRes.json();
-    const decoded = decodeURIComponent(escape(atob(getJson.content.replace(/\n/g, ""))));
-    const locations = JSON.parse(decoded);
-
-    if (locations.some((l) => l.name === newLoc.name)) {
-      return { success: false, error: `A location named "${newLoc.name}" already exists — edit it from Settings instead of adding a duplicate.` };
-    }
-
-    locations.push(newLoc);
-    const content = JSON.stringify(locations, null, 2) + "\n";
-    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${FILE_PATH}`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${conn.token}`,
-        Accept: "application/vnd.github+json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        message: `Add location "${newLoc.name}" from Location tab preview`,
-        content: utf8ToBase64(content),
-        sha: getJson.sha,
-        branch: BRANCH,
-      }),
-    });
-    if (!putRes.ok) {
-      const errBody = await putRes.json().catch(() => ({}));
-      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
-    }
-    return { success: true };
-  } catch (err) {
-    console.error("saveNewLocationToGitHub failed:", err);
-    return { success: false, error: err.message };
-  }
-}
 
 // --- GPS fishing marks (shared) ---------------------------------------------
 //
