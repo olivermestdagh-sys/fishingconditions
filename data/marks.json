@@ -27849,6 +27849,31 @@
       "waterDepth": 8,
       "windDirection": "WSW",
       "windSpeed": 4
+    },
+    {
+      "id": "m_1789179939913_7zajt",
+      "lat": -38.3049916,
+      "lng": 145.5174301,
+      "name": "Chels gummy",
+      "type": "Catch",
+      "dateTime": "2026-09-12 12:25:39",
+      "createdAt": "2026-09-12 12:26:31",
+      "source": "Manual",
+      "species": "Gummy Shark",
+      "weatherCondition": "Overcast",
+      "tideCondition": "Last Run In",
+      "waterCondition": "Murky",
+      "bait": "Squid",
+      "rig": "Paternoster",
+      "rod": "Ruvalus",
+      "size": 25,
+      "barometer": 1027,
+      "temperature": 17.1,
+      "waterTemperature": 14,
+      "waterDepth": 1.3,
+      "windDirection": "NW",
+      "windSpeed": 5,
+      "released": true
     }
   ]
 }
