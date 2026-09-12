@@ -374,9 +374,14 @@ async function handleMe(request, env) {
 }
 
 // ---------------------------------------------------------------------
-// Locations CRUD — every query is scoped by user_id, always. There is no
-// "admin" path here that can see across users; that's the whole point of
-// this table existing separately from config/locations.json.
+// v1 Locations CRUD (user_locations table) — DEPRECATED, superseded by
+// the v2 /api/tracked-locations endpoints below (same table Admin's own
+// Locations page and account.js's own "My locations" now both use).
+// Kept functional (still scoped correctly, still safe) rather than
+// deleted outright — nothing currently calls it, but removing working
+// code purely for tidiness isn't worth the risk/diff for a dead path
+// that costs nothing left running. Safe to delete in a future round once
+// confirmed nothing else depends on it.
 // ---------------------------------------------------------------------
 
 async function handleLocationsCollection(request, env) {
@@ -1626,7 +1631,28 @@ async function upsertUser(env, claims) {
   await env.DB.prepare("INSERT INTO users (id, google_sub, email, name, created_at) VALUES (?, ?, ?, ?, ?)")
     .bind(id, claims.sub, claims.email, claims.name || null, Date.now())
     .run();
+  await seedDefaultTypes(env, id);
   return { id, google_sub: claims.sub, email: claims.email, name: claims.name || null };
+}
+
+/**
+ * Every brand-new user gets their own Kayak/Land based user_types rows —
+ * without this, a new signed-in user's first location-add would have no
+ * types at all to pick from (account.js's own vocabulary is entirely
+ * per-user, same as Public's; nothing seeds it automatically otherwise).
+ * Uses INSERT OR IGNORE — harmless if ever called twice for the same
+ * user (e.g. a retry), since UNIQUE(user_id, name) would just reject the
+ * second attempt rather than error the whole request.
+ */
+async function seedDefaultTypes(env, userId) {
+  const now = Date.now();
+  for (const name of ["Kayak", "Land based"]) {
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO user_types (id, user_id, name, behaves_like, created_at) VALUES (?, ?, ?, ?, ?)"
+    )
+      .bind(crypto.randomUUID(), userId, name, name, now)
+      .run();
+  }
 }
 
 function decodeIdTokenPayload(idToken) {
