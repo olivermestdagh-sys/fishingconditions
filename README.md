@@ -975,18 +975,16 @@ through as expected.
 
 ## Editing locations from the site itself
 
-**This section is now partly outdated** — Location Groups, Fishing Mark
-Lists, and Locations itself all moved off the GitHub-token flow
-described below during the v2 migration (see "User accounts" further
-down for the current, accurate picture). What's still true here: the
-GitHub token itself, the Home-address feature, the "Refresh data now"
-button, and the fishing-marks/Sync features (still unmigrated — see
-"GPS fishing marks"/"Syncing marks" sections). What's NOT true any
-more: "Save changes"/"Save & refresh data now" as one combined
-button (Locations now saves every field immediately, and refreshing
-is its own separate button), and GitHub write access being needed to
-edit Locations/Groups/Mark Lists at all — that's Google Admin sign-in
-now (Account tab).
+**This section is now outdated** — Location Groups, Fishing Mark Lists,
+Locations itself, marks, and Sync have all moved off the GitHub-token
+flow described below during the v2 migration (see "User accounts"
+further down for the current, accurate picture). All that's actually
+left on the GitHub token now: the Home-address feature and the "Refresh
+data now" button. What's NOT true any more: "Save changes"/"Save &
+refresh data now" as one combined button (Locations now saves every
+field immediately, and refreshing is its own separate button), and
+GitHub write access being needed to edit Locations/Groups/Mark
+Lists/marks/Sync at all — that's Google Admin sign-in now (Account tab).
 
 There's now a **Locations** tab that lets you view and edit `config/locations.json`
 without going into GitHub's file editor. Since this is a static site with no server,
@@ -1286,11 +1284,69 @@ the first place on this site where "signed in as Admin" replaces the
 GitHub token as the actual permission gate, rather than just being an
 option alongside it.
 
-**This is a narrow fix, not the broader migration.** Marks (adding/
-editing/deleting a catch or POI from the map) and the Sync page both
-still gate on the GitHub token exactly as before — those are separate,
-larger features that would need their own dedicated migration to move
-onto Admin-session gating, not something this fix touched.
+**This was a narrow fix at the time** — marks and Sync followed in their
+own dedicated round, below.
+
+### Marks and Sync — the broader migration, done
+
+Everything "Add as permanent location" started is now finished: marks
+(adding/editing/deleting a catch or POI from the map) and the Sync page
+(GPX/chartplotter import and export) are both off the GitHub token
+entirely, gated on `cachedIsAdmin` the same way.
+
+**What changed:**
+- **A new public, unauthenticated endpoint**: `GET /api/public/marks` —
+  same pattern as `/api/public/marklists`, deliberately unpaginated
+  (unlike `GET /api/marks`, which caps at 500) since the map and Sync's
+  own duplicate-matching both assume the whole dataset in one response,
+  same as the old static file did.
+- **`saveMarkToGitHub`/`deleteMarkFromGitHub`/`saveMarksBatchToGitHub`
+  (`charts.js`) replaced** with `saveMarkToD1`/`deleteMarkFromD1`/
+  `saveMarksBatchToD1` — POST/PUT/DELETE through `/api/marks`
+  (`?userId=public`) instead of the GitHub Contents API's read-sha/
+  modify/write-whole-file dance. The batch version has no bulk-create
+  endpoint to call, so it issues one POST per mark in small concurrent
+  batches (8 at a time) rather than either fully sequential (slow for a
+  large import) or fully parallel (too many simultaneous requests at
+  once) — and reports a partial success count rather than all-or-nothing,
+  since there's no single commit left to roll back if some fail.
+- **`POST /api/marks` (`user-backend.js`) now accepts an optional
+  client-supplied `id`**, using it when present instead of always
+  generating a UUID — this is what lets a mark's id, chosen the moment
+  its draft pin is first drawn (`makeMarkId()`, `startNewMarkEntry`),
+  stay the same permanent one all the way through saving, with zero
+  changes needed to the existing (fairly intricate)
+  `marksById`/`markersById` bookkeeping in `wireMarkPopupButtons`.
+- **Every render/action gate that checked `getConnection()` now checks
+  `cachedIsAdmin` instead**: `loadAndRenderMarks`'s whole marks layer,
+  the Edit button inside each popup, the map-click "start a new mark"
+  flow (shared between the Location and Live tabs), the "hide Sync nav
+  link" check, and `sync.js`'s own `canSync()` gate.
+- **The privacy caveat carries over unchanged**: this was never real
+  access control (a fully static site can't build one), just a "don't
+  clutter the map for random visitors" UI choice — `GET /api/public/marks`
+  is deliberately open the same way the static file always was; the
+  gate only ever controlled whether the JS chose to render it.
+
+**Data ownership**: the original 2,532 real marks were migrated (very
+first migration round) to the Admin's own account, not Public's — they
+'re genuinely personal catch history, not a "free site default". A
+one-time migration (`migration-marks-reattribute-to-public.sql`)
+reattributes them to `'public'` specifically so the map's public display
+and the Sync page both have one consistent owner to read from, matching
+every other public-facing dataset's convention on this site.
+
+**Verified**: a real headless-browser test against the actual
+`saveMarkToD1`/`deleteMarkFromD1`/`saveMarksBatchToD1` functions — create
+preserves a client-supplied id, update PUTs to the right id, delete hits
+the right id, and a 3-mark batch import reports the correct count — plus
+`sync.html` loaded as both an Admin (workflow visible, zero JS errors)
+and a non-admin (gate shown, zero JS errors) session. Also added a
+try/catch around `sync.js`'s own marks/mark-lists fetch that wasn't
+there before — these are genuine cross-origin Worker calls now, not
+same-origin static files, so a real network failure is a more realistic
+possibility than it used to be, and it should degrade gracefully rather
+than throw uncaught.
 
 ## Troubleshooting
 
