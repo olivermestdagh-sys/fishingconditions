@@ -10,7 +10,7 @@
  * DEPLOYING THIS section) — same one-time pattern as
  * WILLYWEATHER_SEARCH_WORKER_URL in charts.js.
  */
-const USER_BACKEND_URL = "https://fishingconditions-users.YOUR-SUBDOMAIN.workers.dev";
+const USER_BACKEND_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev";
 
 const VALID_TYPES = ["Kayak", "Land based"];
 
