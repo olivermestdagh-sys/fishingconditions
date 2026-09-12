@@ -27,9 +27,12 @@
   <section id="connectionCard" class="summary-card">
     <div class="summary-title" style="margin-bottom:6px;">GitHub connection</div>
     <p class="footnote" style="margin:0 0 12px;text-align:left;">
-      Saving changes here commits directly to your repo, so it needs a GitHub token with permission
-      to write to it. This is entered once and kept only on this device (localStorage) — it's never
-      sent anywhere except GitHub's own API. See the README for how to create one.
+      Locations, Location Groups, and Fishing Mark Lists no longer use this — they save straight to
+      your account once you're signed in as Admin (see the Account tab). This connection is only for
+      two things now: setting a Home address (still stored in the repo's config/settings.json) and the
+      "Refresh data now" button (triggers a GitHub Actions run immediately). Needs a GitHub token with
+      permission to write to the repo. Entered once, kept only on this device (localStorage) — it's
+      never sent anywhere except GitHub's own API. See the README for how to create one.
     </p>
     <div class="filter-row" style="margin-bottom:10px;">
       <div style="flex:1;min-width:160px;">
@@ -123,22 +126,28 @@
   <section id="locationsSection" class="table-section" style="display:none;">
     <h2>Locations</h2>
     <p class="footnote" style="margin:0 0 12px;text-align:left;">
-      Changes take effect on the next data refresh (scheduled, or trigger it immediately below after saving).
+      Every change below saves immediately to your account — no separate Save step any more.
+      Changes take effect on the next scheduled data refresh, or trigger one immediately with the button below.
     </p>
-    <div id="settingsLocationMap" class="location-map" style="margin-bottom:14px;"></div>
-    <p class="footnote" style="margin:0 0 10px;text-align:left;">Tap a marker to jump straight to that location below. "Add location"/"Add Home" arm the map for one click, placing a new location or your home address exactly there.</p>
-    <div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;">
-      <button type="button" id="btnAddByMapClick" class="btn-secondary">📍 Add location</button>
-      <button type="button" id="btnAddHome" class="btn-secondary">🏠 Add Home</button>
+    <div id="locationsSignedOut" style="display:none;">
+      <p class="footnote" style="margin:0;text-align:left;">
+        Sign in with Google as Admin on the <a href="account.html">Account</a> tab to manage locations.
+      </p>
     </div>
-    <div id="locationsList"></div>
-    <button id="btnAddRow" class="btn-secondary" style="margin-top:10px;">+ Add location</button>
+    <div id="locationsEditor" style="display:none;">
+      <div id="settingsLocationMap" class="location-map" style="margin-bottom:14px;"></div>
+      <p class="footnote" style="margin:0 0 10px;text-align:left;">Tap a marker to jump straight to that location below. Every new location is added by clicking the map — there's no coordinate-less blank row any more. "Add Home" arms the map for one click, placing your home address exactly there.</p>
+      <div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" id="btnAddByMapClick" class="btn-secondary">📍 Add location</button>
+        <button type="button" id="btnAddHome" class="btn-secondary">🏠 Add Home</button>
+      </div>
+      <div id="locationsList"></div>
 
-    <div style="margin-top:20px;display:flex;gap:8px;flex-wrap:wrap;">
-      <button id="btnSave" class="btn-primary">Save changes</button>
-      <button id="btnSaveAndRefresh" class="btn-primary">Save &amp; refresh data now</button>
+      <div style="margin-top:20px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button id="btnRefreshDataNow" class="btn-primary">Refresh data now</button>
+      </div>
+      <div id="saveStatus" style="margin-top:10px;font-size:0.85rem;"></div>
     </div>
-    <div id="saveStatus" style="margin-top:10px;font-size:0.85rem;"></div>
   </section>
 
   <footer class="footnote">

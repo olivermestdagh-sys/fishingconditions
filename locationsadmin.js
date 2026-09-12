@@ -80,7 +80,6 @@ function typeIconSvg(type, size) {
 // duplicated. See charts.js's "Preview condition scoring" section.
 
 let locations = [];
-let currentSha = null;
 let locationGroups = []; // plain group-name strings — kept in this shape for
                           // backward compat with every other place on this
                           // page that reads it (e.g. the per-location group
@@ -227,20 +226,23 @@ async function verifyGithubToken(conn) {
 }
 
 function hideConnectedSections() {
-  // groupsSection and markListsSection deliberately NOT included any more —
-  // both are gated on Admin sign-in (checkAdmin()) independent of the
-  // GitHub connection, and manage their own visibility entirely inside
-  // loadLocationGroups()/loadMarkLists().
-  document.getElementById("locationsSection").style.display = "none";
+  // groupsSection, markListsSection, and locationsSection are deliberately
+  // NOT included any more — all three are gated on Admin sign-in
+  // (checkAdmin()) independent of the GitHub connection, and manage their
+  // own visibility entirely inside their own load functions. Nothing is
+  // left to hide here any more, but the function stays (called from the
+  // GitHub-token-failure branch in init()) in case a future GitHub-only
+  // section needs the same treatment.
 }
 
-/** Runs the GitHub-token-gated sections' own load-and-render — Location
- * Groups and Fishing Mark Lists are deliberately NOT among these any more
- * (see init() above); both load independently of whether a GitHub
- * connection exists at all. */
+/** Runs what's still GitHub-token-gated: loadLocationCoords (a public,
+ * unauthenticated read in practice, but historically bundled here) and
+ * loadHomeLocation (config/settings.json, unrelated to the Locations
+ * model). Locations itself, Location Groups, and Fishing Mark Lists are
+ * deliberately NOT among these any more (see init() above); all three
+ * load independently of whether a GitHub connection exists at all. */
 async function loadAllConnectedSections() {
   await Promise.all([loadLocationCoords(), loadHomeLocation()]);
-  await loadLocations();
 }
 
 /**
@@ -348,19 +350,14 @@ async function init() {
   makeCollapsible(document.getElementById("markListsSection"), "settingsCollapsed:markLists", true);
   makeCollapsible(document.getElementById("locationsSection"), "settingsCollapsed:locations", true);
 
-  document.getElementById("btnAddRow").addEventListener("click", () => {
-    locations.push({ name: "", shore: "N", types: [defaultTypeConfig("Kayak")] });
-    // Show just the new blank card (same as clicking a marker on the map)
-    // rather than the whole list — nothing left to persist across a reload
-    // for it yet (see selectLocation), but it should still be the ONLY
-    // thing visible right now so it's obvious where to start typing.
-    selectLocation(locations.length - 1);
-    renderRows();
-  });
+  // btnAddRow removed entirely (see locations.html) — v2's locations.lat/lng
+  // are NOT NULL in D1, so a coordinate-less blank row can no longer be
+  // created at all. Every new location now goes through the map-click flow
+  // (btnAddByMapClick below), which always has real lat/lng from the click
+  // itself, with or without a successful WillyWeather candidate match.
   document.getElementById("btnAddByMapClick").addEventListener("click", toggleAddLocationClickMode);
   document.getElementById("btnAddHome").addEventListener("click", toggleAddHomeClickMode);
-  document.getElementById("btnSave").addEventListener("click", () => onSave(false));
-  document.getElementById("btnSaveAndRefresh").addEventListener("click", () => onSave(true));
+  document.getElementById("btnRefreshDataNow").addEventListener("click", onRefreshDataNow);
 
   document.getElementById("btnAddGroup").addEventListener("click", onAddGroup);
   document.getElementById("newGroupInput").addEventListener("keydown", (e) => {
@@ -379,27 +376,29 @@ async function init() {
   // connection below entirely — gated on Google Admin sign-in instead, via
   // the SAME checkAdmin() call (one sign-in check, not two). Runs
   // regardless of what the GitHub token check further down finds.
+  // Location Groups, Fishing Mark Lists, AND Locations itself: all three
+  // independent of the GitHub connection below entirely now — gated on
+  // Google Admin sign-in instead, via the SAME checkAdmin() call. Runs
+  // regardless of what the GitHub token check further down finds.
   adminUser = await checkAdmin();
-  await Promise.all([loadLocationGroups(), loadMarkLists()]);
+  await Promise.all([loadLocationGroups(), loadMarkLists(), loadLocations()]);
 
+  // What's left behind the GitHub token now: triggering an immediate data
+  // refresh (onRefreshDataNow, a GitHub Actions workflow-dispatch call —
+  // inherently a GitHub capability, not a Locations-data one) and the Home
+  // address (still saved to config/settings.json via GitHub commit,
+  // unrelated to the Locations model entirely — see saveHomeLocation).
   connectionVerified = await verifyGithubToken(conn);
   if (!connectionVerified) {
     hideConnectedSections();
     if (conn) {
       setStatus("That token isn't working — check it's still valid and has write access to this repo, then reconnect below.", true);
     } else {
-      setStatus("Connect to GitHub above to manage locations.", false);
+      setStatus("Connect to GitHub above to set a home address or trigger an immediate data refresh.", false);
     }
     return;
   }
 
-  // Coords, home, and mark lists all need to be ready before the first
-  // renderRows() (called at the end of loadLocations, which renders the
-  // map too) — well, mark lists don't actually feed renderRows() the way
-  // the other two do (nothing on this page reaches into `locations` for
-  // them yet), but there's no reason to make it wait its turn behind ones
-  // that do. All three are independent of `locations` itself and of each
-  // other, so they load in parallel rather than one after another.
   await loadAllConnectedSections();
 }
 
@@ -1177,39 +1176,94 @@ function setMarkListsSaveStatus(text, isError) {
 // immediately via the API, same as Location Groups; there's nothing left
 // to batch into one commit.
 
+let publicTypes = []; // Public's own type vocabulary ({id,name,behavesLike}) —
+                       // loaded once alongside locations, used by the
+                       // per-location "+ Add type" picker below.
+
+/**
+ * v2: Locations now live in D1 (locations + user_types +
+ * user_location_access + user_location_group_members, all scoped to the
+ * 'public' user — see schema-v2.sql) rather than FILE_PATH, gated on the
+ * same Google Admin sign-in as Groups/Mark Lists above. Every field edit
+ * below saves immediately (debounced for anything that fires per-
+ * keystroke) — there's no more "Save changes"/"Save & refresh data now"
+ * batch commit; see onRefreshDataNow further down for what that button
+ * does instead.
+ *
+ * The in-memory `locations` array keeps roughly its OLD shape (name,
+ * shore, tidal, tideOffset, lat, lng, willyweatherId/Name/Region/State,
+ * tideMaxObserved, locationGroups[], types[] with driveTo/driveBack/
+ * setUp/packUp/timeToSpot/timeFromSpot/minTideHeight) so renderRows/
+ * renderSettingsLocationMap/renderTypeSection/the group-tag box below
+ * are almost entirely UNCHANGED — only load/save mechanics differ. Two
+ * NEW internal-only fields track D1 identity: `_id` (null until this
+ * location's first save) and, per type entry, `_accessId`/`_typeId`.
+ */
 async function loadLocations() {
-  const conn = getConnection();
+  if (!adminUser) {
+    locations = [];
+    document.getElementById("locationsSection").style.display = "block";
+    document.getElementById("locationsSignedOut").style.display = "block";
+    document.getElementById("locationsEditor").style.display = "none";
+    return;
+  }
+
   try {
-    if (conn && conn.owner && conn.repo && conn.token) {
-      const res = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${FILE_PATH}?ref=${BRANCH}`, {
-        headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+    const [trackedRes, typesRes] = await Promise.all([
+      fetch(`${USER_BACKEND_URL}/api/tracked-locations?userId=public`, { credentials: "include" }),
+      fetch(`${USER_BACKEND_URL}/api/types?userId=public`, { credentials: "include" }),
+    ]);
+    if (!trackedRes.ok) throw new Error(`tracked-locations status ${trackedRes.status}`);
+    if (!typesRes.ok) throw new Error(`types status ${typesRes.status}`);
+    const tracked = await trackedRes.json();
+    publicTypes = await typesRes.json();
+
+    const byLocation = new Map();
+    for (const row of tracked) {
+      let loc = byLocation.get(row.location.id);
+      if (!loc) {
+        loc = {
+          _id: row.location.id,
+          name: row.location.name,
+          shore: row.location.shore,
+          tidal: row.location.tidal,
+          tideOffset: row.location.tideOffset,
+          lat: row.location.lat,
+          lng: row.location.lng,
+          willyweatherId: row.location.willyweatherId,
+          willyweatherName: row.location.willyweatherName,
+          willyweatherRegion: row.location.willyweatherRegion,
+          willyweatherState: row.location.willyweatherState,
+          tideMaxObserved: row.location.tideMaxObserved,
+          locationGroups: row.groups.map((g) => g.name),
+          types: [],
+        };
+        byLocation.set(row.location.id, loc);
+      }
+      loc.types.push({
+        _accessId: row.accessId,
+        _typeId: row.type.id,
+        type: row.type.name,
+        behavesLike: row.type.behavesLike,
+        driveTo: row.driveTo,
+        driveBack: row.driveBack,
+        setUp: row.setUp,
+        packUp: row.packUp,
+        timeToSpot: row.timeToSpot,
+        timeFromSpot: row.timeFromSpot,
+        minTideHeight: row.minTideHeight,
       });
-      if (!res.ok) throw new Error(`GitHub returned ${res.status}`);
-      const json = await res.json();
-      currentSha = json.sha;
-      const decoded = decodeURIComponent(escape(atob(json.content.replace(/\n/g, ""))));
-      locations = JSON.parse(decoded);
-      setStatus("Connected — editing live from GitHub");
-    } else {
-      // No connection yet — fall back to the public static file, read-only until connected
-      const res = await fetch("config/locations.json", { cache: "no-store" });
-      locations = await res.json();
-      setStatus("Viewing current locations — connect above to edit");
     }
+    locations = [...byLocation.values()];
+    setStatus("Signed in as Admin — editing live");
   } catch (err) {
-    console.error(err);
+    console.error("Failed to load locations:", err);
     setStatus("Could not load locations: " + err.message, true);
     locations = [];
   }
 
   // Restore whichever location was last clicked/selected, by name — see
-  // SELECTED_LOCATION_STORAGE_KEY/selectLocation. Done here (after
-  // `locations` is fully populated, before the first renderRows()) rather
-  // than in selectLocation itself, since this is the ONE case where
-  // selectedLocationIdx is set without going through selectLocation — the
-  // value's already in storage, so re-writing it right back via
-  // selectLocation would just be a redundant no-op localStorage write on
-  // every single page load.
+  // SELECTED_LOCATION_STORAGE_KEY/selectLocation.
   try {
     const savedName = localStorage.getItem(SELECTED_LOCATION_STORAGE_KEY);
     const idx = savedName ? locations.findIndex((l) => l.name === savedName) : -1;
@@ -1218,7 +1272,9 @@ async function loadLocations() {
     selectedLocationIdx = null;
   }
 
-  if (connectionVerified) document.getElementById("locationsSection").style.display = "block";
+  document.getElementById("locationsSection").style.display = "block";
+  document.getElementById("locationsSignedOut").style.display = "none";
+  document.getElementById("locationsEditor").style.display = "block";
   renderRows();
 }
 
@@ -1227,7 +1283,12 @@ function renderRows() {
   list.innerHTML = "";
   locations.forEach((loc, i) => {
     if (!loc.types) loc.types = [];
-    const activeTypeNames = loc.types.map((t) => t.type);
+    const activeTypeIds = loc.types.map((t) => t._typeId);
+    // Public's own types not yet used on THIS location — what the "+ Add
+    // type" picker below offers, alongside always offering to define a
+    // brand new one. See "v2: Locations" note on loadLocations for why
+    // this is open-ended now rather than a fixed Kayak/Land based pair.
+    const availableTypes = publicTypes.filter((t) => !activeTypeIds.includes(t.id));
 
     const row = document.createElement("div");
     row.className = "window-card loc-edit-card";
@@ -1261,18 +1322,27 @@ function renderRows() {
             title="Positive: this location's tide runs later than the matched station. Negative: earlier."
             style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
         </div>
-        <button data-remove-loc="${i}" class="btn-secondary" style="height:38px;">Remove location</button>
+        ${loc._new
+          ? `<button data-create-loc="${i}" class="btn-primary" style="height:38px;">Create location</button>`
+          : `<button data-remove-loc="${i}" class="btn-secondary" style="height:38px;">Remove location</button>`
+        }
       </div>
 
       <label class="loc-edit-label" style="display:block;margin:12px 0 6px;">Usable for</label>
-      <div class="type-photo-row" style="max-width:340px;">
-        ${TYPE_OPTIONS.map((type) => `
-          <button type="button" class="type-photo-card${activeTypeNames.includes(type) ? " active" : ""}"
-            data-toggle-type="${type}" data-idx="${i}">
-            <img src="${type === "Kayak" ? "images/type-kayak.jpg" : "images/type-landbased.jpg"}" alt="${type}" />
-            <span>${type}</span>
-          </button>
-        `).join("")}
+      <div class="type-add-row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+        <select class="type-add-select" data-idx="${i}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);">
+          <option value="">+ Add a type…</option>
+          ${availableTypes.map((t) => `<option value="${t.id}">${t.name.replace(/</g, "&lt;")} (${t.behavesLike})</option>`).join("")}
+          <option value="__new__">+ Define a new type…</option>
+        </select>
+        <span class="type-new-form" data-idx="${i}" style="display:none;gap:6px;align-items:center;">
+          <input type="text" class="type-new-name" placeholder="Name, e.g. SUP" style="padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);width:140px;" />
+          <select class="type-new-behaveslike" style="padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);">
+            <option value="Kayak">Scores like Kayak</option>
+            <option value="Land based">Scores like Land based</option>
+          </select>
+          <button type="button" class="btn-secondary type-new-confirm" data-idx="${i}">Add</button>
+        </span>
       </div>
 
       <div class="loc-type-sections">
@@ -1513,10 +1583,17 @@ async function saveHomeLocation(lat, lng) {
  * for it at all, not even once.
  */
 function createNewLocationAt(lat, lng, candidate) {
+  // No `types` yet (unlike the old defaultTypeConfig("Kayak") default) —
+  // `_new` drafts aren't saved to D1 at all until "Create location" is
+  // clicked (createLocation), which is what actually adds a default Kayak
+  // type as part of that same POST. Nothing renders/edits a type section
+  // for a draft in the meantime (renderRows guards with `_new` showing a
+  // "Create location" button instead of per-field auto-save).
   const newLoc = {
+    _new: true,
     name: candidate ? candidate.name : "",
     shore: "N",
-    types: [defaultTypeConfig("Kayak")],
+    types: [],
     lat,
     lng,
   };
@@ -1631,12 +1708,18 @@ function removeLocationFilterBanner() {
 }
 
 function renderTypeSection(loc, typeConfig, locIdx, typeIdx) {
-  const fields = TYPE_TIME_FIELDS[typeConfig.type] || [];
+  // Falls back to behavesLike when the display name isn't itself a
+  // recognized key (any custom type, e.g. "SUP") — TYPE_TIME_FIELDS is a
+  // shared charts.js lookup keyed literally on "Kayak"/"Land based" and
+  // knows nothing about custom names; behavesLike is always one of those
+  // two, so the fallback always resolves. Same reasoning for the icon.
+  const fields = TYPE_TIME_FIELDS[typeConfig.type] || TYPE_TIME_FIELDS[typeConfig.behavesLike] || [];
   return `
     <div class="loc-type-section">
       <div class="loc-type-section-header">
-        ${typeIconSvg(typeConfig.type, 15)}
-        <label class="loc-edit-label" style="margin:0;">${typeConfig.type} timings (duration, hours : minutes)</label>
+        ${typeIconSvg(typeConfig.behavesLike, 15)}
+        <label class="loc-edit-label" style="margin:0;">${typeConfig.type.replace(/</g, "&lt;")} timings (duration, hours : minutes)</label>
+        <button type="button" data-remove-type data-idx="${locIdx}" data-typeidx="${typeIdx}" class="btn-secondary" style="margin-left:auto;font-size:0.75rem;padding:3px 8px;">Remove type</button>
       </div>
       <div class="loc-time-grid">
         ${fields.map((f) => {
@@ -1654,7 +1737,7 @@ function renderTypeSection(loc, typeConfig, locIdx, typeIdx) {
         }).join("")}
       </div>
 
-      ${typeConfig.type === "Kayak" ? `
+      ${typeConfig.behavesLike === "Kayak" ? `
       <label class="loc-edit-label" style="display:block;margin:12px 0 6px;">Minimum tide height for access (m) — leave blank if not applicable</label>
       <input type="number" min="0" step="0.1" inputmode="decimal" data-typefield="minTideHeight" data-idx="${locIdx}" data-typeidx="${typeIdx}"
         value="${typeConfig.minTideHeight != null ? typeConfig.minTideHeight : ""}"
@@ -1744,6 +1827,7 @@ function wireGroupTagBox(idx) {
         if (!currentGroups().includes(group)) currentGroups().push(group);
         input.value = "";
         refreshGroupTagBox(idx);
+        saveGroupMembership(idx);
       });
     });
   }
@@ -1765,8 +1849,260 @@ function wireGroupTagBox(idx) {
       const group = e.currentTarget.dataset.group;
       loc.locationGroups = currentGroups().filter((g) => g !== group);
       refreshGroupTagBox(idx);
+      saveGroupMembership(idx);
     });
   });
+}
+
+const placeSaveTimers = new Map(); // debounce keys: idx
+const typeSaveTimers = new Map(); // debounce keys: `${idx}:${typeIdx}`
+
+/**
+ * Debounced (600ms) save of a location's PLACE-level fields (name, shore,
+ * tideOffset, tidal) — PUT through its first type's accessId, since the
+ * API's place-field edit path is reached via any of a location's access
+ * rows (see handleTrackedItem, user-backend.js). No-op for a `_new` draft
+ * (nothing to save until "Create location" is clicked) or a location with
+ * zero types yet (shouldn't happen for a saved location — every creation
+ * path requires at least one type).
+ */
+function schedulePlaceSave(idx) {
+  const loc = locations[idx];
+  if (!loc || loc._new || !loc._id || !loc.types.length) return;
+  clearTimeout(placeSaveTimers.get(idx));
+  placeSaveTimers.set(
+    idx,
+    setTimeout(async () => {
+      try {
+        const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations/${loc.types[0]._accessId}?userId=public`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: loc.name,
+            shore: loc.shore,
+            tideOffset: loc.tideOffset,
+            tidal: loc.tidal !== false,
+          }),
+        });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        setSaveStatus("", false);
+      } catch (err) {
+        console.error("Failed to save location:", err);
+        setSaveStatus("Couldn't save: " + err.message, true);
+      }
+    }, 600)
+  );
+}
+
+/** Same debounce shape as schedulePlaceSave, for one type's own
+ * drive/setup/pack-up/time-to/from-spot/minTideHeight fields. */
+function scheduleTypeSave(idx, typeIdx) {
+  const loc = locations[idx];
+  const typeConfig = loc && loc.types[typeIdx];
+  if (!loc || loc._new || !typeConfig || !typeConfig._accessId) return;
+  const key = `${idx}:${typeIdx}`;
+  clearTimeout(typeSaveTimers.get(key));
+  typeSaveTimers.set(
+    key,
+    setTimeout(async () => {
+      try {
+        const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations/${typeConfig._accessId}?userId=public`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            driveTo: typeConfig.driveTo,
+            driveBack: typeConfig.driveBack,
+            setUp: typeConfig.setUp,
+            packUp: typeConfig.packUp,
+            timeToSpot: typeConfig.timeToSpot,
+            timeFromSpot: typeConfig.timeFromSpot,
+            minTideHeight: typeConfig.minTideHeight,
+          }),
+        });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        setSaveStatus("", false);
+      } catch (err) {
+        console.error("Failed to save type timings:", err);
+        setSaveStatus("Couldn't save: " + err.message, true);
+      }
+    }, 600)
+  );
+}
+
+/** Immediate (not debounced — triggered by a discrete Create click, not
+ * typing) creation of a brand-new `_new` draft location, defaulting to
+ * one Kayak-behaving type (matching the old default) — reusing Public's
+ * existing "Kayak" type if one exists, defining it fresh otherwise. */
+async function createLocation(idx) {
+  const loc = locations[idx];
+  if (!loc || !loc._new) return;
+  if (!loc.name || !loc.name.trim()) {
+    setSaveStatus("Name is required.", true);
+    return;
+  }
+  if (typeof loc.lat !== "number" || typeof loc.lng !== "number") {
+    setSaveStatus("This location needs coordinates — add it via the map instead of a blank row.", true);
+    return;
+  }
+  const existingKayak = publicTypes.find((t) => t.behavesLike === "Kayak" && t.name === "Kayak");
+  const body = {
+    name: loc.name,
+    lat: loc.lat,
+    lng: loc.lng,
+    shore: loc.shore,
+    tideOffset: loc.tideOffset,
+    tidal: loc.tidal !== false,
+    willyweatherId: loc.willyweatherId,
+    willyweatherName: loc.willyweatherName,
+    willyweatherRegion: loc.willyweatherRegion,
+    willyweatherState: loc.willyweatherState,
+    driveTo: "00:00",
+    driveBack: "00:00",
+    setUp: "00:00",
+    packUp: "00:00",
+    timeToSpot: "00:00",
+    timeFromSpot: "00:00",
+  };
+  if (existingKayak) body.typeId = existingKayak.id;
+  else {
+    body.newTypeName = "Kayak";
+    body.newTypeBehavesLike = "Kayak";
+  }
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations?userId=public`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    setSaveStatus("Location created.");
+    await loadLocations(); // simplest correct way to pick up the new type/location ids and re-sync publicTypes
+  } catch (err) {
+    console.error("Failed to create location:", err);
+    setSaveStatus("Couldn't create location: " + err.message, true);
+  }
+}
+
+/** Deletes a saved location entirely — one DELETE per type's accessId;
+ * the LAST one deleted also removes the now-orphaned place row itself
+ * server-side (see handleTrackedItem's DELETE branch, user-backend.js). */
+async function removeLocation(idx) {
+  const loc = locations[idx];
+  if (!loc) return;
+  if (loc._new) {
+    locations.splice(idx, 1);
+    selectLocation(null);
+    renderRows();
+    return;
+  }
+  if (!confirm(`Delete "${loc.name}" and all its type entries?`)) return;
+  try {
+    for (const t of loc.types) {
+      const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations/${t._accessId}?userId=public`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok && res.status !== 404) throw new Error(`status ${res.status}`);
+    }
+  } catch (err) {
+    console.error("Failed to delete location:", err);
+    setSaveStatus("Couldn't delete: " + err.message, true);
+    return;
+  }
+  locations.splice(idx, 1);
+  selectLocation(null);
+  renderRows();
+}
+
+/** Adds an existing Public type (typeId) or defines a brand new one
+ * (newTypeName/newTypeBehavesLike) to an ALREADY-SAVED location. Disabled
+ * for a `_new` draft — see createLocation for how a draft's first type
+ * gets attached (as part of the same POST that creates the place itself). */
+async function addTypeToLocation(idx, { typeId, newTypeName, newTypeBehavesLike }) {
+  const loc = locations[idx];
+  if (!loc || loc._new) return;
+  const body = {
+    locationId: loc._id,
+    driveTo: "00:00",
+    driveBack: "00:00",
+    setUp: "00:00",
+    packUp: "00:00",
+    timeToSpot: "00:00",
+    timeFromSpot: "00:00",
+  };
+  if (typeId) body.typeId = typeId;
+  else {
+    body.newTypeName = newTypeName;
+    body.newTypeBehavesLike = newTypeBehavesLike;
+  }
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations?userId=public`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    setSaveStatus("Type added.");
+    await loadLocations(); // re-syncs publicTypes too, in case a new one was just defined
+  } catch (err) {
+    console.error("Failed to add type:", err);
+    setSaveStatus("Couldn't add type: " + err.message, true);
+  }
+}
+
+/** Removes one type from a location — refuses to remove the last one
+ * (same rule the old toggle-button UI enforced), same as before. */
+async function removeTypeFromLocation(idx, typeIdx) {
+  const loc = locations[idx];
+  const typeConfig = loc && loc.types[typeIdx];
+  if (!loc || !typeConfig) return;
+  if (loc.types.length <= 1) {
+    setSaveStatus("A location needs at least one type — add another before removing this one.", true);
+    return;
+  }
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations/${typeConfig._accessId}?userId=public`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (!res.ok && res.status !== 404) throw new Error(`status ${res.status}`);
+  } catch (err) {
+    console.error("Failed to remove type:", err);
+    setSaveStatus("Couldn't remove type: " + err.message, true);
+    return;
+  }
+  loc.types.splice(typeIdx, 1);
+  renderRows();
+}
+
+/** Immediate (not debounced) save of a location's full group-membership
+ * list — called after any add/remove in the group-tag box below. */
+async function saveGroupMembership(idx) {
+  const loc = locations[idx];
+  if (!loc || loc._new || !loc._id) return;
+  const groupIds = (loc.locationGroups || []).map((name) => groupNameToId.get(name)).filter(Boolean);
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/locations/${loc._id}/groups?userId=public`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groupIds }),
+    });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+  } catch (err) {
+    console.error("Failed to save group membership:", err);
+    setSaveStatus("Couldn't save groups: " + err.message, true);
+  }
 }
 
 function wireRowListeners(list) {
@@ -1775,6 +2111,7 @@ function wireRowListeners(list) {
       const idx = Number(e.target.dataset.idx);
       const field = e.target.dataset.field;
       locations[idx][field] = e.target.value;
+      schedulePlaceSave(idx);
     });
   });
 
@@ -1783,19 +2120,20 @@ function wireRowListeners(list) {
       const idx = Number(e.target.dataset.idx);
       const field = e.target.dataset.boolfield;
       locations[idx][field] = e.target.checked;
+      schedulePlaceSave(idx);
     });
   });
 
   // Location-level numeric fields (as opposed to data-typefield, which is
   // per-type) — same "store a real number, not the string every input's
-  // .value naturally is" reasoning: fetch_conditions.py does arithmetic
-  // with this (a timedelta of minutes), which a quoted JSON string would
-  // break.
+  // .value naturally is" reasoning: the API stores this as a REAL column,
+  // which a quoted JSON string would break.
   list.querySelectorAll("input[data-numfield]").forEach((el) => {
     el.addEventListener("input", (e) => {
       const idx = Number(e.target.dataset.idx);
       const field = e.target.dataset.numfield;
       locations[idx][field] = e.target.value === "" ? null : parseFloat(e.target.value);
+      schedulePlaceSave(idx);
     });
   });
 
@@ -1804,11 +2142,8 @@ function wireRowListeners(list) {
       const idx = Number(e.target.dataset.idx);
       const typeIdx = Number(e.target.dataset.typeidx);
       const field = e.target.dataset.typefield;
-      // Store a real number (or null if cleared) rather than the raw
-      // string every input's .value naturally is — otherwise this would
-      // save as a quoted string in the JSON, breaking numeric comparisons
-      // downstream (chart threshold-line math, Python min/max logic).
       locations[idx].types[typeIdx][field] = e.target.value === "" ? null : parseFloat(e.target.value);
+      scheduleTypeSave(idx, typeIdx);
     });
   });
 
@@ -1824,37 +2159,57 @@ function wireRowListeners(list) {
       if (part === "h") current.h = Math.min(23, raw);
       else current.m = Math.min(59, raw);
       typeConfig[field] = formatHM(current.h, current.m);
+      scheduleTypeSave(idx, typeIdx);
     });
   });
 
   list.querySelectorAll("button[data-remove-loc]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       const idx = Number(e.currentTarget.dataset.removeLoc);
-      locations.splice(idx, 1);
-      // Indices shift after a removal, so any active filter would now
-      // point at the wrong (or a nonexistent) card — clear it (and its
-      // persisted copy, via selectLocation) rather than risk showing the
-      // wrong location or an empty filtered view.
-      selectLocation(null);
-      renderRows();
+      removeLocation(idx);
     });
   });
 
-  list.querySelectorAll("button[data-toggle-type]").forEach((btn) => {
+  list.querySelectorAll("button[data-create-loc]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const idx = Number(e.currentTarget.dataset.createLoc);
+      createLocation(idx);
+    });
+  });
+
+  list.querySelectorAll("button[data-remove-type]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       const idx = Number(e.currentTarget.dataset.idx);
-      const type = e.currentTarget.dataset.toggleType;
-      const loc = locations[idx];
-      const existingIdx = loc.types.findIndex((t) => t.type === type);
-      if (existingIdx >= 0) {
-        // Don't allow removing the LAST type — a location needs at least
-        // one, otherwise it has no timings/scoring at all.
-        if (loc.types.length <= 1) return;
-        loc.types.splice(existingIdx, 1);
-      } else {
-        loc.types.push(defaultTypeConfig(type));
+      const typeIdx = Number(e.currentTarget.dataset.typeidx);
+      removeTypeFromLocation(idx, typeIdx);
+    });
+  });
+
+  list.querySelectorAll(".type-add-select").forEach((select) => {
+    select.addEventListener("change", (e) => {
+      const idx = Number(e.currentTarget.dataset.idx);
+      const value = e.currentTarget.value;
+      const formEl = list.querySelector(`.type-new-form[data-idx="${idx}"]`);
+      if (value === "__new__") {
+        formEl.style.display = "inline-flex";
+        return;
       }
-      renderRows();
+      if (value) {
+        addTypeToLocation(idx, { typeId: value });
+      }
+      e.currentTarget.value = "";
+      formEl.style.display = "none";
+    });
+  });
+
+  list.querySelectorAll(".type-new-confirm").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const idx = Number(e.currentTarget.dataset.idx);
+      const formEl = e.currentTarget.closest(".type-new-form");
+      const name = formEl.querySelector(".type-new-name").value.trim();
+      const behavesLike = formEl.querySelector(".type-new-behaveslike").value;
+      if (!name) return;
+      addTypeToLocation(idx, { newTypeName: name, newTypeBehavesLike: behavesLike });
     });
   });
 }
@@ -1885,103 +2240,51 @@ function onDisconnect() {
   document.getElementById("ghOwner").value = "";
   document.getElementById("ghRepo").value = "";
   document.getElementById("ghToken").value = "";
-  currentSha = null;
   connectionVerified = false;
   hideConnectedSections();
-  setStatus("Connect to GitHub above to manage locations, groups, and mark lists.", false);
+  setStatus("Connect to GitHub above to set a home address or trigger an immediate data refresh.", false);
 }
 
-function validateLocations() {
-  for (const loc of locations) {
-    if (!loc.name || !loc.name.trim()) return "Every location needs a name";
-    if (!SHORE_OPTIONS.includes(loc.shore)) return `"${loc.name}" needs a valid Shore`;
-    if (!loc.types || loc.types.length === 0) return `"${loc.name}" needs at least one type (Kayak or Land based)`;
-    for (const t of loc.types) {
-      if (!TYPE_OPTIONS.includes(t.type)) return `"${loc.name}" has an invalid type`;
-    }
-  }
-  return null;
-}
+// validateLocations/onSave removed entirely — every field edit above now
+// saves immediately (or via createLocation/removeLocation/
+// addTypeToLocation/removeTypeFromLocation), same as Groups/Mark Lists;
+// there's nothing left to validate-then-batch-commit.
 
-async function onSave(alsoRefresh) {
+/**
+ * "Refresh data now" — all that's left of the old onSave(true) path.
+ * Locations save themselves as you edit them now, so this button no
+ * longer needs to save anything first; it just triggers the GitHub
+ * Actions workflow immediately rather than waiting for the next
+ * scheduled run. Still needs the GitHub connection above — triggering a
+ * workflow run is inherently a GitHub Actions capability, not a
+ * Locations-data one, so this is deliberately NOT gated on Admin sign-in
+ * the way editing locations/groups/mark lists is.
+ */
+async function onRefreshDataNow() {
   const conn = getConnection();
   if (!conn) {
-    setSaveStatus("Connect to GitHub first (above) before saving.", true);
+    setSaveStatus("Connect to GitHub first (above) to trigger a refresh.", true);
     return;
   }
-  const problem = validateLocations();
-  if (problem) {
-    setSaveStatus(problem, true);
-    return;
-  }
-
-  // Native time inputs return "" if left untouched/cleared — normalize to
-  // "00:00" so every saved type variant always has a valid HH:MM value for
-  // all of its applicable fields.
-  for (const loc of locations) {
-    for (const t of loc.types) {
-      for (const f of TYPE_TIME_FIELDS[t.type] || []) {
-        if (!t[f.key]) t[f.key] = "00:00";
-      }
-    }
-  }
-
-  setSaveStatus("Saving…");
+  setSaveStatus("Triggering data refresh…");
   try {
-    // Re-fetch the current sha immediately before writing, in case the file changed elsewhere
-    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${FILE_PATH}?ref=${BRANCH}`, {
-      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
-    });
-    if (!getRes.ok) throw new Error(`Could not read current file (${getRes.status})`);
-    const getJson = await getRes.json();
-    currentSha = getJson.sha;
-
-    const content = JSON.stringify(locations, null, 2) + "\n";
-    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${FILE_PATH}`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${conn.token}`,
-        Accept: "application/vnd.github+json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        message: "Update locations via site",
-        content: utf8ToBase64(content),
-        sha: currentSha,
-        branch: BRANCH,
-      }),
-    });
-    if (!putRes.ok) {
-      const errBody = await putRes.json().catch(() => ({}));
-      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
-    }
-    const putJson = await putRes.json();
-    currentSha = putJson.content.sha;
-    setSaveStatus("Saved to GitHub.");
-
-    if (alsoRefresh) {
-      setSaveStatus("Saved. Triggering data refresh…");
-      const dispatchRes = await fetch(
-        `${GITHUB_API}/repos/${conn.owner}/${conn.repo}/actions/workflows/${WORKFLOW_FILE}/dispatches`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${conn.token}`,
-            Accept: "application/vnd.github+json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ ref: BRANCH }),
-        }
-      );
-      if (!dispatchRes.ok) {
-        setSaveStatus("Saved, but couldn't trigger the refresh automatically — run it manually from the Actions tab.", true);
-      } else {
-        setSaveStatus("Saved and refresh triggered — check the Actions tab, then the Conditions tab in a minute or two.");
+    const dispatchRes = await fetch(
+      `${GITHUB_API}/repos/${conn.owner}/${conn.repo}/actions/workflows/${WORKFLOW_FILE}/dispatches`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${conn.token}`,
+          Accept: "application/vnd.github+json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ref: BRANCH }),
       }
-    }
+    );
+    if (!dispatchRes.ok) throw new Error(`GitHub returned ${dispatchRes.status}`);
+    setSaveStatus("Refresh triggered — check the Actions tab, then the Conditions tab in a minute or two.");
   } catch (err) {
-    console.error(err);
-    setSaveStatus("Save failed: " + err.message, true);
+    console.error("Failed to trigger refresh:", err);
+    setSaveStatus("Couldn't trigger the refresh automatically — run it manually from the Actions tab: " + err.message, true);
   }
 }
 
