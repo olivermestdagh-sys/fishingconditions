@@ -1085,20 +1085,65 @@ A Basic account is capped at 10 *additional* locations — counted as
 locations they've personally created (`locations.created_by_user_id`),
 never counting anything inherited from Public's set.
 
-**Current state, honestly:** this round is the data model + Worker
-endpoints only, verified by directly exercising every new query against
-real SQLite (not just read over) — a full lifecycle (create a type,
-create a location + track it, group it, add a mark-list entry, log a
-mark, delete and confirm cleanup) runs clean. What's NOT done yet:
-`locationsadmin.js` still saves to `config/*.json` via GitHub commits,
-not these endpoints — none of the site's actual editing UI has been
-cut over. Neither has `fetch_conditions.py`, which still reads
-`config/locations.json` as a local file, not from Public's rows via
-these endpoints. The original `user_locations`/`user_settings`
-endpoints (`/api/locations`, `/api/settings`) are untouched and still
-what `account.js` talks to — nothing about the currently-working
-sign-in flow changed. No WillyWeather-calling cron exists yet either,
-same as before.
+**Current state, honestly:**
+
+- **Location Groups and Fishing Mark Lists are fully cut over** —
+  `locationsadmin.js` saves both immediately via `/api/groups` and
+  `/api/marklists` (scoped to Public), gated on Google Admin sign-in
+  rather than the GitHub token. Each add/remove/edit hits the API right
+  away; there's no more "Save groups"/"Save mark lists" button for
+  either. Verified with a real headless-browser test exercising add/
+  remove/edit through the actual UI, not just the API in isolation.
+- **The pipeline (`fetch_conditions.py`) is also cut over** — it now
+  reads the tracked-locations list from a dedicated Worker endpoint
+  (`GET /api/pipeline/locations`) and writes its WillyWeather id/lat/lng/
+  tideMaxObserved cache back the same way (`PUT /api/pipeline/locations/
+  :id`), instead of reading/writing `config/locations.json` as a local
+  file. See "Pipeline endpoints" below for why this needed a completely
+  different auth mechanism from everything else here, and the
+  `behavesLike` fix that keeps custom location types scoring correctly.
+- **`locationsadmin.js`'s Locations section itself (map, per-type
+  scheduling, the location list) is the one piece still on the GitHub-
+  commit path** — this is the last, biggest section to cut over. Until
+  it does, **editing locations via the Settings page no longer has any
+  effect on the live site** — the pipeline now reads Public's D1 rows,
+  not `config/locations.json`, so that file is effectively frozen at
+  whatever it held when the pipeline switched over. Don't use the old
+  Locations editor for real changes in the meantime.
+- The original `user_locations`/`user_settings` endpoints
+  (`/api/locations`, `/api/settings`) are untouched and still what
+  `account.js` talks to — nothing about the currently-working sign-in
+  flow changed. No WillyWeather-calling cron exists yet either, same as
+  before.
+
+### Pipeline endpoints (`fetch_conditions.py` / GitHub Actions)
+
+Two endpoints, deliberately NOT using the session-cookie model every
+other endpoint above does — GitHub Actions has no browser, so it can
+never hold a session. Both are gated on a single shared secret instead
+(`X-Pipeline-Token` header, checked against the Worker's own
+`PIPELINE_API_TOKEN` setting):
+
+- `GET /api/pipeline/locations` — Public's full tracked-locations list,
+  shaped to match the OLD `config/locations.json` array closely (each
+  location's `types[]` nested the same way) so `fetch_conditions.py`'s
+  existing field access needed minimal changes. Each type entry carries
+  BOTH `type` (the admin's own display name) and `behavesLike` (always
+  exactly `"Kayak"` or `"Land based"`) — the scoring functions branch on
+  `behavesLike` only, never the display name, so a renamed or custom
+  type (e.g. "SUP" scoring like Kayak) still scores correctly. Verified
+  directly: a synthetic "SUP" type scored identically to "Kayak" while
+  keeping its own label in the output.
+- `PUT /api/pipeline/locations/:id` — writes the resolved WillyWeather
+  id/name/region/state/lat/lng/tideMaxObserved cache back onto a
+  location's own row. Runs once per location, every run, unlike the old
+  git-commit-if-changed behaviour — D1 writes at this volume are cheap
+  enough that this wasn't worth a real changed-since-last-time check.
+
+Needs two new secrets on the site repo (Settings -> Secrets and
+variables -> Actions): `PIPELINE_WORKER_URL` (this Worker's own URL) and
+`PIPELINE_API_TOKEN` (matching the Worker's own secret of the same
+name) — see `update.yml`'s own comments.
 
 ## Troubleshooting
 
