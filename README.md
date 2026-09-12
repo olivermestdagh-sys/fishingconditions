@@ -1226,6 +1226,34 @@ model and never existed in the historical file — so `charts.js` needed
 zero changes. `update.yml` commits it again alongside
 `data/conditions.json`.
 
+### Public reads (`/api/public/marklists`)
+
+Unlike locations (a periodically-regenerated static export — see above),
+`config/mark_lists.json`'s CONSUMPTION side is now fully live instead:
+`charts.js`'s own map marker icon/colour resolution and `sync.js`'s GPX/
+chartplotter export mapping both used to read that static file directly,
+client-side — a real gap for a while, since the admin-editing side moved
+to D1 (Location Groups/Mark Lists cutover, above) with nothing keeping
+that static file in sync. Closed now via a genuinely public,
+unauthenticated endpoint on the same Worker: `GET /api/public/marklists`
+— no session, no token, same trust level `config/mark_lists.json` already
+had as a plain downloadable file (this is read-only; there's no public
+write path anywhere). `MARK_LISTS_FILE_PATH` (`charts.js`) now points at
+this endpoint instead of the static file — a one-constant change, since
+both existing fetch call sites (`charts.js`, `sync.js`, which shares the
+same global constant) needed no changes at all. Verified directly: the
+endpoint's query/output shape matches `rowToMarkList` exactly, and the
+existing fetch code correctly round-trips against it in a real browser.
+
+A short (60s) `Cache-Control` header keeps this from hitting D1 on every
+single page load, at the cost of edits taking up to a minute to appear
+on the free site — a much shorter lag than locations' ~3-hour pipeline
+cycle, and worth knowing if a change seems to not have landed yet.
+
+`config/mark_lists.json` itself is now orphaned the same way
+`config/location_groups.json` already was — nothing reads or writes it
+any more. Safe to delete from the repo whenever convenient.
+
 ## Troubleshooting
 
 - **Page loads but says "Not updated yet"**: the scheduled job hasn't run

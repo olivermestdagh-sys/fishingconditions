@@ -3341,7 +3341,16 @@ async function saveNewLocationToGitHub(newLoc) {
 // (and the deploy-by-drag-and-drop workflow) one consistent shape.
 
 const MARKS_FILE_PATH = "data/marks.json";
-const MARK_LISTS_FILE_PATH = "config/mark_lists.json";
+// Points at the live, unauthenticated user-backend endpoint (D1, Public's
+// own rows) rather than the static config/mark_lists.json file it used to
+// — see user-backend.js's handlePublicMarkLists for why this is safe to
+// leave wide open (read-only, same data the static file already made
+// freely downloadable). Both fetch call sites below/in sync.js are
+// UNCHANGED — this constant swap is the entire migration; the cache-
+// busting `?_=${Date.now()}` and `cache:"no-store"` on those calls are
+// harmless no-ops against a live API rather than a static file, not worth
+// removing just for tidiness.
+const MARK_LISTS_FILE_PATH = "https://fishingconditions-users.oliver-mestdagh.workers.dev/api/public/marklists";
 
 /**
  * Shape of one entry in data/marks.json's `marks` array:

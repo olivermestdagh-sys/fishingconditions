@@ -231,6 +231,14 @@ export default {
       if (pipelineLocMatch && request.method === "PUT") {
         return handlePipelineLocationUpdate(request, env, pipelineLocMatch[1]);
       }
+
+      // --- Public (anonymous) reads below: no session, no token — genuinely
+      // open, matching that this is the exact same data anyone could
+      // already fetch for free from the static config/mark_lists.json file
+      // it replaces. Read-only; there is no public write path anywhere.
+      if (url.pathname === "/api/public/marklists" && request.method === "GET") {
+        return handlePublicMarkLists(env);
+      }
     } catch (err) {
       // Belt-and-braces: an uncaught exception anywhere above should still
       // come back as a JSON error with CORS headers attached, not a bare
@@ -1580,6 +1588,38 @@ async function handlePipelineLocationUpdate(request, env, id) {
     .run();
 
   return jsonResponse({ id, ...merged }, 200, env);
+}
+
+/**
+ * The public, unauthenticated counterpart to /api/marklists?userId=public —
+ * same data, same rowToMarkList shape (field/value/shapeFormat/colorFormat/
+ * color/icon/lowranceSym/garminSym), but reachable by anyone, no session
+ * required. This is what lets charts.js/sync.js (loaded on the free,
+ * anonymous site) read Public's mark-list vocabulary LIVE from D1 instead
+ * of a periodically-regenerated static file — see README's "Public reads"
+ * section for why this is safe to leave wide open: it's read-only, and
+ * it's the exact same data config/mark_lists.json already made freely
+ * downloadable with zero auth.
+ */
+async function handlePublicMarkLists(env) {
+  const { results } = await env.DB.prepare(
+    "SELECT * FROM user_mark_lists WHERE user_id = ? ORDER BY field ASC, value ASC"
+  )
+    .bind(PUBLIC_USER_ID)
+    .all();
+  return new Response(JSON.stringify(results.map(rowToMarkList)), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      // Deliberately a real wildcard, unlike corsHeaders()'s own
+      // env.ALLOWED_ORIGIN — this endpoint carries no session cookie and
+      // never will, so the browser-security reason every other response
+      // in this file avoids "*" (it's incompatible with
+      // Access-Control-Allow-Credentials: true) simply doesn't apply here.
+      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "public, max-age=60", // light caching — this changes rarely enough that a live edit being up to a minute stale on the free site is a fine trade for not hammering D1 on every page load
+    },
+  });
 }
 
 // ---------------------------------------------------------------------
