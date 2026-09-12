@@ -2,6 +2,19 @@
   {
     "name": "Balnarring Beach, VIC 3926",
     "shore": "NW",
+    "tidal": true,
+    "locationGroup": "Western Port",
+    "locationGroups": [
+      "Western Port"
+    ],
+    "tideOffset": 0,
+    "willyweatherId": 13803,
+    "willyweatherName": "Balnarring Beach",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.3884,
+    "lng": 145.1245,
+    "tideMaxObserved": 3.04,
     "types": [
       {
         "type": "Kayak",
@@ -21,49 +34,80 @@
         "timeToSpot": "00:10",
         "timeFromSpot": "00:10"
       }
-    ],
-    "locationGroup": "Western Port",
+    ]
+  },
+  {
+    "name": "Betka Beach VIC",
+    "shore": "N",
+    "tidal": true,
+    "locationGroup": "Mallacoota",
     "locationGroups": [
-      "Western Port"
+      "Mallacoota"
     ],
-    "tideOffset": 0,
-    "willyweatherId": 13803,
-    "willyweatherName": "Balnarring Beach",
-    "willyweatherRegion": "Mornington Peninsula",
+    "tideOffset": null,
+    "willyweatherId": 18288,
+    "willyweatherName": "Betka Beach",
+    "willyweatherRegion": "East Gippsland",
     "willyweatherState": "VIC",
-    "lat": -38.3884,
-    "lng": 145.1245,
-    "tideMaxObserved": 3.04
+    "lat": -37.5775,
+    "lng": 149.7536,
+    "tideMaxObserved": 1.3,
+    "types": [
+      {
+        "type": "Land based",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:20",
+        "packUp": "00:20",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
+      }
+    ]
+  },
+  {
+    "name": "Cape Woolamai Beach",
+    "shore": "NE",
+    "tidal": true,
+    "locationGroup": "South Beaches",
+    "locationGroups": [
+      "South Beaches"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 11840,
+    "willyweatherName": "Cape Woolamai",
+    "willyweatherRegion": "Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -38.54427195995182,
+    "lng": 145.34040927886966,
+    "tideMaxObserved": 2.71,
+    "types": [
+      {
+        "type": "Land based",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:10",
+        "packUp": "00:10",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
+      }
+    ]
   },
   {
     "name": "Corinella Boat Ramp, VIC",
     "shore": "E",
-    "types": [
-      {
-        "type": "Kayak",
-        "driveTo": "00:00",
-        "driveBack": "00:00",
-        "setUp": "00:30",
-        "packUp": "00:30",
-        "timeToSpot": "00:20",
-        "timeFromSpot": "00:20"
-      }
-    ],
+    "tidal": true,
     "locationGroup": "Western Port",
     "locationGroups": [
       "Western Port"
     ],
+    "tideOffset": null,
     "willyweatherId": 35583,
     "willyweatherName": "Corinella Boat Ramp",
     "willyweatherRegion": "Gippsland",
     "willyweatherState": "VIC",
     "lat": -38.4079,
     "lng": 145.4234,
-    "tideMaxObserved": 2.9
-  },
-  {
-    "name": "Coronet Bay, VIC 3984",
-    "shore": "E",
+    "tideMaxObserved": 2.9,
     "types": [
       {
         "type": "Kayak",
@@ -74,22 +118,52 @@
         "timeToSpot": "00:20",
         "timeFromSpot": "00:20"
       }
-    ],
+    ]
+  },
+  {
+    "name": "Coronet Bay, VIC 3984",
+    "shore": "E",
+    "tidal": true,
     "locationGroup": "Western Port",
     "locationGroups": [
       "Western Port"
     ],
+    "tideOffset": null,
     "willyweatherId": 11954,
     "willyweatherName": "Coronet Bay",
     "willyweatherRegion": "Gippsland",
     "willyweatherState": "VIC",
     "lat": -38.4348,
     "lng": 145.4426,
-    "tideMaxObserved": 2.9
+    "tideMaxObserved": 2.9,
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:30",
+        "packUp": "00:30",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
+      }
+    ]
   },
   {
     "name": "Flinders Pier, VIC",
     "shore": "W",
+    "tidal": true,
+    "locationGroup": "Western Port",
+    "locationGroups": [
+      "Western Port"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 27168,
+    "willyweatherName": "Flinders Pier",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.4758,
+    "lng": 145.0286,
+    "tideMaxObserved": 2.71,
     "types": [
       {
         "type": "Kayak",
@@ -100,22 +174,24 @@
         "timeToSpot": "00:20",
         "timeFromSpot": "00:20"
       }
-    ],
-    "locationGroup": "Western Port",
-    "locationGroups": [
-      "Western Port"
-    ],
-    "willyweatherId": 27168,
-    "willyweatherName": "Flinders Pier",
-    "willyweatherRegion": "Mornington Peninsula",
-    "willyweatherState": "VIC",
-    "lat": -38.4758,
-    "lng": 145.0286,
-    "tideMaxObserved": 2.71
+    ]
   },
   {
     "name": "Gunnamatta Beach, VIC",
     "shore": "N",
+    "tidal": true,
+    "locationGroup": "South Beaches",
+    "locationGroups": [
+      "South Beaches"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 18234,
+    "willyweatherName": "Gunnamatta Beach",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.457,
+    "lng": 144.8687,
+    "tideMaxObserved": 1.7,
     "types": [
       {
         "type": "Land based",
@@ -126,22 +202,24 @@
         "timeToSpot": "00:20",
         "timeFromSpot": "00:20"
       }
-    ],
-    "locationGroup": "South Beaches",
-    "locationGroups": [
-      "South Beaches"
-    ],
-    "willyweatherId": 18234,
-    "willyweatherName": "Gunnamatta Beach",
-    "willyweatherRegion": "Mornington Peninsula",
-    "willyweatherState": "VIC",
-    "lat": -38.457,
-    "lng": 144.8687,
-    "tideMaxObserved": 1.7
+    ]
   },
   {
     "name": "Hastings Jetty, VIC",
     "shore": "W",
+    "tidal": true,
+    "locationGroup": "Western Port",
+    "locationGroups": [
+      "Western Port"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 31737,
+    "willyweatherName": "Hastings Jetty",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.3082,
+    "lng": 145.1991,
+    "tideMaxObserved": 3.04,
     "types": [
       {
         "type": "Kayak",
@@ -152,22 +230,24 @@
         "timeToSpot": "01:00",
         "timeFromSpot": "01:00"
       }
-    ],
-    "locationGroup": "Western Port",
-    "locationGroups": [
-      "Western Port"
-    ],
-    "willyweatherId": 31737,
-    "willyweatherName": "Hastings Jetty",
-    "willyweatherRegion": "Mornington Peninsula",
-    "willyweatherState": "VIC",
-    "lat": -38.3082,
-    "lng": 145.1991,
-    "tideMaxObserved": 3.04
+    ]
   },
   {
     "name": "Kilcunda, VIC 3995",
     "shore": "N",
+    "tidal": true,
+    "locationGroup": "South Beaches",
+    "locationGroups": [
+      "South Beaches"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 12454,
+    "willyweatherName": "Kilcunda",
+    "willyweatherRegion": "Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -38.5492,
+    "lng": 145.4754,
+    "tideMaxObserved": 2.71,
     "types": [
       {
         "type": "Land based",
@@ -178,22 +258,52 @@
         "timeToSpot": "00:30",
         "timeFromSpot": "00:30"
       }
-    ],
-    "locationGroup": "South Beaches",
+    ]
+  },
+  {
+    "name": "Lakes Entrance Beach VIC",
+    "shore": "NE",
+    "tidal": true,
+    "locationGroup": "Lakes Entrance",
     "locationGroups": [
-      "South Beaches"
+      "Lakes Entrance"
     ],
-    "willyweatherId": 12454,
-    "willyweatherName": "Kilcunda",
-    "willyweatherRegion": "Gippsland",
+    "tideOffset": null,
+    "willyweatherId": 18294,
+    "willyweatherName": "Lakes Entrance Beach",
+    "willyweatherRegion": "East Gippsland",
     "willyweatherState": "VIC",
-    "lat": -38.5492,
-    "lng": 145.4754,
-    "tideMaxObserved": 2.71
+    "lat": -37.8859,
+    "lng": 147.9875,
+    "tideMaxObserved": 1.08,
+    "types": [
+      {
+        "type": "Land based",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:20",
+        "packUp": "00:20",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
+      }
+    ]
   },
   {
     "name": "Lang Lang Boat Ramp, VIC",
     "shore": "E",
+    "tidal": true,
+    "locationGroup": "Western Port",
+    "locationGroups": [
+      "Western Port"
+    ],
+    "tideOffset": 30,
+    "willyweatherId": 31713,
+    "willyweatherName": "Lang Lang Boat Ramp",
+    "willyweatherRegion": "Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -38.3052,
+    "lng": 145.5214,
+    "tideMaxObserved": 3.31,
     "types": [
       {
         "type": "Kayak",
@@ -214,23 +324,80 @@
         "timeToSpot": "00:00",
         "timeFromSpot": "00:00"
       }
-    ],
-    "locationGroup": "Western Port",
+    ]
+  },
+  {
+    "name": "Mallacoota",
+    "shore": "S",
+    "tidal": true,
+    "locationGroup": "Mallacoota",
     "locationGroups": [
-      "Western Port"
+      "Mallacoota"
     ],
-    "tideOffset": 30,
-    "willyweatherId": 31713,
-    "willyweatherName": "Lang Lang Boat Ramp",
-    "willyweatherRegion": "Gippsland",
+    "tideOffset": null,
+    "willyweatherId": 12642,
+    "willyweatherName": "Mallacoota",
+    "willyweatherRegion": "East Gippsland",
     "willyweatherState": "VIC",
-    "lat": -38.3052,
-    "lng": 145.5214,
-    "tideMaxObserved": 3.31
+    "lat": -37.55435935391175,
+    "lng": 149.7561085224152,
+    "tideMaxObserved": null,
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
+  },
+  {
+    "name": "Metung, VIC 3904",
+    "shore": "W",
+    "tidal": false,
+    "locationGroup": "Lakes Entrance",
+    "locationGroups": [
+      "Lakes Entrance"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 12704,
+    "willyweatherName": "Metung",
+    "willyweatherRegion": "East Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -37.8835,
+    "lng": 147.8508,
+    "tideMaxObserved": null,
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:20",
+        "packUp": "00:20",
+        "timeToSpot": "00:10",
+        "timeFromSpot": "00:10"
+      }
+    ]
   },
   {
     "name": "Mornington Pier, VIC",
     "shore": "E",
+    "tidal": true,
+    "locationGroup": "Port Phillip",
+    "locationGroups": [
+      "Port Phillip"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 35618,
+    "willyweatherName": "Mornington Pier",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.2117,
+    "lng": 145.0349,
+    "tideMaxObserved": 0.85,
     "types": [
       {
         "type": "Kayak",
@@ -241,126 +408,24 @@
         "timeToSpot": "00:15",
         "timeFromSpot": "00:15"
       }
-    ],
-    "locationGroup": "Port Phillip",
-    "locationGroups": [
-      "Port Phillip"
-    ],
-    "willyweatherId": 35618,
-    "willyweatherName": "Mornington Pier",
-    "willyweatherRegion": "Mornington Peninsula",
-    "willyweatherState": "VIC",
-    "lat": -38.2117,
-    "lng": 145.0349,
-    "tideMaxObserved": 0.85
+    ]
   },
   {
     "name": "Patterson River Entrance, VIC",
     "shore": "E",
-    "types": [
-      {
-        "type": "Kayak",
-        "driveTo": "00:00",
-        "driveBack": "00:00",
-        "setUp": "00:30",
-        "packUp": "00:30",
-        "timeToSpot": "00:20",
-        "timeFromSpot": "00:20"
-      }
-    ],
+    "tidal": true,
     "locationGroup": "Port Phillip",
     "locationGroups": [
       "Port Phillip"
     ],
+    "tideOffset": null,
     "willyweatherId": 23948,
     "willyweatherName": "Patterson River Entrance",
     "willyweatherRegion": "Melbourne",
     "willyweatherState": "VIC",
     "lat": -38.0734,
     "lng": 145.1197,
-    "tideMaxObserved": 0.83
-  },
-  {
-    "name": "Rosebud Pier, VIC",
-    "shore": "E",
-    "types": [
-      {
-        "type": "Kayak",
-        "driveTo": "00:00",
-        "driveBack": "00:00",
-        "setUp": "00:30",
-        "packUp": "00:40",
-        "timeToSpot": "00:20",
-        "timeFromSpot": "00:20"
-      }
-    ],
-    "locationGroup": "Port Phillip",
-    "locationGroups": [
-      "Port Phillip"
-    ],
-    "willyweatherId": 35608,
-    "willyweatherName": "Rosebud Pier",
-    "willyweatherRegion": "Mornington Peninsula",
-    "willyweatherState": "VIC",
-    "lat": -38.3503,
-    "lng": 144.9073,
-    "tideMaxObserved": 0.82
-  },
-  {
-    "name": "Safety Beach Boat Ramp, VIC",
-    "shore": "E",
-    "types": [
-      {
-        "type": "Kayak",
-        "driveTo": "00:00",
-        "driveBack": "00:00",
-        "setUp": "00:30",
-        "packUp": "00:40",
-        "timeToSpot": "00:20",
-        "timeFromSpot": "00:20"
-      }
-    ],
-    "locationGroup": "Port Phillip",
-    "locationGroups": [
-      "Port Phillip"
-    ],
-    "willyweatherId": 31834,
-    "willyweatherName": "Safety Beach Boat Ramp",
-    "willyweatherRegion": "Mornington Peninsula",
-    "willyweatherState": "VIC",
-    "lat": -38.3131,
-    "lng": 144.9911,
-    "tideMaxObserved": 0.82
-  },
-  {
-    "name": "Sorrento Pier, VIC",
-    "shore": "SW",
-    "types": [
-      {
-        "type": "Kayak",
-        "driveTo": "00:00",
-        "driveBack": "00:00",
-        "setUp": "00:30",
-        "packUp": "00:40",
-        "timeToSpot": "00:20",
-        "timeFromSpot": "00:20"
-      }
-    ],
-    "locationGroup": "Port Phillip",
-    "locationGroups": [
-      "Port Phillip"
-    ],
-    "willyweatherId": 35607,
-    "willyweatherName": "Sorrento Pier",
-    "willyweatherRegion": "Mornington Peninsula",
-    "willyweatherState": "VIC",
-    "lat": -38.3357,
-    "lng": 144.7459,
-    "tideMaxObserved": 1.7
-  },
-  {
-    "name": "Stony Point Boat Ramp, VIC",
-    "shore": "W",
+    "tideMaxObserved": 0.83,
     "types": [
       {
         "type": "Kayak",
@@ -371,22 +436,162 @@
         "timeToSpot": "00:20",
         "timeFromSpot": "00:20"
       }
+    ]
+  },
+  {
+    "name": "Rosebud Pier, VIC",
+    "shore": "E",
+    "tidal": true,
+    "locationGroup": "Port Phillip",
+    "locationGroups": [
+      "Port Phillip"
     ],
+    "tideOffset": null,
+    "willyweatherId": 35608,
+    "willyweatherName": "Rosebud Pier",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.3503,
+    "lng": 144.9073,
+    "tideMaxObserved": 0.82,
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:30",
+        "packUp": "00:40",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
+      }
+    ]
+  },
+  {
+    "name": "Safety Beach Boat Ramp, VIC",
+    "shore": "E",
+    "tidal": true,
+    "locationGroup": "Port Phillip",
+    "locationGroups": [
+      "Port Phillip"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 31834,
+    "willyweatherName": "Safety Beach Boat Ramp",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.3131,
+    "lng": 144.9911,
+    "tideMaxObserved": 0.82,
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:30",
+        "packUp": "00:40",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
+      }
+    ]
+  },
+  {
+    "name": "Sorrento Pier, VIC",
+    "shore": "SW",
+    "tidal": true,
+    "locationGroup": "Port Phillip",
+    "locationGroups": [
+      "Port Phillip"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 35607,
+    "willyweatherName": "Sorrento Pier",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.3357,
+    "lng": 144.7459,
+    "tideMaxObserved": 1.7,
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:30",
+        "packUp": "00:40",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
+      }
+    ]
+  },
+  {
+    "name": "Stony Point Boat Ramp, VIC",
+    "shore": "W",
+    "tidal": true,
     "locationGroup": "Western Port",
     "locationGroups": [
       "Western Port"
     ],
+    "tideOffset": null,
     "willyweatherId": 35584,
     "willyweatherName": "Stony Point Boat Ramp",
     "willyweatherRegion": "Mornington Peninsula",
     "willyweatherState": "VIC",
     "lat": -38.3744,
     "lng": 145.2224,
-    "tideMaxObserved": 3.04
+    "tideMaxObserved": 3.04,
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:30",
+        "packUp": "00:30",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
+      }
+    ]
+  },
+  {
+    "name": "Terranora Creek - Kennedy Drive Boat Ramp",
+    "shore": "NE",
+    "tidal": true,
+    "locationGroup": null,
+    "locationGroups": [],
+    "tideOffset": null,
+    "willyweatherId": 30385,
+    "willyweatherName": "Terranora Creek - Kennedy Drive Boat Ramp",
+    "willyweatherRegion": "Far North Coast",
+    "willyweatherState": "NSW",
+    "lat": -28.18676843321961,
+    "lng": 153.53226184844974,
+    "tideMaxObserved": 1.49,
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:20",
+        "packUp": "00:20",
+        "timeToSpot": "00:05",
+        "timeFromSpot": "00:05"
+      }
+    ]
   },
   {
     "name": "Warneet Boat Ramp, VIC",
     "shore": "N",
+    "tidal": true,
+    "locationGroup": "Western Port",
+    "locationGroups": [
+      "Western Port"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 31734,
+    "willyweatherName": "Warneet Boat Ramp",
+    "willyweatherRegion": "Melbourne",
+    "willyweatherState": "VIC",
+    "lat": -38.2275,
+    "lng": 145.3066,
+    "tideMaxObserved": 3.04,
     "types": [
       {
         "type": "Kayak",
@@ -397,22 +602,24 @@
         "timeToSpot": "01:00",
         "timeFromSpot": "01:00"
       }
-    ],
-    "locationGroup": "Western Port",
-    "locationGroups": [
-      "Western Port"
-    ],
-    "willyweatherId": 31734,
-    "willyweatherName": "Warneet Boat Ramp",
-    "willyweatherRegion": "Melbourne",
-    "willyweatherState": "VIC",
-    "lat": -38.2275,
-    "lng": 145.3066,
-    "tideMaxObserved": 3.04
+    ]
   },
   {
     "name": "Williamstown Beach, VIC",
     "shore": "N",
+    "tidal": true,
+    "locationGroup": "Port Phillip",
+    "locationGroups": [
+      "Port Phillip"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 27141,
+    "willyweatherName": "Williamstown Beach",
+    "willyweatherRegion": "Melbourne",
+    "willyweatherState": "VIC",
+    "lat": -37.8674,
+    "lng": 144.8916,
+    "tideMaxObserved": 0.95,
     "types": [
       {
         "type": "Kayak",
@@ -423,161 +630,6 @@
         "timeToSpot": "00:20",
         "timeFromSpot": "00:20"
       }
-    ],
-    "locationGroup": "Port Phillip",
-    "locationGroups": [
-      "Port Phillip"
-    ],
-    "willyweatherId": 27141,
-    "willyweatherName": "Williamstown Beach",
-    "willyweatherRegion": "Melbourne",
-    "willyweatherState": "VIC",
-    "lat": -37.8674,
-    "lng": 144.8916,
-    "tideMaxObserved": 0.95
-  },
-  {
-    "name": "Betka Beach VIC",
-    "shore": "N",
-    "types": [
-      {
-        "type": "Land based",
-        "setUp": "00:20",
-        "packUp": "00:20",
-        "timeToSpot": "00:20",
-        "timeFromSpot": "00:20"
-      }
-    ],
-    "locationGroup": "Mallacoota",
-    "locationGroups": [
-      "Mallacoota"
-    ],
-    "willyweatherId": 18288,
-    "willyweatherName": "Betka Beach",
-    "willyweatherRegion": "East Gippsland",
-    "willyweatherState": "VIC",
-    "lat": -37.5775,
-    "lng": 149.7536,
-    "tideMaxObserved": 1.3
-  },
-  {
-    "name": "Metung, VIC 3904",
-    "shore": "W",
-    "types": [
-      {
-        "type": "Kayak",
-        "setUp": "00:20",
-        "packUp": "00:20",
-        "timeToSpot": "00:10",
-        "timeFromSpot": "00:10"
-      }
-    ],
-    "tidal": false,
-    "locationGroup": "Lakes Entrance",
-    "locationGroups": [
-      "Lakes Entrance"
-    ],
-    "willyweatherId": 12704,
-    "willyweatherName": "Metung",
-    "willyweatherRegion": "East Gippsland",
-    "willyweatherState": "VIC",
-    "lat": -37.8835,
-    "lng": 147.8508,
-    "tideMaxObserved": null
-  },
-  {
-    "name": "Lakes Entrance Beach VIC",
-    "shore": "NE",
-    "types": [
-      {
-        "type": "Land based",
-        "setUp": "00:20",
-        "packUp": "00:20",
-        "timeToSpot": "00:20",
-        "timeFromSpot": "00:20"
-      }
-    ],
-    "locationGroup": "Lakes Entrance",
-    "locationGroups": [
-      "Lakes Entrance"
-    ],
-    "willyweatherId": 18294,
-    "willyweatherName": "Lakes Entrance Beach",
-    "willyweatherRegion": "East Gippsland",
-    "willyweatherState": "VIC",
-    "lat": -37.8859,
-    "lng": 147.9875,
-    "tideMaxObserved": 1.08
-  },
-  {
-    "name": "Cape Woolamai Beach",
-    "shore": "NE",
-    "types": [
-      {
-        "type": "Land based",
-        "setUp": "00:10",
-        "packUp": "00:10",
-        "timeToSpot": "00:20",
-        "timeFromSpot": "00:20"
-      }
-    ],
-    "lat": -38.54427195995182,
-    "lng": 145.34040927886966,
-    "locationGroups": [
-      "South Beaches"
-    ],
-    "tideMaxObserved": 2.71,
-    "willyweatherId": 11840,
-    "willyweatherName": "Cape Woolamai",
-    "willyweatherRegion": "Gippsland",
-    "willyweatherState": "VIC"
-  },
-  {
-    "name": "Mallacoota",
-    "shore": "S",
-    "types": [
-      {
-        "type": "Kayak",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
-      }
-    ],
-    "lat": -37.55435935391175,
-    "lng": 149.7561085224152,
-    "tidal": true,
-    "willyweatherId": 12642,
-    "willyweatherName": "Mallacoota",
-    "willyweatherRegion": "East Gippsland",
-    "willyweatherState": "VIC",
-    "tideMaxObserved": null,
-    "locationGroups": [
-      "Mallacoota"
     ]
-  },
-  {
-    "name": "Terranora Creek - Kennedy Drive Boat Ramp",
-    "shore": "NE",
-    "types": [
-      {
-        "type": "Kayak",
-        "setUp": "00:20",
-        "packUp": "00:20",
-        "timeToSpot": "00:05",
-        "timeFromSpot": "00:05"
-      }
-    ],
-    "lat": -28.18676843321961,
-    "lng": 153.53226184844974,
-    "tidal": true,
-    "willyweatherId": 30385,
-    "willyweatherName": "Terranora Creek - Kennedy Drive Boat Ramp",
-    "willyweatherRegion": "Far North Coast",
-    "willyweatherState": "NSW",
-    "locationGroups": [
-      "Gold Coast"
-    ],
-    "tideMaxObserved": 1.49
   }
 ]
