@@ -6,10 +6,14 @@ the Excel workbook's Power Query "Conditions" query, so the numbers and
 column meanings should match exactly.
 
 Run with:
-    WILLYWEATHER_API_KEY=xxxx python3 fetch_conditions.py
+    WILLYWEATHER_API_KEY=xxxx PIPELINE_WORKER_URL=https://fishingconditions-users.oliver-mestdagh.workers.dev PIPELINE_API_TOKEN=xxxx python3 fetch_conditions.py
 
 Environment variables:
     WILLYWEATHER_API_KEY  (required) - your WillyWeather API key
+    PIPELINE_WORKER_URL   (required) - the user-backend Worker's own URL (locations now
+                                        live in D1 behind it, not config/locations.json)
+    PIPELINE_API_TOKEN    (required) - shared secret matching that Worker's own
+                                        PIPELINE_API_TOKEN setting
     FORECAST_DAYS         (optional) - how many days ahead to pull, default 6
 """
 
@@ -28,8 +32,16 @@ FORECAST_DAYS = int(os.environ.get("FORECAST_DAYS", "6"))
 BASE_URL = "https://api.willyweather.com.au/v2"
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 OPEN_METEO_MARINE_URL = "https://marine-api.open-meteo.com/v1/marine"
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config", "locations.json")
 OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "conditions.json")
+# Locations now live in D1 behind the user-backend Worker (Public
+# account's own rows) rather than config/locations.json — see
+# load_locations()/write_location_cache() below, and user-backend.js's
+# "Pipeline" section for the endpoint itself. A completely different auth
+# mechanism from anything a browser uses: GitHub Actions has no session
+# cookie, so this is a long-lived shared secret instead, set as both a
+# Worker secret and a GitHub Actions secret.
+PIPELINE_WORKER_URL = os.environ.get("PIPELINE_WORKER_URL", "").rstrip("/")
+PIPELINE_API_TOKEN = os.environ.get("PIPELINE_API_TOKEN", "")
 # WillyWeather's coordinate search rejects the request without an explicit
 # search radius — see search_location_by_coords for how that was actually
 # pinned down. Same 25km default as the live-preview Cloudflare Worker
@@ -42,12 +54,15 @@ COMPASS_DEGREES = {
 }
 
 
-def http_get_json(url, retries=3, backoff=2.0):
+def http_get_json(url, retries=3, backoff=2.0, extra_headers=None):
     """GET a URL and parse JSON, with a couple of retries for transient errors."""
     last_err = None
+    headers = {"Content-Type": "application/json"}
+    if extra_headers:
+        headers.update(extra_headers)
     for attempt in range(retries):
         try:
-            req = urllib.request.Request(url, headers={"Content-Type": "application/json"})
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=20) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except Exception as e:  # noqa: BLE001 - we want to retry on anything transient
@@ -56,6 +71,95 @@ def http_get_json(url, retries=3, backoff=2.0):
                 time.sleep(backoff * (attempt + 1))
     print(f"WARNING: request failed after {retries} attempts: {url}\n  {last_err}", file=sys.stderr)
     return None
+
+
+def http_put_json(url, body, retries=3, backoff=2.0, extra_headers=None):
+    """PUT a JSON body to a URL and parse the JSON response — same retry
+    shape as http_get_json above. Used only by write_location_cache()
+    below; a transient failure here just means this run's newly-resolved
+    WillyWeather id/lat/lng cache doesn't get persisted, which costs the
+    NEXT run one extra name-search call for that location — not fatal
+    enough to abort the whole fetch over."""
+    last_err = None
+    headers = {"Content-Type": "application/json"}
+    if extra_headers:
+        headers.update(extra_headers)
+    data = json.dumps(body).encode("utf-8")
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, data=data, headers=headers, method="PUT")
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:  # noqa: BLE001 - see docstring
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(backoff * (attempt + 1))
+    print(f"WARNING: request failed after {retries} attempts: {url}\n  {last_err}", file=sys.stderr)
+    return None
+
+
+def load_locations():
+    """Loads the tracked-locations list from the user-backend Worker's
+    pipeline endpoint — the Public account's own rows, i.e. exactly what
+    the free site's locations Settings page edits (once that's cut over;
+    see that file's own notes). Replaces the old direct read of
+    config/locations.json. Unlike http_get_json's normal lenient
+    behaviour, a failure here is fatal — there is nothing sensible to
+    fetch conditions FOR without a location list, same as the old
+    open(CONFIG_PATH) would have crashed just as hard on a missing/
+    unreadable file."""
+    if not PIPELINE_WORKER_URL or not PIPELINE_API_TOKEN:
+        print("ERROR: PIPELINE_WORKER_URL and PIPELINE_API_TOKEN must both be set.", file=sys.stderr)
+        sys.exit(1)
+    data = http_get_json(
+        f"{PIPELINE_WORKER_URL}/api/pipeline/locations",
+        extra_headers={"X-Pipeline-Token": PIPELINE_API_TOKEN},
+    )
+    if data is None:
+        print("ERROR: failed to load locations from the pipeline endpoint.", file=sys.stderr)
+        sys.exit(1)
+    return data
+
+
+def write_location_cache(locations):
+    """Replaces the old 'write the whole locations list back to
+    config/locations.json' step — persists each location's newly-resolved
+    willyweatherId/willyweatherName/willyweatherRegion/willyweatherState/
+    lat/lng/tideMaxObserved (see the resolution tiers in process_location())
+    back to its own D1 row, one PUT per location.
+
+    DELIBERATE BEHAVIOUR CHANGE from the old file-based version: this
+    always sends a PUT for every location on every run, rather than only
+    committing when the file's content genuinely changed. D1 writes at
+    this volume (a few dozen locations, once every few hours) are cheap
+    enough that this isn't worth the extra round-trip a real
+    changed-since-last-time comparison would need — but it IS a real
+    behaviour change from the git-commit version worth knowing about if
+    D1 write volume/cost ever becomes a concern."""
+    if not PIPELINE_WORKER_URL or not PIPELINE_API_TOKEN:
+        return  # already exited in load_locations() if these were ever missing; defensive only
+    sent = 0
+    for loc in locations:
+        loc_id = loc.get("id")
+        if not loc_id:
+            continue
+        body = {
+            "willyweatherId": loc.get("willyweatherId"),
+            "willyweatherName": loc.get("willyweatherName"),
+            "willyweatherRegion": loc.get("willyweatherRegion"),
+            "willyweatherState": loc.get("willyweatherState"),
+            "lat": loc.get("lat"),
+            "lng": loc.get("lng"),
+            "tideMaxObserved": loc.get("tideMaxObserved"),
+        }
+        result = http_put_json(
+            f"{PIPELINE_WORKER_URL}/api/pipeline/locations/{loc_id}",
+            body,
+            extra_headers={"X-Pipeline-Token": PIPELINE_API_TOKEN},
+        )
+        if result is not None:
+            sent += 1
+    print(f"Wrote WillyWeather id cache back to D1 for {sent}/{len(locations)} locations")
 
 
 def search_location(name):
@@ -1158,9 +1262,20 @@ def process_location(loc):
     # Condition IS type-specific (Kayak's wind+current formula vs Land
     # based's wave-angle formula) — each type gets its own copy of the
     # shared rows, tagged with which type it represents.
+    #
+    # type_name (the admin's own display name — could be a renamed or
+    # entirely custom type like "SUP") is what's used as this dict's key
+    # and the output "Type" label users see; behaves_like (always exactly
+    # "Kayak" or "Land based" — see user-backend.js's pipeline section for
+    # why) is what actually drives the scoring math below. Two different
+    # custom types CAN share the same behaves_like (a "SUP" scoring like
+    # Kayak, say) — that's exactly why behaves_like is never used as a key
+    # or a label here, only ever passed into compute_condition/
+    # explain_condition, which know nothing about custom type names.
     rows_by_type = {}
     for type_config in types:
         type_name = type_config.get("type")
+        behaves_like = type_config.get("behavesLike", type_name)  # falls back to type_name if ever absent — keeps this safe against an older/malformed response shape
         type_rows = []
         for row in base_rows:
             row_copy = dict(row)
@@ -1168,11 +1283,11 @@ def process_location(loc):
             row_current_velocity = velocity_by_hour.get(hour_key)
             row_current_direction = direction_by_hour.get(hour_key)
             row_copy["Condition"] = compute_condition(
-                type_name, shore, row.get("Wind Forecast Dir"), row.get("Wind Forecast (km/h)"),
+                behaves_like, shore, row.get("Wind Forecast Dir"), row.get("Wind Forecast (km/h)"),
                 current_velocity=row_current_velocity, current_direction=row_current_direction,
             )
             row_copy["Condition Reason"] = explain_condition(
-                type_name, shore, row.get("Wind Forecast Dir"), row.get("Wind Forecast (km/h)"),
+                behaves_like, shore, row.get("Wind Forecast Dir"), row.get("Wind Forecast (km/h)"),
                 current_velocity=row_current_velocity, current_direction=row_current_direction,
             )
             row_copy["Type"] = type_name
@@ -1224,8 +1339,7 @@ def main():
         print("ERROR: WILLYWEATHER_API_KEY environment variable is not set.", file=sys.stderr)
         sys.exit(1)
 
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        locations = json.load(f)
+    locations = load_locations()
 
     previous_output = load_previous_output()
     previous_rows_by_key = {}
@@ -1342,23 +1456,14 @@ def main():
 
     print(f"Wrote {len(all_rows)} rows to {OUTPUT_PATH}")
 
-    # Write the WillyWeather id/name/region/state cache (see the resolution
-    # tiers at the top of process_location()) back to config/locations.json
-    # — the whole point of caching is that it has to be PERSISTED somewhere
-    # for the next run to find, and the location's own config entry is the
-    # natural place for it to live rather than a separate file to keep in
-    # sync. `locations` is the SAME list read from CONFIG_PATH at the top of
-    # main(), and every `loc` dict in it has been mutated in place by
-    # process_location() with whatever it newly resolved — writing it back
-    # unconditionally is safe: git only actually commits this file (see
-    # .github/workflows/update.yml's file_pattern) when the content genuinely
-    # changed, so a run where every location already had a cached id
-    # produces an identical file and no commit at all.
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(locations, f, indent=2)
-        f.write("\n")
-
-    print(f"Wrote WillyWeather id cache back to {CONFIG_PATH}")
+    # Write the WillyWeather id/name/region/state/lat/lng/tideMaxObserved
+    # cache (see the resolution tiers at the top of process_location())
+    # back to D1 — `locations` is the SAME list returned by load_locations()
+    # at the top of main(), and every `loc` dict in it has been mutated in
+    # place by process_location() with whatever it newly resolved. See
+    # write_location_cache()'s own docstring for how this differs from the
+    # old git-commit-if-changed behaviour.
+    write_location_cache(locations)
 
 
 if __name__ == "__main__":
