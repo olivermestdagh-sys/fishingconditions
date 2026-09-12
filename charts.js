@@ -1321,16 +1321,16 @@ function markListOptionsHtml(markLists, listLabel, currentValue) {
  * root element is how the map-level popupopen handler (see
  * loadAndRenderMarks) knows which mark a given open popup belongs to.
  *
- * The Edit button only renders at all when getConnection() finds a saved
- * GitHub token — with no token there's no way to actually WRITE a change
- * back to data/marks.json (saveMarkToGitHub would just fail), so offering
- * an Edit button that can only ever end in a save error is worse than not
- * offering one. In practice this whole popup already only ever renders
- * behind that same connection check one level up (loadAndRenderMarks won't
- * even load marks without one today), so this is currently a belt-and-braces
- * check rather than one closing a live gap — but it keeps the button itself
- * correct on its own terms, independent of whatever gates marks display
- * further up, rather than relying on that outer gate alone.
+ * The Edit button only renders at all when cachedIsAdmin is true — with
+ * no Admin session there's no way to actually WRITE a change back to D1
+ * (saveMarkToD1 would just fail server-side), so offering an Edit button
+ * that can only ever end in a save error is worse than not offering one.
+ * In practice this whole popup already only ever renders behind that same
+ * Admin check one level up (loadAndRenderMarks won't even load marks
+ * without it today), so this is currently a belt-and-braces check rather
+ * than one closing a live gap — but it keeps the button itself correct on
+ * its own terms, independent of whatever gates marks display further up,
+ * rather than relying on that outer gate alone.
  */
 /** "95" -> "1h 35m"; under an hour stays as "42 min". Rounds to the
  * nearest minute — this is a rough distance÷speed estimate to begin with
@@ -1433,7 +1433,7 @@ function buildMarkPopupViewHtml(mark) {
   // anything already sitting on `mark`).
   rows.push(`<div data-mark-distance-row="nearest" style="display:flex;gap:6px;font-size:0.85rem;margin-bottom:3px;"><span style="font-weight:600;min-width:64px;">Nearest loc.</span><span>Calculating…</span></div>`);
   rows.push(`<div data-mark-distance-row="fromyou" style="display:flex;gap:6px;font-size:0.85rem;margin-bottom:3px;"><span style="font-weight:600;min-width:64px;">From you</span><span>Calculating…</span></div>`);
-  const canEdit = !!getConnection();
+  const canEdit = cachedIsAdmin;
   return `
     <div data-mark-id="${escapeHtml(mark.id)}" style="min-width:200px;">
       ${rows.join("")}
@@ -1676,189 +1676,123 @@ function collectMarkFormValues(form, originalMark) {
 }
 
 /**
- * Writes one mark to data/marks.json on GitHub — same read-current-sha/
- * modify/write-whole-file pattern as saveNewLocationToGitHub below. Upserts
- * by id: replaces the matching entry if one exists (the edit-popup flow —
- * see wireMarkPopupButtons), otherwise appends it as a new entry (the
- * "start a new mark" flow — see startNewMarkEntry). One function for both
- * rather than a separate create/update pair, since the only real difference
- * between them is whether an existing array index was found, and getting
- * that wrong in the edit case (e.g. the mark was deleted elsewhere between
- * loading the page and saving) is better handled by just writing it back in
- * than by failing the save outright.
+ * Writes one mark to D1 via POST or PUT /api/marks (Public's own rows,
+ * ?userId=public) — replaces saveMarkToGitHub's read-sha/modify/write-
+ * whole-file pattern with a single REST call per save. `isNew` (passed by
+ * the caller — see wireMarkPopupButtons's own options.isNew) decides
+ * POST vs PUT directly, rather than this function re-deriving it by
+ * searching for an existing entry the way the old GitHub version had to
+ * (there's no "whole array to search" any more, just one row to write).
  *
- * Requires an existing GitHub connection (see getConnection) — the mark
- * popups themselves only ever render at all when connected in the first
- * place (see loadAndRenderMarks), so in practice this check is a defensive
- * backstop, not the primary gate.
+ * updatedMark.id is passed through as-is on a POST — see
+ * handleMarksCollection's own comment (user-backend.js) for why the
+ * server accepts and keeps a client-supplied id rather than generating
+ * its own: it's what lets the SAME id chosen when a draft pin is first
+ * drawn (makeMarkId(), startNewMarkEntry) still be the real, permanent
+ * one once saved, with no extra bookkeeping needed here to reconcile a
+ * server-assigned id back into marksById/markersById.
  *
  * Returns { success: true } or { success: false, error: "..." } — never
- * throws, so the popup's own Save handler can show the error text directly.
+ * throws, same contract saveMarkToGitHub had, so the popup's own Save
+ * handler needed no changes beyond the function name itself.
  */
-async function saveMarkToGitHub(updatedMark) {
-  const conn = getConnection();
-  if (!conn || !conn.owner || !conn.repo || !conn.token) {
-    return { success: false, error: "Not connected to GitHub — connect from the Settings tab first." };
-  }
+async function saveMarkToD1(updatedMark, isNew) {
   try {
-    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARKS_FILE_PATH}?ref=${BRANCH}`, {
-      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+    const url = isNew
+      ? `${USER_BACKEND_URL}/api/marks?userId=public`
+      : `${USER_BACKEND_URL}/api/marks/${updatedMark.id}?userId=public`;
+    const res = await fetch(url, {
+      method: isNew ? "POST" : "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updatedMark),
     });
-    if (!getRes.ok) throw new Error(`Could not read current file (${getRes.status})`);
-    const getJson = await getRes.json();
-    const decoded = decodeURIComponent(escape(atob(getJson.content.replace(/\n/g, ""))));
-    const marksJson = JSON.parse(decoded);
-    if (!Array.isArray(marksJson.marks)) marksJson.marks = [];
-    const marksArr = marksJson.marks;
-
-    const idx = marksArr.findIndex((m) => m.id === updatedMark.id);
-    if (idx === -1) marksArr.push(updatedMark);
-    else marksArr[idx] = updatedMark;
-
-    const content = JSON.stringify(marksJson, null, 2) + "\n";
-    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARKS_FILE_PATH}`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${conn.token}`,
-        Accept: "application/vnd.github+json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        message: `${idx === -1 ? "Add" : "Update"} mark "${updatedMark.name}" via site`,
-        content: utf8ToBase64(content),
-        sha: getJson.sha,
-        branch: BRANCH,
-      }),
-    });
-    if (!putRes.ok) {
-      const errBody = await putRes.json().catch(() => ({}));
-      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
     }
     return { success: true };
   } catch (err) {
-    console.error("saveMarkToGitHub failed:", err);
+    console.error("saveMarkToD1 failed:", err);
     return { success: false, error: err.message };
   }
 }
 
 /**
- * Deletes one mark from data/marks.json entirely — same GET-current-sha-
- * then-PUT-whole-file pattern as saveMarkToGitHub just above (this repo's
- * only way to write anything, being a static site with no server of its
- * own), just filtering the mark OUT of the array instead of adding or
- * replacing one. Never throws (same convention as saveMarkToGitHub) —
- * returns {success:false, error} instead, so the popup's own Delete
- * handler can show the error text directly rather than needing its own
- * try/catch.
+ * Deletes one mark from D1 — replaces deleteMarkFromGitHub's read-sha/
+ * filter/write-whole-file pattern with a single DELETE call. Same
+ * never-throws convention (returns {success:false, error} instead), same
+ * reasoning as saveMarkToD1 above.
  */
-async function deleteMarkFromGitHub(markId) {
-  const conn = getConnection();
-  if (!conn || !conn.owner || !conn.repo || !conn.token) {
-    return { success: false, error: "Not connected to GitHub — connect from the Settings tab first." };
-  }
+async function deleteMarkFromD1(markId) {
   try {
-    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARKS_FILE_PATH}?ref=${BRANCH}`, {
-      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
+    const res = await fetch(`${USER_BACKEND_URL}/api/marks/${markId}?userId=public`, {
+      method: "DELETE",
+      credentials: "include",
     });
-    if (!getRes.ok) throw new Error(`Could not read current file (${getRes.status})`);
-    const getJson = await getRes.json();
-    const decoded = decodeURIComponent(escape(atob(getJson.content.replace(/\n/g, ""))));
-    const marksJson = JSON.parse(decoded);
-    if (!Array.isArray(marksJson.marks)) marksJson.marks = [];
-    marksJson.marks = marksJson.marks.filter((m) => m.id !== markId);
-
-    const content = JSON.stringify(marksJson, null, 2) + "\n";
-    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARKS_FILE_PATH}`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${conn.token}`,
-        Accept: "application/vnd.github+json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        message: `Delete mark ${markId} via site`,
-        content: utf8ToBase64(content),
-        sha: getJson.sha,
-        branch: BRANCH,
-      }),
-    });
-    if (!putRes.ok) {
-      const errBody = await putRes.json().catch(() => ({}));
-      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
-    }
+    if (!res.ok && res.status !== 404) throw new Error(`status ${res.status}`);
     return { success: true };
   } catch (err) {
-    console.error("deleteMarkFromGitHub failed:", err);
+    console.error("deleteMarkFromD1 failed:", err);
     return { success: false, error: err.message };
   }
 }
 
-
 /**
- * Appends MANY new marks to data/marks.json in a single commit — the Sync
- * tab's bulk-import save (see sync.js), as opposed to saveMarkToGitHub just
- * above, which is a single add-or-update used by the interactive map
- * popup. Doing one GET + one PUT for the whole batch (rather than looping
- * saveMarkToGitHub once per mark) matters here specifically because an
- * import can realistically be hundreds to low-thousands of marks at once —
- * that many sequential GitHub API round trips would be slow, would race
- * against each other's read-modify-write (each call re-reading a sha a
- * previous in-flight call might already be about to invalidate), and would
- * leave hundreds of individual commits in the repo's history for what is
- * conceptually one action.
+ * Creates MANY new marks in D1 — the Sync tab's bulk-import save (see
+ * sync.js), as opposed to saveMarkToD1 just above, which is a single
+ * add-or-update used by the interactive map popup. There is no bulk-
+ * create endpoint (unlike the old GitHub version, which could fold
+ * hundreds of new marks into one commit) — this issues one POST per
+ * mark instead, in small concurrent batches (CONCURRENCY below) rather
+ * than either fully sequential (slow for a large import) or fully
+ * parallel (hundreds of simultaneous requests hitting the Worker/D1 at
+ * once). A partial failure part-way through does NOT roll back whatever
+ * already succeeded — same trade-off the old version's single big commit
+ * never had to make, but an import is rare enough, and each mark
+ * independent enough, that "some of these saved, here's exactly how
+ * many and what went wrong" is more useful than an all-or-nothing commit
+ * would be here anyway.
  *
- * newMarks is assumed to already be fully-formed mark objects
- * (id/lat/lng/etc already set — see handleImportClick, sync.js) and already
- * deduped against whatever was loaded for the review screen; this function
- * does not re-check for existing near-duplicates itself, it just appends.
- *
- * Returns { success: true, added: n } or { success: false, error: "..." } —
- * never throws.
+ * Returns { success: true, added: n } (added may be less than
+ * newMarks.length if some failed — check the console for which) or
+ * { success: false, error } if NONE succeeded. Never throws.
  */
-async function saveMarksBatchToGitHub(newMarks) {
-  const conn = getConnection();
-  if (!conn || !conn.owner || !conn.repo || !conn.token) {
-    return { success: false, error: "Not connected to GitHub — connect from the Settings tab first." };
-  }
+async function saveMarksBatchToD1(newMarks) {
   if (!newMarks || newMarks.length === 0) {
     return { success: false, error: "Nothing selected to import." };
   }
-  try {
-    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARKS_FILE_PATH}?ref=${BRANCH}`, {
-      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
-    });
-    if (!getRes.ok) throw new Error(`Could not read current file (${getRes.status})`);
-    const getJson = await getRes.json();
-    const decoded = decodeURIComponent(escape(atob(getJson.content.replace(/\n/g, ""))));
-    const marksJson = JSON.parse(decoded);
-    if (!Array.isArray(marksJson.marks)) marksJson.marks = [];
-
-    marksJson.marks.push(...newMarks);
-
-    const content = JSON.stringify(marksJson, null, 2) + "\n";
-    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARKS_FILE_PATH}`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${conn.token}`,
-        Accept: "application/vnd.github+json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        message: `Import ${newMarks.length} mark${newMarks.length === 1 ? "" : "s"} via Sync tab`,
-        content: utf8ToBase64(content),
-        sha: getJson.sha,
-        branch: BRANCH,
-      }),
-    });
-    if (!putRes.ok) {
-      const errBody = await putRes.json().catch(() => ({}));
-      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
-    }
-    return { success: true, added: newMarks.length };
-  } catch (err) {
-    console.error("saveMarksBatchToGitHub failed:", err);
-    return { success: false, error: err.message };
+  const CONCURRENCY = 8;
+  let added = 0;
+  const errors = [];
+  for (let i = 0; i < newMarks.length; i += CONCURRENCY) {
+    const batch = newMarks.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      batch.map((mark) =>
+        fetch(`${USER_BACKEND_URL}/api/marks?userId=public`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(mark),
+        })
+          .then(async (res) => {
+            if (!res.ok) {
+              const errBody = await res.json().catch(() => ({}));
+              throw new Error(errBody.error || `status ${res.status}`);
+            }
+            return true;
+          })
+          .catch((err) => {
+            console.error(`Failed to import mark "${mark.name || mark.id}":`, err);
+            errors.push(err.message);
+            return false;
+          })
+      )
+    );
+    added += results.filter(Boolean).length;
   }
+  if (added === 0) return { success: false, error: errors[0] || "Import failed." };
+  return { success: true, added };
 }
 
 /**
@@ -1981,7 +1915,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       const statusEl = popupEl.querySelector("[data-mark-delete-status]");
       deleteConfirmYesBtn.disabled = true;
       if (statusEl) statusEl.textContent = "Deleting…";
-      const result = await deleteMarkFromGitHub(mark.id);
+      const result = await deleteMarkFromD1(mark.id);
       if (!result.success) {
         deleteConfirmYesBtn.disabled = false;
         if (statusEl) {
@@ -2041,7 +1975,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       statusEl.textContent = "Saving…";
       statusEl.style.color = "";
 
-      const result = await saveMarkToGitHub(updated);
+      const result = await saveMarkToD1(updated, options.isNew);
       if (result.success) {
         // Mutate the SAME object every closure here already holds a
         // reference to (marksById's entry, this popup's `mark`) rather than
@@ -2164,27 +2098,27 @@ function parseGpxWaypoints(gpxText) {
 }
 
 /**
- * Loads data/marks.json (and config/mark_lists.json, for the edit form's
- * dropdown options) and plots every mark on an already-created Leaflet map,
- * each one clickable into a view/edit popup (see buildMarkPopupViewHtml/
- * buildMarkPopupEditHtml above). Cache-busted with a `?_=` query param —
- * same reason loadLocationCoords/loadTideOffsets already do this for their
- * own data/config fetches: GitHub Pages' CDN caches static files with
- * max-age=600, so a mark added (or edited) moments ago wouldn't show up
- * here for up to 10 minutes without it.
+ * Loads marks (D1, Public's own rows, via GET /api/public/marks) and
+ * config/mark_lists.json's live equivalent (GET /api/public/marklists,
+ * for the edit form's dropdown options) and plots every mark on an
+ * already-created Leaflet map, each one clickable into a view/edit popup
+ * (see buildMarkPopupViewHtml/buildMarkPopupEditHtml above).
  *
- * Gated behind getConnection() — the SAME GitHub personal access token
- * already used for admin/write actions on Settings, not a new or separate
- * token. IMPORTANT CAVEAT, worth understanding clearly: this only gates
- * whether the JS chooses to RENDER the data — it does not, and on a static
- * GitHub Pages site CANNOT, restrict who can fetch data/marks.json directly.
- * That file sits in the same public repo as everything else on this site;
- * anyone who knows or guesses the path can still download it with a plain
- * HTTP request, connection or no connection. This is a "don't clutter the
- * map with a couple thousand personal points for random visitors" gate, not
- * genuine access control — there's no server here able to enforce one. If
- * these points need to be genuinely private, they can't live in this repo
- * at all.
+ * Gated behind cachedIsAdmin (refreshAdminStatus, above) — the SAME
+ * Admin-session flag "Add as permanent location" (app.js) already uses,
+ * not a new or separate check. IMPORTANT CAVEAT, worth understanding
+ * clearly, carried over unchanged from when this gated on a GitHub
+ * connection instead: this only gates whether the JS chooses to RENDER
+ * the data — it does not, and genuinely cannot from a static site with no
+ * server of its own, restrict who can fetch this data. GET
+ * /api/public/marks is deliberately unauthenticated (see its own comment,
+ * user-backend.js) — anyone who knows or guesses the endpoint can still
+ * fetch it directly, signed in or not. This is a "don't clutter the map
+ * with a couple thousand personal points for random visitors" gate, not
+ * genuine access control — there never was a way to build one here. If
+ * these points need to be genuinely private, they can't be reachable by
+ * an unauthenticated endpoint at all, which is a bigger redesign than
+ * this migration.
  *
  * Rendered as Leaflet circleMarkers (or the diamond/cross classes built
  * by getDiamondMarkerClass/getCrossMarkerClass above), one
@@ -2455,19 +2389,17 @@ function createMarkShapeLayer(latlng, mark, options, markLists) {
 }
 
 async function loadAndRenderMarks(map, state) {
-  if (!getConnection()) return;
+  if (!cachedIsAdmin) return;
 
-  let marksJson;
+  let marks;
   try {
     const res = await fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" });
-    if (!res.ok) return; // file not there yet / nothing to show, not an error
-    marksJson = await res.json();
+    if (!res.ok) return; // nothing to show yet, not an error
+    marks = await res.json(); // bare array — see handlePublicMarks, user-backend.js
   } catch (err) {
-    console.error("Could not load marks.json:", err);
+    console.error("Could not load marks:", err);
     return;
   }
-
-  const marks = (marksJson && marksJson.marks) || [];
 
   // Best-effort — the edit form's dropdowns just fall back to "no options
   // besides the current value" if this fails, rather than blocking the
@@ -2476,7 +2408,7 @@ async function loadAndRenderMarks(map, state) {
     const listsRes = await fetch(`${MARK_LISTS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" });
     if (listsRes.ok) state.markLists = await listsRes.json();
   } catch (err) {
-    console.error("Could not load mark_lists.json (edit dropdowns will be limited):", err);
+    console.error("Could not load mark lists (edit dropdowns will be limited):", err);
   }
 
   const renderer = L.canvas({ padding: 0.5 });
@@ -3126,14 +3058,14 @@ async function refreshMarkFormConditionsForNewTime(formEl, lat, lng, dateTimeNai
  * (see computeQuickMarkDefaults); a plain click through this same function
  * always starts blank.
  *
- * Marks are gated behind a GitHub connection everywhere else on this site
- * (see loadAndRenderMarks) — without one, "add a mark" isn't a real option
- * to offer, so a click just falls back to whatever this map's plain-click
+ * Marks are gated behind Admin sign-in everywhere else on this site (see
+ * loadAndRenderMarks) — without it, "add a mark" isn't a real option to
+ * offer, so a click just falls back to whatever this map's plain-click
  * behaviour was before marks existed (the Location tab's preview, or
  * nothing at all on Live).
  */
 async function handleMapClickForMarks(map, lat, lng, state, onLocationPreviewClick, defaults = {}) {
-  if (!getConnection()) {
+  if (!cachedIsAdmin) {
     if (onLocationPreviewClick) onLocationPreviewClick(lat, lng);
     return;
   }
@@ -3152,16 +3084,20 @@ async function handleMapClickForMarks(map, lat, lng, state, onLocationPreviewCli
 // --- GitHub read/write (shared) ---------------------------------------------
 //
 // Originally lived only in locationsadmin.js (the Settings tab's own
-// save flow) — moved here once the Location tab's preview needed the same
-// "is there a GitHub connection, read the current file, write it back"
-// plumbing for its own "Add as permanent location" button (see
-// saveNewLocationToGitHub below, and previewLocationOnMap/
-// btnAddPreviewAsLocation in app.js). GROUPS_FILE_PATH and WORKFLOW_FILE
-// stay local to locationsadmin.js — nothing outside the Settings page
-// touches location groups or triggers a data refresh.
+// save flow), then grew a second consumer (the Location tab's "Add as
+// permanent location") that's since moved to D1 too (saveNewLocationToD1,
+// above) — GITHUB_API/BRANCH/getConnection() below are still genuinely
+// used, just narrower now: Home address and the "Refresh data now"
+// trigger (locationsadmin.js), Sync (sync.js, still unmigrated). FILE_PATH
+// (config/locations.json) specifically is now dead — nothing writes to it
+// via this path any more — left in place rather than removed for the same
+// low-risk-over-tidiness reasoning the deprecated v1 endpoints get
+// (user-backend.js). GROUPS_FILE_PATH and WORKFLOW_FILE stay local to
+// locationsadmin.js — nothing outside the Settings page triggers a data
+// refresh.
 
 const GITHUB_API = "https://api.github.com";
-const FILE_PATH = "config/locations.json";
+const FILE_PATH = "config/locations.json"; // dead — see comment above
 const BRANCH = "main";
 
 /** Reads the same "ghConnection" localStorage entry the Settings page's
@@ -3179,24 +3115,23 @@ function getConnection() {
 }
 
 /**
- * Hides the "Sync" nav link entirely when there's no GitHub connection —
- * the Sync tab is pure write/admin functionality (import/export marks via
- * the GitHub Contents API), gated the same way every other write-capable
- * feature on this site already is, so there's nothing useful behind it
- * without a connection; showing the link would just lead to sync.html's
- * own "not connected" card rather than anywhere actually useful. Runs on
- * every page load — the same identical `.tabnav` markup (including the
- * Sync link) is duplicated in every page's own HTML rather than templated,
- * so this one shared listener (charts.js loads on every page) covers all
- * of them from a single place instead of needing the same few lines
- * copy-pasted into week.js/app.js/live.js/locationsadmin.js/sync.js too.
- * No live-updating while sitting on a page — connecting/disconnecting on
- * Settings only takes effect for THIS check on the next page load/
- * navigation, same as every other per-page use of getConnection() here.
+ * Hides the "Sync" nav link entirely when not signed in as Admin — the
+ * Sync tab is pure write/admin functionality (import/export marks), gated
+ * the same way marks editing itself now is, so there's nothing useful
+ * behind it otherwise; showing the link would just lead to sync.html's
+ * own "not connected" card rather than anywhere actually useful. Runs its
+ * own refreshAdminStatus() rather than relying on some other page's own
+ * init() having already done so first — this listener fires identically
+ * on every page (charts.js loads everywhere), independent of whichever
+ * page-specific init() also happens to run one. No live-updating while
+ * sitting on a page — signing in/out on the Account tab only takes effect
+ * for THIS check on the next page load/navigation.
  */
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   const syncNavLink = document.querySelector('.tabnav a[href="sync.html"]');
-  if (syncNavLink && !getConnection()) syncNavLink.style.display = "none";
+  if (!syncNavLink) return;
+  await refreshAdminStatus();
+  if (!cachedIsAdmin) syncNavLink.style.display = "none";
 });
 
 // ---------------------------------------------------------------------
@@ -3387,7 +3322,15 @@ function defaultTypeConfig(type) {
 // of thousands of rows; until then a flat file keeps the whole architecture
 // (and the deploy-by-drag-and-drop workflow) one consistent shape.
 
-const MARKS_FILE_PATH = "data/marks.json";
+const MARKS_FILE_PATH = "https://fishingconditions-users.oliver-mestdagh.workers.dev/api/public/marks";
+// Points at the live, unauthenticated user-backend endpoint (D1, Public's
+// own rows, reattributed there from the Admin's own account by a one-time
+// migration — see handlePublicMarks's own comment for why) rather than the
+// static data/marks.json file it used to. Same migration pattern as
+// MARK_LISTS_FILE_PATH above: this constant swap plus the render-gate and
+// write-path changes below are the ENTIRE migration — sync.js's own two
+// fetch call sites needed no changes at all, same as it didn't for mark
+// lists.
 // Points at the live, unauthenticated user-backend endpoint (D1, Public's
 // own rows) rather than the static config/mark_lists.json file it used to
 // — see user-backend.js's handlePublicMarkLists for why this is safe to

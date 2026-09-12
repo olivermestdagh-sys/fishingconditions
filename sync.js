@@ -1,25 +1,27 @@
 // sync.js — the Sync tab (sync.html): import fishing marks from a Garmin
 // GPX or Lowrance .usr chartplotter export, review/edit the new ones before
-// anything is saved, then commit accepted marks into data/marks.json. Also
-// offers the reverse direction: export the current marks.json as a GPX file
-// suitable for loading straight back onto either a Garmin or a Lowrance
-// unit (Oliver's own Lowrance takes GPX directly — no need to write a real
-// binary .usr file back out, which is a much heavier, riskier thing to get
-// right without a real unit to test against).
+// anything is saved, then commit accepted marks into D1. Also offers the
+// reverse direction: export the current marks as a GPX file suitable for
+// loading straight back onto either a Garmin or a Lowrance unit (Oliver's
+// own Lowrance takes GPX directly — no need to write a real binary .usr
+// file back out, which is a much heavier, riskier thing to get right
+// without a real unit to test against).
 //
 // Lives as its own page script (like week.js/live.js/locationsadmin.js),
-// reusing the shared plumbing already in charts.js: getConnection/GITHUB_API
-// for the read-sha/write pattern, MARKS_FILE_PATH/MARK_LISTS_FILE_PATH,
-// makeMarkId, nowAsNaiveString/parseNaive/previewEpochToNaiveString for the
-// site's naive-timestamp convention, parseGpxWaypoints for GPX <wpt>
-// parsing, and the new saveMarksBatchToGitHub for the actual write.
+// reusing the shared plumbing already in charts.js: cachedIsAdmin/
+// refreshAdminStatus for the Admin-session gate, MARKS_FILE_PATH/
+// MARK_LISTS_FILE_PATH (now live D1 endpoints, not static files —
+// see those constants' own comments), makeMarkId,
+// nowAsNaiveString/parseNaive/previewEpochToNaiveString for the site's
+// naive-timestamp convention, parseGpxWaypoints for GPX <wpt> parsing, and
+// saveMarksBatchToD1 for the actual write.
 //
-// Gated behind getConnection() the same way every other write-capable page
-// on this site is — see canSync() below. A file can still be PARSED without
-// a connection (nothing here needs GitHub for that), but there's no point
-// showing a review screen for an import that can't be saved anywhere, so
-// the whole workflow is hidden until connected, same as Settings/marks
-// editing elsewhere.
+// Gated behind cachedIsAdmin (refreshAdminStatus) the same way marks
+// editing itself now is — see canSync() below. A file can still be PARSED
+// without being signed in (nothing here needs a session for that), but
+// there's no point showing a review screen for an import that can't be
+// saved anywhere, so the whole workflow is hidden until signed in as
+// Admin, same as Settings/marks editing elsewhere.
 
 // ---------------------------------------------------------------------------
 // State — module-level, single active import at a time (matches how every
@@ -777,16 +779,15 @@ async function handleExportClick(device) {
   statusEl.style.color = "";
   try {
     // Fresh fetch rather than reusing the in-memory existingMarks — this
-    // button should export whatever is REALLY in the repo right now, not a
-    // copy that might be stale if marks were edited elsewhere (another
-    // tab, another device) since this page loaded. Cache-busted for the
-    // same reason loadAndRenderMarks is (charts.js): GitHub Pages' CDN
-    // caches static files for up to 10 minutes.
+    // button should export whatever is REALLY in D1 right now, not a copy
+    // that might be stale if marks were edited elsewhere (another tab,
+    // another device) since this page loaded. Cache-busted for the same
+    // reason loadAndRenderMarks is (charts.js) — the endpoint's own 60s
+    // Cache-Control could otherwise serve a just-edited mark's old value.
     const res = await fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" });
-    if (!res.ok) throw new Error(`Could not load marks.json (${res.status})`);
-    const data = await res.json();
-    const marks = Array.isArray(data.marks) ? data.marks : [];
-    if (marks.length === 0) {
+    if (!res.ok) throw new Error(`Could not load marks (${res.status})`);
+    const marks = await res.json(); // bare array — see handlePublicMarks, user-backend.js
+    if (!Array.isArray(marks) || marks.length === 0) {
       statusEl.textContent = "No marks to export yet.";
       return;
     }
@@ -1092,7 +1093,7 @@ async function handleImportClick() {
     return mark;
   });
 
-  const result = await saveMarksBatchToGitHub(newMarks);
+  const result = await saveMarksBatchToD1(newMarks);
   if (result.success) {
     statusEl.textContent = `Imported ${result.added} mark${result.added === 1 ? "" : "s"} into data/marks.json.`;
     statusEl.style.color = "#16a34a";
@@ -1248,13 +1249,13 @@ async function handleFileInputChange(e) {
 // ---------------------------------------------------------------------------
 
 function canSync() {
-  const conn = getConnection();
-  return !!(conn && conn.owner && conn.repo && conn.token);
+  return cachedIsAdmin;
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
   const gateEl = document.getElementById("syncNotConnected");
   const mainEl = document.getElementById("syncMain");
+  await refreshAdminStatus();
   if (!canSync()) {
     gateEl.style.display = "block";
     mainEl.style.display = "none";
@@ -1265,14 +1266,26 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Loaded once, up front — needed both for matching (existingMarks) and
   // for the review row's Species dropdown options (markLists). Cache-busted
-  // like every other config/data fetch on this site — see loadAndRenderMarks,
-  // charts.js, for why (GitHub Pages' CDN caches static files for up to 10
-  // minutes).
-  const [marksRes, listsRes] = await Promise.all([
-    fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" }),
-    fetch(`${MARK_LISTS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" }),
-  ]);
-  existingMarks = marksRes.ok ? (await marksRes.json()).marks || [] : [];
+  // like every other data fetch on this site — see loadAndRenderMarks,
+  // charts.js — the endpoints' own 60s Cache-Control could otherwise serve
+  // a just-edited value.
+  // Wrapped in try/catch (unlike before) — these are now genuine cross-
+  // origin calls to the Worker rather than same-origin static files, so a
+  // real network failure (not just a non-2xx response) is a realistic
+  // possibility worth degrading gracefully from, same as
+  // loadAndRenderMarks's own try/catch (charts.js) already does for the
+  // identical fetch pair.
+  let existingMarksRes = { ok: false };
+  let listsRes = { ok: false };
+  try {
+    [existingMarksRes, listsRes] = await Promise.all([
+      fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" }),
+      fetch(`${MARK_LISTS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" }),
+    ]);
+  } catch (err) {
+    console.error("Could not reach the marks/mark-lists endpoints:", err);
+  }
+  existingMarks = existingMarksRes.ok ? await existingMarksRes.json() : []; // bare array now — see handlePublicMarks, user-backend.js
   markLists = listsRes.ok ? await listsRes.json() : [];
   knownSpecies = markLists.filter((r) => r.field === "Species").map((r) => r.value);
 

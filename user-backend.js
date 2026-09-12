@@ -239,6 +239,9 @@ export default {
       if (url.pathname === "/api/public/marklists" && request.method === "GET") {
         return handlePublicMarkLists(env);
       }
+      if (url.pathname === "/api/public/marks" && request.method === "GET") {
+        return handlePublicMarks(env);
+      }
     } catch (err) {
       // Belt-and-braces: an uncaught exception anywhere above should still
       // come back as a JSON error with CORS headers attached, not a bare
@@ -1309,9 +1312,24 @@ async function handleMarksCollection(request, url, env) {
     const body = await readJsonBody(request);
     const validationError = validateMarkInput(body, { partial: false });
     if (validationError) return jsonResponse({ error: validationError }, 400, env);
-    const id = crypto.randomUUID();
+    // Accepts an optional client-supplied id (charts.js's own makeMarkId()
+    // scheme, already proven unique across 2,500+ real marks) rather than
+    // always generating one server-side — this is what lets a mark created
+    // through the map's own draft-pin flow keep the SAME id from the
+    // moment it's drawn through to being saved, matching how that existing
+    // client-side code already tracks marks locally (marksById/markersById,
+    // charts.js) before a save round-trip ever completes. Falls back to a
+    // fresh UUID when omitted (e.g. a future caller with no id scheme of
+    // its own). A collision (reusing an id that already exists) fails on
+    // the PRIMARY KEY constraint below rather than silently overwriting —
+    // callers are expected to generate genuinely unique ids up front.
+    const id = typeof body.id === "string" && body.id.trim() ? body.id.trim() : crypto.randomUUID();
     const now = Date.now();
-    await insertOrUpdateMark(env, id, uid, body, now);
+    try {
+      await insertOrUpdateMark(env, id, uid, body, now);
+    } catch (err) {
+      return jsonResponse({ error: "A mark with that id already exists." }, 409, env);
+    }
     const created = await env.DB.prepare("SELECT * FROM marks WHERE id = ?").bind(id).first();
     return jsonResponse(rowToMark(created), 201, env);
   }
@@ -1618,6 +1636,42 @@ async function handlePublicMarkLists(env) {
       // Access-Control-Allow-Credentials: true) simply doesn't apply here.
       "Access-Control-Allow-Origin": "*",
       "Cache-Control": "public, max-age=60", // light caching — this changes rarely enough that a live edit being up to a minute stale on the free site is a fine trade for not hammering D1 on every page load
+    },
+  });
+}
+
+/**
+ * Public counterpart to handlePublicMarkLists above, for the `marks`
+ * table — this is what lets charts.js's map (add/edit/delete a catch or
+ * POI) and sync.js (GPX/chartplotter import) read Public's marks LIVE
+ * from D1 instead of the static data/marks.json file they used to.
+ * Deliberately unpaginated (unlike GET /api/marks, which caps at 500) —
+ * this mirrors the old file-based behaviour of loading the WHOLE dataset
+ * in one response, which the map rendering and the Sync page's own
+ * duplicate-matching logic both already assume; at real-world scale (a
+ * few thousand marks) one D1 query returning everything is still cheap,
+ * especially with the same 60s Cache-Control as mark lists above.
+ *
+ * NOTE ON WHAT COUNTS AS "PUBLIC" HERE: unlike locations/groups/mark-
+ * lists, marks were never seeded as Public's own data — the original
+ * 2,532 real marks were migrated to the Admin's own account (they're
+ * genuinely personal catch history, not a "free site default"). A
+ * one-time migration reattributes them to 'public' specifically so this
+ * endpoint (and the map's own display of them) has one consistent owner
+ * to read, matching every other public-facing dataset's convention.
+ */
+async function handlePublicMarks(env) {
+  const { results } = await env.DB.prepare(
+    "SELECT * FROM marks WHERE user_id = ? ORDER BY date_time DESC"
+  )
+    .bind(PUBLIC_USER_ID)
+    .all();
+  return new Response(JSON.stringify(results.map(rowToMark)), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "public, max-age=60",
     },
   });
 }
