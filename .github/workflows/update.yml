@@ -26,6 +26,14 @@ jobs:
       - name: Fetch latest conditions
         env:
           WILLYWEATHER_API_KEY: ${{ secrets.WILLYWEATHER_API_KEY }}
+          # Locations now live in D1 behind the user-backend Worker (Public
+          # account's own rows) rather than config/locations.json — see
+          # fetch_conditions.py's own updated header comment and
+          # user-backend.js's "Pipeline" section. PIPELINE_API_TOKEN is a
+          # long-lived shared secret, NOT the same kind of credential as
+          # anything session/cookie-based the site's own sign-in uses.
+          PIPELINE_WORKER_URL: ${{ secrets.PIPELINE_WORKER_URL }}
+          PIPELINE_API_TOKEN: ${{ secrets.PIPELINE_API_TOKEN }}
           FORECAST_DAYS: "6"
         run: python3 scripts/fetch_conditions.py
 
@@ -33,12 +41,10 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Update conditions data"
-          # config/locations.json is now ALSO written by fetch_conditions.py
-          # (see the WillyWeather id/name/region/state caching comment at
-          # the top of process_location(), fetch_conditions.py) — each
-          # location's resolved WillyWeather id gets written back here so
-          # every future run can skip search entirely for it. Committing it
-          # alongside data/conditions.json is what makes that cache actually
-          # persist between runs, instead of being rediscovered and thrown
-          # away every single time.
-          file_pattern: "data/conditions.json config/locations.json"
+          # config/locations.json is NO LONGER written by fetch_conditions.py
+          # — the WillyWeather id/name/region/state/lat/lng/tideMaxObserved
+          # cache (see write_location_cache(), fetch_conditions.py) now
+          # writes straight back to each location's own D1 row instead, via
+          # the pipeline endpoint above. Only the generated data file itself
+          # needs committing here any more.
+          file_pattern: "data/conditions.json"
