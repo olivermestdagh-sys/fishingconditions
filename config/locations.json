@@ -507,7 +507,7 @@
     "willyweatherState": "VIC",
     "lat": -37.8859,
     "lng": 147.9875,
-    "tideMaxObserved": 1.12
+    "tideMaxObserved": 1.08
   },
   {
     "name": "Cape Woolamai Beach",
@@ -578,6 +578,6 @@
     "locationGroups": [
       "Gold Coast"
     ],
-    "tideMaxObserved": 1.59
+    "tideMaxObserved": 1.49
   }
 ]
