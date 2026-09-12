@@ -4,8 +4,9 @@ const DATA_URL = "data/conditions.json";
 // buildDayBandPlugin, renderConditionsChart, CONDITION_COLORS, wireHoldToShowTooltip,
 // setupFullscreenToggle, setupDragToScroll, fetchWillyWeatherCandidates,
 // showLocationCandidatePicker, fetchWillyWeatherPreviewRows, attachConditionScores,
-// SHORE_OPTIONS, TYPE_OPTIONS, getConnection, defaultTypeConfig, and
-// saveNewLocationToGitHub all come from charts.js (loaded before this file).
+// SHORE_OPTIONS, TYPE_OPTIONS, defaultTypeConfig, cachedIsAdmin,
+// refreshAdminStatus, and saveNewLocationToD1 all come from charts.js
+// (loaded before this file).
 
 let state = {
   data: null, rowsByLocation: {}, chart: null,
@@ -52,6 +53,12 @@ async function init() {
   }
 
   defaultEmptyStateText = document.getElementById("hoverPanelEmptyState").textContent;
+
+  // Small, fast Worker call — awaited so canEditLocations()/
+  // showAddPermanentButton() below never race a not-yet-resolved check
+  // (see cachedIsAdmin's own comment, charts.js, for the trade-off this
+  // makes instead: a stale cache across tabs, not a race within one).
+  await refreshAdminStatus();
 
   groupRowsByLocation();
   renderUpdatedBanner();
@@ -211,10 +218,9 @@ function renderLocationMap() {
  * renderLeafletLocationMap call) — fires on every click on open map area
  * (Leaflet doesn't bubble marker clicks up to this handler, so clicking an
  * existing pin still only ever triggers that marker's own onClick, never
- * this). Gated on canEditLocations() (charts.js's getConnection — same
- * "ghConnection" localStorage entry the Settings tab's Connect button
- * writes): without a GitHub connection there's no way to act on a preview
- * anyway (no "Add as permanent location" button — see
+ * this). Gated on canEditLocations() (cachedIsAdmin, refreshed once at
+ * page load — see charts.js): without Admin sign-in there's no way to
+ * act on a preview anyway (no "Add as permanent location" button — see
  * showAddPermanentButton), so an open-map click is simply a no-op for a
  * visitor who's just viewing the public site, same as it was before this
  * feature existed at all — only existing markers stay clickable. Looks up
@@ -380,13 +386,15 @@ function showPreviewNote(show) {
   if (el) el.style.display = show ? "block" : "none";
 }
 
-/** True only when a GitHub connection already exists (same "ghConnection"
- * localStorage entry the Settings tab's Connect button writes — see
- * getConnection, charts.js) — this page never asks for a token itself, it
- * just checks whether one's already sitting there from a Settings visit. */
+/** True only when this browser is currently signed in as Admin (see
+ * cachedIsAdmin/refreshAdminStatus, charts.js) — refreshed once at page
+ * load (init, below), read synchronously here since this is called from
+ * several places that were never async to begin with. Replaces the old
+ * GitHub-connection check for this one feature; every OTHER write-
+ * capable feature on this site (marks, Sync) still gates on the GitHub
+ * token, unrelated to this. */
 function canEditLocations() {
-  const conn = getConnection();
-  return !!(conn && conn.owner && conn.repo && conn.token);
+  return cachedIsAdmin;
 }
 
 /**
@@ -418,7 +426,7 @@ function showPreviewAddStatus(text, isError) {
 
 /**
  * Saves the CURRENT preview as a real config/locations.json entry (see
- * saveNewLocationToGitHub, charts.js) — the same minimal shape
+ * saveNewLocationToD1, charts.js) — the same minimal shape
  * createNewLocationAt (locationsadmin.js's own map-click-to-add flow)
  * builds: name/shore/types/lat/lng plus the WillyWeather id/name/region/
  * state cache, so this location's very first scheduled run already has a
@@ -457,10 +465,10 @@ async function onAddPreviewAsLocation() {
     willyweatherState: state.previewCandidate.state,
   };
 
-  const result = await saveNewLocationToGitHub(newLoc);
+  const result = await saveNewLocationToD1(newLoc);
   if (result.success) {
     btn.textContent = "✓ Added";
-    showPreviewAddStatus("Saved to config/locations.json. Trigger a data refresh from Settings (or wait for the next scheduled run) to see it with real scored data.", false);
+    showPreviewAddStatus("Saved. Trigger a data refresh from Settings (or wait for the next scheduled run) to see it with real scored data.", false);
   } else {
     btn.disabled = false;
     btn.textContent = "➕ Add as permanent location";
