@@ -1102,14 +1102,41 @@ never counting anything inherited from Public's set.
   file. See "Pipeline endpoints" below for why this needed a completely
   different auth mechanism from everything else here, and the
   `behavesLike` fix that keeps custom location types scoring correctly.
-- **`locationsadmin.js`'s Locations section itself (map, per-type
-  scheduling, the location list) is the one piece still on the GitHub-
-  commit path** — this is the last, biggest section to cut over. Until
-  it does, **editing locations via the Settings page no longer has any
-  effect on the live site** — the pipeline now reads Public's D1 rows,
-  not `config/locations.json`, so that file is effectively frozen at
-  whatever it held when the pipeline switched over. Don't use the old
-  Locations editor for real changes in the meantime.
+  `config/locations.json` itself is now a generated EXPORT (see
+  `export_locations_json()`) so `charts.js`'s own direct client-side
+  reads of it (Live page GPS-matching, tide-offset lookups, the
+  boat-ramp-access chart threshold) keep working unchanged.
+- **The Locations section itself is now fully cut over too** — the last
+  and biggest piece. Every field (name, shore, tide offset, "affected by
+  tides", group membership, per-type drive/setup/pack-up/time-to-spot/
+  minimum-tide-height) saves immediately, debounced where it fires per-
+  keystroke. Location **type is now genuinely open-ended** — the old
+  fixed Kayak/Land based toggle buttons are replaced by a "+ Add a
+  type…" picker sourced from Public's own type vocabulary, with an
+  inline "define a new type" option (name + which of the two real
+  scoring behaviours it uses). Verified with a real headless-browser
+  test: renamed a location (debounced place save), edited a type's
+  timing (debounced), removed a type, and added a genuinely custom type
+  ("SUP", scoring like Kayak) — confirmed it got its own timing section,
+  the right icon, and the minimum-tide-height field, all driven by
+  `behavesLike` rather than the display name.
+
+  **Two things changed as a result, worth knowing:**
+  - Every new location now has to be added via a map click (📍 Add
+    location) — the old "+ Add location" blank-row button is gone,
+    since D1's `locations.lat`/`lng` are `NOT NULL` and that button
+    never had coordinates to give it.
+  - The GitHub connection card's job has shrunk to just two things:
+    setting a Home address (still `config/settings.json`, untouched by
+    any of this) and the "Refresh data now" button (a GitHub Actions
+    workflow-dispatch call — inherently a GitHub capability, kept
+    separate from Admin sign-in on purpose).
+
+  **A real bug fixed along the way**: `packUp` updates via
+  `PUT /api/tracked-locations/:id` had silently never applied since
+  Stage 2 — the server checked `body.pack_up` (snake_case) when every
+  request actually sends `packUp` (camelCase, matching every other
+  field). Fixed in `user-backend.js`.
 - The original `user_locations`/`user_settings` endpoints
   (`/api/locations`, `/api/settings`) are untouched and still what
   `account.js` talks to — nothing about the currently-working sign-in
