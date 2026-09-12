@@ -502,6 +502,11 @@ this restriction — nothing extra is drawn.
 - `config/mark_lists.json` — the editable pick-lists (species, bait, rig,
   weather/tide/water condition, etc) offered when logging a mark. Edit from
   the Settings tab's "Fishing Mark Lists" section
+- `user-backend.js` — a second, separate Cloudflare Worker (own deploy, own
+  secrets, own D1 database) adding Google sign-in and a per-user
+  locations/settings backend — see "User accounts" below. `schema.sql` is
+  its D1 table setup. `account.html`/`account.js` is the site page that
+  talks to it
 
 ## GPS fishing marks
 
@@ -1018,6 +1023,33 @@ it from that device only, and immediately hides every section below the connecti
 card again), or delete/revoke the token itself from GitHub's Developer settings page
 (immediately invalidates it everywhere — the next page load's own check will notice
 and hide those sections here too).
+
+## User accounts (optional, separate backend)
+
+The Account tab (`account.html`/`account.js`) lets someone sign in with
+Google and manage their OWN list of locations and a check-frequency
+setting. This is entirely separate infrastructure from the free site above
+— it never reads or writes `config/locations.json` or
+`data/conditions.json`, and signing in changes nothing about what any other
+page shows.
+
+It's powered by a second Cloudflare Worker, `user-backend.js` — deliberately
+a separate Worker from `willyweather-search.js` rather than added to it,
+since it holds a database and OAuth secrets and has a genuinely different
+risk profile from the tiny, stateless search proxy. See the long comment
+block at the top of `user-backend.js` for the full one-time setup
+(Google Cloud OAuth client, Cloudflare D1 database via `schema.sql`, and
+the Worker's own secrets), and for exactly what each endpoint does.
+
+**Current state, honestly:** this is the account/CRUD layer only. Signing
+in and saving your own locations/settings works end-to-end, but nothing
+yet actually calls WillyWeather on a user's behalf on that schedule — the
+`schedule_state` table exists in `schema.sql` so that piece won't need a
+schema migration later, but the cron sweep that would read it, and any
+Stripe billing/tier-gating on top of `check_frequency_minutes`, are not
+built. Every signed-in user today is functionally on the same untiered
+plan, with only a floor (15 minutes) stopping an unreasonably tight
+setting.
 
 ## Troubleshooting
 
