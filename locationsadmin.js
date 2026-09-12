@@ -227,18 +227,19 @@ async function verifyGithubToken(conn) {
 }
 
 function hideConnectedSections() {
-  // groupsSection deliberately NOT included any more — it's gated on
-  // Admin sign-in (checkAdmin()) independent of the GitHub connection,
-  // and manages its own visibility entirely inside loadLocationGroups().
-  document.getElementById("markListsSection").style.display = "none";
+  // groupsSection and markListsSection deliberately NOT included any more —
+  // both are gated on Admin sign-in (checkAdmin()) independent of the
+  // GitHub connection, and manage their own visibility entirely inside
+  // loadLocationGroups()/loadMarkLists().
   document.getElementById("locationsSection").style.display = "none";
 }
 
-/** Runs every GitHub-token-gated section's own load-and-render — Location
- * Groups is deliberately NOT among these any more (see init() below); it
- * loads independently of whether a GitHub connection exists at all. */
+/** Runs the GitHub-token-gated sections' own load-and-render — Location
+ * Groups and Fishing Mark Lists are deliberately NOT among these any more
+ * (see init() above); both load independently of whether a GitHub
+ * connection exists at all. */
 async function loadAllConnectedSections() {
-  await Promise.all([loadLocationCoords(), loadHomeLocation(), loadMarkLists()]);
+  await Promise.all([loadLocationCoords(), loadHomeLocation()]);
   await loadLocations();
 }
 
@@ -368,17 +369,18 @@ async function init() {
       onAddGroup();
     }
   });
-  // btnSaveGroups no longer exists (see "v2: Location Groups" — add/remove
-  // now save immediately, there's nothing left to batch into one commit).
-  document.getElementById("btnSaveMarkLists").addEventListener("click", onSaveMarkLists);
+  // btnSaveGroups and btnSaveMarkLists no longer exist (see "v2: Location
+  // Groups" / "v2: Fishing Mark Lists" — add/remove/edit now save
+  // immediately, there's nothing left to batch into one commit).
   document.getElementById("btnAddMarkShapeFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Shape Format", "newMarkShapeFormatInput"));
   document.getElementById("btnAddMarkColorFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Colour Format", "newMarkColorFormatInput"));
 
-  // Location Groups: independent of the GitHub connection below entirely —
-  // gated on Google Admin sign-in instead. Runs regardless of what the
-  // GitHub token check further down finds.
+  // Location Groups AND Fishing Mark Lists: both independent of the GitHub
+  // connection below entirely — gated on Google Admin sign-in instead, via
+  // the SAME checkAdmin() call (one sign-in check, not two). Runs
+  // regardless of what the GitHub token check further down finds.
   adminUser = await checkAdmin();
-  await loadLocationGroups();
+  await Promise.all([loadLocationGroups(), loadMarkLists()]);
 
   connectionVerified = await verifyGithubToken(conn);
   if (!connectionVerified) {
@@ -386,7 +388,7 @@ async function init() {
     if (conn) {
       setStatus("That token isn't working — check it's still valid and has write access to this repo, then reconnect below.", true);
     } else {
-      setStatus("Connect to GitHub above to manage locations and mark lists.", false);
+      setStatus("Connect to GitHub above to manage locations.", false);
     }
     return;
   }
@@ -651,39 +653,50 @@ async function checkAdmin() {
 // Type's own Format assignments (either axis) mainly matter for POI,
 // which has no species to carry one of its own at all.
 
-let markLists = [];
-let markListsSha = null;
+let markLists = []; // v2: sourced from /api/marklists (D1, 'public' user) — see
+                     // "v2: Fishing Mark Lists" below. Each entry now also
+                     // carries a real `id` from D1, used only by this
+                     // section's own add/remove/update calls; every existing
+                     // read of this array elsewhere (filter by field/value)
+                     // is untouched and still works exactly as before.
 
+/**
+ * v2: Fishing Mark Lists now live in D1 (user_mark_lists, scoped to the
+ * 'public' user — see schema-v2.sql and user-backend.js) rather than
+ * MARK_LISTS_FILE_PATH, gated on Google Admin sign-in (checkAdmin(),
+ * shared with Location Groups above — both run from the same adminUser
+ * check in init(), not two separate sign-in checks). Every add/remove/
+ * edit below hits the API immediately, same as Groups — no more batch
+ * "Save mark lists" step.
+ *
+ * KNOWN GAP, worth being upfront about: charts.js's own mark-rendering
+ * code (map icon/colour resolution) still reads MARK_LISTS_FILE_PATH —
+ * the static config/mark_lists.json file — directly, completely separate
+ * from this admin-editing path. So an edit made here won't show up in how
+ * marks actually render on the map/site until something (a future round)
+ * either points that rendering code at this same API or writes D1's
+ * mark lists back out to the static file. Not addressed this round.
+ */
 async function loadMarkLists() {
-  const conn = getConnection();
-  try {
-    if (conn && conn.owner && conn.repo && conn.token) {
-      const res = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARK_LISTS_FILE_PATH}?ref=${BRANCH}`, {
-        headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
-      });
-      if (res.status === 404) {
-        // Same as groups — perfectly normal the first time this feature is
-        // used on a repo; starts empty and gets created on first Save.
-        markLists = [];
-        markListsSha = null;
-      } else if (!res.ok) {
-        throw new Error(`GitHub returned ${res.status}`);
-      } else {
-        const json = await res.json();
-        markListsSha = json.sha;
-        const decoded = decodeURIComponent(escape(atob(json.content.replace(/\n/g, ""))));
-        markLists = JSON.parse(decoded);
-      }
-    } else {
-      // No connection yet — fall back to the public static file, same as groups.
-      const res = await fetch("config/mark_lists.json", { cache: "no-store" });
-      markLists = res.ok ? await res.json() : [];
-    }
-  } catch (err) {
-    console.error(err);
+  if (!adminUser) {
     markLists = [];
+    document.getElementById("markListsSection").style.display = "block";
+    document.getElementById("markListsSignedOut").style.display = "block";
+    document.getElementById("markListsEditor").style.display = "none";
+    return;
   }
-  if (connectionVerified) document.getElementById("markListsSection").style.display = "block";
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/marklists?userId=public`, { credentials: "include" });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    markLists = await res.json();
+  } catch (err) {
+    console.error("Failed to load mark lists:", err);
+    markLists = [];
+    setMarkListsSaveStatus("Couldn't load mark lists — try reloading the page.", true);
+  }
+  document.getElementById("markListsSection").style.display = "block";
+  document.getElementById("markListsSignedOut").style.display = "none";
+  document.getElementById("markListsEditor").style.display = "block";
   renderMarkLists();
 }
 
@@ -823,7 +836,7 @@ function renderMarkLists() {
   makeCollapsible(document.getElementById("markColorFormatsFieldGroup"), "settingsCollapsed:markColorFormats", true);
 }
 
-function onAddMarkListValue(key) {
+async function onAddMarkListValue(key) {
   const fieldDef = MARK_LIST_FIELDS.find((f) => f.key === key);
   if (!fieldDef) return;
   const input = document.querySelector(`.mark-list-new-value[data-field="${key}"]`);
@@ -836,9 +849,26 @@ function onAddMarkListValue(key) {
     input.value = "";
     return;
   }
-  markLists.push({ field: fieldDef.label, value });
-  input.value = "";
-  renderMarkLists();
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/marklists?userId=public`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ field: fieldDef.label, value }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    const created = await res.json();
+    markLists.push(created);
+    input.value = "";
+    renderMarkLists();
+    setMarkListsSaveStatus("", false);
+  } catch (err) {
+    console.error("Failed to add mark list value:", err);
+    setMarkListsSaveStatus("Couldn't add value: " + err.message, true);
+  }
 }
 
 // Sets (or clears back to none, if `color` is falsy) the display colour for
@@ -882,8 +912,29 @@ const MARK_ICON_OPTIONS = ["circle", "diamond", "cross"];
 function onSetMarkListValueSubFormat(fieldLabel, value, prop, formatName) {
   const entry = markLists.find((r) => r.field === fieldLabel && r.value === value);
   if (!entry) return;
+  // Optimistic: update locally (and the caller re-renders) immediately —
+  // this is a <select> the person just changed, waiting on a network
+  // round-trip before showing the new choice would feel laggy for
+  // something this small. The API call runs in the background; a failure
+  // is reported via the status line but doesn't revert the dropdown —
+  // same trade-off sync/lowrance text inputs below already make.
   if (formatName) entry[prop] = formatName;
   else delete entry[prop];
+  if (!entry.id) return; // shouldn't happen — every loaded/created entry has one
+  fetch(`${USER_BACKEND_URL}/api/marklists/${entry.id}?userId=public`, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ [prop]: formatName || null }),
+  })
+    .then((res) => {
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      setMarkListsSaveStatus("", false);
+    })
+    .catch((err) => {
+      console.error("Failed to save format assignment:", err);
+      setMarkListsSaveStatus("Couldn't save that change: " + err.message, true);
+    });
 }
 
 /**
@@ -960,8 +1011,9 @@ function renderMarkSubFormatList(fieldName, containerId, newInputId) {
     });
   });
   // "input" (not "change") for the two free-text sym fields — these have
-  // no picker to "close", so waiting for blur/change would mean a value
-  // could be lost if Save gets clicked without ever leaving the field.
+  // no picker to "close", so onSetMarkSubFormatProperty's own debounce
+  // (see its comment) is what actually paces the saves; without "input"
+  // here, a value typed and never blurred could be lost entirely.
   container.querySelectorAll(".mark-subformat-lowrance-input").forEach((input) => {
     input.addEventListener("input", (e) => {
       onSetMarkSubFormatProperty(e.currentTarget.dataset.field, e.currentTarget.dataset.value, "lowranceSym", e.currentTarget.value);
@@ -984,6 +1036,8 @@ function renderMarkSubFormatList(fieldName, containerId, newInputId) {
   }
 }
 
+const markSubFormatSaveTimers = new Map(); // debounce keys, see onSetMarkSubFormatProperty below
+
 /** Sets or clears one property on a Mark Shape/Colour Format entry itself
  * (icon or color, lowranceSym, garminSym) — value === "" deletes the
  * property (falls back exactly as if it had never been set) rather than
@@ -991,15 +1045,45 @@ function renderMarkSubFormatList(fieldName, containerId, newInputId) {
  * live input the person is actively using (typing text, or a colour/icon
  * they just picked), so redrawing the whole row out from under their
  * cursor would be actively disruptive; the DOM already shows what they
- * just set. */
+ * just set.
+ *
+ * The actual save is debounced (600ms of no further calls for this same
+ * entry+prop) rather than firing immediately — the two free-text sym
+ * inputs above call this on every keystroke ("input", not "change"), so
+ * saving on each one would mean a PUT request per character typed.
+ * icon-select/colour-input go through the same debounce too, harmlessly,
+ * since they only ever fire once per discrete pick anyway. */
 function onSetMarkSubFormatProperty(fieldName, formatName, prop, value) {
   const entry = markLists.find((r) => r.field === fieldName && r.value === formatName);
   if (!entry) return;
   if (value) entry[prop] = value;
   else delete entry[prop];
+  if (!entry.id) return; // shouldn't happen — every loaded/created entry has one
+
+  const timerKey = `${fieldName}::${formatName}::${prop}`;
+  clearTimeout(markSubFormatSaveTimers.get(timerKey));
+  markSubFormatSaveTimers.set(
+    timerKey,
+    setTimeout(() => {
+      fetch(`${USER_BACKEND_URL}/api/marklists/${entry.id}?userId=public`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [prop]: value || null }),
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error(`status ${res.status}`);
+          setMarkListsSaveStatus("", false);
+        })
+        .catch((err) => {
+          console.error("Failed to save format property:", err);
+          setMarkListsSaveStatus("Couldn't save that change: " + err.message, true);
+        });
+    }, 600)
+  );
 }
 
-function onAddMarkSubFormat(fieldName, inputId) {
+async function onAddMarkSubFormat(fieldName, inputId) {
   const input = document.getElementById(inputId);
   const value = input.value.trim();
   const exists = value && markLists.some((r) => r.field === fieldName && r.value.toLowerCase() === value.toLowerCase());
@@ -1007,13 +1091,30 @@ function onAddMarkSubFormat(fieldName, inputId) {
     input.value = "";
     return;
   }
-  markLists.push({ field: fieldName, value });
-  input.value = "";
-  // Full re-render, not just this one list — every tile's own Shape/
-  // Colour Format <select> options are built from the current lists too
-  // (see renderMarkLists above), so a newly-added one needs to show up
-  // there immediately, not just in this sub-list.
-  renderMarkLists();
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/marklists?userId=public`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ field: fieldName, value }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    const created = await res.json();
+    markLists.push(created);
+    input.value = "";
+    // Full re-render, not just this one list — every tile's own Shape/
+    // Colour Format <select> options are built from the current lists too
+    // (see renderMarkLists above), so a newly-added one needs to show up
+    // there immediately, not just in this sub-list.
+    renderMarkLists();
+    setMarkListsSaveStatus("", false);
+  } catch (err) {
+    console.error("Failed to add format:", err);
+    setMarkListsSaveStatus("Couldn't add: " + err.message, true);
+  }
 }
 
 /** Removing a Shape/Colour Format does NOT clear it off any value that's
@@ -1022,9 +1123,23 @@ function onAddMarkSubFormat(fieldName, inputId) {
  * page) — that value just falls back to its own default the next time
  * anything resolves it (see resolveMarkShapeFormat/resolveMarkColorFormat,
  * charts.js), same as if the Format had simply never existed. */
-function onRemoveMarkSubFormat(fieldName, value) {
+async function onRemoveMarkSubFormat(fieldName, value) {
+  const entry = markLists.find((r) => r.field === fieldName && r.value === value);
+  if (!entry || !entry.id) return;
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/marklists/${entry.id}?userId=public`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (!res.ok && res.status !== 404) throw new Error(`status ${res.status}`);
+  } catch (err) {
+    console.error("Failed to remove format:", err);
+    setMarkListsSaveStatus("Couldn't remove: " + err.message, true);
+    return;
+  }
   markLists = markLists.filter((r) => !(r.field === fieldName && r.value === value));
   renderMarkLists(); // same reasoning as onAddMarkSubFormat above
+  setMarkListsSaveStatus("", false);
 }
 
 // Removing an option here does NOT scrub it from any mark that already used
@@ -1032,11 +1147,25 @@ function onRemoveMarkSubFormat(fieldName, value) {
 // editor on this page yet for it to reach into. That's a fine degrade for
 // now: an existing mark keeping a since-removed value just won't offer that
 // value as a pick again, it isn't broken or hidden.
-function onRemoveMarkListValue(key, value) {
+async function onRemoveMarkListValue(key, value) {
   const fieldDef = MARK_LIST_FIELDS.find((f) => f.key === key);
   if (!fieldDef) return;
+  const entry = markLists.find((r) => r.field === fieldDef.label && r.value === value);
+  if (!entry || !entry.id) return;
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/marklists/${entry.id}?userId=public`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (!res.ok && res.status !== 404) throw new Error(`status ${res.status}`);
+  } catch (err) {
+    console.error("Failed to remove mark list value:", err);
+    setMarkListsSaveStatus("Couldn't remove: " + err.message, true);
+    return;
+  }
   markLists = markLists.filter((r) => !(r.field === fieldDef.label && r.value === value));
   renderMarkLists();
+  setMarkListsSaveStatus("", false);
 }
 
 function setMarkListsSaveStatus(text, isError) {
@@ -1044,49 +1173,9 @@ function setMarkListsSaveStatus(text, isError) {
   el.textContent = text;
   el.style.color = isError ? "#dc2626" : "#16a34a";
 }
-
-async function onSaveMarkLists() {
-  const conn = getConnection();
-  if (!conn) {
-    setMarkListsSaveStatus("Connect to GitHub first (above) before saving.", true);
-    return;
-  }
-  setMarkListsSaveStatus("Saving…");
-  try {
-    // Re-check the current sha immediately before writing — same reasoning
-    // as onSaveGroups (in case the file changed elsewhere, or doesn't exist
-    // in the repo yet at all).
-    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARK_LISTS_FILE_PATH}?ref=${BRANCH}`, {
-      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
-    });
-    if (getRes.status === 404) {
-      markListsSha = null; // creating the file for the first time
-    } else if (!getRes.ok) {
-      throw new Error(`Could not read current file (${getRes.status})`);
-    } else {
-      markListsSha = (await getRes.json()).sha;
-    }
-
-    const content = JSON.stringify(markLists, null, 2) + "\n";
-    const body = { message: "Update fishing mark lists via site", content: utf8ToBase64(content), branch: BRANCH };
-    if (markListsSha) body.sha = markListsSha; // omitted entirely on create — GitHub rejects an explicit sha:null
-
-    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${MARK_LISTS_FILE_PATH}`, {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!putRes.ok) {
-      const errBody = await putRes.json().catch(() => ({}));
-      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
-    }
-    markListsSha = (await putRes.json()).content.sha;
-    setMarkListsSaveStatus("Saved to GitHub.");
-  } catch (err) {
-    console.error(err);
-    setMarkListsSaveStatus("Save failed: " + err.message, true);
-  }
-}
+// onSaveMarkLists removed entirely — every add/remove/edit above now saves
+// immediately via the API, same as Location Groups; there's nothing left
+// to batch into one commit.
 
 async function loadLocations() {
   const conn = getConnection();
