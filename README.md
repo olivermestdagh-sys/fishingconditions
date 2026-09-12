@@ -1145,6 +1145,31 @@ variables -> Actions): `PIPELINE_WORKER_URL` (this Worker's own URL) and
 `PIPELINE_API_TOKEN` (matching the Worker's own secret of the same
 name) — see `update.yml`'s own comments.
 
+**Correction made after this first shipped:** two real fields were
+initially missed by `schema-v2.sql` — `tidal` (Metung, VIC is a real,
+currently-tracked inland spot with `tidal: false`, stripping tide/
+current data from its scoring regardless of what the marine APIs
+return) and `minTideHeight` (Lang Lang's Kayak entry uses this for its
+chart's boat-ramp-access threshold line). Both were found by checking
+every field actually used across the live `config/locations.json`
+data, not assumed — see `schema-v2.sql`'s own comments on the `tidal`
+and `min_tide_height` columns. `handlePipelineLocationsList` was
+hardcoding `tidal: true` for everyone and omitting `minTideHeight`
+entirely until this fix.
+
+**Also added: `config/locations.json` is now a generated EXPORT, not a
+frozen leftover.** `charts.js` reads that file directly, client-side,
+in several places (Live page GPS-matching, tide-offset lookups, the
+boat-ramp-access chart threshold) — completely separate from anything
+`fetch_conditions.py` itself reads. Once the pipeline stopped writing
+to it, those client-side reads would have silently gone stale forever.
+`export_locations_json()` (`fetch_conditions.py`) regenerates it every
+run from the same D1-sourced list `load_locations()` returns, stripped
+of the two fields (`id`, `behavesLike`) that are internal to the D1
+model and never existed in the historical file — so `charts.js` needed
+zero changes. `update.yml` commits it again alongside
+`data/conditions.json`.
+
 ## Troubleshooting
 
 - **Page loads but says "Not updated yet"**: the scheduled job hasn't run

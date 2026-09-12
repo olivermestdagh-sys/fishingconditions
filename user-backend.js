@@ -713,10 +713,10 @@ async function handleTrackedCollection(request, url, env) {
   if (request.method === "GET") {
     const { results } = await env.DB.prepare(
       `SELECT ula.id as access_id, ula.drive_to, ula.drive_back, ula.set_up, ula.pack_up,
-              ula.time_to_spot, ula.time_from_spot,
+              ula.time_to_spot, ula.time_from_spot, ula.min_tide_height,
               l.id as location_id, l.name, l.lat, l.lng, l.willyweather_id, l.willyweather_name,
               l.willyweather_region, l.willyweather_state, l.shore, l.tide_offset, l.tide_max_observed,
-              l.created_by_user_id,
+              l.tidal, l.created_by_user_id,
               t.id as type_id, t.name as type_name, t.behaves_like
        FROM user_location_access ula
        JOIN locations l ON l.id = ula.location_id
@@ -795,8 +795,8 @@ async function handleTrackedCollection(request, url, env) {
       locationId = crypto.randomUUID();
       await env.DB.prepare(
         `INSERT INTO locations (id, created_by_user_id, name, lat, lng, willyweather_id, willyweather_name,
-                                 willyweather_region, willyweather_state, shore, tide_offset, tide_max_observed, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                                 willyweather_region, willyweather_state, shore, tide_offset, tide_max_observed, tidal, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           locationId,
@@ -811,6 +811,7 @@ async function handleTrackedCollection(request, url, env) {
           body.shore ?? null,
           body.tideOffset ?? null,
           body.tideMaxObserved ?? null,
+          body.tidal === false ? 0 : 1,
           Date.now()
         )
         .run();
@@ -823,8 +824,8 @@ async function handleTrackedCollection(request, url, env) {
     try {
       await env.DB.prepare(
         `INSERT INTO user_location_access
-           (id, user_id, location_id, type_id, drive_to, drive_back, set_up, pack_up, time_to_spot, time_from_spot, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, user_id, location_id, type_id, drive_to, drive_back, set_up, pack_up, time_to_spot, time_from_spot, min_tide_height, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           accessId,
@@ -837,6 +838,7 @@ async function handleTrackedCollection(request, url, env) {
           body.packUp ?? "00:00",
           body.timeToSpot ?? "00:00",
           body.timeFromSpot ?? "00:00",
+          body.minTideHeight ?? null,
           Date.now()
         )
         .run();
@@ -878,23 +880,30 @@ async function handleTrackedItem(request, url, env, accessId) {
       driveTo: body.driveTo ?? existing.drive_to,
       driveBack: body.driveBack ?? existing.drive_back,
       setUp: body.setUp ?? existing.set_up,
-      packUp: body.pack_up ?? existing.pack_up,
+      packUp: body.packUp ?? existing.pack_up, // was body.pack_up (snake_case) — a bug since
+                                                 // Stage 2 that meant this field silently never
+                                                 // updated; every request body uses camelCase,
+                                                 // same as every other field here
       timeToSpot: body.timeToSpot ?? existing.time_to_spot,
       timeFromSpot: body.timeFromSpot ?? existing.time_from_spot,
+      minTideHeight: body.minTideHeight !== undefined ? body.minTideHeight : existing.min_tide_height,
     };
     await env.DB.prepare(
       `UPDATE user_location_access
-       SET drive_to = ?, drive_back = ?, set_up = ?, pack_up = ?, time_to_spot = ?, time_from_spot = ?
+       SET drive_to = ?, drive_back = ?, set_up = ?, pack_up = ?, time_to_spot = ?, time_from_spot = ?, min_tide_height = ?
        WHERE id = ? AND user_id = ?`
     )
-      .bind(scheduling.driveTo, scheduling.driveBack, scheduling.setUp, scheduling.packUp, scheduling.timeToSpot, scheduling.timeFromSpot, accessId, uid)
+      .bind(
+        scheduling.driveTo, scheduling.driveBack, scheduling.setUp, scheduling.packUp,
+        scheduling.timeToSpot, scheduling.timeFromSpot, scheduling.minTideHeight, accessId, uid
+      )
       .run();
 
     // Editing the PLACE's own base fields (name/lat/lng/etc) is only
     // allowed for whoever created it — tracking a location (having an
     // access row) is not the same as owning its base record. An admin
     // reaches this by passing ?userId=<the owner>, same as everywhere else.
-    const placeFields = ["name", "lat", "lng", "willyweatherId", "willyweatherName", "willyweatherRegion", "willyweatherState", "shore", "tideOffset", "tideMaxObserved"];
+    const placeFields = ["name", "lat", "lng", "willyweatherId", "willyweatherName", "willyweatherRegion", "willyweatherState", "shore", "tideOffset", "tideMaxObserved", "tidal"];
     const wantsPlaceEdit = placeFields.some((f) => body[f] !== undefined);
     if (wantsPlaceEdit) {
       if (existing.location_owner !== uid) {
@@ -912,10 +921,11 @@ async function handleTrackedItem(request, url, env, accessId) {
         shore: body.shore ?? place.shore,
         tideOffset: body.tideOffset ?? place.tide_offset,
         tideMaxObserved: body.tideMaxObserved ?? place.tide_max_observed,
+        tidal: body.tidal !== undefined ? (body.tidal ? 1 : 0) : place.tidal,
       };
       await env.DB.prepare(
         `UPDATE locations SET name=?, lat=?, lng=?, willyweather_id=?, willyweather_name=?, willyweather_region=?,
-                               willyweather_state=?, shore=?, tide_offset=?, tide_max_observed=?
+                               willyweather_state=?, shore=?, tide_offset=?, tide_max_observed=?, tidal=?
          WHERE id = ?`
       )
         .bind(
@@ -929,6 +939,7 @@ async function handleTrackedItem(request, url, env, accessId) {
           merged.shore,
           merged.tideOffset,
           merged.tideMaxObserved,
+          merged.tidal,
           existing.location_id
         )
         .run();
@@ -972,10 +983,10 @@ async function handleTrackedItem(request, url, env, accessId) {
 async function fetchOneTracked(env, accessId) {
   const row = await env.DB.prepare(
     `SELECT ula.id as access_id, ula.drive_to, ula.drive_back, ula.set_up, ula.pack_up,
-            ula.time_to_spot, ula.time_from_spot,
+            ula.time_to_spot, ula.time_from_spot, ula.min_tide_height,
             l.id as location_id, l.name, l.lat, l.lng, l.willyweather_id, l.willyweather_name,
             l.willyweather_region, l.willyweather_state, l.shore, l.tide_offset, l.tide_max_observed,
-            l.created_by_user_id,
+            l.tidal, l.created_by_user_id,
             t.id as type_id, t.name as type_name, t.behaves_like
      FROM user_location_access ula
      JOIN locations l ON l.id = ula.location_id
@@ -1004,6 +1015,7 @@ function rowToTracked(row, groups) {
       shore: row.shore,
       tideOffset: row.tide_offset,
       tideMaxObserved: row.tide_max_observed,
+      tidal: !!row.tidal,
       createdByUserId: row.created_by_user_id,
     },
     type: { id: row.type_id, name: row.type_name, behavesLike: row.behaves_like },
@@ -1013,6 +1025,7 @@ function rowToTracked(row, groups) {
     packUp: row.pack_up,
     timeToSpot: row.time_to_spot,
     timeFromSpot: row.time_from_spot,
+    minTideHeight: row.min_tide_height,
     groups,
   };
 }
@@ -1471,7 +1484,7 @@ async function handlePipelineLocationsList(request, env) {
 
   const { results: accessRows } = await env.DB.prepare(
     `SELECT ula.location_id, ula.drive_to, ula.drive_back, ula.set_up, ula.pack_up, ula.time_to_spot, ula.time_from_spot,
-            t.name as type_name, t.behaves_like
+            ula.min_tide_height, t.name as type_name, t.behaves_like
      FROM user_location_access ula
      JOIN user_types t ON t.id = ula.type_id
      WHERE ula.user_id = ?`
@@ -1490,6 +1503,7 @@ async function handlePipelineLocationsList(request, env) {
       packUp: row.pack_up,
       timeToSpot: row.time_to_spot,
       timeFromSpot: row.time_from_spot,
+      minTideHeight: row.min_tide_height,
     });
   }
 
@@ -1513,9 +1527,8 @@ async function handlePipelineLocationsList(request, env) {
       id: loc.id,
       name: loc.name,
       shore: loc.shore,
-      tidal: true, // no per-location tidal:false override exists in this schema yet — every
-                   // Public location is currently a real tidal spot; carried over as a fixed
-                   // true rather than silently dropping the field fetch_conditions.py reads
+      tidal: !!loc.tidal, // real column now (schema-v2.sql) — confirmed against live
+                          // data (Metung, VIC) rather than assumed true for everyone
       locationGroup: groups[0] || null, // legacy singular field, kept for anything that still reads it
       locationGroups: groups,
       tideOffset: loc.tide_offset,
