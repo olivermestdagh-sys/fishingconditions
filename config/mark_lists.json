@@ -331,5 +331,9 @@
     "color": "#ffff00",
     "lowranceSym": "yellow",
     "garminSym": "Yellow"
+  },
+  {
+    "field": "Species",
+    "value": "Pinky"
   }
 ]
