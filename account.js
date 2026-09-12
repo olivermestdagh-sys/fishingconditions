@@ -17,11 +17,16 @@
  * reads them), no shore field. That's a carried-forward limitation from
  * the original v1 design, not a new one introduced by this reconciliation.
  *
- * REPLACE THIS after deploying user-backend.js (see that file's own
- * DEPLOYING THIS section) — same one-time pattern as
- * WILLYWEATHER_SEARCH_WORKER_URL in charts.js.
+ * REPLACE THIS in charts.js's own USER_BACKEND_URL constant after
+ * deploying user-backend.js (see that file's own DEPLOYING THIS section)
+ * — same one-time pattern as WILLYWEATHER_SEARCH_WORKER_URL. NOT declared
+ * again here — charts.js loads before this file on account.html, and a
+ * duplicate top-level `const` of the same name across two scripts
+ * sharing one global scope is a fatal SyntaxError, not a harmless
+ * redeclaration. It silently broke this entire file for a while (see
+ * README's "A serious bug, found and fixed" note) until caught by a real
+ * page-load test.
  */
-const USER_BACKEND_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev";
 
 const VALID_TYPES = ["Kayak", "Land based"];
 

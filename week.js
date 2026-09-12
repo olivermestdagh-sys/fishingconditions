@@ -33,7 +33,12 @@
 const isMobileDevice = Math.min(window.innerWidth, window.innerHeight) <= 900;
 
 const DATA_URL = "data/conditions.json";
-const SETTINGS_URL = "config/settings.json";
+const SETTINGS_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev/api/public/settings";
+// Points at the live, unauthenticated user-backend endpoint (D1, Public's
+// own row) rather than the static config/settings.json file it used to —
+// same migration pattern as MARK_LISTS_FILE_PATH/MARKS_FILE_PATH
+// (charts.js): same response shape ({googleRoutesApiKey, homeLat,
+// homeLng}), so nothing below this constant needed to change at all.
 // Half the usual scale on mobile — 32px/hour was sized for a desktop-width
 // screen. At that same scale on a phone's much narrower rotated-landscape
 // width, a single day took up nearly the entire visible width on its own,
@@ -556,7 +561,7 @@ async function init() {
       googleRoutesApiKey = settings.googleRoutesApiKey || null;
     }
   } catch (err) {
-    console.error("Could not load settings.json:", err);
+    console.error("Could not load settings:", err);
   }
 
   computedSessions = loadComputedSessions();
