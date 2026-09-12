@@ -57,7 +57,15 @@ COMPASS_DEGREES = {
 def http_get_json(url, retries=3, backoff=2.0, extra_headers=None):
     """GET a URL and parse JSON, with a couple of retries for transient errors."""
     last_err = None
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        # Some hosts' bot-protection layers specifically flag urllib's
+        # default User-Agent (a well-known, very generic script signature)
+        # — a real, descriptive one avoids that without changing anything
+        # about how the request itself behaves.
+        "User-Agent": "fishingconditions-pipeline/1.0 (+https://github.com/olivermestdagh-sys/fishingconditions)",
+    }
     if extra_headers:
         headers.update(extra_headers)
     for attempt in range(retries):
@@ -81,7 +89,15 @@ def http_put_json(url, body, retries=3, backoff=2.0, extra_headers=None):
     NEXT run one extra name-search call for that location — not fatal
     enough to abort the whole fetch over."""
     last_err = None
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        # Some hosts' bot-protection layers specifically flag urllib's
+        # default User-Agent (a well-known, very generic script signature)
+        # — a real, descriptive one avoids that without changing anything
+        # about how the request itself behaves.
+        "User-Agent": "fishingconditions-pipeline/1.0 (+https://github.com/olivermestdagh-sys/fishingconditions)",
+    }
     if extra_headers:
         headers.update(extra_headers)
     data = json.dumps(body).encode("utf-8")
