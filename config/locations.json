@@ -579,25 +579,5 @@
       "Gold Coast"
     ],
     "tideMaxObserved": 1.49
-  },
-  {
-    "name": "Woolamai",
-    "shore": "N",
-    "types": [
-      {
-        "type": "Land based",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
-      }
-    ],
-    "lat": -38.498743086027794,
-    "lng": 145.51666259765628,
-    "tidal": false,
-    "willyweatherId": 13591,
-    "willyweatherName": "Woolamai",
-    "willyweatherRegion": "Gippsland",
-    "willyweatherState": "VIC"
   }
 ]
