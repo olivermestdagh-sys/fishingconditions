@@ -33,6 +33,14 @@ BASE_URL = "https://api.willyweather.com.au/v2"
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 OPEN_METEO_MARINE_URL = "https://marine-api.open-meteo.com/v1/marine"
 OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "conditions.json")
+# config/locations.json is now a GENERATED EXPORT, not a source of truth —
+# see export_locations_json() below. It still exists because charts.js
+# reads it directly, client-side, in several places (the Live page's
+# GPS-matching, tide-offset lookups, the "boat ramp access" chart
+# threshold) — confirmed by checking, not assumed. Keeping this file
+# updated automatically is what stops those features from silently going
+# stale now that the ADMIN side of locations lives in D1.
+LOCATIONS_EXPORT_PATH = os.path.join(os.path.dirname(__file__), "..", "config", "locations.json")
 # Locations now live in D1 behind the user-backend Worker (Public
 # account's own rows) rather than config/locations.json — see
 # load_locations()/write_location_cache() below, and user-backend.js's
@@ -176,6 +184,57 @@ def write_location_cache(locations):
         if result is not None:
             sent += 1
     print(f"Wrote WillyWeather id cache back to D1 for {sent}/{len(locations)} locations")
+
+
+def export_locations_json(locations):
+    """Regenerates config/locations.json from the SAME list load_locations()
+    just returned — this is what keeps charts.js's own direct, client-side
+    reads of that file (Live page GPS-matching, tide-offset lookups, the
+    boat-ramp-access chart threshold) working without any changes to
+    charts.js itself, now that D1 (not this file) is the real source of
+    truth for locations.
+
+    Strips the two fields that are internal to the pipeline/D1 model and
+    never existed in the historical file — each location's own `id`, and
+    each type's `behavesLike` (see the file-level note on
+    handlePipelineLocationsList, user-backend.js, for why that field
+    exists at all) — so the exported shape matches what charts.js has
+    always expected, field-for-field."""
+    exportable = []
+    for loc in locations:
+        exportable.append({
+            "name": loc.get("name"),
+            "shore": loc.get("shore"),
+            "tidal": loc.get("tidal", True),
+            "locationGroup": loc.get("locationGroup"),
+            "locationGroups": loc.get("locationGroups") or [],
+            "tideOffset": loc.get("tideOffset"),
+            "willyweatherId": loc.get("willyweatherId"),
+            "willyweatherName": loc.get("willyweatherName"),
+            "willyweatherRegion": loc.get("willyweatherRegion"),
+            "willyweatherState": loc.get("willyweatherState"),
+            "lat": loc.get("lat"),
+            "lng": loc.get("lng"),
+            "tideMaxObserved": loc.get("tideMaxObserved"),
+            "types": [
+                {
+                    "type": t.get("type"),
+                    "driveTo": t.get("driveTo"),
+                    "driveBack": t.get("driveBack"),
+                    "setUp": t.get("setUp"),
+                    "packUp": t.get("packUp"),
+                    "timeToSpot": t.get("timeToSpot"),
+                    "timeFromSpot": t.get("timeFromSpot"),
+                    **({"minTideHeight": t["minTideHeight"]} if t.get("minTideHeight") is not None else {}),
+                }
+                for t in (loc.get("types") or [])
+            ],
+        })
+    os.makedirs(os.path.dirname(LOCATIONS_EXPORT_PATH), exist_ok=True)
+    with open(LOCATIONS_EXPORT_PATH, "w", encoding="utf-8") as f:
+        json.dump(exportable, f, indent=2)
+        f.write("\n")
+    print(f"Exported {len(exportable)} locations to {LOCATIONS_EXPORT_PATH}")
 
 
 def search_location(name):
@@ -1480,6 +1539,10 @@ def main():
     # write_location_cache()'s own docstring for how this differs from the
     # old git-commit-if-changed behaviour.
     write_location_cache(locations)
+
+    # Regenerates config/locations.json for charts.js's own direct,
+    # client-side reads — see export_locations_json()'s own docstring.
+    export_locations_json(locations)
 
 
 if __name__ == "__main__":
