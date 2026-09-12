@@ -5,9 +5,21 @@
 // than duplicated. GROUPS_FILE_PATH and WORKFLOW_FILE stay here — nothing
 // outside this Settings page touches location GROUPS or triggers a data
 // refresh.
-const GROUPS_FILE_PATH = "config/location_groups.json";
+const GROUPS_FILE_PATH = "config/location_groups.json"; // no longer read/written by
+                          // this file (see "v2: Location Groups" below) —
+                          // kept only as a comment anchor; GROUPS_FILE_PATH
+                          // itself is now unused dead code, left rather than
+                          // hunting down whether anything else references it
 const SETTINGS_FILE_PATH = "config/settings.json";
 const WORKFLOW_FILE = "update.yml";
+
+// v2 user-backend Worker — same deployed URL as account.js's own
+// USER_BACKEND_URL constant (duplicated here rather than sharing a single
+// source of truth across the two files; a genuine "one shared constants
+// file" refactor is a reasonable future cleanup, not done this round).
+// Location Groups (below) is the only section on this page wired to it so
+// far — Mark Lists and Locations still save via the GitHub token path.
+const USER_BACKEND_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev";
 
 // Home address — a single lat/lng, stored in config/settings.json
 // alongside googleRoutesApiKey (NOT config/locations.json; it isn't a
@@ -69,8 +81,18 @@ function typeIconSvg(type, size) {
 
 let locations = [];
 let currentSha = null;
-let locationGroups = [];
-let groupsSha = null;
+let locationGroups = []; // plain group-name strings — kept in this shape for
+                          // backward compat with every other place on this
+                          // page that reads it (e.g. the per-location group
+                          // tag picker below), even though it's now sourced
+                          // from D1's user_location_groups, not GROUPS_FILE_PATH
+let groupNameToId = new Map(); // name -> D1 row id, needed only by this
+                          // section's own add/remove calls below
+let adminUser = null;    // result of checkAdmin() — null if not signed in
+                          // as Admin; gates Location Groups only so far (see
+                          // "v2: Location Groups" section below) — Mark
+                          // Lists and Locations still run on the GitHub
+                          // token path, untouched this round
 
 // Name -> {lat, lng}, populated by loadLocationCoords() below. The admin
 // config this page edits (config/locations.json, loaded into `locations`
@@ -205,18 +227,18 @@ async function verifyGithubToken(conn) {
 }
 
 function hideConnectedSections() {
-  document.getElementById("groupsSection").style.display = "none";
+  // groupsSection deliberately NOT included any more — it's gated on
+  // Admin sign-in (checkAdmin()) independent of the GitHub connection,
+  // and manages its own visibility entirely inside loadLocationGroups().
   document.getElementById("markListsSection").style.display = "none";
   document.getElementById("locationsSection").style.display = "none";
 }
 
-/** Runs every section's own load-and-render, in the same parallel/then-
- * sequential shape init() already used — shared between init() (page
- * load, when a saved connection already verifies) and onConnect() (a
- * fresh connect, which needs the exact same thing to actually populate
- * anything, not just Locations the way onConnect alone used to). */
+/** Runs every GitHub-token-gated section's own load-and-render — Location
+ * Groups is deliberately NOT among these any more (see init() below); it
+ * loads independently of whether a GitHub connection exists at all. */
 async function loadAllConnectedSections() {
-  await Promise.all([loadLocationGroups(), loadLocationCoords(), loadHomeLocation(), loadMarkLists()]);
+  await Promise.all([loadLocationCoords(), loadHomeLocation(), loadMarkLists()]);
   await loadLocations();
 }
 
@@ -346,10 +368,17 @@ async function init() {
       onAddGroup();
     }
   });
-  document.getElementById("btnSaveGroups").addEventListener("click", onSaveGroups);
+  // btnSaveGroups no longer exists (see "v2: Location Groups" — add/remove
+  // now save immediately, there's nothing left to batch into one commit).
   document.getElementById("btnSaveMarkLists").addEventListener("click", onSaveMarkLists);
   document.getElementById("btnAddMarkShapeFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Shape Format", "newMarkShapeFormatInput"));
   document.getElementById("btnAddMarkColorFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Colour Format", "newMarkColorFormatInput"));
+
+  // Location Groups: independent of the GitHub connection below entirely —
+  // gated on Google Admin sign-in instead. Runs regardless of what the
+  // GitHub token check further down finds.
+  adminUser = await checkAdmin();
+  await loadLocationGroups();
 
   connectionVerified = await verifyGithubToken(conn);
   if (!connectionVerified) {
@@ -357,18 +386,18 @@ async function init() {
     if (conn) {
       setStatus("That token isn't working — check it's still valid and has write access to this repo, then reconnect below.", true);
     } else {
-      setStatus("Connect to GitHub above to manage locations, groups, and mark lists.", false);
+      setStatus("Connect to GitHub above to manage locations and mark lists.", false);
     }
     return;
   }
 
-  // Groups, coords, home, and mark lists all need to be ready before the
-  // first renderRows() (called at the end of loadLocations, which renders
-  // the map too) — well, mark lists don't actually feed renderRows() the
-  // way the other three do (nothing on this page reaches into `locations`
-  // for them yet), but there's no reason to make it wait its turn behind
-  // ones that do. All four are independent of `locations` itself and of
-  // each other, so they load in parallel rather than one after another.
+  // Coords, home, and mark lists all need to be ready before the first
+  // renderRows() (called at the end of loadLocations, which renders the
+  // map too) — well, mark lists don't actually feed renderRows() the way
+  // the other two do (nothing on this page reaches into `locations` for
+  // them yet), but there's no reason to make it wait its turn behind ones
+  // that do. All three are independent of `locations` itself and of each
+  // other, so they load in parallel rather than one after another.
   await loadAllConnectedSections();
 }
 
@@ -408,39 +437,45 @@ async function loadHomeLocation() {
   }
 }
 
+/**
+ * v2: Location Groups now live in D1 (user_location_groups, scoped to the
+ * 'public' user — see schema-v2.sql and user-backend.js) rather than
+ * GROUPS_FILE_PATH, and are gated on Google Admin sign-in (checkAdmin())
+ * instead of the GitHub token this page's other sections still use. Every
+ * add/remove below hits the API immediately — there's no batch "Save
+ * groups" step any more (no sha to track, unlike a GitHub commit).
+ *
+ * locationGroups itself STAYS a flat array of plain name strings — every
+ * other place on this page that reads it (renderRows's per-location group
+ * picker, onRemoveGroup's own cleanup of loc.locationGroups below) expects
+ * that shape and is untouched this round. groupNameToId is the only new
+ * piece of state, holding each name's real D1 id purely so this section's
+ * own add/remove calls know which row to hit.
+ */
 async function loadLocationGroups() {
-  const conn = getConnection();
-  try {
-    if (conn && conn.owner && conn.repo && conn.token) {
-      const res = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${GROUPS_FILE_PATH}?ref=${BRANCH}`, {
-        headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
-      });
-      if (res.status === 404) {
-        // File doesn't exist in the repo yet — perfectly normal the first
-        // time this feature is used; starts as an empty list and gets
-        // created the first time "Save groups" below is used.
-        locationGroups = [];
-        groupsSha = null;
-      } else if (!res.ok) {
-        throw new Error(`GitHub returned ${res.status}`);
-      } else {
-        const json = await res.json();
-        groupsSha = json.sha;
-        const decoded = decodeURIComponent(escape(atob(json.content.replace(/\n/g, ""))));
-        locationGroups = JSON.parse(decoded);
-      }
-    } else {
-      // No connection yet — fall back to the public static file if it
-      // exists; a 404 here (file not created yet) is just as normal as
-      // above, not worth surfacing as an error.
-      const res = await fetch("config/location_groups.json", { cache: "no-store" });
-      locationGroups = res.ok ? await res.json() : [];
-    }
-  } catch (err) {
-    console.error(err);
+  if (!adminUser) {
     locationGroups = [];
+    groupNameToId = new Map();
+    document.getElementById("groupsSection").style.display = "block";
+    document.getElementById("groupsSignedOut").style.display = "block";
+    document.getElementById("groupsEditor").style.display = "none";
+    return;
   }
-  if (connectionVerified) document.getElementById("groupsSection").style.display = "block"; // defense-in-depth — see connectionVerified's own comment
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/groups?userId=public`, { credentials: "include" });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const rows = await res.json();
+    groupNameToId = new Map(rows.map((r) => [r.name, r.id]));
+    locationGroups = rows.map((r) => r.name);
+  } catch (err) {
+    console.error("Failed to load location groups:", err);
+    locationGroups = [];
+    groupNameToId = new Map();
+    setGroupsSaveStatus("Couldn't load groups — try reloading the page.", true);
+  }
+  document.getElementById("groupsSection").style.display = "block";
+  document.getElementById("groupsSignedOut").style.display = "none";
+  document.getElementById("groupsEditor").style.display = "block";
   renderGroupsList();
 }
 
@@ -466,26 +501,59 @@ function renderGroupsList() {
   });
 }
 
-function onAddGroup() {
+async function onAddGroup() {
   const input = document.getElementById("newGroupInput");
   const name = input.value.trim();
   if (!name || locationGroups.includes(name)) {
     input.value = "";
     return;
   }
-  locationGroups.push(name);
-  input.value = "";
-  renderGroupsList();
-  renderRows(); // each location row's Location Group <select> needs the new option available immediately, not just after a reload
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/groups?userId=public`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    const created = await res.json();
+    groupNameToId.set(created.name, created.id);
+    locationGroups.push(created.name);
+    input.value = "";
+    renderGroupsList();
+    renderRows(); // each location row's Location Group <select> needs the new option available immediately, not just after a reload
+    setGroupsSaveStatus("", false);
+  } catch (err) {
+    console.error("Failed to add group:", err);
+    setGroupsSaveStatus("Couldn't add group: " + err.message, true);
+  }
 }
 
-function onRemoveGroup(idx) {
+async function onRemoveGroup(idx) {
   const removed = locationGroups[idx];
+  const id = groupNameToId.get(removed);
+  if (!id) return; // shouldn't happen — nothing sane to do without a real row id
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/groups/${id}?userId=public`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (!res.ok && res.status !== 404) throw new Error(`status ${res.status}`);
+  } catch (err) {
+    console.error("Failed to remove group:", err);
+    setGroupsSaveStatus("Couldn't remove group: " + err.message, true);
+    return; // local state left untouched — don't drop it from the list if the server call actually failed
+  }
   locationGroups.splice(idx, 1);
+  groupNameToId.delete(removed);
   // Any location currently tagged with the removed group has it dropped
   // from its list rather than silently keeping a value that no longer
   // appears anywhere as a selectable option — other groups it has stay
-  // untouched.
+  // untouched. (Still the old locations.json in-memory model this round —
+  // see the file-level note on why Locations itself isn't migrated yet.)
   for (const loc of locations) {
     if (Array.isArray(loc.locationGroups)) {
       loc.locationGroups = loc.locationGroups.filter((g) => g !== removed);
@@ -493,6 +561,7 @@ function onRemoveGroup(idx) {
   }
   renderGroupsList();
   renderRows();
+  setGroupsSaveStatus("", false);
 }
 
 function setGroupsSaveStatus(text, isError) {
@@ -501,49 +570,15 @@ function setGroupsSaveStatus(text, isError) {
   el.style.color = isError ? "#dc2626" : "#16a34a";
 }
 
-async function onSaveGroups() {
-  const conn = getConnection();
-  if (!conn) {
-    setGroupsSaveStatus("Connect to GitHub first (above) before saving.", true);
-    return;
-  }
-  setGroupsSaveStatus("Saving…");
+async function checkAdmin() {
   try {
-    // Re-check the current sha immediately before writing — same
-    // reasoning as onSave() below for locations.json (in case the file
-    // changed elsewhere since it was loaded), plus the common case here
-    // of this being a brand-new file that doesn't exist in the repo yet.
-    const getRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${GROUPS_FILE_PATH}?ref=${BRANCH}`, {
-      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json" },
-    });
-    if (getRes.status === 404) {
-      groupsSha = null; // creating the file for the first time
-    } else if (!getRes.ok) {
-      throw new Error(`Could not read current file (${getRes.status})`);
-    } else {
-      groupsSha = (await getRes.json()).sha;
-    }
-
-    const content = JSON.stringify(locationGroups, null, 2) + "\n";
-    const body = { message: "Update location groups via site", content: utf8ToBase64(content), branch: BRANCH };
-    // sha omitted entirely when creating the file for the first time —
-    // GitHub's API rejects an explicit sha:null on a create.
-    if (groupsSha) body.sha = groupsSha;
-
-    const putRes = await fetch(`${GITHUB_API}/repos/${conn.owner}/${conn.repo}/contents/${GROUPS_FILE_PATH}`, {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${conn.token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!putRes.ok) {
-      const errBody = await putRes.json().catch(() => ({}));
-      throw new Error(errBody.message || `GitHub returned ${putRes.status}`);
-    }
-    groupsSha = (await putRes.json()).content.sha;
-    setGroupsSaveStatus("Saved to GitHub.");
+    const res = await fetch(`${USER_BACKEND_URL}/auth/me`, { credentials: "include" });
+    if (!res.ok) return null; // not signed in — treated the same as any other failure here
+    const user = await res.json();
+    return user.role === "admin" ? user : null;
   } catch (err) {
-    console.error(err);
-    setGroupsSaveStatus("Save failed: " + err.message, true);
+    console.error("Admin check failed:", err);
+    return null;
   }
 }
 

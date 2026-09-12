@@ -55,17 +55,21 @@
     <div class="summary-title" style="margin-bottom:6px;">Location Groups</div>
     <p class="footnote" style="margin:0 0 12px;text-align:left;">
       The list of Location Group values available to assign below, and to filter by on the Week Ahead page.
-      Saved separately from the locations list itself.
+      Saved immediately to your account as you add or remove them — no separate Save step any more.
     </p>
-    <div id="groupsList" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;"></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      <input type="text" id="newGroupInput" placeholder="e.g. Port Phillip" style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
-      <button id="btnAddGroup" class="btn-secondary">+ Add group</button>
+    <div id="groupsSignedOut" style="display:none;">
+      <p class="footnote" style="margin:0;text-align:left;">
+        Sign in with Google as Admin on the <a href="account.html">Account</a> tab to manage location groups.
+      </p>
     </div>
-    <div style="margin-top:14px;">
-      <button id="btnSaveGroups" class="btn-primary">Save groups</button>
+    <div id="groupsEditor" style="display:none;">
+      <div id="groupsList" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input type="text" id="newGroupInput" placeholder="e.g. Port Phillip" style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+        <button id="btnAddGroup" class="btn-secondary">+ Add group</button>
+      </div>
+      <div id="groupsSaveStatus" style="margin-top:10px;font-size:0.85rem;"></div>
     </div>
-    <div id="groupsSaveStatus" style="margin-top:10px;font-size:0.85rem;"></div>
   </section>
 
   <section id="markListsSection" class="summary-card" style="display:none;">
