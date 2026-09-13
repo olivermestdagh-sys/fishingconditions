@@ -52,6 +52,30 @@ let visibleCount = 100; // how many of `candidates` (after search filtering)
                          // what's currently drawn.
 let searchFilter = "";
 
+// --- Fishing Sessions (trail import) --------------------------------------
+//
+// A GPX file's <trk> data — parsed alongside marks whenever the uploaded
+// file is GPX (never .usr; see parseGpxTracks's own comment, charts.js, for
+// why trail data specifically comes from GPX only). Entirely separate
+// state from `candidates` above — a session isn't a mark, and this tree
+// sits alongside the existing marks review list, not instead of it (this
+// is the SAME "Import from a device export" flow, expanded, not a second
+// one — the marks list above is completely unchanged by any of this).
+let trackData = []; // see buildTrackData's own comment for the exact shape
+let selectedCandidateKey = null; // "trackIdx.dayIdx.segIdx.candIdx" of
+                                  // whichever candidate point is currently
+                                  // highlighted, in the tree AND on the map
+                                  // — set from either side, read by both
+let trackMap = null; // the Leaflet map instance for this tree (created once,
+                     // on first file load — see renderTrackMap)
+let trackMapLayer = null; // a plain L.LayerGroup holding every polyline/
+                          // marker currently drawn for trackData — cleared
+                          // and fully redrawn on each render rather than
+                          // patched incrementally, since a full redraw is
+                          // simple and cheap at the point-count a REDUCED
+                          // (line + candidate-marker only, not per-point
+                          // marker) render actually needs
+
 // How close two points have to be to count as "the same spot" — both for
 // collapsing repeat device saves of one spot into a single candidate, and
 // for recognising a candidate that's already tracked in marks.json. Fixed
@@ -1116,6 +1140,55 @@ async function handleImportClick() {
 // File handling
 // ---------------------------------------------------------------------------
 
+/**
+ * Builds the full display tree from parseGpxTracks' output — Track ->
+ * Day-group -> Segment -> (for a "fishing" segment only) Start/End
+ * candidate points. Everything defaults to checked (both Import and
+ * View) — there's no "already imported?" dedup against past Sessions
+ * yet, since nothing about Sessions is actually SAVED anywhere yet (see
+ * this feature's own phased build plan); once save/storage exists,
+ * this default should change to "unchecked if this day looks like one
+ * already saved", matching how marks import already behaves.
+ *
+ * Condition-change checkpoints (weather/tide/barometer shifting
+ * mid-session) and linking a Catch mark into whichever segment its
+ * timestamp falls within are BOTH deliberately not built yet either —
+ * next phases, once this tree/map layer itself is confirmed working.
+ */
+function buildTrackData(gpxText) {
+  const rawTracks = parseGpxTracks(gpxText);
+  return rawTracks
+    .map((track) => {
+      const dayGroups = deriveTrackDayGroups(track.points).map((points) => {
+        const segments = detectFishingSegments(points).map((seg) => {
+          const startPoint = points[seg.startIdx];
+          const endPoint = points[seg.endIdx];
+          const timeLabel = `${startPoint.timeNaive.slice(11, 16)}–${endPoint.timeNaive.slice(11, 16)}`;
+          const candidates =
+            seg.kind === "fishing"
+              ? [
+                  { kind: "start", pointIdx: seg.startIdx, importChecked: true, viewChecked: true },
+                  { kind: "end", pointIdx: seg.endIdx, importChecked: true, viewChecked: true },
+                ]
+              : [];
+          return {
+            kind: seg.kind,
+            startIdx: seg.startIdx,
+            endIdx: seg.endIdx,
+            label: `${seg.kind === "fishing" ? "Fishing" : "Transiting"} ${timeLabel}`,
+            importChecked: seg.kind === "fishing",
+            viewChecked: true,
+            candidates,
+          };
+        });
+        const dayLabel = new Date(points[0].timeMs).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+        return { label: dayLabel, points, segments, importChecked: true, viewChecked: true };
+      });
+      return { name: track.name, dayGroups, importChecked: true, viewChecked: true };
+    })
+    .filter((t) => t.dayGroups.length > 0);
+}
+
 async function handleFileInputChange(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -1149,18 +1222,28 @@ async function handleFileInputChange(e) {
         uuid: null,
       }));
       sourceLabel = "garmin-import";
+
+      // Trail data (Fishing Sessions) — GPX only, never .usr (see
+      // parseGpxTracks's own comment, charts.js). Built alongside the
+      // marks candidates above, entirely separate state — see trackData's
+      // own comment for why. A file with no <trk> data at all (a pure
+      // waypoints-only export) just leaves trackData empty; the Tracks
+      // section stays hidden in that case (see the render call below).
+      trackData = buildTrackData(text);
     }
 
-    if (rawWaypoints.length === 0) {
-      statusEl.textContent = "No waypoints found in that file.";
+    if (rawWaypoints.length === 0 && trackData.length === 0) {
+      statusEl.textContent = "No waypoints or tracks found in that file.";
       return;
     }
 
-    statusEl.textContent = `Parsed ${rawWaypoints.length} waypoints — matching against existing marks…`;
-    const groups = collapseRawWaypoints(rawWaypoints);
-    matchAgainstExisting(groups);
+    let candidateStatusPrefix = "";
+    if (rawWaypoints.length > 0) {
+      statusEl.textContent = `Parsed ${rawWaypoints.length} waypoints — matching against existing marks…`;
+      const groups = collapseRawWaypoints(rawWaypoints);
+      matchAgainstExisting(groups);
 
-    candidates = groups.map((g, i) => ({
+      candidates = groups.map((g, i) => ({
       key: `c${i}`,
       lat: g.lat,
       lng: g.lng,
@@ -1201,41 +1284,59 @@ async function handleFileInputChange(e) {
       windDirection: undefined,
       windSpeed: undefined,
       released: undefined,
-    }));
+      }));
 
-    // Real historical weather/tide/barometer/wind lookup, run up front so
-    // the review list can show it directly (per Oliver's own call — this
-    // used to run later, only at Import time) — only for candidates
-    // actually reviewable (see reviewableCandidates' own comment); a
-    // matched-existing one is never shown or imported, so there's no
-    // reason to spend a billed WillyWeather call plus an Open-Meteo call
-    // looking anything up for it.
-    const toLookUp = reviewableCandidates();
-    if (toLookUp.length > 0) {
-      statusEl.textContent = `Looking up conditions for ${toLookUp.length} new spot${toLookUp.length === 1 ? "" : "s"}…`;
-      await runWithConcurrencyLimit(
-        toLookUp,
-        SYNC_LOOKUP_CONCURRENCY,
-        async (c) => {
-          const result = await lookupHistoricalMarkConditions(c.lat, c.lng, c.dateTime || nowAsNaiveString());
-          Object.assign(c, result);
-        },
-        (done, total) => {
-          statusEl.textContent = `Looking up conditions: ${done} of ${total}…`;
-        }
-      );
+      // Real historical weather/tide/barometer/wind lookup, run up front so
+      // the review list can show it directly (per Oliver's own call — this
+      // used to run later, only at Import time) — only for candidates
+      // actually reviewable (see reviewableCandidates' own comment); a
+      // matched-existing one is never shown or imported, so there's no
+      // reason to spend a billed WillyWeather call plus an Open-Meteo call
+      // looking anything up for it.
+      const toLookUp = reviewableCandidates();
+      if (toLookUp.length > 0) {
+        statusEl.textContent = `Looking up conditions for ${toLookUp.length} new spot${toLookUp.length === 1 ? "" : "s"}…`;
+        await runWithConcurrencyLimit(
+          toLookUp,
+          SYNC_LOOKUP_CONCURRENCY,
+          async (c) => {
+            const result = await lookupHistoricalMarkConditions(c.lat, c.lng, c.dateTime || nowAsNaiveString());
+            Object.assign(c, result);
+          },
+          (done, total) => {
+            statusEl.textContent = `Looking up conditions: ${done} of ${total}…`;
+          }
+        );
+      }
+
+      visibleCount = 100;
+      searchFilter = "";
+      const searchBox = document.getElementById("syncSearchBox");
+      if (searchBox) searchBox.value = "";
+      document.getElementById("importStatus").textContent = "";
+
+      renderSummary();
+      renderReviewList();
+      document.getElementById("reviewSection").style.display = "block";
+      candidateStatusPrefix = `${candidates.length} distinct spot${candidates.length === 1 ? "" : "s"} found from ${rawWaypoints.length} raw waypoints`;
+    } else {
+      document.getElementById("reviewSection").style.display = "none";
     }
 
-    visibleCount = 100;
-    searchFilter = "";
-    const searchBox = document.getElementById("syncSearchBox");
-    if (searchBox) searchBox.value = "";
-    document.getElementById("importStatus").textContent = "";
+    // Fishing Sessions tree — independent of whether any marks were also
+    // found in this same file (a trail-only export with no waypoints at
+    // all is a completely normal thing to upload here).
+    document.getElementById("tracksSection").style.display = trackData.length > 0 ? "block" : "none";
+    if (trackData.length > 0) {
+      selectedCandidateKey = null;
+      renderTracksTree();
+      renderTrackMap();
+    }
 
-    renderSummary();
-    renderReviewList();
-    document.getElementById("reviewSection").style.display = "block";
-    statusEl.textContent = `Done — ${candidates.length} distinct spot${candidates.length === 1 ? "" : "s"} found from ${rawWaypoints.length} raw waypoints.`;
+    const totalDays = trackData.reduce((sum, t) => sum + t.dayGroups.length, 0);
+    const trackStatusSuffix = trackData.length > 0 ? `${totalDays} track day${totalDays === 1 ? "" : "s"} found` : "";
+    statusEl.textContent =
+      "Done — " + [candidateStatusPrefix, trackStatusSuffix].filter(Boolean).join("; ") + ".";
     statusEl.style.color = "#16a34a";
   } catch (err) {
     console.error("Import parse failed:", err);
@@ -1247,6 +1348,206 @@ async function handleFileInputChange(e) {
 // ---------------------------------------------------------------------------
 // Page init
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Fishing Sessions — tree panel + scoped map (Phase 2: display and
+// selection only; point editing, condition-checkpoint auto-fill, catch-
+// linking, and actually saving anything are all later phases — see this
+// feature's own design brief).
+// ---------------------------------------------------------------------------
+
+/** A stable string key identifying one candidate point, used both as a
+ * DOM data-attribute and as selectedCandidateKey's own value — so a
+ * click on either the tree row or the map marker can find and highlight
+ * the same candidate from the other side. */
+function candidateKey(trackIdx, dayIdx, segIdx, candIdx) {
+  return `${trackIdx}.${dayIdx}.${segIdx}.${candIdx}`;
+}
+
+/** Cascades a new checked value down to every descendant of a tree node —
+ * ticking/unticking a Track, Day, or Segment row applies the same value
+ * to everything nested under it, rather than leaving children stranded
+ * at whatever they were previously set to. */
+function cascadeChecked(node, field, value) {
+  node[field] = value;
+  if (node.dayGroups) node.dayGroups.forEach((d) => cascadeChecked(d, field, value));
+  if (node.segments) node.segments.forEach((s) => cascadeChecked(s, field, value));
+  if (node.candidates) node.candidates.forEach((c) => (c[field] = value));
+}
+
+/** Tri-state summary of a node's own children for one field — "checked"/
+ * "unchecked" when every child agrees, "indeterminate" when they don't.
+ * A leaf node (a candidate, or a transiting segment with no candidates)
+ * has no children to summarise — callers should read its own stored
+ * boolean directly instead of calling this. */
+function summariseChecked(children, field) {
+  if (children.length === 0) return "unchecked";
+  const values = children.map((c) => childCheckedState(c, field));
+  if (values.every((v) => v === "checked")) return "checked";
+  if (values.every((v) => v === "unchecked")) return "unchecked";
+  return "indeterminate";
+}
+function childCheckedState(node, field) {
+  if (node.dayGroups) return summariseChecked(node.dayGroups, field);
+  if (node.segments) return summariseChecked(node.segments, field);
+  if (node.candidates && node.candidates.length > 0) return summariseChecked(node.candidates, field);
+  return node[field] ? "checked" : "unchecked";
+}
+
+function applyTriState(checkboxEl, state) {
+  checkboxEl.checked = state === "checked";
+  checkboxEl.indeterminate = state === "indeterminate";
+}
+
+function renderTracksTree() {
+  const container = document.getElementById("tracksTree");
+  if (!container) return;
+
+  let html = "";
+  trackData.forEach((track, trackIdx) => {
+    html += `<div class="tracks-tree-node" data-level="track" data-track="${trackIdx}">
+      <input type="checkbox" data-role="import" data-track="${trackIdx}" />
+      <input type="checkbox" data-role="view" data-track="${trackIdx}" />
+      <span>${escapeHtml(track.name)}</span>
+    </div>`;
+    track.dayGroups.forEach((day, dayIdx) => {
+      html += `<div class="tracks-tree-node" data-level="day" style="padding-left:20px;" data-track="${trackIdx}" data-day="${dayIdx}">
+        <input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" />
+        <input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" />
+        <span>${escapeHtml(day.label)}</span>
+      </div>`;
+      day.segments.forEach((seg, segIdx) => {
+        html += `<div class="tracks-tree-node" data-level="segment" style="padding-left:40px;" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}">
+          <input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" />
+          <input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" />
+          <span>${escapeHtml(seg.label)}</span>
+        </div>`;
+        seg.candidates.forEach((cand, candIdx) => {
+          const key = candidateKey(trackIdx, dayIdx, segIdx, candIdx);
+          const isSelected = key === selectedCandidateKey;
+          const candLabel = `${cand.kind === "start" ? "Start" : "End"} ${day.points[cand.pointIdx].timeNaive.slice(11, 16)}`;
+          html += `<div class="tracks-tree-node${isSelected ? " tracks-tree-node-selected" : ""}" data-level="candidate" style="padding-left:60px;" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">
+            <input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}" />
+            <input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}" />
+            <span data-role="select-candidate">${candLabel}</span>
+          </div>`;
+        });
+      });
+    });
+  });
+  container.innerHTML = html;
+
+  // Apply each row's own checked/indeterminate display — done as a
+  // second pass, after the HTML is in the DOM, since indeterminate isn't
+  // settable via a plain HTML attribute, only the live DOM property.
+  trackData.forEach((track, trackIdx) => {
+    setRowCheckboxes(container, `[data-track="${trackIdx}"][data-level="track"]`, track);
+    track.dayGroups.forEach((day, dayIdx) => {
+      setRowCheckboxes(container, `[data-track="${trackIdx}"][data-day="${dayIdx}"][data-level="day"]`, day);
+      day.segments.forEach((seg, segIdx) => {
+        setRowCheckboxes(container, `[data-track="${trackIdx}"][data-day="${dayIdx}"][data-seg="${segIdx}"][data-level="segment"]`, seg);
+        seg.candidates.forEach((cand, candIdx) => {
+          setRowCheckboxes(container, `[data-track="${trackIdx}"][data-day="${dayIdx}"][data-seg="${segIdx}"][data-cand="${candIdx}"][data-level="candidate"]`, cand);
+        });
+      });
+    });
+  });
+
+  container.querySelectorAll('input[data-role="import"]').forEach((el) => el.addEventListener("change", onTreeCheckboxChange));
+  container.querySelectorAll('input[data-role="view"]').forEach((el) => el.addEventListener("change", onTreeCheckboxChange));
+  container.querySelectorAll('[data-role="select-candidate"]').forEach((el) => {
+    el.addEventListener("click", (e) => {
+      const row = e.currentTarget.closest(".tracks-tree-node");
+      selectedCandidateKey = candidateKey(row.dataset.track, row.dataset.day, row.dataset.seg, row.dataset.cand);
+      renderTracksTree();
+      renderTrackMap();
+    });
+  });
+}
+
+function setRowCheckboxes(container, selector, node) {
+  const row = container.querySelector(selector);
+  if (!row) return;
+  const importBox = row.querySelector('input[data-role="import"]');
+  const viewBox = row.querySelector('input[data-role="view"]');
+  const isLeaf = !node.dayGroups && !node.segments && !(node.candidates && node.candidates.length > 0);
+  if (isLeaf) {
+    importBox.checked = !!node.importChecked;
+    viewBox.checked = !!node.viewChecked;
+  } else {
+    applyTriState(importBox, childCheckedState(node, "importChecked"));
+    applyTriState(viewBox, childCheckedState(node, "viewChecked"));
+  }
+}
+
+function onTreeCheckboxChange(e) {
+  const el = e.currentTarget;
+  const field = el.dataset.role === "import" ? "importChecked" : "viewChecked";
+  const { track, day, seg, cand } = el.dataset;
+  let node = trackData[Number(track)];
+  if (day !== undefined) node = node.dayGroups[Number(day)];
+  if (seg !== undefined) node = node.segments[Number(seg)];
+  if (cand !== undefined) node = node.candidates[Number(cand)];
+  cascadeChecked(node, field, el.checked);
+  renderTracksTree();
+  renderTrackMap();
+}
+
+const SEGMENT_COLORS = { fishing: "#d97706", transiting: "#6b7280" }; // amber for likely-fishing stretches, grey for travel — deliberately distinct from any mark colour on the OTHER maps, since this is a different kind of thing being shown
+
+function renderTrackMap() {
+  const mapEl = document.getElementById("tracksMap");
+  if (!mapEl) return;
+
+  if (!trackMap) {
+    trackMap = L.map("tracksMap");
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors" }).addTo(trackMap);
+    trackMapLayer = L.layerGroup().addTo(trackMap);
+  }
+
+  trackMapLayer.clearLayers();
+  const allShownLatLngs = [];
+
+  trackData.forEach((track, trackIdx) => {
+    track.dayGroups.forEach((day, dayIdx) => {
+      day.segments.forEach((seg, segIdx) => {
+        if (!seg.viewChecked) return;
+        const segPoints = day.points.slice(seg.startIdx, seg.endIdx + 1);
+        const latLngs = segPoints.map((p) => [p.lat, p.lon]);
+        if (latLngs.length >= 2) {
+          L.polyline(latLngs, { color: SEGMENT_COLORS[seg.kind], weight: 3 }).addTo(trackMapLayer);
+          allShownLatLngs.push(...latLngs);
+        }
+        seg.candidates.forEach((cand, candIdx) => {
+          if (!cand.viewChecked) return;
+          const point = day.points[cand.pointIdx];
+          const key = candidateKey(trackIdx, dayIdx, segIdx, candIdx);
+          const isSelected = key === selectedCandidateKey;
+          const marker = L.circleMarker([point.lat, point.lon], {
+            radius: isSelected ? 9 : 6,
+            color: "#fff",
+            weight: 2,
+            fillColor: cand.kind === "start" ? "#16a34a" : "#dc2626",
+            fillOpacity: 1,
+          }).addTo(trackMapLayer);
+          marker.bindTooltip(`${cand.kind === "start" ? "Start" : "End"} — ${point.timeNaive}`);
+          marker.on("click", () => {
+            selectedCandidateKey = key;
+            renderTracksTree();
+            renderTrackMap();
+          });
+          allShownLatLngs.push([point.lat, point.lon]);
+        });
+      });
+    });
+  });
+
+  if (allShownLatLngs.length > 0) {
+    trackMap.fitBounds(allShownLatLngs, { padding: [20, 20] });
+  } else {
+    trackMap.setView([-38.1, 145.1], 9); // Port Phillip/Western Port default — nothing to show yet
+  }
+}
 
 function canSync() {
   return cachedIsAdmin;
