@@ -936,11 +936,37 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
   map.on("zoomend", saveCurrentView);
 
   if (opts.onMapClick) {
+    // A click that's only dismissing an already-open popup shouldn't ALSO
+    // be treated as "click on empty map area" (starting a new mark, or
+    // asking "new mark or view location?" — handleMapClickForMarks) — a
+    // real, previously-reported bug: accidentally clicking off an open
+    // mark's edit form closed it AND immediately started a second,
+    // unrelated action at that same point. Leaflet fires 'preclick' just
+    // before 'click' for the exact same physical click, and BEFORE any
+    // popup that click is about to auto-close actually closes — so
+    // checking "is a popup currently open" at 'preclick' time reliably
+    // means "yes, THIS click is the one dismissing it", even though by
+    // the time 'click' itself fires the popup has already closed (and
+    // 'popupclose' already fired) as part of the very same click.
+    let popupWasOpenForThisClick = false;
+    let aPopupIsCurrentlyOpen = false;
+    map.on("popupopen", () => {
+      aPopupIsCurrentlyOpen = true;
+    });
+    map.on("popupclose", () => {
+      aPopupIsCurrentlyOpen = false;
+    });
+    map.on("preclick", () => {
+      popupWasOpenForThisClick = aPopupIsCurrentlyOpen;
+    });
     // Fires on a genuine click on open map area. Leaflet doesn't bubble
     // marker clicks up to this handler by default, so clicking an existing
     // pin correctly triggers ONLY that marker's own onClick (set above),
     // never both.
-    map.on("click", (e) => opts.onMapClick(e.latlng.lat, e.latlng.lng));
+    map.on("click", (e) => {
+      if (popupWasOpenForThisClick) return; // this click's real purpose was closing that popup — nothing more
+      opts.onMapClick(e.latlng.lat, e.latlng.lng);
+    });
   }
 
   // Leaflet sizes its internal tile grid ONCE, from the container's
@@ -2038,16 +2064,17 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
           marker.unbindTooltip();
           marker.bindTooltip(markTooltipText(mark, options.state), { direction: "top" });
           if (options.state) options.state.markersById.set(mark.id, marker);
-          // zoomToShowLayer (not a plain openPopup) — the freshly re-created
-          // marker could easily land inside a cluster if other marks sit
-          // nearby, in which case a plain openPopup() would silently do
-          // nothing (a clustered marker has no visible DOM to pop up
-          // from). This zooms only as far as actually needed to reveal it
-          // unclustered, then opens the popup once that's guaranteed —
-          // everything depending on the NEW popup's own DOM element has
-          // to wait for this callback too, since it doesn't exist before
-          // the popup actually opens.
-          options.state.markerLayer.zoomToShowLayer(marker, () => {
+          // showMarkerOnceVisible (not zoomToShowLayer directly, and not a
+          // plain openPopup) — the freshly re-created marker could easily
+          // land inside a cluster if other marks sit nearby, in which
+          // case a plain openPopup() would silently do nothing (a
+          // clustered marker has no visible DOM to pop up from) — AND
+          // zoomToShowLayer's own callback is confirmed unreliable for
+          // this project's marker types (see showMarkerOnceVisible's own
+          // comment for why). Everything depending on the NEW popup's own
+          // DOM element has to wait for this callback too, since it
+          // doesn't exist before the popup actually opens.
+          showMarkerOnceVisible(options.state.markerLayer, marker, () => {
             marker.openPopup();
             const newPopupEl = marker.getPopup().getElement();
             fillMarkPopupDistances(newPopupEl, mark);
@@ -2519,13 +2546,75 @@ function createMarkClusterIcon(cluster) {
   });
 }
 
+/**
+ * Reliable replacement for calling zoomToShowLayer(marker, callback)
+ * directly and trusting its own callback — CONFIRMED not to fire for
+ * anything but a plain L.Marker in real-world use (a known,
+ * long-standing Leaflet.markercluster limitation: internally it checks
+ * for the marker's `_icon` DOM property before firing, which only
+ * L.Marker/L.DivIcon layers ever have — see
+ * github.com/Leaflet/Leaflet.markercluster/issues/904). Every mark on
+ * this site is an L.CircleMarker or a custom Path shape (createMarkShapeLayer)
+ * for the Canvas-rendering this whole layer depends on at scale — never
+ * a plain L.Marker — so that callback silently never ran, meaning
+ * whatever it was supposed to do (openPopup + wireMarkPopupButtons, in
+ * every caller here) never happened. This was a REAL, reported bug:
+ * copying or creating a mark whose popup never got its Save button
+ * wired at all, with no visible error — clicking Save simply did
+ * nothing, because nothing had ever attached a listener to it.
+ *
+ * Still calls zoomToShowLayer for its actual zoom/spiderfy side effect
+ * (ignoring its own callback entirely), then polls getVisibleParent
+ * until the marker itself — not a cluster standing in for it — is
+ * confirmed visible, and only then runs the real callback. Skips the
+ * zoom/poll dance entirely when the marker is already visible right
+ * now, which is the common case (a spot just clicked, or a copy of a
+ * mark that was already visible to click "Copy" on in the first place).
+ * Gives up after ~3s (a generous margin over any real zoom/spiderfy
+ * animation) and runs the callback anyway rather than leaving a popup
+ * permanently unwired if something unexpected prevents the marker from
+ * ever reporting visible.
+ */
+function showMarkerOnceVisible(markerLayer, marker, callback) {
+  // Checks marker._map directly — a standard Leaflet property, true only
+  // when this SPECIFIC layer is genuinely rendered on the map right now
+  // (as opposed to hidden behind a cluster icon standing in for it).
+  // Deliberately NOT using Leaflet.markercluster's own getVisibleParent
+  // for this: confirmed by direct testing to have the EXACT SAME `_icon`-
+  // dependent bug as zoomToShowLayer's callback (it walks up looking for
+  // a layer with an `_icon` property, which only L.Marker/L.DivIcon ever
+  // have — every mark here is a CircleMarker or custom Path shape, so it
+  // always returns null regardless of whether the marker is actually
+  // visible, which is exactly how the original bug this function exists
+  // to fix went undetected: the "obvious" correct-looking API for this is
+  // itself broken for this project's marker types).
+  if (marker._map) {
+    callback();
+    return;
+  }
+  markerLayer.zoomToShowLayer(marker, () => {}); // side effect only (the actual zoom/spiderfy) — its own callback is never trusted, same reasoning as above
+  const startedAt = Date.now();
+  const checkVisible = () => {
+    if (marker._map) {
+      callback();
+    } else if (Date.now() - startedAt < 3000) {
+      setTimeout(checkVisible, 100);
+    } else {
+      console.error("showMarkerOnceVisible: gave up waiting for marker to become visible; running callback anyway.");
+      callback();
+    }
+  };
+  setTimeout(checkVisible, 150); // give the zoom/spiderfy animation a moment to actually start before the first check
+}
+
 // --- Mark display filtering & colour-by-field grouping ---------------------
 //
 // Two independent, persisted view preferences layered on top of the marks
 // layer itself: which field currently determines colour (state.groupByKey
-// — see markStyleFor/markTooltipText above) and which values are
-// included/excluded from display at all (state.filters — see
-// markMatchesFilters below). Both live on the SAME `state` object
+// below) and which values are included/excluded from display at all
+// (state.filters below). Both persist to localStorage (see
+// loadMarkViewSettings/saveMarkViewSettings below), shared across the
+// Location and Live tabs.
 // loadAndRenderMarks already threads everywhere marks are touched, and both
 // persist to localStorage (see loadMarkViewSettings/saveMarkViewSettings)
 // SHARED across the Location and Live tabs — one filter setup follows you
@@ -2941,14 +3030,19 @@ function startNewMarkEntry(map, lat, lng, state, defaults = {}) {
     fillOpacity: 0.85,
   }, state.markLists).addTo(state.markerLayer);
   marker.bindPopup(buildMarkPopupEditHtml(draft, state.markLists), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
-  // zoomToShowLayer (not a plain openPopup) — a spot just clicked on the
-  // map is usually already zoomed in enough that this is a same-zoom
-  // no-op, but if several existing marks already sit at/near this exact
+  // showMarkerOnceVisible (not zoomToShowLayer directly, and not a plain
+  // openPopup) — a spot just clicked on the map is usually already
+  // zoomed in enough that this resolves immediately with no visible
+  // zoom, but if several existing marks already sit at/near this exact
   // point, the new one could otherwise land straight inside a cluster
-  // with no visible pin to open a popup from at all. Everything that
-  // needs the popup's own DOM element has to wait for this callback —
-  // it doesn't exist before the popup actually opens.
-  state.markerLayer.zoomToShowLayer(marker, () => {
+  // with no visible pin to open a popup from at all — AND
+  // zoomToShowLayer's own callback is confirmed unreliable for this
+  // project's marker types (see showMarkerOnceVisible's own comment for
+  // why: a real, previously-reported bug — Save silently doing nothing
+  // because this callback never ran, so nothing ever wired it).
+  // Everything that needs the popup's own DOM element has to wait for
+  // this callback — it doesn't exist before the popup actually opens.
+  showMarkerOnceVisible(state.markerLayer, marker, () => {
     marker.openPopup();
     const popupEl = marker.getPopup().getElement();
     wireMarkPopupButtons(popupEl, marker, draft, state.markLists, { isNew: true, map, state });
@@ -3020,12 +3114,15 @@ function startCopiedMarkEntry(map, sourceMark, state) {
     fillOpacity: 0.85,
   }, state.markLists).addTo(state.markerLayer);
   marker.bindPopup(buildMarkPopupEditHtml(draft, state.markLists), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
-  // zoomToShowLayer — same reasoning as startNewMarkEntry's own copy of
-  // this comment: this copy lands at the SAME point as its source mark,
-  // which by definition already has at least one mark there, so the odds
-  // of landing inside a cluster are if anything higher than for a
-  // brand-new point.
-  state.markerLayer.zoomToShowLayer(marker, () => {
+  // showMarkerOnceVisible — same reasoning as startNewMarkEntry's own
+  // copy of this comment: this copy lands at the SAME point as its
+  // source mark, which by definition already has at least one mark
+  // there, so the odds of landing inside a cluster are if anything
+  // higher than for a brand-new point. Also the exact call that first
+  // surfaced the real zoomToShowLayer-callback bug this helper works
+  // around — copying a mark, then finding its Save button silently did
+  // nothing at all.
+  showMarkerOnceVisible(state.markerLayer, marker, () => {
     marker.openPopup();
     const popupEl = marker.getPopup().getElement();
     wireMarkPopupButtons(popupEl, marker, draft, state.markLists, { isNew: true, map, state });

@@ -537,31 +537,67 @@ mid-edit case, and the species/tide/etc filter toggle
 group instead of the map directly, so nothing falls outside its
 clustering.
 
-**One real interaction problem this raised, and how it's handled**:
-adding a brand-new mark (clicking the map, or "Copy" on an existing
-one) opens that mark's edit popup immediately — but a marker added
-straight into a cluster group can land INSIDE an existing cluster with
-no visible pin to pop up from at all, silently doing nothing. Both
-`startNewMarkEntry` and `startCopiedMarkEntry` (and the mid-edit
-shape-change case) use the cluster group's own `zoomToShowLayer`
-instead of a plain `openPopup()` — it zooms only as far as actually
-needed to guarantee the marker is visible and un-clustered, then opens
-the popup once that's certain. Only the tracked-location pins
-(Locations/Settings) are unaffected — clustering was applied to marks
-specifically, where the real density problem is; the location pins are
-a much smaller, curated set with no real overlap issue to solve.
+**Two real bugs this raised, found from actual use — not caught by the
+original testing, both fixed:**
 
-**Verified**: a real headless-browser test — 8 marks placed a few
+**1. Copying or creating a mark left its Save button completely
+unwired — clicking it did nothing at all.** The original fix for "a new
+marker can land inside an existing cluster with no visible pin to pop
+up from" used the cluster group's own `zoomToShowLayer(marker,
+callback)`. That callback turned out to be unreliable in a way that
+went undetected until a real report: it's a confirmed, long-standing
+Leaflet.markercluster bug — internally it only fires once a layer has
+an `_icon` DOM property, which is an `L.Marker`-only thing. Every mark
+here is an `L.CircleMarker` or a custom Path shape (never a plain
+`L.Marker`, needed for the Canvas rendering this whole layer depends on
+at real-world scale), so that callback silently never ran — meaning
+`openPopup()` and `wireMarkPopupButtons()` inside it never ran either.
+The popup itself could still open in some cases (Leaflet's own default
+click-to-open-popup behaviour doesn't depend on this callback), but
+nothing had ever attached a listener to its Save button.
+
+Replaced with `showMarkerOnceVisible` — checks `marker._map` directly
+(a plain, standard Leaflet property, true only when a layer is
+genuinely rendered right now, not hidden behind a cluster icon) instead
+of trusting the plugin's own visibility-checking, which has the exact
+same `_icon`-dependent flaw (confirmed directly: `getVisibleParent`
+returns `null` for these marker types regardless of actual visibility,
+for the same reason). Still calls `zoomToShowLayer` for its real zoom/
+spiderfy side effect, just never trusts its callback — polls
+`marker._map` afterward instead, with a 3-second ceiling before giving
+up and running the callback anyway rather than leaving a popup
+permanently unwired.
+
+**2. Clicking to close an open mark's popup also started a second,
+unrelated action at that same spot** — accidentally clicking off an
+open edit form closed it AND immediately triggered "what's here? new
+mark, or view location data?" for that same click. Fixed in
+`renderLeafletLocationMap`: Leaflet fires a `preclick` event just
+before `click`, and before an about-to-be-dismissed popup actually
+closes — checking whether a popup is open at `preclick` time reliably
+identifies "this click's real purpose is dismissing that popup", even
+though by the time `click` itself fires the popup has already closed.
+That one click is now suppressed from also reaching `onMapClick`;
+normal clicks (no popup open) are unaffected.
+
+**Verified**: real headless-browser tests for both — confirmed the
+Save button is wired and a click on it produces a real save
+immediately after creating a mark with no clustering/zoom involved (the
+exact previously-broken case); confirmed a popup-dismissing click no
+longer also opens the "what's here?" dialog, while a genuinely separate
+subsequent click still does. Zero JS errors throughout.
+
+Also verified, unrelated to the bugs above: 8 marks placed a few
 metres apart correctly collapsed into one numbered cluster; clicking it
 split into smaller clusters as expected; repeated clicks at maximum
 zoom produced the actual spiderfy effect (confirmed visually via
 screenshot — individual marks radiating out from a cluster on visible
-spider legs) — zero JS errors throughout. (This sandbox's own network
-access to unpkg.com stopped working partway through this project,
-unrelated to the code itself — verified instead by pulling the real
-published packages through `registry.npmjs.org` and serving them
-locally for the test; the delivered HTML still points at the normal
-public CDN, which works fine in an actual browser.)
+spider legs). (This sandbox's own network access to unpkg.com stopped
+working partway through this project, unrelated to the code itself —
+verified instead by pulling the real published packages through
+`registry.npmjs.org` and serving them locally for testing; the
+delivered HTML still points at the normal public CDN, which works fine
+in an actual browser.)
 
 A **mark** is a single GPS point you drop yourself, out on the water. Three
 Mark Types, each showing (and saving) only the fields that actually apply —
