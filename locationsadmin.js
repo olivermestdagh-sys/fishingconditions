@@ -84,11 +84,35 @@ let locationGroups = []; // plain group-name strings — kept in this shape for
                           // from D1's user_location_groups, not GROUPS_FILE_PATH
 let groupNameToId = new Map(); // name -> D1 row id, needed only by this
                           // section's own add/remove calls below
-let adminUser = null;    // result of checkAdmin() — null if not signed in
-                          // as Admin; gates Location Groups only so far (see
-                          // "v2: Location Groups" section below) — Mark
-                          // Lists and Locations still run on the GitHub
-                          // token path, untouched this round
+let currentUser = null;  // result of checkSignedIn() — null if not signed in
+                          // at all, regardless of role. Location Groups,
+                          // Fishing Mark Lists, and Locations are now
+                          // available to ANY signed-in user (each seeing
+                          // their own data by default) — not Admin-only
+                          // any more; see isAdmin/viewingAsPublic below
+                          // for what IS still Admin-specific.
+let isAdmin = false;      // derived from currentUser.role === "admin" — gates
+                          // the "View as Public" toggle and the Home
+                          // address / Refresh data now sections, nothing else
+let viewingAsPublic = false; // Admin-only toggle state — when true, every
+                          // section below (Groups/Mark Lists/Locations/
+                          // Check frequency) operates on Public's data
+                          // instead of the signed-in Admin's own. See
+                          // effectiveUserIdParam() and onToggleViewAsPublic.
+
+/**
+ * Every fetch to a v2/v1-with-override endpoint appends this instead of a
+ * hardcoded ?userId=public — returns "" (meaning "act as myself", the
+ * default every endpoint already falls back to when the param is omitted)
+ * unless an Admin has flipped viewingAsPublic on, in which case it
+ * returns "?userId=public" so every one of those same calls acts on
+ * Public's rows instead. A non-admin's viewingAsPublic can never be true
+ * (see onToggleViewAsPublic — the button that sets it doesn't render for
+ * anyone else), so this is safe to call unconditionally everywhere below.
+ */
+function effectiveUserIdParam() {
+  return isAdmin && viewingAsPublic ? "?userId=public" : "";
+}
 
 // Name -> {lat, lng}, populated by loadLocationCoords() below. The admin
 // config this page edits (config/locations.json, loaded into `locations`
@@ -272,18 +296,20 @@ function setSaveStatus(text, isError) {
 
 async function init() {
   // Every top-level section on this page, foldable — see makeCollapsible's
-  // own comment on why. All start folded now that there's no separate
-  // "connection" entry point to leave open by default — Admin sign-in
-  // (Account tab) is the only gate this whole page has left.
+  // own comment on why. All start folded — Groups/Mark Lists/Locations are
+  // now used by every signed-in user, not just Admin reviewing their own
+  // curated set, so there's even less reason to default them open.
   makeCollapsible(document.getElementById("groupsSection"), "settingsCollapsed:groups", true);
   makeCollapsible(document.getElementById("markListsSection"), "settingsCollapsed:markLists", true);
   makeCollapsible(document.getElementById("locationsSection"), "settingsCollapsed:locations", true);
 
-  // btnAddRow removed entirely (see locations.html) — v2's locations.lat/lng
-  // are NOT NULL in D1, so a coordinate-less blank row can no longer be
-  // created at all. Every new location now goes through the map-click flow
-  // (btnAddByMapClick below), which always has real lat/lng from the click
-  // itself, with or without a successful WillyWeather candidate match.
+  document.getElementById("btnSignIn").addEventListener("click", () => {
+    window.location.href = `${USER_BACKEND_URL}/auth/login`;
+  });
+  document.getElementById("btnSignOut").addEventListener("click", onSignOut);
+  document.getElementById("btnSaveSettings").addEventListener("click", saveSettings);
+  document.getElementById("btnToggleViewAsPublic").addEventListener("click", onToggleViewAsPublic);
+
   document.getElementById("btnAddByMapClick").addEventListener("click", toggleAddLocationClickMode);
   document.getElementById("btnAddHome").addEventListener("click", toggleAddHomeClickMode);
   document.getElementById("btnRefreshDataNow").addEventListener("click", onRefreshDataNow);
@@ -295,21 +321,131 @@ async function init() {
       onAddGroup();
     }
   });
-  // btnSaveGroups and btnSaveMarkLists no longer exist (see "v2: Location
-  // Groups" / "v2: Fishing Mark Lists" — add/remove/edit now save
-  // immediately, there's nothing left to batch into one commit).
   document.getElementById("btnAddMarkShapeFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Shape Format", "newMarkShapeFormatInput"));
   document.getElementById("btnAddMarkColorFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Colour Format", "newMarkColorFormatInput"));
 
-  // Everything on this page is now gated on ONE thing: Google Admin
-  // sign-in (Account tab) — Location Groups, Fishing Mark Lists,
-  // Locations, Home address, and the "Refresh data now" trigger. The
-  // GitHub-connection concept that used to gate Home address/Refresh
-  // separately is gone entirely — see README's "Home address and Refresh
-  // data now" section for what replaced it (a Worker-held GitHub token,
-  // never touching the browser, plus two new Admin-only endpoints).
-  adminUser = await checkAdmin();
-  await Promise.all([loadLocationGroups(), loadMarkLists(), loadLocations(), loadLocationCoords(), loadHomeLocation()]);
+  await refreshPageForCurrentUser();
+}
+
+/**
+ * Runs the ENTIRE sign-in-dependent page state — called from init() and
+ * again from onSignOut/onToggleViewAsPublic, since either one changes
+ * what every section below should be showing. Location Groups/Fishing
+ * Mark Lists/Locations/Check frequency are now available to ANY signed-in
+ * user; Home address/Refresh data now/the View-as-Public toggle itself
+ * stay Admin-only (see isAdmin below) — those are site-wide concepts with
+ * no per-user meaning, unaffected by viewingAsPublic.
+ */
+async function refreshPageForCurrentUser() {
+  currentUser = await checkSignedIn();
+  isAdmin = !!currentUser && currentUser.role === "admin";
+  if (!isAdmin) viewingAsPublic = false; // can't be mid-toggle if sign-out happened, or a Basic account somehow reached this state
+
+  const signedOutCard = document.getElementById("signedOutCard");
+  const signedInCard = document.getElementById("signedInCard");
+  const settingsSection = document.getElementById("settingsSection");
+  const adminOnlyControls = document.getElementById("adminOnlyControls");
+  const toggleBtn = document.getElementById("btnToggleViewAsPublic");
+
+  if (!currentUser) {
+    signedOutCard.style.display = "";
+    signedInCard.style.display = "none";
+    settingsSection.style.display = "none";
+    adminOnlyControls.style.display = "none";
+    setStatus("");
+  } else {
+    signedOutCard.style.display = "none";
+    signedInCard.style.display = "";
+    settingsSection.style.display = "";
+    adminOnlyControls.style.display = isAdmin ? "" : "none";
+    toggleBtn.style.display = isAdmin ? "" : "none";
+    toggleBtn.textContent = viewingAsPublic ? "← Back to my account" : "View as Public →";
+    document.getElementById("whoAmI").textContent = viewingAsPublic
+      ? "Viewing as: Public (the free site's own data)"
+      : `Signed in as ${currentUser.name ? `${currentUser.name} (${currentUser.email})` : currentUser.email}`;
+    setStatus(viewingAsPublic ? "Viewing Public's settings and locations" : "Signed in");
+  }
+
+  await Promise.all([loadLocationGroups(), loadMarkLists(), loadLocations(), loadLocationCoords(), loadHomeLocation(), loadSettings()]);
+}
+
+async function onSignOut() {
+  try {
+    await fetch(`${USER_BACKEND_URL}/auth/logout`, { method: "POST", credentials: "include" });
+  } catch (err) {
+    console.error("Sign-out request failed:", err);
+    // Still refresh below — even if the network call failed, re-checking
+    // the actual sign-in state is more useful than assuming it worked.
+  }
+  await refreshPageForCurrentUser();
+}
+
+/**
+ * Admin-only — flips whether every signed-in-gated section below
+ * (Groups/Mark Lists/Locations/Check frequency) operates on Public's
+ * data instead of the Admin's own. Nothing server-side changes about
+ * WHO can do this — every affected endpoint already enforces the same
+ * "only Admin may pass ?userId=public" rule (resolveEffectiveUserId,
+ * user-backend.js) regardless of what this button shows; it only
+ * controls what effectiveUserIdParam() sends from here on.
+ */
+async function onToggleViewAsPublic() {
+  viewingAsPublic = !viewingAsPublic;
+  await refreshPageForCurrentUser();
+}
+
+// ---------------------------------------------------------------------
+// Check frequency — the v1 user_settings table (check-frequency
+// scheduling), now supporting the same Admin ?userId= override as
+// everything else (see handleSettings, user-backend.js) even though
+// there's no scheduler yet to act on ANY user's setting, Public's
+// included — kept consistent with every other toggled section rather
+// than being the one exception.
+// ---------------------------------------------------------------------
+
+async function loadSettings() {
+  if (!currentUser) return;
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/settings${effectiveUserIdParam()}`, { credentials: "include" });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const settings = await res.json();
+    document.getElementById("checkFrequency").value = settings.checkFrequencyMinutes;
+    document.getElementById("windowStart").value = settings.activeWindowStart;
+    document.getElementById("windowEnd").value = settings.activeWindowEnd;
+  } catch (err) {
+    console.error("Failed to load settings:", err);
+    setSettingsStatus("Couldn't load settings — try reloading the page.", true);
+  }
+}
+
+async function saveSettings() {
+  const body = {
+    checkFrequencyMinutes: parseInt(document.getElementById("checkFrequency").value, 10),
+    activeWindowStart: document.getElementById("windowStart").value,
+    activeWindowEnd: document.getElementById("windowEnd").value,
+  };
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/settings${effectiveUserIdParam()}`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    setSettingsStatus("Saved.", false);
+  } catch (err) {
+    console.error("Failed to save settings:", err);
+    setSettingsStatus(`Couldn't save: ${err.message}`, true);
+  }
+}
+
+function setSettingsStatus(text, isError) {
+  const el = document.getElementById("settingsStatus");
+  el.textContent = text;
+  el.style.color = isError ? "var(--red-600, #c0392b)" : "var(--grey-500)";
 }
 
 /**
@@ -348,16 +484,14 @@ async function loadHomeLocation() {
  * own add/remove calls know which row to hit.
  */
 async function loadLocationGroups() {
-  if (!adminUser) {
+  if (!currentUser) {
     locationGroups = [];
     groupNameToId = new Map();
-    document.getElementById("groupsSection").style.display = "block";
-    document.getElementById("groupsSignedOut").style.display = "block";
-    document.getElementById("groupsEditor").style.display = "none";
+    document.getElementById("groupsSection").style.display = "none";
     return;
   }
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/groups?userId=public`, { credentials: "include" });
+    const res = await fetch(`${USER_BACKEND_URL}/api/groups${effectiveUserIdParam()}`, { credentials: "include" });
     if (!res.ok) throw new Error(`status ${res.status}`);
     const rows = await res.json();
     groupNameToId = new Map(rows.map((r) => [r.name, r.id]));
@@ -404,7 +538,7 @@ async function onAddGroup() {
     return;
   }
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/groups?userId=public`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/groups${effectiveUserIdParam()}`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -432,7 +566,7 @@ async function onRemoveGroup(idx) {
   const id = groupNameToId.get(removed);
   if (!id) return; // shouldn't happen — nothing sane to do without a real row id
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/groups/${id}?userId=public`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/groups/${id}${effectiveUserIdParam()}`, {
       method: "DELETE",
       credentials: "include",
     });
@@ -465,14 +599,13 @@ function setGroupsSaveStatus(text, isError) {
   el.style.color = isError ? "#dc2626" : "#16a34a";
 }
 
-async function checkAdmin() {
+async function checkSignedIn() {
   try {
     const res = await fetch(`${USER_BACKEND_URL}/auth/me`, { credentials: "include" });
     if (!res.ok) return null; // not signed in — treated the same as any other failure here
-    const user = await res.json();
-    return user.role === "admin" ? user : null;
+    return await res.json();
   } catch (err) {
-    console.error("Admin check failed:", err);
+    console.error("Sign-in check failed:", err);
     return null;
   }
 }
@@ -571,15 +704,13 @@ let markLists = []; // v2: sourced from /api/marklists (D1, 'public' user) — s
  * mark lists back out to the static file. Not addressed this round.
  */
 async function loadMarkLists() {
-  if (!adminUser) {
+  if (!currentUser) {
     markLists = [];
-    document.getElementById("markListsSection").style.display = "block";
-    document.getElementById("markListsSignedOut").style.display = "block";
-    document.getElementById("markListsEditor").style.display = "none";
+    document.getElementById("markListsSection").style.display = "none";
     return;
   }
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/marklists?userId=public`, { credentials: "include" });
+    const res = await fetch(`${USER_BACKEND_URL}/api/marklists${effectiveUserIdParam()}`, { credentials: "include" });
     if (!res.ok) throw new Error(`status ${res.status}`);
     markLists = await res.json();
   } catch (err) {
@@ -743,7 +874,7 @@ async function onAddMarkListValue(key) {
     return;
   }
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/marklists?userId=public`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/marklists${effectiveUserIdParam()}`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -814,7 +945,7 @@ function onSetMarkListValueSubFormat(fieldLabel, value, prop, formatName) {
   if (formatName) entry[prop] = formatName;
   else delete entry[prop];
   if (!entry.id) return; // shouldn't happen — every loaded/created entry has one
-  fetch(`${USER_BACKEND_URL}/api/marklists/${entry.id}?userId=public`, {
+  fetch(`${USER_BACKEND_URL}/api/marklists/${entry.id}${effectiveUserIdParam()}`, {
     method: "PUT",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -958,7 +1089,7 @@ function onSetMarkSubFormatProperty(fieldName, formatName, prop, value) {
   markSubFormatSaveTimers.set(
     timerKey,
     setTimeout(() => {
-      fetch(`${USER_BACKEND_URL}/api/marklists/${entry.id}?userId=public`, {
+      fetch(`${USER_BACKEND_URL}/api/marklists/${entry.id}${effectiveUserIdParam()}`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -985,7 +1116,7 @@ async function onAddMarkSubFormat(fieldName, inputId) {
     return;
   }
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/marklists?userId=public`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/marklists${effectiveUserIdParam()}`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -1020,7 +1151,7 @@ async function onRemoveMarkSubFormat(fieldName, value) {
   const entry = markLists.find((r) => r.field === fieldName && r.value === value);
   if (!entry || !entry.id) return;
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/marklists/${entry.id}?userId=public`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/marklists/${entry.id}${effectiveUserIdParam()}`, {
       method: "DELETE",
       credentials: "include",
     });
@@ -1046,7 +1177,7 @@ async function onRemoveMarkListValue(key, value) {
   const entry = markLists.find((r) => r.field === fieldDef.label && r.value === value);
   if (!entry || !entry.id) return;
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/marklists/${entry.id}?userId=public`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/marklists/${entry.id}${effectiveUserIdParam()}`, {
       method: "DELETE",
       credentials: "include",
     });
@@ -1070,7 +1201,7 @@ function setMarkListsSaveStatus(text, isError) {
 // immediately via the API, same as Location Groups; there's nothing left
 // to batch into one commit.
 
-let publicTypes = []; // Public's own type vocabulary ({id,name,behavesLike}) —
+let viewedTypes = []; // Public's own type vocabulary ({id,name,behavesLike}) —
                        // loaded once alongside locations, used by the
                        // per-location "+ Add type" picker below.
 
@@ -1094,24 +1225,21 @@ let publicTypes = []; // Public's own type vocabulary ({id,name,behavesLike}) �
  * location's first save) and, per type entry, `_accessId`/`_typeId`.
  */
 async function loadLocations() {
-  if (!adminUser) {
+  if (!currentUser) {
     locations = [];
-    document.getElementById("locationsSection").style.display = "block";
-    document.getElementById("locationsSignedOut").style.display = "block";
-    document.getElementById("locationsEditor").style.display = "none";
-    setStatus("Sign in as Admin (Account tab) to manage settings.", false);
+    document.getElementById("locationsSection").style.display = "none";
     return;
   }
 
   try {
     const [trackedRes, typesRes] = await Promise.all([
-      fetch(`${USER_BACKEND_URL}/api/tracked-locations?userId=public`, { credentials: "include" }),
-      fetch(`${USER_BACKEND_URL}/api/types?userId=public`, { credentials: "include" }),
+      fetch(`${USER_BACKEND_URL}/api/tracked-locations${effectiveUserIdParam()}`, { credentials: "include" }),
+      fetch(`${USER_BACKEND_URL}/api/types${effectiveUserIdParam()}`, { credentials: "include" }),
     ]);
     if (!trackedRes.ok) throw new Error(`tracked-locations status ${trackedRes.status}`);
     if (!typesRes.ok) throw new Error(`types status ${typesRes.status}`);
     const tracked = await trackedRes.json();
-    publicTypes = await typesRes.json();
+    viewedTypes = await typesRes.json();
 
     const byLocation = new Map();
     for (const row of tracked) {
@@ -1183,7 +1311,7 @@ function renderRows() {
     // type" picker below offers, alongside always offering to define a
     // brand new one. See "v2: Locations" note on loadLocations for why
     // this is open-ended now rather than a fixed Kayak/Land based pair.
-    const availableTypes = publicTypes.filter((t) => !activeTypeIds.includes(t.id));
+    const availableTypes = viewedTypes.filter((t) => !activeTypeIds.includes(t.id));
 
     const row = document.createElement("div");
     row.className = "window-card loc-edit-card";
@@ -1747,7 +1875,7 @@ function schedulePlaceSave(idx) {
     idx,
     setTimeout(async () => {
       try {
-        const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations/${loc.types[0]._accessId}?userId=public`, {
+        const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations/${loc.types[0]._accessId}${effectiveUserIdParam()}`, {
           method: "PUT",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -1780,7 +1908,7 @@ function scheduleTypeSave(idx, typeIdx) {
     key,
     setTimeout(async () => {
       try {
-        const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations/${typeConfig._accessId}?userId=public`, {
+        const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations/${typeConfig._accessId}${effectiveUserIdParam()}`, {
           method: "PUT",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -1819,7 +1947,7 @@ async function createLocation(idx) {
     setSaveStatus("This location needs coordinates — add it via the map instead of a blank row.", true);
     return;
   }
-  const existingKayak = publicTypes.find((t) => t.behavesLike === "Kayak" && t.name === "Kayak");
+  const existingKayak = viewedTypes.find((t) => t.behavesLike === "Kayak" && t.name === "Kayak");
   const body = {
     name: loc.name,
     lat: loc.lat,
@@ -1844,7 +1972,7 @@ async function createLocation(idx) {
     body.newTypeBehavesLike = "Kayak";
   }
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations?userId=public`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations${effectiveUserIdParam()}`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -1855,7 +1983,7 @@ async function createLocation(idx) {
       throw new Error(errBody.error || `status ${res.status}`);
     }
     setSaveStatus("Location created.");
-    await loadLocations(); // simplest correct way to pick up the new type/location ids and re-sync publicTypes
+    await loadLocations(); // simplest correct way to pick up the new type/location ids and re-sync viewedTypes
   } catch (err) {
     console.error("Failed to create location:", err);
     setSaveStatus("Couldn't create location: " + err.message, true);
@@ -1877,7 +2005,7 @@ async function removeLocation(idx) {
   if (!confirm(`Delete "${loc.name}" and all its type entries?`)) return;
   try {
     for (const t of loc.types) {
-      const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations/${t._accessId}?userId=public`, {
+      const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations/${t._accessId}${effectiveUserIdParam()}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -1915,7 +2043,7 @@ async function addTypeToLocation(idx, { typeId, newTypeName, newTypeBehavesLike 
     body.newTypeBehavesLike = newTypeBehavesLike;
   }
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations?userId=public`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations${effectiveUserIdParam()}`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -1926,7 +2054,7 @@ async function addTypeToLocation(idx, { typeId, newTypeName, newTypeBehavesLike 
       throw new Error(errBody.error || `status ${res.status}`);
     }
     setSaveStatus("Type added.");
-    await loadLocations(); // re-syncs publicTypes too, in case a new one was just defined
+    await loadLocations(); // re-syncs viewedTypes too, in case a new one was just defined
   } catch (err) {
     console.error("Failed to add type:", err);
     setSaveStatus("Couldn't add type: " + err.message, true);
@@ -1944,7 +2072,7 @@ async function removeTypeFromLocation(idx, typeIdx) {
     return;
   }
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations/${typeConfig._accessId}?userId=public`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations/${typeConfig._accessId}${effectiveUserIdParam()}`, {
       method: "DELETE",
       credentials: "include",
     });
@@ -1965,7 +2093,7 @@ async function saveGroupMembership(idx) {
   if (!loc || loc._new || !loc._id) return;
   const groupIds = (loc.locationGroups || []).map((name) => groupNameToId.get(name)).filter(Boolean);
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/locations/${loc._id}/groups?userId=public`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/locations/${loc._id}/groups${effectiveUserIdParam()}`, {
       method: "PUT",
       credentials: "include",
       headers: { "Content-Type": "application/json" },

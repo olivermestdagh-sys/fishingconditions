@@ -506,9 +506,11 @@ this restriction — nothing extra is drawn.
   the Settings tab's "Fishing Mark Lists" section
 - `user-backend.js` — a second, separate Cloudflare Worker (own deploy, own
   secrets, own D1 database) adding Google sign-in and a per-user
-  locations/settings backend — see "User accounts" below. `schema.sql` is
-  its D1 table setup. `account.html`/`account.js` is the site page that
-  talks to it
+  locations/settings backend — see "User accounts" below. `schema.sql`/
+  `schema-v2.sql` are its D1 table setup. `locations.html`/`locationsadmin.js`
+  (the Settings tab) is what talks to it now — `account.html`/`account.js`
+  used to be a separate page for this and have since been retired, merged
+  into Settings (see "Settings and Account merged" further down)
 
 ## GPS fishing marks
 
@@ -1361,6 +1363,51 @@ zero JS errors, with a real page-load test this time.
 and this round, `locations.html` and `account.html` were broken on your
 live site for that whole window** — worth confirming both pages actually
 work again once this deploys.
+
+### Settings and Account merged — one page, one script
+
+`account.html`/`account.js` are gone entirely. Everything they did now
+lives on the Settings page (`locations.html`/`locationsadmin.js`) — every
+other page's nav link to "Account" is gone too, just "Settings" now.
+
+**The bigger change underneath the merge**: Location Groups, Fishing
+Mark Lists, and Locations — previously Admin-only, always operating on
+Public's data — are now available to **any signed-in user**, each
+managing their own by default. This retires the old, simpler "My
+locations" card UI account.js had (name/lat/lng/type/tidal only, one
+type per location) — the richer editor (map, multiple types per
+location, groups, drive-times, minimum tide height) now serves
+everyone, since there's no longer a separate simple/rich split to
+maintain.
+
+**What's still Admin-only**: a new "View as Public" button (in the
+signed-in card) that toggles every one of those sections between the
+signed-in user's own data and Public's — clicking it once switches to
+Public, again switches back. This is genuinely the same mechanism
+that's existed since the v2 migration (`?userId=public`,
+`resolveEffectiveUserId`) — the button just makes it a client-side
+toggle instead of something hardcoded into every fetch call.
+`/api/settings` (check-frequency) was extended to accept the same
+`?userId=` override so it toggles too, for consistency, even though no
+scheduler exists yet to act on any user's setting, Public's included.
+
+**Home address and "Refresh data now" stay strictly Admin-only and
+UNAFFECTED by the toggle** — moved into their own `adminOnlyControls`
+block, since both are site-wide concepts with no per-user meaning; they
+always act on the real site regardless of whether the Admin is
+currently "viewing as Public" or not.
+
+**One real config change needed on deploy**: the Worker's
+`FRONTEND_ACCOUNT_URL` secret pointed at `account.html` — update it to
+`locations.html` (or wherever Settings lives), or Google sign-in will
+redirect to a page that no longer exists.
+
+**Verified**: a real headless-browser test across all three states —
+signed out (only the sign-in card shows), a Basic user (their own
+settings/locations, no toggle, no admin controls), and an Admin
+(toggle visible, clicking it correctly switches every section's
+requests to `?userId=public`, clicking again correctly reverts) —
+zero JS errors throughout.
 
 ## Troubleshooting
 

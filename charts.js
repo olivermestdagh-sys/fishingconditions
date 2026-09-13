@@ -3135,26 +3135,28 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 // ---------------------------------------------------------------------
-// Admin-session gating — the newer alternative to getConnection() above.
-// Only "Add as permanent location" (app.js) uses this so far; every other
-// write-capable feature on this site (marks, Sync) still gates on the
-// GitHub token, same as it always has — those are a separate, larger
-// migration, not part of this one. Same USER_BACKEND_URL value as
-// account.js/locationsadmin.js each define locally (duplicated rather
-// than centralized — matches the existing convention across those two
-// files already).
+// Admin-session gating — used for "Add as permanent location" (app.js),
+// marks (add/edit/delete a catch or POI), and Sync's own canSync() gate.
+// The old GitHub-token concept (getConnection() above) has been fully
+// retired for every write-capable feature on this site — see README's
+// "A serious bug, found and fixed" and later sections for the full
+// migration history. Same USER_BACKEND_URL value as locationsadmin.js's
+// own declaration — kept as ONE declaration now, not duplicated (a
+// duplicate top-level `const` of the same name across two scripts
+// sharing a page is a fatal SyntaxError, not a harmless redeclaration —
+// this is exactly what caused that bug).
 // ---------------------------------------------------------------------
 
 const USER_BACKEND_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev";
 
 let cachedIsAdmin = false; // refreshed once via refreshAdminStatus() at page
-                           // init (see app.js) — read synchronously
-                           // everywhere else (canEditLocations, app.js) so
-                           // every EXISTING call site (several of them
-                           // synchronous) needed zero restructuring into
+                           // init (see app.js/locationsadmin.js) — read
+                           // synchronously everywhere else (canEditLocations,
+                           // app.js) so every EXISTING call site (several of
+                           // them synchronous) needed zero restructuring into
                            // async, at the cost of a small (one page-load)
                            // staleness window: signing in/out on the
-                           // Account tab in another tab won't be reflected
+                           // Settings tab in another tab won't be reflected
                            // here until this page's own next load.
 async function refreshAdminStatus() {
   try {
@@ -3174,7 +3176,7 @@ async function refreshAdminStatus() {
 /**
  * Replaces saveNewLocationToGitHub for "Add as permanent location"
  * (app.js) — POSTs through the same /api/tracked-locations endpoint
- * Admin's own Locations page and account.js both use, as Public
+ * the Settings page's own Locations editor uses, as Public
  * (?userId=public), rather than committing straight to
  * config/locations.json. This is the actual bug fix: that file is now a
  * generated EXPORT (see fetch_conditions.py's export_locations_json()) —
