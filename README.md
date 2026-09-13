@@ -521,14 +521,43 @@ together (the same popular spot, visited many times) to overlap and
 become unclickable at anything but the closest zoom. Every mark marker
 now lives inside one `L.markerClusterGroup` (`state.markerLayer`,
 `loadAndRenderMarks`, `charts.js`) instead of being added to the map
-directly — overlapping marks collapse into a single numbered circle,
-styled to match the site's own navy (`--blue-900`) rather than the
-plugin's default yellow/orange/green gradient (`createMarkClusterIcon`).
-Clicking a cluster zooms in; at the closest zoom a cluster can't split
-any further, it "spiderfies" instead — arranging the individual marks in
-a spider-leg pattern radiating out from the cluster, each independently
-clickable. Loaded via CDN (`unpkg.com/leaflet.markercluster@1.5.3`),
+directly. Clicking a cluster zooms in; at the closest zoom a cluster
+can't split any further, it "spiderfies" instead — arranging the
+individual marks in a spider-leg pattern radiating out from the
+cluster, each independently clickable. Loaded via CDN
+(`unpkg.com/leaflet.markercluster@1.5.3`),
 same pattern as Leaflet itself.
+
+**Cluster icon design — satellites, not a single number.** Rather than
+one aggregate count, a cluster's icon breaks down into small
+"satellite" shapes arranged around a centre — one satellite per
+distinct (shape, colour) combination actually present among its marks
+(POI/Mark/Catch's own shape × whatever the current "Colour by" field
+resolves to), each with a small count badge when more than one mark
+shares that exact combination (`createMarkClusterIcon`,
+`markShapeToCssHtml`). Shows roughly WHAT'S in a cluster at a glance,
+not just how many, without zooming in first. Capped at
+`MAX_CLUSTER_SATELLITES` (6) distinct combinations — a cluster spanning
+a dozen species collapses its smallest groups into one grey "+N"
+overflow satellite rather than turning into an unreadable ring of
+slivers.
+
+Reads each child marker's shape straight off `_markShapeName` (tagged
+once at creation, in `createMarkShapeLayer` — safe, since a mark's
+shape never changes in place; changing it means creating an entirely
+new marker instance) and its CURRENT colour straight off
+`marker.options.fillColor` (kept live by `setStyle` whenever "Colour
+by" changes, so a cluster's satellites always match what's actually
+selected, not whatever was current when a mark was first loaded).
+
+**Verified**: a real headless-browser test with 6 marks — 3 POI
+(diamond), 2 sharing one species/colour, 2 Catch (cross, different
+species), 1 Mark (circle) — confirmed exactly 5 satellites rendered
+(6 marks, 5 distinct shape+colour combinations) with exactly one badge,
+showing "2", on the pair that actually shares both shape and colour —
+confirmed visually via screenshot too. The overflow path (>6 distinct
+combinations) is reasoned-through and straightforward but wasn't
+separately exercised with live test data.
 
 **Every other place a mark marker gets added to or removed from the
 map** — delete, cancel, the "Type changed to a different shape"
