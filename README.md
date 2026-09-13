@@ -1470,14 +1470,35 @@ CORS misconfiguration in the browser console rather than a server-side
 check the actual HTTP status in the Network tab, not just the console's
 CORS-shaped wording, before assuming it's a CORS problem.)
 
-**"Refresh data now" returned a 403.** The `GH_ACTIONS_TOKEN` setup
-instructions (above) originally said Actions-only, explicitly telling
-you to leave Contents at no access — this was wrong. GitHub's
-workflow-dispatch API needs to read the workflow file itself to
-validate the dispatch, so it requires **Contents: Read** too, even
-though the token never touches repo files otherwise. Fixed in this
-file's own deploy comment; the token itself needed regenerating with
-that permission added.
+**"Refresh data now" returned a 403.** Chased down over two rounds —
+worth recording both, since the first theory turned out wrong and the
+real fix was something else entirely.
+
+First theory (wrong): the `GH_ACTIONS_TOKEN` setup instructions
+originally said Actions-only, explicitly telling you to leave Contents
+at no access. Based on community reports of similar 403s, this looked
+like the likely cause, so the instructions were updated to require
+Contents: Read too. That's still a reasonable permission to have, but
+it turned out NOT to be the actual problem here — the token already
+had Contents: Read/write from an earlier, broader token, and the 403
+persisted anyway.
+
+**Actual cause, confirmed via the Worker's own live logs**: the fetch
+call to GitHub's API (`handleAdminRefreshDataNow`, `user-backend.js`)
+never set a `User-Agent` header. GitHub's REST API hard-rejects any
+request with none at all — a documented requirement, and the exact
+wording GitHub returned (surfaced by checking Cloudflare's
+Observability → Live log stream, not just the browser's console) named
+it directly: *"Request forbidden by administrative rules. Please make
+sure your request has a User-Agent header."* Nothing to do with the
+token's permissions at all. Fixed with one added header.
+
+**Lesson worth keeping**: the bare status code alone (403) pointed at
+completely the wrong fix. Getting GitHub's own response body — via the
+Worker's live logs, which this file's own `console.error` on that
+failure path already writes to — was what actually solved it. Worth
+checking those logs first next time something like this comes up,
+rather than reasoning from the status code alone.
 
 ## Troubleshooting
 
