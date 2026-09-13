@@ -120,12 +120,12 @@
  *        this Worker's own URL. See the "Pipeline" section further down.
  *      - GH_ACTIONS_TOKEN (Secret) — a GitHub Personal Access Token
  *        (fine-grained, same repo, permissions -> Actions: Read and write
- *        AND Contents: Read-only. Contents:Read is required even though
- *        this token never touches repo files — confirmed by testing:
- *        GitHub's workflow-dispatch API needs to read the workflow file
- *        itself to validate the dispatch, and returns a 403 without it.
- *        Still meaningfully narrower than the old browser-held token,
- *        which needed Contents:WRITE). This is what lets
+ *        is the only ACTUALLY required one — Contents access is not
+ *        needed for this (an earlier theory said it was; that turned out
+ *        wrong — see README's "Refresh data now" troubleshooting entry
+ *        for the real cause, a missing User-Agent header, now fixed
+ *        below). Still meaningfully narrower than the old browser-held
+ *        token, which needed Contents:WRITE). This is what lets
  *        "Refresh data now" (locationsadmin.js) trigger a workflow run
  *        without any GitHub token ever touching the browser — the Worker
  *        holds this one, server-side, instead. See "Admin-only endpoints"
@@ -1813,6 +1813,13 @@ async function handleAdminRefreshDataNow(env) {
           Authorization: `Bearer ${env.GH_ACTIONS_TOKEN}`,
           Accept: "application/vnd.github+json",
           "Content-Type": "application/json",
+          // GitHub's REST API rejects any request with no User-Agent at
+          // all (a documented, hard requirement — see
+          // docs.github.com/en/rest/using-the-rest-api/troubleshooting-
+          // the-rest-api#user-agent-required) — confirmed directly: this
+          // was the actual cause of the 403 here, nothing to do with the
+          // token's permissions, which were already correct.
+          "User-Agent": "fishingconditions-user-backend-worker",
         },
         body: JSON.stringify({ ref: "main" }),
       }
