@@ -2425,12 +2425,22 @@ function shapeNameForMark(mark, markLists) {
  * just above for where that name actually comes from. Always pass a
  * Canvas renderer in `options.renderer` — see getDiamondMarkerClass's own
  * comment on why that's required, not optional, for anything but a plain
- * circle. */
+ * circle. Tags the returned instance with its own shape name
+ * (`_markShapeName`) — cheap to read directly off the marker later rather
+ * than re-deriving it, and specifically what createMarkClusterIcon reads
+ * to build a cluster's satellite breakdown. Safe to tag once here and
+ * never touch again: unlike colour (which setStyle can change later —
+ * read that live off marker.options.fillColor instead, never tagged),
+ * a mark's shape never changes in place; changing it means creating an
+ * entirely new marker instance (see the "Type changed to a different
+ * shape" case, wireMarkPopupButtons), so this tag can't go stale. */
 function createMarkShapeLayer(latlng, mark, options, markLists) {
   const shapeName = shapeNameForMark(mark, markLists);
   const getShapeClass = LOWRANCE_SHAPE_GETTERS[shapeName];
   const ShapeClass = getShapeClass ? getShapeClass() : L.CircleMarker;
-  return new ShapeClass(latlng, options);
+  const layer = new ShapeClass(latlng, options);
+  layer._markShapeName = shapeName;
+  return layer;
 }
 
 async function loadAndRenderMarks(map, state) {
@@ -2522,28 +2532,99 @@ async function loadAndRenderMarks(map, state) {
 }
 
 /**
- * Styles a cluster's numbered circle to match the site's own palette
- * (--blue-900/--blue-700) instead of the plugin's default yellow/orange/
- * green gradient, which would look like an unstyled default bolted onto
- * an otherwise deliberately-designed site. Slightly larger for bigger
- * clusters (three size tiers) — the plugin's own default behaviour,
- * just re-themed rather than reimplemented from scratch.
+ * Breaks a cluster's icon down into small "satellite" shapes arranged
+ * around a centre — one satellite per distinct (shape, colour)
+ * combination actually present among its marks (POI/Mark/Catch shape ×
+ * whatever the current "Colour by" field resolves to), each showing a
+ * small count badge when more than one mark shares that exact
+ * combination. This is deliberately richer than a single aggregate
+ * number: at a glance it shows not just HOW MANY marks are grouped here
+ * but roughly WHAT KIND, without needing to zoom in or spiderfy first.
+ *
+ * Reads each child marker's shape straight off `_markShapeName` (tagged
+ * once at creation — see createMarkShapeLayer) and its CURRENT colour
+ * straight off `marker.options.fillColor` (kept live by setStyle
+ * whenever the "Colour by" field changes — see applyMarkFiltersAndGrouping
+ * — so this always reflects what's on screen right now, not whatever it
+ * was when the mark was first created).
+ *
+ * Capped at MAX_SATELLITES distinct combinations so a cluster spanning a
+ * dozen species doesn't turn into an unreadable ring of slivers — the
+ * smallest-count groups beyond that cap collapse into one grey "+N"
+ * overflow satellite instead of being dropped silently.
  */
+const MAX_CLUSTER_SATELLITES = 6;
+
 function createMarkClusterIcon(cluster) {
-  const count = cluster.getChildCount();
-  const size = count < 10 ? 32 : count < 100 ? 38 : 44;
+  const children = cluster.getAllChildMarkers();
+  const groups = new Map(); // "shape|colour" -> {shape, color, count}
+  for (const child of children) {
+    const shape = child._markShapeName || "circle";
+    const color = (child.options && child.options.fillColor) || "#6b7280";
+    const key = `${shape}|${color}`;
+    const existing = groups.get(key);
+    if (existing) existing.count++;
+    else groups.set(key, { shape, color, count: 1 });
+  }
+
+  let entries = Array.from(groups.values()).sort((a, b) => b.count - a.count);
+  if (entries.length > MAX_CLUSTER_SATELLITES) {
+    const kept = entries.slice(0, MAX_CLUSTER_SATELLITES - 1);
+    const overflowCount = entries.slice(MAX_CLUSTER_SATELLITES - 1).reduce((sum, g) => sum + g.count, 0);
+    entries = [...kept, { shape: "circle", color: "#6b7280", count: overflowCount, isOverflow: true }];
+  }
+
+  const size = 60;
+  const center = size / 2;
+  // Fewer, bigger satellites when there's not much to show; smaller once
+  // several distinct combinations need to fit around the same ring.
+  const satelliteSize = entries.length <= 2 ? 24 : entries.length <= 4 ? 20 : 16;
+  const radius = entries.length === 1 ? 0 : center - satelliteSize / 2 - 3;
+
+  const satellitesHtml = entries
+    .map((g, i) => {
+      const angle = (360 / entries.length) * i - 90; // first satellite straight up, rest clockwise
+      const rad = (angle * Math.PI) / 180;
+      const x = center + radius * Math.cos(rad) - satelliteSize / 2;
+      const y = center + radius * Math.sin(rad) - satelliteSize / 2;
+      const badge =
+        g.count > 1
+          ? `<div class="mark-cluster-satellite-badge" style="position:absolute;bottom:-4px;right:-4px;min-width:14px;height:14px;padding:0 2px;
+               border-radius:50%;background:var(--blue-900,#0b2a4a);color:#fff;border:1.5px solid #fff;
+               font-size:0.6rem;font-weight:600;line-height:14px;text-align:center;">${g.count}</div>`
+          : "";
+      return `<div style="position:absolute;left:${x}px;top:${y}px;width:${satelliteSize}px;height:${satelliteSize}px;">
+        ${markShapeToCssHtml(g.shape, satelliteSize, g.color)}
+        ${badge}
+      </div>`;
+    })
+    .join("");
+
   return L.divIcon({
-    html: `<div style="
-      width:${size}px;height:${size}px;border-radius:50%;
-      background:var(--blue-900,#0b2a4a);color:#fff;
-      display:flex;align-items:center;justify-content:center;
-      font-weight:600;font-size:${count < 100 ? "0.85rem" : "0.75rem"};
-      border:2px solid rgba(255,255,255,0.85);
-      box-shadow:0 1px 4px rgba(0,0,0,0.35);
-    ">${count}</div>`,
+    html: `<div style="position:relative;width:${size}px;height:${size}px;">${satellitesHtml}</div>`,
     className: "mark-cluster-icon", // no default plugin styling — see MarkerCluster.Default.css override, style.css
     iconSize: L.point(size, size),
   });
+}
+
+/**
+ * One satellite's own little shape, as a plain absolutely-filled div —
+ * matches the three real shapes this site draws on the map itself
+ * (circle/diamond/cross — see createMarkShapeLayer/getDiamondMarkerClass/
+ * getCrossMarkerClass) as closely as CSS reasonably allows, without
+ * pulling in an actual SVG or Canvas render for something this small.
+ * Diamond is a rotated square; cross uses a clip-path plus-sign polygon
+ * (a standard CSS technique — no image/font dependency).
+ */
+function markShapeToCssHtml(shape, size, color) {
+  const shared = `width:100%;height:100%;background:${color};box-shadow:0 1px 3px rgba(0,0,0,0.45);`;
+  if (shape === "diamond") {
+    return `<div style="${shared}border:1.5px solid #fff;transform:rotate(45deg);box-sizing:border-box;"></div>`;
+  }
+  if (shape === "cross") {
+    return `<div style="${shared}clip-path:polygon(35% 0%,65% 0%,65% 35%,100% 35%,100% 65%,65% 65%,65% 100%,35% 100%,35% 65%,0% 65%,0% 35%,35% 35%);"></div>`;
+  }
+  return `<div style="${shared}border:1.5px solid #fff;border-radius:50%;box-sizing:border-box;"></div>`;
 }
 
 /**
