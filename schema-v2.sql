@@ -31,12 +31,35 @@
 -- check that forgets to special-case the sentinel id fails closed (no
 -- write access) rather than open.
 
+CREATE TABLE IF NOT EXISTS tiers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  max_extra_locations INTEGER NOT NULL DEFAULT 0, -- how many additional
+                                     -- private locations (beyond whatever's
+                                     -- inherited from Public) a Basic user
+                                     -- assigned to this tier may create —
+                                     -- replaces the old single hardcoded
+                                     -- MAX_BASIC_CREATED_LOCATIONS constant.
+                                     -- Meaningless for an Admin (never capped
+                                     -- regardless of tier).
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   google_sub TEXT UNIQUE NOT NULL,
   email TEXT NOT NULL,
   name TEXT,
   role TEXT NOT NULL DEFAULT 'basic', -- 'admin' | 'basic' | 'public' (Public sentinel only)
+  tier_id TEXT REFERENCES tiers(id), -- which tier's max_extra_locations
+                                     -- applies to this user — meaningful for
+                                     -- Basic users only; NULL for Admin/
+                                     -- Public (never capped either way).
+                                     -- A Basic user with no tier assigned
+                                     -- (shouldn't normally happen — see
+                                     -- migration-tiers.sql) is treated as
+                                     -- zero extra locations allowed, not
+                                     -- unlimited — see handleTrackedCollection.
   home_lat REAL,                    -- ONLY meaningful on the Public sentinel row —
   home_lng REAL,                    -- the site's own configured home address, used for
                                      -- drive-time-to-home on the Live tab; Admin-only to set
