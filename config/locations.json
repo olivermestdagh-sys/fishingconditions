@@ -40,10 +40,8 @@
     "name": "Betka Beach VIC",
     "shore": "N",
     "tidal": true,
-    "locationGroup": "Mallacoota",
-    "locationGroups": [
-      "Mallacoota"
-    ],
+    "locationGroup": null,
+    "locationGroups": [],
     "tideOffset": null,
     "willyweatherId": 18288,
     "willyweatherName": "Betka Beach",
@@ -290,10 +288,8 @@
     "name": "Lakes Entrance Beach VIC",
     "shore": "NE",
     "tidal": true,
-    "locationGroup": "Lakes Entrance",
-    "locationGroups": [
-      "Lakes Entrance"
-    ],
+    "locationGroup": null,
+    "locationGroups": [],
     "tideOffset": null,
     "willyweatherId": 18294,
     "willyweatherName": "Lakes Entrance Beach",
@@ -356,10 +352,8 @@
     "name": "Mallacoota",
     "shore": "S",
     "tidal": true,
-    "locationGroup": "Mallacoota",
-    "locationGroups": [
-      "Mallacoota"
-    ],
+    "locationGroup": null,
+    "locationGroups": [],
     "tideOffset": null,
     "willyweatherId": 12642,
     "willyweatherName": "Mallacoota",
@@ -384,10 +378,8 @@
     "name": "Metung, VIC 3904",
     "shore": "W",
     "tidal": false,
-    "locationGroup": "Lakes Entrance",
-    "locationGroups": [
-      "Lakes Entrance"
-    ],
+    "locationGroup": null,
+    "locationGroups": [],
     "tideOffset": null,
     "willyweatherId": 12704,
     "willyweatherName": "Metung",
