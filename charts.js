@@ -1930,7 +1930,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       // (created via startNewMarkEntry, never actually saved) never reach this
       // code path at all — Cancel is what removes those, not Delete.
       marker.closePopup();
-      if (options.map) options.map.removeLayer(marker);
+      if (options.state && options.state.markerLayer) options.state.markerLayer.removeLayer(marker);
       if (options.state) {
         options.state.marksById.delete(mark.id);
         options.state.markersById.delete(mark.id);
@@ -1946,7 +1946,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         // Nothing was ever saved — there's no "view mode" to revert to,
         // just remove the draft pin entirely.
         marker.closePopup();
-        options.map.removeLayer(marker);
+        if (options.state && options.state.markerLayer) options.state.markerLayer.removeLayer(marker);
         return;
       }
       marker.setPopupContent(buildMarkPopupViewHtml(mark));
@@ -2022,10 +2022,10 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         const desiredShapeGetter = LOWRANCE_SHAPE_GETTERS[desiredShapeName];
         const desiredShapeClass = desiredShapeGetter ? desiredShapeGetter() : L.CircleMarker;
         let effectivePopupEl = popupEl;
-        if (marker.constructor !== desiredShapeClass && options.map) {
+        if (marker.constructor !== desiredShapeClass && options.state && options.state.markerLayer) {
           const latlng = marker.getLatLng();
           const freshStyle = markStyleFor(mark, options.state);
-          options.map.removeLayer(marker);
+          options.state.markerLayer.removeLayer(marker);
           marker = createMarkShapeLayer(latlng, mark, {
             renderer: (options.state && options.state.canvasRenderer) || undefined,
             radius: freshStyle.radius,
@@ -2033,14 +2033,32 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
             weight: freshStyle.weight,
             fillColor: freshStyle.fillColor,
             fillOpacity: 0.85,
-          }, markListsForShape).addTo(options.map);
+          }, markListsForShape).addTo(options.state.markerLayer);
           marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
-          marker.openPopup();
-          effectivePopupEl = marker.getPopup().getElement();
+          marker.unbindTooltip();
+          marker.bindTooltip(markTooltipText(mark, options.state), { direction: "top" });
           if (options.state) options.state.markersById.set(mark.id, marker);
-        } else {
-          marker.setPopupContent(buildMarkPopupViewHtml(mark));
+          // zoomToShowLayer (not a plain openPopup) — the freshly re-created
+          // marker could easily land inside a cluster if other marks sit
+          // nearby, in which case a plain openPopup() would silently do
+          // nothing (a clustered marker has no visible DOM to pop up
+          // from). This zooms only as far as actually needed to reveal it
+          // unclustered, then opens the popup once that's guaranteed —
+          // everything depending on the NEW popup's own DOM element has
+          // to wait for this callback too, since it doesn't exist before
+          // the popup actually opens.
+          options.state.markerLayer.zoomToShowLayer(marker, () => {
+            marker.openPopup();
+            const newPopupEl = marker.getPopup().getElement();
+            fillMarkPopupDistances(newPopupEl, mark);
+            wireMarkPopupButtons(newPopupEl, marker, mark, markListsCache, options);
+          });
+          return; // the tail below (same fillMarkPopupDistances/wireMarkPopupButtons
+                   // calls, plus tooltip/style already applied above) is redundant
+                   // for this branch — it's all handled inside the callback instead,
+                   // once the popup can actually exist
         }
+        marker.setPopupContent(buildMarkPopupViewHtml(mark));
         fillMarkPopupDistances(effectivePopupEl, mark);
         wireMarkPopupButtons(effectivePopupEl, marker, mark, markListsCache, options);
         marker.unbindTooltip();
@@ -2411,6 +2429,23 @@ async function loadAndRenderMarks(map, state) {
     console.error("Could not load mark lists (edit dropdowns will be limited):", err);
   }
 
+  // Every mark marker lives inside this ONE cluster group, never added to
+  // `map` directly — real-world mark counts (a couple thousand, all real
+  // fishing spots) cluster heavily at anything but the closest zoom, and
+  // without this, overlapping pins in the same popular spot would be
+  // impossible to see or click individually. See createMarkClusterIcon
+  // below for the numbered-circle styling, and zoomToShowLayer's use
+  // throughout this file for how a SPECIFIC mark (e.g. one just added)
+  // still gets reliably shown un-clustered when that's what's needed.
+  // chunkedLoading spreads the initial add of a couple thousand markers
+  // over several animation frames instead of doing it all in one go,
+  // so the tab doesn't visibly freeze while this first render happens.
+  state.markerLayer = L.markerClusterGroup({
+    chunkedLoading: true,
+    iconCreateFunction: createMarkClusterIcon,
+  });
+  map.addLayer(state.markerLayer);
+
   const renderer = L.canvas({ padding: 0.5 });
   state.canvasRenderer = renderer; // reused by startNewMarkEntry below for a freshly-created mark, so every shape on this map — loaded or brand new — draws on the same Canvas renderer (see getDiamondMarkerClass/getCrossMarkerClass's own comment on why that's required)
   for (const mark of marks) {
@@ -2423,7 +2458,7 @@ async function loadAndRenderMarks(map, state) {
       weight: style.weight,
       fillColor: style.fillColor,
       fillOpacity: 0.85,
-    }, state.markLists).addTo(map);
+    }, state.markLists).addTo(state.markerLayer);
     marker.bindTooltip(markTooltipText(mark, state), { direction: "top" });
     marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
     // Only fires the actual distance lookups the first time each mark's
@@ -2457,6 +2492,31 @@ async function loadAndRenderMarks(map, state) {
   });
 
   initMarkControls(map, state);
+}
+
+/**
+ * Styles a cluster's numbered circle to match the site's own palette
+ * (--blue-900/--blue-700) instead of the plugin's default yellow/orange/
+ * green gradient, which would look like an unstyled default bolted onto
+ * an otherwise deliberately-designed site. Slightly larger for bigger
+ * clusters (three size tiers) — the plugin's own default behaviour,
+ * just re-themed rather than reimplemented from scratch.
+ */
+function createMarkClusterIcon(cluster) {
+  const count = cluster.getChildCount();
+  const size = count < 10 ? 32 : count < 100 ? 38 : 44;
+  return L.divIcon({
+    html: `<div style="
+      width:${size}px;height:${size}px;border-radius:50%;
+      background:var(--blue-900,#0b2a4a);color:#fff;
+      display:flex;align-items:center;justify-content:center;
+      font-weight:600;font-size:${count < 100 ? "0.85rem" : "0.75rem"};
+      border:2px solid rgba(255,255,255,0.85);
+      box-shadow:0 1px 4px rgba(0,0,0,0.35);
+    ">${count}</div>`,
+    className: "mark-cluster-icon", // no default plugin styling — see MarkerCluster.Default.css override, style.css
+    iconSize: L.point(size, size),
+  });
 }
 
 // --- Mark display filtering & colour-by-field grouping ---------------------
@@ -2546,19 +2606,20 @@ function markMatchesFilters(mark, filters) {
  * the modal, or an active-filter chip is removed directly.
  */
 function applyMarkFiltersAndGrouping(map, state) {
+  const layer = state.markerLayer || map; // markerLayer should always be set by the time this runs; falling back to `map` only as a defensive no-crash guard
   state.marksById.forEach((mark, id) => {
     const marker = state.markersById.get(id);
     if (!marker) return;
     const passes = markMatchesFilters(mark, state.filters);
-    const onMap = map.hasLayer(marker);
+    const onMap = layer.hasLayer(marker);
     if (passes) {
-      if (!onMap) marker.addTo(map);
+      if (!onMap) layer.addLayer(marker);
       const style = markStyleFor(mark, state);
       marker.setStyle({ color: style.color, fillColor: style.fillColor, radius: style.radius, weight: style.weight });
       marker.unbindTooltip();
       marker.bindTooltip(markTooltipText(mark, state), { direction: "top" });
     } else if (onMap) {
-      map.removeLayer(marker);
+      layer.removeLayer(marker);
     }
   });
 }
@@ -2878,25 +2939,35 @@ function startNewMarkEntry(map, lat, lng, state, defaults = {}) {
     weight: style.weight,
     fillColor: style.fillColor,
     fillOpacity: 0.85,
-  }, state.markLists).addTo(map);
+  }, state.markLists).addTo(state.markerLayer);
   marker.bindPopup(buildMarkPopupEditHtml(draft, state.markLists), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
-  marker.openPopup();
-  const popupEl = marker.getPopup().getElement();
-  wireMarkPopupButtons(popupEl, marker, draft, state.markLists, { isNew: true, map, state });
+  // zoomToShowLayer (not a plain openPopup) — a spot just clicked on the
+  // map is usually already zoomed in enough that this is a same-zoom
+  // no-op, but if several existing marks already sit at/near this exact
+  // point, the new one could otherwise land straight inside a cluster
+  // with no visible pin to open a popup from at all. Everything that
+  // needs the popup's own DOM element has to wait for this callback —
+  // it doesn't exist before the popup actually opens.
+  state.markerLayer.zoomToShowLayer(marker, () => {
+    marker.openPopup();
+    const popupEl = marker.getPopup().getElement();
+    wireMarkPopupButtons(popupEl, marker, draft, state.markLists, { isNew: true, map, state });
 
-  // Best-effort auto-fill of Weather/Tide/Barometer/Wind from a real
-  // historical lookup (see lookupHistoricalMarkConditions above) — fired
-  // off in the background rather than awaited, since it's a network round
-  // trip and the popup should open immediately regardless of how long
-  // that takes. Skipped entirely for a POI or Mark-level draft (checking
-  // whether ANY of this lookup's own fields even apply to the type — see
-  // MARK_TYPE_FIELD_KEYS: those fields only ever ALL apply together, on a
-  // Catch, never partially) — a WillyWeather call plus two Open-Meteo
-  // calls would otherwise fire for every new mark regardless of type, even
-  // though POI/Mark can't show or save a single one of those fields.
-  if (fieldKeysForMarkType(draft.type).includes("weatherCondition")) {
-    fillMarkFormFromHistoricalLookup(popupEl, lat, lng, draft.dateTime);
-  }
+    // Best-effort auto-fill of Weather/Tide/Barometer/Wind from a real
+    // historical lookup (see lookupHistoricalMarkConditions above) —
+    // fired off in the background rather than awaited, since it's a
+    // network round trip and the popup should open immediately regardless
+    // of how long that takes. Skipped entirely for a POI or Mark-level
+    // draft (checking whether ANY of this lookup's own fields even apply
+    // to the type — see MARK_TYPE_FIELD_KEYS: those fields only ever ALL
+    // apply together, on a Catch, never partially) — a WillyWeather call
+    // plus two Open-Meteo calls would otherwise fire for every new mark
+    // regardless of type, even though POI/Mark can't show or save a
+    // single one of those fields.
+    if (fieldKeysForMarkType(draft.type).includes("weatherCondition")) {
+      fillMarkFormFromHistoricalLookup(popupEl, lat, lng, draft.dateTime);
+    }
+  });
 }
 
 /**
@@ -2947,11 +3018,18 @@ function startCopiedMarkEntry(map, sourceMark, state) {
     weight: style.weight,
     fillColor: style.fillColor,
     fillOpacity: 0.85,
-  }, state.markLists).addTo(map);
+  }, state.markLists).addTo(state.markerLayer);
   marker.bindPopup(buildMarkPopupEditHtml(draft, state.markLists), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
-  marker.openPopup();
-  const popupEl = marker.getPopup().getElement();
-  wireMarkPopupButtons(popupEl, marker, draft, state.markLists, { isNew: true, map, state });
+  // zoomToShowLayer — same reasoning as startNewMarkEntry's own copy of
+  // this comment: this copy lands at the SAME point as its source mark,
+  // which by definition already has at least one mark there, so the odds
+  // of landing inside a cluster are if anything higher than for a
+  // brand-new point.
+  state.markerLayer.zoomToShowLayer(marker, () => {
+    marker.openPopup();
+    const popupEl = marker.getPopup().getElement();
+    wireMarkPopupButtons(popupEl, marker, draft, state.markLists, { isNew: true, map, state });
+  });
 }
 
 /**
