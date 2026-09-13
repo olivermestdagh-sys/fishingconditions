@@ -514,6 +514,81 @@ this restriction — nothing extra is drawn.
 
 ## GPS fishing marks
 
+## Fishing Sessions (trail import) — Phase 1 + 2, in progress
+
+A new, separate concept from marks — derived from a Lowrance GPS trail
+(GPX export, never `.usr` — see `parseGpxTracks`'s own comment,
+`charts.js`, for why: even GPSBabel can't parse `.usr` v6 trail data,
+while GPX's `<trk>` data is fully standard). The idea: dwell time (long
+stationary stretches) is itself a real data point — "these conditions,
+this spot, this duration → this many catches, possibly zero" — which
+plain marks alone can never capture, since every mark is a success by
+definition.
+
+Built and verified in phases; phases 1–2 are done, phases 3–4 (point
+editing/condition auto-fill, and actually saving Sessions anywhere) are
+not yet built.
+
+**Phase 1 — parsing and dwell detection** (`charts.js`):
+- `parseGpxTracks` — reads every `<trk>`'s `<trkpt>` data, flattening
+  `<trkseg>` boundaries (confirmed these don't line up with real trip
+  boundaries in a real export — one file had 5 `<trk>` elements
+  spanning 53 distinct calendar days between them), converting to the
+  site's naive-time convention, and dropping the ~0.6% of points
+  carrying Lowrance's `1970-01-01` placeholder timestamp (a real,
+  confirmed data quirk, not a hypothetical).
+- `deriveTrackDayGroups` — splits into real outings: by calendar day,
+  and by any 45+ minute gap even within one day.
+- `detectFishingSegments` — dwell detection: stationary within 100m for
+  15+ minutes = "fishing"; everything else "transiting". Folds out
+  segments shorter than 10 minutes, then merges any now-adjacent
+  same-kind segments this folding leaves touching (confirmed directly:
+  without this second merge pass, one real continuous 67-minute fishing
+  stop was reported as two separate ones, split at an arbitrary
+  one-second boundary). Handles a real anomaly gracefully — one group
+  had 633 points sharing one identical timestamp (a logging glitch) —
+  without dividing by zero.
+- All three thresholds (gap/radius/window/minimum-duration) are
+  starting values, not final — agreed up front that these need real
+  calibration against actual trail data, not a one-shot guess.
+- Verified directly against a real 53-day, 82,238-point trail export:
+  produces 60 day-groups; a real 4.6-hour outing came back as a
+  plausible transit→fish(121min)→transit→fish(67min)→transit→fish(14min)→transit
+  sequence.
+
+**Phase 2 — tree panel + map** (`sync.js`, `sync.html`):
+- The SAME "Import from a device export" flow on the Sync tab, expanded
+  — not a separate page. A GPX upload now parses tracks alongside
+  marks (`.usr` is unaffected — marks-only, as always).
+- A new "Fishing Sessions" section: a side tree panel (Track → Day →
+  Segment → Start/End candidate points for each "fishing" segment) next
+  to a Leaflet map scoped ONLY to this import's own data — no existing
+  marks or tracked locations shown on it.
+- Every level has independent Import/View checkboxes, tri-state
+  (checked/unchecked/indeterminate) when children disagree, cascading
+  down when toggled.
+- The map draws each visible segment as a polyline (amber for fishing,
+  grey for transiting) and each visible candidate as a clickable
+  marker; clicking a candidate in the tree OR on the map highlights the
+  same one in both places.
+- **Verified**: uploaded the real 17MB/82,238-point trail file through
+  the actual Sync page in a real browser — confirmed 5 tracks/60
+  days/288 segments/246 candidates (123 fishing segments × start+end,
+  always even) render correctly, 534 map shapes drawn, click-to-select
+  works both directions, and checkbox cascade correctly propagates
+  whatever value a parent was toggled to down to every descendant —
+  zero JS errors throughout.
+
+**Not built yet** (later phases): actually editing a candidate point's
+fields (Start/Stop override, Bait/Rig/Rod/Berley carried forward,
+Weather/Tide/Barometer auto-filled from the historical lookup already
+used elsewhere), promoting an ordinary trackpoint to a new candidate,
+linking a Catch mark into whichever segment its timestamp falls
+within, and saving any of this anywhere — there is no Session data
+model or backend endpoint yet. Also not done: the existing marks
+review list itself has no map/View capability — this phase only added
+that to the new Tracks section, not retroactively to marks.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough

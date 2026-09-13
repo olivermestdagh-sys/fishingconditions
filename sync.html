@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Olie's Kayak and Surf Fishing Conditions – Sync</title>
 <link rel="stylesheet" href="style.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  .tracks-layout { display: flex; gap: 16px; flex-wrap: wrap; }
+  .tracks-tree-panel { flex: 1; min-width: 280px; max-height: 520px; overflow-y: auto; border: 1px solid var(--grey-200); border-radius: 8px; padding: 8px; }
+  .tracks-map-panel { flex: 2; min-width: 320px; }
+  #tracksMap { height: 520px; border-radius: 8px; }
+  .tracks-tree-node { display: flex; align-items: center; gap: 8px; padding: 4px 2px; font-size: 0.85rem; border-radius: 6px; }
+  .tracks-tree-node[data-level="track"] { font-weight: 600; }
+  .tracks-tree-node[data-level="candidate"] span[data-role="select-candidate"] { cursor: pointer; text-decoration: underline dotted; }
+  .tracks-tree-node-selected { background: var(--blue-100, #eaf2fb); }
+</style>
 </head>
 <body>
 
@@ -72,6 +83,20 @@
       <div id="importStatus" style="margin-top:10px;font-size:0.85rem;"></div>
     </section>
 
+    <section id="tracksSection" class="summary-card" style="display:none;">
+      <div class="summary-title" style="margin-bottom:6px;">Fishing Sessions (trail data)</div>
+      <p class="footnote" style="margin:0 0 12px;text-align:left;">
+        Detected automatically from this file's GPS trail — stretches where you likely stopped to fish
+        (shown in amber) versus travelling between spots (grey). Tick <strong>View</strong> to show something
+        on the map, <strong>Import</strong> to save it as a Session once that's built. Nothing here is saved
+        yet — this is a preview/review step.
+      </p>
+      <div class="tracks-layout">
+        <div class="tracks-tree-panel" id="tracksTree"></div>
+        <div class="tracks-map-panel"><div id="tracksMap"></div></div>
+      </div>
+    </section>
+
     <section class="summary-card">
       <div class="summary-title" style="margin-bottom:6px;">Export to a device</div>
       <p class="footnote" style="margin:0 0 12px;text-align:left;">
@@ -92,6 +117,7 @@
   </div>
 </main>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="charts.js"></script>
 <script src="sync.js"></script>
 </body>
