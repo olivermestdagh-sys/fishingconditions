@@ -230,11 +230,27 @@ CREATE TABLE IF NOT EXISTS marks (
 
 CREATE INDEX IF NOT EXISTS idx_marks_user ON marks(user_id);
 
--- Scheduler bookkeeping — now keyed by user_location_access's own id
--- rather than a bare location id, since scheduling now happens per
--- (user, location, type), not per location alone. Still not wired up to
--- an actual WillyWeather-calling cron — see the same NOT YET BUILT note
--- carried over from schema.sql v1.
+-- Scheduler bookkeeping — keyed by user_location_access's own id rather
+-- than a bare location id, since scheduling happens per (user, location,
+-- type), not per location alone. Still not wired up to an actual
+-- WillyWeather-calling cron.
+--
+-- REAL BUG, FOUND AND FIXED: this CREATE TABLE IF NOT EXISTS was a
+-- silent no-op against an already-deployed D1 — v1's schema.sql already
+-- created a schedule_state table (keyed by user_location_id, a
+-- user_locations reference — a different, deprecated concept from
+-- user_location_access here), so this definition never actually took
+-- effect on a real deploy; the live table kept v1's shape. Every DELETE
+-- on a tracked location (handleTrackedItem, user-backend.js) referenced
+-- the column THIS definition promised (user_location_access_id), which
+-- never existed on the real table — a genuine 500 on every delete,
+-- confirmed by reproducing it against the real combined v1+v2 schema.
+-- Fixed with a migration (ALTER TABLE ADD COLUMN) rather than by
+-- changing the code, which was already correct — see
+-- migration-fix-schedule-state.sql. This CREATE TABLE statement below is
+-- now accurate for a brand-new deploy from scratch; it just was never
+-- what actually ran against this project's own real, already-existing
+-- database.
 CREATE TABLE IF NOT EXISTS schedule_state (
   user_location_access_id TEXT PRIMARY KEY REFERENCES user_location_access(id) ON DELETE CASCADE,
   next_check_due_at INTEGER,

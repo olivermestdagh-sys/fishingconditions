@@ -119,9 +119,13 @@
  *        Actions), alongside a new PIPELINE_WORKER_URL secret there set to
  *        this Worker's own URL. See the "Pipeline" section further down.
  *      - GH_ACTIONS_TOKEN (Secret) — a GitHub Personal Access Token
- *        (fine-grained, same repo, permissions -> Actions: Read and write,
- *        nothing else — deliberately narrower than the old browser-held
- *        token, which also needed Contents:write). This is what lets
+ *        (fine-grained, same repo, permissions -> Actions: Read and write
+ *        AND Contents: Read-only. Contents:Read is required even though
+ *        this token never touches repo files — confirmed by testing:
+ *        GitHub's workflow-dispatch API needs to read the workflow file
+ *        itself to validate the dispatch, and returns a 403 without it.
+ *        Still meaningfully narrower than the old browser-held token,
+ *        which needed Contents:WRITE). This is what lets
  *        "Refresh data now" (locationsadmin.js) trigger a workflow run
  *        without any GitHub token ever touching the browser — the Worker
  *        holds this one, server-side, instead. See "Admin-only endpoints"

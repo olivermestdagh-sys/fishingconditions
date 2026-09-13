@@ -1442,6 +1442,43 @@ existing matching type for the first type while defining a new one for
 the second, with both correctly attached to the same newly-created
 location.
 
+### Two real bugs found and fixed after deploy
+
+**Deleting any tracked location (or removing a type from one) returned
+a 500.** Root cause: `schema-v2.sql`'s `CREATE TABLE IF NOT EXISTS
+schedule_state` was a silent no-op against the already-deployed
+database — v1's original `schema.sql` had already created a
+`schedule_state` table, keyed by `user_location_id` (a reference to the
+old, deprecated `user_locations` table). `handleTrackedItem`'s DELETE
+handler (`user-backend.js`) correctly referenced
+`user_location_access_id`, exactly matching what `schema-v2.sql`
+*claimed* to create — but that column never actually existed on the
+real table, since the `CREATE TABLE IF NOT EXISTS` did nothing. Every
+delete threw a genuine SQL error. Reproduced directly against a
+simulation of the real combined v1+v2 schema before fixing — confirmed
+the error, applied `migration-fix-schedule-state.sql` (a plain `ALTER
+TABLE ADD COLUMN`), confirmed the same delete then succeeds. No code
+change needed — `handleTrackedItem` was already correct; the schema was
+incomplete. `schema-v2.sql` itself is accurate for a brand-new deploy
+from scratch — it just was never what actually ran against this
+project's own database.
+
+(Cloudflare's own error page for that particular class of failure
+doesn't carry CORS headers, which is why it initially looked like a
+CORS misconfiguration in the browser console rather than a server-side
+500 — worth knowing if a similar-looking error ever shows up again:
+check the actual HTTP status in the Network tab, not just the console's
+CORS-shaped wording, before assuming it's a CORS problem.)
+
+**"Refresh data now" returned a 403.** The `GH_ACTIONS_TOKEN` setup
+instructions (above) originally said Actions-only, explicitly telling
+you to leave Contents at no access — this was wrong. GitHub's
+workflow-dispatch API needs to read the workflow file itself to
+validate the dispatch, so it requires **Contents: Read** too, even
+though the token never touches repo files otherwise. Fixed in this
+file's own deploy comment; the token itself needed regenerating with
+that permission added.
+
 ## Troubleshooting
 
 - **Page loads but says "Not updated yet"**: the scheduled job hasn't run
