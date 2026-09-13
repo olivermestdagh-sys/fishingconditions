@@ -233,6 +233,32 @@
     ]
   },
   {
+    "name": "Inverloch",
+    "shore": "WNW",
+    "tidal": true,
+    "locationGroup": null,
+    "locationGroups": [],
+    "tideOffset": null,
+    "willyweatherId": 12374,
+    "willyweatherName": "Inverloch",
+    "willyweatherRegion": "Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -38.633500077966396,
+    "lng": 145.72471618652347,
+    "tideMaxObserved": 2.71,
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
+  },
+  {
     "name": "Kilcunda, VIC 3995",
     "shore": "N",
     "tidal": true,
