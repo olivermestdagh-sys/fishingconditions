@@ -514,6 +514,55 @@ this restriction — nothing extra is drawn.
 
 ## GPS fishing marks
 
+### Clustering when marks overlap (Leaflet.markercluster)
+
+With a couple thousand real marks, plenty of them sit close enough
+together (the same popular spot, visited many times) to overlap and
+become unclickable at anything but the closest zoom. Every mark marker
+now lives inside one `L.markerClusterGroup` (`state.markerLayer`,
+`loadAndRenderMarks`, `charts.js`) instead of being added to the map
+directly — overlapping marks collapse into a single numbered circle,
+styled to match the site's own navy (`--blue-900`) rather than the
+plugin's default yellow/orange/green gradient (`createMarkClusterIcon`).
+Clicking a cluster zooms in; at the closest zoom a cluster can't split
+any further, it "spiderfies" instead — arranging the individual marks in
+a spider-leg pattern radiating out from the cluster, each independently
+clickable. Loaded via CDN (`unpkg.com/leaflet.markercluster@1.5.3`),
+same pattern as Leaflet itself.
+
+**Every other place a mark marker gets added to or removed from the
+map** — delete, cancel, the "Type changed to a different shape"
+mid-edit case, and the species/tide/etc filter toggle
+(`applyMarkFiltersAndGrouping`) — now goes through this same cluster
+group instead of the map directly, so nothing falls outside its
+clustering.
+
+**One real interaction problem this raised, and how it's handled**:
+adding a brand-new mark (clicking the map, or "Copy" on an existing
+one) opens that mark's edit popup immediately — but a marker added
+straight into a cluster group can land INSIDE an existing cluster with
+no visible pin to pop up from at all, silently doing nothing. Both
+`startNewMarkEntry` and `startCopiedMarkEntry` (and the mid-edit
+shape-change case) use the cluster group's own `zoomToShowLayer`
+instead of a plain `openPopup()` — it zooms only as far as actually
+needed to guarantee the marker is visible and un-clustered, then opens
+the popup once that's certain. Only the tracked-location pins
+(Locations/Settings) are unaffected — clustering was applied to marks
+specifically, where the real density problem is; the location pins are
+a much smaller, curated set with no real overlap issue to solve.
+
+**Verified**: a real headless-browser test — 8 marks placed a few
+metres apart correctly collapsed into one numbered cluster; clicking it
+split into smaller clusters as expected; repeated clicks at maximum
+zoom produced the actual spiderfy effect (confirmed visually via
+screenshot — individual marks radiating out from a cluster on visible
+spider legs) — zero JS errors throughout. (This sandbox's own network
+access to unpkg.com stopped working partway through this project,
+unrelated to the code itself — verified instead by pulling the real
+published packages through `registry.npmjs.org` and serving them
+locally for the test; the delivered HTML still points at the normal
+public CDN, which works fine in an actual browser.)
+
 A **mark** is a single GPS point you drop yourself, out on the water. Three
 Mark Types, each showing (and saving) only the fields that actually apply —
 see "Which fields show for which type" below:
