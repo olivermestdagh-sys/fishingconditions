@@ -271,32 +271,6 @@
     ]
   },
   {
-    "name": "Metung, VIC 3904",
-    "shore": "W",
-    "tidal": false,
-    "locationGroup": null,
-    "locationGroups": [],
-    "tideOffset": null,
-    "willyweatherId": 12704,
-    "willyweatherName": "Metung",
-    "willyweatherRegion": "East Gippsland",
-    "willyweatherState": "VIC",
-    "lat": -37.8835,
-    "lng": 147.8508,
-    "tideMaxObserved": null,
-    "types": [
-      {
-        "type": "Kayak",
-        "driveTo": "00:00",
-        "driveBack": "00:00",
-        "setUp": "00:20",
-        "packUp": "00:20",
-        "timeToSpot": "00:10",
-        "timeFromSpot": "00:10"
-      }
-    ]
-  },
-  {
     "name": "Mornington Pier, VIC",
     "shore": "E",
     "tidal": true,
