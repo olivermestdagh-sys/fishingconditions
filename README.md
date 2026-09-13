@@ -1614,6 +1614,56 @@ failure path already writes to — was what actually solved it. Worth
 checking those logs first next time something like this comes up,
 rather than reasoning from the status code alone.
 
+### Check frequency is now global and Admin-only; Users and Tiers sections added
+
+Three related changes, all on the Settings page.
+
+**Check frequency** was a per-user setting (anyone signed in could set
+their own) — it's now a single site-wide value, Admin-only to even see.
+`handleSettings` (`user-backend.js`) dropped the `?userId=` override
+entirely and requires `role === "admin"` directly; the D1 row itself
+now lives under a fixed sentinel key (`GLOBAL_SETTINGS_KEY = "global"`)
+instead of a real user id — there's exactly one row now, not one per
+account. The "View as Public" toggle no longer affects it at all, since
+there's nothing left to toggle between.
+
+**Users** — a new Admin-only section listing every real account (Public
+excluded — it's not a real account to manage this way) with its role
+and tier, both editable inline, saving immediately
+(`GET /api/admin/users`, `PUT /api/admin/users/:id`). A real safeguard,
+verified directly: the backend blocks demoting the *last* remaining
+Admin account — whether that's changing your own role or someone
+else's — since the site would otherwise have no way back into any
+Admin-only section short of editing D1 by hand.
+
+**Tiers** — a new Admin-only section replacing the old fixed
+`MAX_BASIC_CREATED_LOCATIONS = 10` constant with editable rows
+(`tiers` table: name + `max_extra_locations`). Add, rename, or change a
+tier's cap, and it takes effect immediately for every user assigned to
+it — no code deploy needed to adjust how many extra locations a Basic
+account gets. Deleting a tier is blocked while any user is still
+assigned to it (`DELETE /api/admin/tiers/:id` returns a clear error
+naming how many); move them to a different tier first. A new
+`users.tier_id` column tracks each user's assignment — meaningless for
+Admin/Public (never capped either way), and treated as **zero** extra
+locations (fails closed, not open) for a Basic user who somehow has
+none assigned.
+
+**Migration** (`migration-tiers.sql`) creates the `tiers` table, adds
+the `tier_id` column, seeds a "Basic" tier matching the *old* hardcoded
+cap (10) so nothing changes in practice for any existing account, and
+assigns every existing Basic user to it.
+
+**Verified**: real browser tests confirmed a Basic user sees none of
+the three new/changed sections at all, while an Admin sees all three
+and can change a user's role, add a tier, edit a tier's cap, and
+attempt to remove an in-use tier (correctly blocked, with the backend's
+own message surfaced in the UI) — zero JS errors throughout. The
+location-cap logic itself (tier lookup, the actual allow/block
+decision, a tier's cap being raised and immediately unblocking further
+creation with no code change, and the fail-closed behaviour for a
+Basic user with no tier) was verified end-to-end against real SQLite.
+
 ## Troubleshooting
 
 - **Page loads but says "Not updated yet"**: the scheduled job hasn't run

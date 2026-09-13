@@ -149,11 +149,10 @@ const VALID_LOCATION_TYPES = new Set(["Kayak", "Land based"]);
 
 // --- v2 (schema-v2.sql) constants ---
 const PUBLIC_USER_ID = "public";
-const MAX_BASIC_CREATED_LOCATIONS = 10; // additional private locations beyond
-                                         // whatever's inherited from Public —
-                                         // counted as locations THIS user
-                                         // created (locations.created_by_user_id),
-                                         // not total tracked count
+// MAX_BASIC_CREATED_LOCATIONS removed — replaced by the tiers table
+// (see handleTrackedCollection's own lookup) so Admin can define and
+// adjust per-tier caps from the Settings page instead of a fixed
+// constant requiring a code deploy to change.
 const VALID_BEHAVES_LIKE = new Set(["Kayak", "Land based"]); // the only two
                                          // real scoring algorithms — a
                                          // user's own custom type name
@@ -280,6 +279,40 @@ export default {
         if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
         if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
         return handleAdminRefreshDataNow(env);
+      }
+      if (url.pathname === "/api/admin/users" && request.method === "GET") {
+        const user = await requireUser(request, env);
+        if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+        if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
+        return handleAdminListUsers(env);
+      }
+      const adminUserMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
+      if (adminUserMatch && request.method === "PUT") {
+        const user = await requireUser(request, env);
+        if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+        if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
+        return handleAdminUpdateUser(request, env, user, adminUserMatch[1]);
+      }
+      if (url.pathname === "/api/admin/tiers" && request.method === "GET") {
+        const user = await requireUser(request, env);
+        if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+        if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
+        return handleAdminListTiers(env);
+      }
+      if (url.pathname === "/api/admin/tiers" && request.method === "POST") {
+        const user = await requireUser(request, env);
+        if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+        if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
+        return handleAdminCreateTier(request, env);
+      }
+      const adminTierMatch = url.pathname.match(/^\/api\/admin\/tiers\/([^/]+)$/);
+      if (adminTierMatch && (request.method === "PUT" || request.method === "DELETE")) {
+        const user = await requireUser(request, env);
+        if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+        if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
+        return request.method === "PUT"
+          ? handleAdminUpdateTier(request, env, adminTierMatch[1])
+          : handleAdminDeleteTier(env, adminTierMatch[1]);
       }
     } catch (err) {
       // Belt-and-braces: an uncaught exception anywhere above should still
@@ -573,26 +606,22 @@ function validateLocationInput(body, { partial }) {
 // no separate "provision defaults on signup" step to keep in sync.
 // ---------------------------------------------------------------------
 
+const GLOBAL_SETTINGS_KEY = "global"; // fixed sentinel row id — check-frequency
+// is no longer a per-user concept; every signed-in Admin reads/writes the
+// SAME one row in user_settings, regardless of who's signed in or
+// whether the "View as Public" toggle is on. Not a real users.id, so no
+// FK concern (user_settings.user_id has no FOREIGN KEY constraint).
+
 async function handleSettings(request, url, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
-  // Same effective-user pattern as every v2 endpoint (resolveEffectiveUserId)
-  // — added so Admin's "View as Public" toggle (locationsadmin.js) can read/
-  // write Public's check-frequency settings too, through ?userId=public,
-  // exactly like it already does for types/tracked-locations/groups/
-  // marklists. Not very MEANINGFUL for Public specifically (no scheduler
-  // exists yet to act on any user's check-frequency, Public's included),
-  // but kept consistent with every other toggled section rather than
-  // being the one exception.
-  const resolved = resolveEffectiveUserId(url, user);
-  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
-  const uid = resolved.id;
+  if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
 
   if (request.method === "GET") {
-    let row = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(uid).first();
+    let row = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(GLOBAL_SETTINGS_KEY).first();
     if (!row) {
-      await env.DB.prepare("INSERT INTO user_settings (user_id) VALUES (?)").bind(uid).run();
-      row = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(uid).first();
+      await env.DB.prepare("INSERT INTO user_settings (user_id) VALUES (?)").bind(GLOBAL_SETTINGS_KEY).run();
+      row = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(GLOBAL_SETTINGS_KEY).first();
     }
     return jsonResponse(rowToSettings(row), 200, env);
   }
@@ -602,7 +631,7 @@ async function handleSettings(request, url, env) {
     const validationError = validateSettingsInput(body);
     if (validationError) return jsonResponse({ error: validationError }, 400, env);
 
-    const existing = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(uid).first();
+    const existing = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(GLOBAL_SETTINGS_KEY).first();
     const merged = {
       checkFrequencyMinutes: body.checkFrequencyMinutes ?? existing?.check_frequency_minutes ?? 180,
       activeWindowStart: body.activeWindowStart ?? existing?.active_window_start ?? "05:00",
@@ -616,10 +645,10 @@ async function handleSettings(request, url, env) {
          active_window_start = excluded.active_window_start,
          active_window_end = excluded.active_window_end`
     )
-      .bind(uid, merged.checkFrequencyMinutes, merged.activeWindowStart, merged.activeWindowEnd)
+      .bind(GLOBAL_SETTINGS_KEY, merged.checkFrequencyMinutes, merged.activeWindowStart, merged.activeWindowEnd)
       .run();
 
-    const updated = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(uid).first();
+    const updated = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(GLOBAL_SETTINGS_KEY).first();
     return jsonResponse(rowToSettings(updated), 200, env);
   }
 
@@ -848,12 +877,24 @@ async function handleTrackedCollection(request, url, env) {
     let locationId = body.locationId;
     if (!locationId) {
       if (user.role === "basic") {
+        // Tier-based cap (replaces the old fixed MAX_BASIC_CREATED_LOCATIONS
+        // constant) — looked up fresh each time rather than cached, since
+        // Admin can change a tier's own cap, or a user's assigned tier, at
+        // any point from the Settings page's Tiers/Users sections. A Basic
+        // user with no tier_id assigned at all (shouldn't normally happen —
+        // see migration-tiers.sql, which assigns one to every existing
+        // Basic user) is treated as zero extra locations allowed, not
+        // unlimited — fails closed rather than open.
+        const tier = user.tier_id
+          ? await env.DB.prepare("SELECT max_extra_locations FROM tiers WHERE id = ?").bind(user.tier_id).first()
+          : null;
+        const maxExtraLocations = tier ? tier.max_extra_locations : 0;
         const countRow = await env.DB.prepare("SELECT COUNT(*) as n FROM locations WHERE created_by_user_id = ?")
           .bind(uid)
           .first();
-        if (countRow.n >= MAX_BASIC_CREATED_LOCATIONS) {
+        if (countRow.n >= maxExtraLocations) {
           return jsonResponse(
-            { error: `Basic accounts are limited to ${MAX_BASIC_CREATED_LOCATIONS} additional private locations.` },
+            { error: `Your account is limited to ${maxExtraLocations} additional private locations.` },
             403,
             env
           );
@@ -1834,6 +1875,182 @@ async function handleAdminRefreshDataNow(env) {
     console.error("Failed to trigger workflow dispatch:", err);
     return jsonResponse({ error: "Could not reach GitHub." }, 502, env);
   }
+}
+
+// ---------------------------------------------------------------------
+// Admin: Users — list every real account and edit its role/tier. The
+// Public sentinel row is deliberately excluded from the listing and
+// blocked as a target — it's not a real account to manage this way.
+// ---------------------------------------------------------------------
+
+/**
+ * Lists every real user (Admin and Basic — Public excluded), each with
+ * its assigned tier's name resolved via a LEFT JOIN (tierName is null
+ * for Admin accounts, which normally have no tier_id at all — a tier
+ * only ever matters for a Basic account's location cap).
+ */
+async function handleAdminListUsers(env) {
+  const { results } = await env.DB.prepare(
+    `SELECT users.id, users.email, users.name, users.role, users.tier_id, users.created_at, tiers.name AS tier_name
+     FROM users LEFT JOIN tiers ON tiers.id = users.tier_id
+     WHERE users.id != ?
+     ORDER BY users.created_at ASC`
+  )
+    .bind(PUBLIC_USER_ID)
+    .all();
+  return jsonResponse(results.map(rowToAdminUser), 200, env);
+}
+
+function rowToAdminUser(row) {
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    role: row.role,
+    tierId: row.tier_id,
+    tierName: row.tier_name || null,
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * Updates a user's role and/or tier — either field independently, both
+ * at once if both are given. Blocks two things: targeting the Public
+ * sentinel (not a real account), and demoting the LAST remaining Admin
+ * account (self or anyone else) — the site would otherwise have no way
+ * back into any of these Admin-only sections short of editing D1
+ * directly. Not blocked: an Admin changing their OWN role, as long as
+ * at least one other Admin account would still exist afterward.
+ */
+async function handleAdminUpdateUser(request, env, callerUser, targetId) {
+  if (targetId === PUBLIC_USER_ID) return jsonResponse({ error: "Not a manageable account." }, 400, env);
+
+  const target = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(targetId).first();
+  if (!target) return jsonResponse({ error: "User not found." }, 404, env);
+
+  const body = await readJsonBody(request);
+  const updates = {};
+
+  if (body.role !== undefined) {
+    if (body.role !== "admin" && body.role !== "basic") {
+      return jsonResponse({ error: "role must be 'admin' or 'basic'." }, 400, env);
+    }
+    if (target.role === "admin" && body.role !== "admin") {
+      const otherAdmins = await env.DB.prepare("SELECT COUNT(*) as n FROM users WHERE role = 'admin' AND id != ?")
+        .bind(targetId)
+        .first();
+      if (otherAdmins.n === 0) {
+        return jsonResponse({ error: "Can't remove the last Admin account." }, 400, env);
+      }
+    }
+    updates.role = body.role;
+  }
+
+  if (body.tierId !== undefined) {
+    if (body.tierId !== null) {
+      const tier = await env.DB.prepare("SELECT id FROM tiers WHERE id = ?").bind(body.tierId).first();
+      if (!tier) return jsonResponse({ error: "tierId not found." }, 404, env);
+    }
+    updates.tier_id = body.tierId;
+  }
+
+  if (Object.keys(updates).length === 0) return jsonResponse({ error: "Nothing to update." }, 400, env);
+
+  const setClauses = Object.keys(updates)
+    .map((k) => `${k} = ?`)
+    .join(", ");
+  await env.DB.prepare(`UPDATE users SET ${setClauses} WHERE id = ?`)
+    .bind(...Object.values(updates), targetId)
+    .run();
+
+  const updated = await env.DB.prepare(
+    `SELECT users.id, users.email, users.name, users.role, users.tier_id, users.created_at, tiers.name AS tier_name
+     FROM users LEFT JOIN tiers ON tiers.id = users.tier_id
+     WHERE users.id = ?`
+  )
+    .bind(targetId)
+    .first();
+  return jsonResponse(rowToAdminUser(updated), 200, env);
+}
+
+// ---------------------------------------------------------------------
+// Admin: Tiers — define and adjust the extra-location caps Basic
+// accounts are assigned to (see handleTrackedCollection's own lookup
+// for where this is actually enforced). Replaces the single fixed
+// MAX_BASIC_CREATED_LOCATIONS constant with Admin-editable rows.
+// ---------------------------------------------------------------------
+
+async function handleAdminListTiers(env) {
+  const { results } = await env.DB.prepare("SELECT * FROM tiers ORDER BY created_at ASC").all();
+  return jsonResponse(results.map(rowToTier), 200, env);
+}
+
+function rowToTier(row) {
+  return { id: row.id, name: row.name, maxExtraLocations: row.max_extra_locations, createdAt: row.created_at };
+}
+
+async function handleAdminCreateTier(request, env) {
+  const body = await readJsonBody(request);
+  if (!body.name || typeof body.name !== "string" || !body.name.trim()) {
+    return jsonResponse({ error: "name is required." }, 400, env);
+  }
+  if (typeof body.maxExtraLocations !== "number" || !Number.isInteger(body.maxExtraLocations) || body.maxExtraLocations < 0) {
+    return jsonResponse({ error: "maxExtraLocations must be a whole number, zero or more." }, 400, env);
+  }
+  const id = crypto.randomUUID();
+  try {
+    await env.DB.prepare("INSERT INTO tiers (id, name, max_extra_locations, created_at) VALUES (?, ?, ?, ?)")
+      .bind(id, body.name.trim(), body.maxExtraLocations, Date.now())
+      .run();
+  } catch (err) {
+    return jsonResponse({ error: `A tier named "${body.name.trim()}" already exists.` }, 409, env);
+  }
+  const created = await env.DB.prepare("SELECT * FROM tiers WHERE id = ?").bind(id).first();
+  return jsonResponse(rowToTier(created), 201, env);
+}
+
+async function handleAdminUpdateTier(request, env, tierId) {
+  const existing = await env.DB.prepare("SELECT * FROM tiers WHERE id = ?").bind(tierId).first();
+  if (!existing) return jsonResponse({ error: "Tier not found." }, 404, env);
+
+  const body = await readJsonBody(request);
+  const name = body.name !== undefined ? String(body.name).trim() : existing.name;
+  const maxExtraLocations = body.maxExtraLocations !== undefined ? body.maxExtraLocations : existing.max_extra_locations;
+  if (!name) return jsonResponse({ error: "name cannot be empty." }, 400, env);
+  if (typeof maxExtraLocations !== "number" || !Number.isInteger(maxExtraLocations) || maxExtraLocations < 0) {
+    return jsonResponse({ error: "maxExtraLocations must be a whole number, zero or more." }, 400, env);
+  }
+
+  try {
+    await env.DB.prepare("UPDATE tiers SET name = ?, max_extra_locations = ? WHERE id = ?")
+      .bind(name, maxExtraLocations, tierId)
+      .run();
+  } catch (err) {
+    return jsonResponse({ error: `A tier named "${name}" already exists.` }, 409, env);
+  }
+  const updated = await env.DB.prepare("SELECT * FROM tiers WHERE id = ?").bind(tierId).first();
+  return jsonResponse(rowToTier(updated), 200, env);
+}
+
+/**
+ * Blocks deleting a tier that any user is still assigned to, rather
+ * than silently orphaning their tier_id (which handleTrackedCollection's
+ * own lookup would then treat as "no tier" — zero extra locations,
+ * probably not what anyone intended). Move affected users to a
+ * different tier first (PUT /api/admin/users/:id) if a tier genuinely
+ * needs retiring.
+ */
+async function handleAdminDeleteTier(env, tierId) {
+  const inUse = await env.DB.prepare("SELECT COUNT(*) as n FROM users WHERE tier_id = ?").bind(tierId).first();
+  if (inUse.n > 0) {
+    return jsonResponse(
+      { error: `Can't delete this tier — ${inUse.n} user${inUse.n === 1 ? " is" : "s are"} still assigned to it. Move them to a different tier first.` },
+      409,
+      env
+    );
+  }
+  await env.DB.prepare("DELETE FROM tiers WHERE id = ?").bind(tierId).run();
+  return new Response(null, { status: 204, headers: corsHeaders(env) });
 }
 
 // ---------------------------------------------------------------------

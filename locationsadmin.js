@@ -302,6 +302,8 @@ async function init() {
   makeCollapsible(document.getElementById("groupsSection"), "settingsCollapsed:groups", true);
   makeCollapsible(document.getElementById("markListsSection"), "settingsCollapsed:markLists", true);
   makeCollapsible(document.getElementById("locationsSection"), "settingsCollapsed:locations", true);
+  makeCollapsible(document.getElementById("usersSection"), "settingsCollapsed:users", true);
+  makeCollapsible(document.getElementById("tiersSection"), "settingsCollapsed:tiers", true);
 
   document.getElementById("btnSignIn").addEventListener("click", () => {
     window.location.href = `${USER_BACKEND_URL}/auth/login`;
@@ -323,6 +325,7 @@ async function init() {
   });
   document.getElementById("btnAddMarkShapeFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Shape Format", "newMarkShapeFormatInput"));
   document.getElementById("btnAddMarkColorFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Colour Format", "newMarkColorFormatInput"));
+  document.getElementById("btnAddTier").addEventListener("click", onAddTier);
 
   await refreshPageForCurrentUser();
 }
@@ -331,10 +334,11 @@ async function init() {
  * Runs the ENTIRE sign-in-dependent page state — called from init() and
  * again from onSignOut/onToggleViewAsPublic, since either one changes
  * what every section below should be showing. Location Groups/Fishing
- * Mark Lists/Locations/Check frequency are now available to ANY signed-in
- * user; Home address/Refresh data now/the View-as-Public toggle itself
- * stay Admin-only (see isAdmin below) — those are site-wide concepts with
- * no per-user meaning, unaffected by viewingAsPublic.
+ * Mark Lists/Locations are available to ANY signed-in user; Check
+ * frequency, Home address, Refresh data now, Users, and Tiers are all
+ * Admin-only site-wide settings now — none of them affected by
+ * viewingAsPublic (there's exactly one of each, not a per-account copy
+ * to switch between).
  */
 async function refreshPageForCurrentUser() {
   currentUser = await checkSignedIn();
@@ -345,6 +349,8 @@ async function refreshPageForCurrentUser() {
   const signedInCard = document.getElementById("signedInCard");
   const settingsSection = document.getElementById("settingsSection");
   const adminOnlyControls = document.getElementById("adminOnlyControls");
+  const usersSection = document.getElementById("usersSection");
+  const tiersSection = document.getElementById("tiersSection");
   const toggleBtn = document.getElementById("btnToggleViewAsPublic");
 
   if (!currentUser) {
@@ -352,12 +358,16 @@ async function refreshPageForCurrentUser() {
     signedInCard.style.display = "none";
     settingsSection.style.display = "none";
     adminOnlyControls.style.display = "none";
+    usersSection.style.display = "none";
+    tiersSection.style.display = "none";
     setStatus("");
   } else {
     signedOutCard.style.display = "none";
     signedInCard.style.display = "";
-    settingsSection.style.display = "";
+    settingsSection.style.display = isAdmin ? "" : "none";
     adminOnlyControls.style.display = isAdmin ? "" : "none";
+    usersSection.style.display = isAdmin ? "" : "none";
+    tiersSection.style.display = isAdmin ? "" : "none";
     toggleBtn.style.display = isAdmin ? "" : "none";
     toggleBtn.textContent = viewingAsPublic ? "← Back to my account" : "View as Public →";
     document.getElementById("whoAmI").textContent = viewingAsPublic
@@ -366,7 +376,16 @@ async function refreshPageForCurrentUser() {
     setStatus(viewingAsPublic ? "Viewing Public's settings and locations" : "Signed in");
   }
 
-  await Promise.all([loadLocationGroups(), loadMarkLists(), loadLocations(), loadLocationCoords(), loadHomeLocation(), loadSettings()]);
+  await Promise.all([
+    loadLocationGroups(),
+    loadMarkLists(),
+    loadLocations(),
+    loadLocationCoords(),
+    loadHomeLocation(),
+    loadSettings(),
+    loadUsers(),
+    loadTiers(),
+  ]);
 }
 
 async function onSignOut() {
@@ -381,11 +400,12 @@ async function onSignOut() {
 }
 
 /**
- * Admin-only — flips whether every signed-in-gated section below
- * (Groups/Mark Lists/Locations/Check frequency) operates on Public's
- * data instead of the Admin's own. Nothing server-side changes about
- * WHO can do this — every affected endpoint already enforces the same
- * "only Admin may pass ?userId=public" rule (resolveEffectiveUserId,
+ * Admin-only — flips whether Location Groups/Fishing Mark Lists/
+ * Locations operate on Public's data instead of the Admin's own. Check
+ * frequency/Home address/Refresh data now/Users/Tiers are unaffected —
+ * all site-wide, not per-account. Nothing server-side changes about WHO
+ * can do this — every affected endpoint already enforces the same "only
+ * Admin may pass ?userId=public" rule (resolveEffectiveUserId,
  * user-backend.js) regardless of what this button shows; it only
  * controls what effectiveUserIdParam() sends from here on.
  */
@@ -395,18 +415,17 @@ async function onToggleViewAsPublic() {
 }
 
 // ---------------------------------------------------------------------
-// Check frequency — the v1 user_settings table (check-frequency
-// scheduling), now supporting the same Admin ?userId= override as
-// everything else (see handleSettings, user-backend.js) even though
-// there's no scheduler yet to act on ANY user's setting, Public's
-// included — kept consistent with every other toggled section rather
-// than being the one exception.
+// Check frequency — now a genuinely GLOBAL setting (one row, not
+// per-user), and Admin-only to even see, matching Home address/Refresh
+// data now. handleSettings (user-backend.js) enforces this same
+// Admin-only rule server-side regardless of what this page shows — this
+// is UI convenience, not the real access control.
 // ---------------------------------------------------------------------
 
 async function loadSettings() {
-  if (!currentUser) return;
+  if (!isAdmin) return;
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/settings${effectiveUserIdParam()}`, { credentials: "include" });
+    const res = await fetch(`${USER_BACKEND_URL}/api/settings`, { credentials: "include" });
     if (!res.ok) throw new Error(`status ${res.status}`);
     const settings = await res.json();
     document.getElementById("checkFrequency").value = settings.checkFrequencyMinutes;
@@ -425,7 +444,7 @@ async function saveSettings() {
     activeWindowEnd: document.getElementById("windowEnd").value,
   };
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/settings${effectiveUserIdParam()}`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/settings`, {
       method: "PUT",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -444,6 +463,275 @@ async function saveSettings() {
 
 function setSettingsStatus(text, isError) {
   const el = document.getElementById("settingsStatus");
+  el.textContent = text;
+  el.style.color = isError ? "var(--red-600, #c0392b)" : "var(--grey-500)";
+}
+
+// ---------------------------------------------------------------------
+// Users — Admin-only. Lists every real account (Public excluded — not a
+// manageable account) with its role and tier, both editable inline,
+// each saving immediately on change (same pattern as everywhere else on
+// this page — no separate Save button). Role changes are blocked
+// server-side (handleAdminUpdateUser, user-backend.js) if they'd leave
+// the site with zero Admin accounts; that error surfaces here as a
+// normal save-failed message, same as any other rejected save.
+// ---------------------------------------------------------------------
+
+let users = []; // [{id, email, name, role, tierId, tierName, createdAt}]
+
+async function loadUsers() {
+  if (!isAdmin) {
+    users = [];
+    return;
+  }
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/admin/users`, { credentials: "include" });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    users = await res.json();
+  } catch (err) {
+    console.error("Failed to load users:", err);
+    users = [];
+    setUsersStatus("Couldn't load users — try reloading the page.", true);
+  }
+  renderUsersList();
+}
+
+function renderUsersList() {
+  const list = document.getElementById("usersList");
+  list.innerHTML = "";
+  if (users.length === 0) {
+    list.innerHTML = `<p class="footnote" style="margin:0;text-align:left;">No other accounts yet.</p>`;
+    return;
+  }
+  const tierOptions = (tiers || [])
+    .map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`)
+    .join("");
+
+  users.forEach((u, idx) => {
+    const row = document.createElement("div");
+    row.className = "filter-row";
+    row.style.cssText = "align-items:center;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--grey-200);";
+    row.innerHTML = `
+      <div style="flex:2;min-width:180px;">
+        <div>${escapeHtml(u.name || u.email)}</div>
+        <div class="footnote" style="margin:0;">${escapeHtml(u.email)}</div>
+      </div>
+      <div style="flex:1;min-width:110px;">
+        <select data-user-role="${idx}" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);">
+          <option value="admin"${u.role === "admin" ? " selected" : ""}>Admin</option>
+          <option value="basic"${u.role === "basic" ? " selected" : ""}>Basic</option>
+        </select>
+      </div>
+      <div style="flex:1;min-width:130px;">
+        <select data-user-tier="${idx}" ${u.role === "admin" ? "disabled" : ""} style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);">
+          <option value="">No tier</option>
+          ${tierOptions}
+        </select>
+      </div>
+    `;
+    const tierSelect = row.querySelector("[data-user-tier]");
+    if (u.tierId) tierSelect.value = u.tierId;
+    list.appendChild(row);
+  });
+
+  list.querySelectorAll("[data-user-role]").forEach((sel) => {
+    sel.addEventListener("change", (e) => onUserRoleChange(Number(e.currentTarget.dataset.userRole), e.currentTarget.value));
+  });
+  list.querySelectorAll("[data-user-tier]").forEach((sel) => {
+    sel.addEventListener("change", (e) => onUserTierChange(Number(e.currentTarget.dataset.userTier), e.currentTarget.value || null));
+  });
+}
+
+async function onUserRoleChange(idx, newRole) {
+  const user = users[idx];
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/admin/users/${user.id}`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: newRole }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    const updated = await res.json();
+    users[idx] = updated;
+    setUsersStatus(`Saved — ${user.email} is now ${newRole === "admin" ? "an Admin" : "a Basic user"}.`, false);
+    renderUsersList();
+  } catch (err) {
+    console.error("Failed to update role:", err);
+    setUsersStatus(`Couldn't save: ${err.message}`, true);
+    renderUsersList(); // revert the dropdown to whatever the server actually has
+  }
+}
+
+async function onUserTierChange(idx, newTierId) {
+  const user = users[idx];
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/admin/users/${user.id}`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tierId: newTierId }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    const updated = await res.json();
+    users[idx] = updated;
+    setUsersStatus(`Saved — ${user.email}'s tier updated.`, false);
+  } catch (err) {
+    console.error("Failed to update tier:", err);
+    setUsersStatus(`Couldn't save: ${err.message}`, true);
+    renderUsersList();
+  }
+}
+
+function setUsersStatus(text, isError) {
+  const el = document.getElementById("usersStatus");
+  el.textContent = text;
+  el.style.color = isError ? "var(--red-600, #c0392b)" : "var(--grey-500)";
+}
+
+// ---------------------------------------------------------------------
+// Tiers — Admin-only. Defines the extra-location caps Basic accounts
+// get assigned to (see Users above) — replaces the old fixed
+// MAX_BASIC_CREATED_LOCATIONS constant with editable rows. Add/edit/
+// remove all save immediately, same pattern as everywhere else on this
+// page.
+// ---------------------------------------------------------------------
+
+let tiers = []; // [{id, name, maxExtraLocations, createdAt}]
+
+async function loadTiers() {
+  if (!isAdmin) {
+    tiers = [];
+    return;
+  }
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/admin/tiers`, { credentials: "include" });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    tiers = await res.json();
+  } catch (err) {
+    console.error("Failed to load tiers:", err);
+    tiers = [];
+    setTiersStatus("Couldn't load tiers — try reloading the page.", true);
+  }
+  renderTiersList();
+  renderUsersList(); // tier dropdown options in Users depend on this list too
+}
+
+function renderTiersList() {
+  const list = document.getElementById("tiersList");
+  list.innerHTML = "";
+  if (tiers.length === 0) {
+    list.innerHTML = `<p class="footnote" style="margin:0;text-align:left;">No tiers yet — add one below.</p>`;
+  }
+  tiers.forEach((t, idx) => {
+    const row = document.createElement("div");
+    row.className = "filter-row";
+    row.style.cssText = "align-items:center;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--grey-200);";
+    row.innerHTML = `
+      <div style="flex:2;min-width:140px;">
+        <input type="text" data-tier-name="${idx}" value="${escapeHtml(t.name)}" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);" />
+      </div>
+      <div style="flex:1;min-width:160px;">
+        <label class="footnote" style="margin:0;display:block;">Extra locations</label>
+        <input type="number" min="0" step="1" data-tier-cap="${idx}" value="${t.maxExtraLocations}" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);" />
+      </div>
+      <button type="button" data-remove-tier="${idx}" class="btn-secondary">Remove</button>
+    `;
+    list.appendChild(row);
+  });
+
+  list.querySelectorAll("[data-tier-name]").forEach((input) => {
+    input.addEventListener("change", (e) => onTierFieldChange(Number(e.currentTarget.dataset.tierName), "name", e.currentTarget.value));
+  });
+  list.querySelectorAll("[data-tier-cap]").forEach((input) => {
+    input.addEventListener("change", (e) => onTierFieldChange(Number(e.currentTarget.dataset.tierCap), "maxExtraLocations", parseInt(e.currentTarget.value, 10)));
+  });
+  list.querySelectorAll("[data-remove-tier]").forEach((btn) => {
+    btn.addEventListener("click", (e) => onRemoveTier(Number(e.currentTarget.dataset.removeTier)));
+  });
+}
+
+async function onTierFieldChange(idx, field, value) {
+  const tier = tiers[idx];
+  const body = field === "name" ? { name: value } : { maxExtraLocations: value };
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/admin/tiers/${tier.id}`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    tiers[idx] = await res.json();
+    setTiersStatus("Saved.", false);
+    renderUsersList(); // tier name may have changed, reflected in Users' own dropdowns
+  } catch (err) {
+    console.error("Failed to save tier:", err);
+    setTiersStatus(`Couldn't save: ${err.message}`, true);
+    renderTiersList();
+  }
+}
+
+async function onAddTier() {
+  const nameInput = document.getElementById("newTierNameInput");
+  const capInput = document.getElementById("newTierCapInput");
+  const name = nameInput.value.trim();
+  const maxExtraLocations = parseInt(capInput.value, 10);
+  if (!name || !Number.isFinite(maxExtraLocations) || maxExtraLocations < 0) {
+    setTiersStatus("Enter a name and a non-negative number of extra locations.", true);
+    return;
+  }
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/admin/tiers`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, maxExtraLocations }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    tiers.push(await res.json());
+    nameInput.value = "";
+    capInput.value = "";
+    setTiersStatus("Added.", false);
+    renderTiersList();
+  } catch (err) {
+    console.error("Failed to add tier:", err);
+    setTiersStatus(`Couldn't add: ${err.message}`, true);
+  }
+}
+
+async function onRemoveTier(idx) {
+  const tier = tiers[idx];
+  if (!confirm(`Remove the "${tier.name}" tier?`)) return;
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/admin/tiers/${tier.id}`, { method: "DELETE", credentials: "include" });
+    if (!res.ok && res.status !== 404) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    tiers.splice(idx, 1);
+    setTiersStatus("Removed.", false);
+    renderTiersList();
+  } catch (err) {
+    console.error("Failed to remove tier:", err);
+    setTiersStatus(`Couldn't remove: ${err.message}`, true);
+  }
+}
+
+function setTiersStatus(text, isError) {
+  const el = document.getElementById("tiersStatus");
   el.textContent = text;
   el.style.color = isError ? "var(--red-600, #c0392b)" : "var(--grey-500)";
 }

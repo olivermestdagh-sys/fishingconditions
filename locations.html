@@ -45,7 +45,8 @@
   <section id="settingsSection" class="summary-card" style="display:none;">
     <div class="summary-title" style="margin-bottom:6px;">Check frequency</div>
     <p class="footnote" style="margin:0 0 12px;text-align:left;">
-      How often the locations below get checked, and the daily window to check them in.
+      A site-wide setting (not per-account) — how often locations get checked, and
+      the daily window to check them in. Admin-only.
     </p>
     <div class="filter-row" style="margin-bottom:10px;">
       <div style="flex:1;min-width:160px;">
@@ -168,6 +169,31 @@
       </div>
       <div id="saveStatus" style="margin-top:10px;font-size:0.85rem;"></div>
     </div>
+  </section>
+
+  <section id="usersSection" class="summary-card" style="display:none;">
+    <div class="summary-title" style="margin-bottom:6px;">Users</div>
+    <p class="footnote" style="margin:0 0 12px;text-align:left;">
+      Every signed-in account (except Public, the free site's own data — not a real
+      account). Change someone's role or tier below — saves immediately.
+    </p>
+    <div id="usersList"></div>
+    <div id="usersStatus" style="margin-top:10px;font-size:0.85rem;"></div>
+  </section>
+
+  <section id="tiersSection" class="summary-card" style="display:none;">
+    <div class="summary-title" style="margin-bottom:6px;">Tiers</div>
+    <p class="footnote" style="margin:0 0 12px;text-align:left;">
+      Defines how many extra private locations a Basic account may create, beyond
+      whatever's inherited from Public. Assign a tier to each user above.
+    </p>
+    <div id="tiersList"></div>
+    <div class="filter-row" style="margin-top:8px;">
+      <input type="text" id="newTierNameInput" placeholder="Tier name (e.g. Plus)" style="flex:2;min-width:140px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+      <input type="number" id="newTierCapInput" min="0" step="1" placeholder="Extra locations" style="flex:1;min-width:120px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+      <button id="btnAddTier" class="btn-secondary">+ Add tier</button>
+    </div>
+    <div id="tiersStatus" style="margin-top:10px;font-size:0.85rem;"></div>
   </section>
 
   <footer class="footnote">
