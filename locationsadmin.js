@@ -1349,6 +1349,10 @@ function renderRows() {
           ? `<button data-create-loc="${i}" class="btn-primary" style="height:38px;">Create location</button>`
           : `<button data-remove-loc="${i}" class="btn-secondary" style="height:38px;">Remove location</button>`
         }
+        ${!loc._new && isAdmin
+          ? `<button data-copy-loc="${i}" class="btn-secondary" style="height:38px;">${viewingAsPublic ? "Copy to My Account" : "Copy to Public"}</button>`
+          : ""
+        }
       </div>
 
       <label class="loc-edit-label" style="display:block;margin:12px 0 6px;">Usable for</label>
@@ -2021,6 +2025,94 @@ async function removeLocation(idx) {
   renderRows();
 }
 
+/**
+ * Admin-only — copies one location (its place fields AND every one of
+ * its type entries, each with its own drive/setup/pack-up/time-to-spot/
+ * minimum-tide-height) to the OTHER account from whichever one is
+ * currently being viewed: to Public if viewing as self, or to the
+ * Admin's own account if currently viewing as Public. Always creates a
+ * genuinely NEW location in the target account (no dedup against an
+ * existing same-named one there — same "no dedup" convention as
+ * createLocation/addTypeToLocation already have) — the first type's
+ * POST creates the place, every type after that reuses its returned
+ * location.id so multiple types land on ONE copied place, not one
+ * place per type.
+ *
+ * Matches each type to the TARGET account's own existing type of the
+ * same name where one exists (avoids silently creating a duplicate
+ * "Kayak" in the target every time something gets copied), and defines
+ * a fresh one there otherwise — same fallback the type-add picker
+ * itself already uses.
+ *
+ * Deliberately does NOT copy group membership — groups are a separate,
+ * per-account vocabulary (see loadLocationGroups), and guessing whether
+ * a same-named group in the target account means the same thing isn't
+ * safe to assume silently. The copied location lands with no groups
+ * assigned; add them by hand in the target account if needed.
+ */
+async function copyLocationToOtherAccount(idx) {
+  const loc = locations[idx];
+  if (!loc || loc._new || !isAdmin) return;
+  const targetUserId = viewingAsPublic ? currentUser.id : "public";
+  const targetLabel = viewingAsPublic ? "your account" : "Public";
+
+  if (!confirm(`Copy "${loc.name}" (${loc.types.length} type${loc.types.length === 1 ? "" : "s"}) to ${targetLabel}?`)) return;
+
+  try {
+    const typesRes = await fetch(`${USER_BACKEND_URL}/api/types?userId=${targetUserId}`, { credentials: "include" });
+    if (!typesRes.ok) throw new Error(`Could not read ${targetLabel}'s types (status ${typesRes.status})`);
+    const targetTypes = await typesRes.json();
+
+    let newLocationId = null;
+    for (const t of loc.types) {
+      const matchingType = targetTypes.find((tt) => tt.name === t.type);
+      const body = {
+        name: loc.name,
+        lat: loc.lat,
+        lng: loc.lng,
+        shore: loc.shore,
+        tideOffset: loc.tideOffset,
+        tidal: loc.tidal !== false,
+        willyweatherId: loc.willyweatherId,
+        willyweatherName: loc.willyweatherName,
+        willyweatherRegion: loc.willyweatherRegion,
+        willyweatherState: loc.willyweatherState,
+        driveTo: t.driveTo,
+        driveBack: t.driveBack,
+        setUp: t.setUp,
+        packUp: t.packUp,
+        timeToSpot: t.timeToSpot,
+        timeFromSpot: t.timeFromSpot,
+        minTideHeight: t.minTideHeight,
+      };
+      if (newLocationId) body.locationId = newLocationId;
+      if (matchingType) body.typeId = matchingType.id;
+      else {
+        body.newTypeName = t.type;
+        body.newTypeBehavesLike = t.behavesLike;
+      }
+
+      const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations?userId=${targetUserId}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `status ${res.status}`);
+      }
+      const created = await res.json();
+      if (!newLocationId) newLocationId = created.location.id;
+      if (!matchingType) targetTypes.push({ id: created.type.id, name: created.type.name, behavesLike: created.type.behavesLike });
+    }
+    setSaveStatus(`Copied "${loc.name}" to ${targetLabel}.`, false);
+  } catch (err) {
+    console.error("Failed to copy location:", err);
+    setSaveStatus(`Couldn't copy "${loc.name}": ${err.message}`, true);
+  }
+}
+
 /** Adds an existing Public type (typeId) or defines a brand new one
  * (newTypeName/newTypeBehavesLike) to an ALREADY-SAVED location. Disabled
  * for a `_new` draft — see createLocation for how a draft's first type
@@ -2168,6 +2260,13 @@ function wireRowListeners(list) {
     btn.addEventListener("click", (e) => {
       const idx = Number(e.currentTarget.dataset.removeLoc);
       removeLocation(idx);
+    });
+  });
+
+  list.querySelectorAll("button[data-copy-loc]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const idx = Number(e.currentTarget.dataset.copyLoc);
+      copyLocationToOtherAccount(idx);
     });
   });
 

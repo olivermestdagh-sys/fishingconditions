@@ -1409,6 +1409,39 @@ settings/locations, no toggle, no admin controls), and an Admin
 requests to `?userId=public`, clicking again correctly reverts) —
 zero JS errors throughout.
 
+### Copy a location to the other account
+
+Each saved location card gets a button, Admin-only: **"Copy to
+Public"** when viewing as self, **"Copy to My Account"** when
+currently viewing as Public (`copyLocationToOtherAccount`,
+`locationsadmin.js`). Copies the place's own fields (name, lat/lng,
+shore, tide offset, tidal, WillyWeather match) AND every one of its
+type entries (each with its own drive/setup/pack-up/time-to-spot/
+minimum-tide-height) — always as a genuinely new location in the
+target account (no dedup against an existing same-named one there,
+same convention every other location-creation path already follows).
+
+For a location with more than one type, the first type's `POST`
+creates the place; every type after that carries that first response's
+`location.id` so all of them land on ONE copied place, not one place
+per type. Each type is matched by name against the TARGET account's
+own existing types first (reusing "Kayak" there if it already has one)
+rather than always defining a fresh one, which would otherwise create
+duplicate same-named types every time something gets copied.
+
+**Deliberately does not copy group membership** — groups are a
+separate, per-account vocabulary, and assuming a same-named group in
+the target account means the same thing isn't safe to do silently. A
+copied location lands with no groups assigned in its new account; add
+them by hand there if needed.
+
+**Verified**: a real headless-browser test with a two-type location —
+confirmed the button only appears for Admin and is labelled correctly
+for the current viewing mode, and that copying it reuses the target's
+existing matching type for the first type while defining a new one for
+the second, with both correctly attached to the same newly-created
+location.
+
 ## Troubleshooting
 
 - **Page loads but says "Not updated yet"**: the scheduled job hasn't run
