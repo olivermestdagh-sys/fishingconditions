@@ -20,10 +20,51 @@
   <a href="live.html">Live</a>
   <a href="sync.html">Sync</a>
   <a href="locations.html" class="active">Settings</a>
-  <a href="account.html">Account</a>
 </nav>
 
 <main>
+  <section id="signedOutCard" class="summary-card">
+    <div class="summary-title" style="margin-bottom:6px;">Sign in</div>
+    <p class="footnote" style="margin:0 0 12px;text-align:left;">
+      Sign in with Google to manage your own locations, groups, and mark lists, and to
+      choose how often your locations are checked. Admins can also view and edit the
+      free site's own public data from here.
+    </p>
+    <button id="btnSignIn" class="btn-primary">Sign in with Google</button>
+  </section>
+
+  <section id="signedInCard" class="summary-card" style="display:none;">
+    <div class="summary-title" style="margin-bottom:6px;">Signed in</div>
+    <p class="footnote" id="whoAmI" style="margin:0 0 12px;text-align:left;"></p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button id="btnSignOut" class="btn-secondary">Sign out</button>
+      <button id="btnToggleViewAsPublic" class="btn-secondary" style="display:none;">View as Public →</button>
+    </div>
+  </section>
+
+  <section id="settingsSection" class="summary-card" style="display:none;">
+    <div class="summary-title" style="margin-bottom:6px;">Check frequency</div>
+    <p class="footnote" style="margin:0 0 12px;text-align:left;">
+      How often the locations below get checked, and the daily window to check them in.
+    </p>
+    <div class="filter-row" style="margin-bottom:10px;">
+      <div style="flex:1;min-width:160px;">
+        <label for="checkFrequency">Check every (minutes)</label>
+        <input type="number" id="checkFrequency" min="15" max="1440" step="15" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+      </div>
+      <div style="flex:1;min-width:120px;">
+        <label for="windowStart">Active from</label>
+        <input type="time" id="windowStart" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+      </div>
+      <div style="flex:1;min-width:120px;">
+        <label for="windowEnd">Active until</label>
+        <input type="time" id="windowEnd" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+      </div>
+    </div>
+    <button id="btnSaveSettings" class="btn-primary">Save</button>
+    <div id="settingsStatus" style="margin-top:10px;font-size:0.85rem;"></div>
+  </section>
+
   <section id="groupsSection" class="summary-card" style="display:none;">
     <div class="summary-title" style="margin-bottom:6px;">Location Groups</div>
     <p class="footnote" style="margin:0 0 12px;text-align:left;">
@@ -32,7 +73,7 @@
     </p>
     <div id="groupsSignedOut" style="display:none;">
       <p class="footnote" style="margin:0;text-align:left;">
-        Sign in with Google as Admin on the <a href="account.html">Account</a> tab to manage location groups.
+        Sign in above to manage location groups.
       </p>
     </div>
     <div id="groupsEditor" style="display:none;">
@@ -54,7 +95,7 @@
     </p>
     <div id="markListsSignedOut" style="display:none;">
       <p class="footnote" style="margin:0;text-align:left;">
-        Sign in with Google as Admin on the <a href="account.html">Account</a> tab to manage mark lists.
+        Sign in above to manage mark lists.
       </p>
     </div>
     <div id="markListsEditor" style="display:none;">
@@ -96,25 +137,34 @@
   <section id="locationsSection" class="table-section" style="display:none;">
     <h2>Locations</h2>
     <p class="footnote" style="margin:0 0 12px;text-align:left;">
-      Every change below saves immediately to your account — no separate Save step any more.
-      Changes take effect on the next scheduled data refresh, or trigger one immediately with the button below.
+      Every change below saves immediately — no separate Save step any more.
+      These are your own tracked locations. Admins can switch to viewing and editing
+      Public's own curated set instead (the "View as Public" button above) — changes there
+      take effect on the free site's next scheduled data refresh, or immediately via the
+      button below.
     </p>
     <div id="locationsSignedOut" style="display:none;">
       <p class="footnote" style="margin:0;text-align:left;">
-        Sign in with Google as Admin on the <a href="account.html">Account</a> tab to manage locations.
+        Sign in above to manage locations.
       </p>
     </div>
     <div id="locationsEditor" style="display:none;">
       <div id="settingsLocationMap" class="location-map" style="margin-bottom:14px;"></div>
-      <p class="footnote" style="margin:0 0 10px;text-align:left;">Tap a marker to jump straight to that location below. Every new location is added by clicking the map — there's no coordinate-less blank row any more. "Add Home" arms the map for one click, placing your home address exactly there.</p>
+      <p class="footnote" style="margin:0 0 10px;text-align:left;">Tap a marker to jump straight to that location below. Every new location is added by clicking the map — there's no coordinate-less blank row any more.</p>
       <div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;">
         <button type="button" id="btnAddByMapClick" class="btn-secondary">📍 Add location</button>
-        <button type="button" id="btnAddHome" class="btn-secondary">🏠 Add Home</button>
       </div>
       <div id="locationsList"></div>
 
-      <div style="margin-top:20px;display:flex;gap:8px;flex-wrap:wrap;">
-        <button id="btnRefreshDataNow" class="btn-primary">Refresh data now</button>
+      <div id="adminOnlyControls" style="display:none;margin-top:20px;">
+        <p class="footnote" style="margin:0 0 8px;text-align:left;">
+          Admin-only, and unaffected by "View as Public" above — these apply to the site
+          itself, not to whichever account's locations you're currently viewing.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" id="btnAddHome" class="btn-secondary">🏠 Add Home</button>
+          <button id="btnRefreshDataNow" class="btn-primary">Refresh data now</button>
+        </div>
       </div>
       <div id="saveStatus" style="margin-top:10px;font-size:0.85rem;"></div>
     </div>

@@ -103,7 +103,10 @@
  *      - ALLOWED_ORIGIN (Text) — e.g. https://olivermestdagh-sys.github.io
  *        (no trailing slash — same value as willyweather-search.js's own)
  *      - FRONTEND_ACCOUNT_URL (Text) — where /auth/callback redirects to
- *        on success, e.g. https://olivermestdagh-sys.github.io/fishingconditions/account.html
+ *        on success, e.g. https://olivermestdagh-sys.github.io/fishingconditions/locations.html
+ *        (account.html/account.js were retired — Settings and Account
+ *        merged into one page; update this value if it still points at
+ *        the old account.html)
  *      - GOOGLE_REDIRECT_URI (Text) — this Worker's own URL + "/auth/callback",
  *        the exact value entered in Google Console step 1
  *      - PIPELINE_API_TOKEN (Secret) — a long, random string you generate
@@ -127,9 +130,9 @@
  *      - GH_REPO_NAME (Text) — e.g. fishingconditions
  *      - GH_WORKFLOW_FILE (Text) — the workflow's filename, e.g. update.yml
  *      Save and Deploy again so the new bindings/secrets take effect.
- *   6. Paste this Worker's URL into account.js's USER_BACKEND_URL constant,
- *      then deploy account.html/account.js as usual via GitHub's upload
- *      page.
+ *   6. Paste this Worker's URL into locationsadmin.js's USER_BACKEND_URL
+ *      constant, then deploy locations.html/locationsadmin.js as usual via
+ *      GitHub's upload page.
  */
 
 const SESSION_COOKIE = "session";
@@ -183,14 +186,16 @@ export default {
         return handleLocationItem(request, env, locationMatch[1]);
       }
       if (url.pathname === "/api/settings") {
-        return handleSettings(request, env);
+        return handleSettings(request, url, env);
       }
 
       // --- v2 endpoints below: the unified locations/types/groups/mark-lists/
-      // marks model (schema-v2.sql). Deliberately left ALONGSIDE the v1
-      // /api/locations and /api/settings routes above rather than replacing
-      // them — account.js still talks to v1 today, and cutting it over is
-      // its own separate step, not bundled into adding these.
+      // marks model (schema-v2.sql). /api/locations and /api/settings (v1)
+      // stay alongside these — /api/locations is fully deprecated (nothing
+      // calls it since account.js was reconciled onto v2 and later retired
+      // entirely — see "Settings and Account merged" further down);
+      // /api/settings (check-frequency) is still genuinely used, just
+      // extended to support the same ?userId= override as everything below.
       if (url.pathname === "/api/types") {
         return handleTypesCollection(request, url, env);
       }
@@ -416,8 +421,9 @@ async function handleMe(request, env) {
 
 // ---------------------------------------------------------------------
 // v1 Locations CRUD (user_locations table) — DEPRECATED, superseded by
-// the v2 /api/tracked-locations endpoints below (same table Admin's own
-// Locations page and account.js's own "My locations" now both use).
+// the v2 /api/tracked-locations endpoints below (the single Locations
+// editor on the merged Settings page now uses this for every signed-in
+// user, not just Admin — see "Settings and Account merged" further down).
 // Kept functional (still scoped correctly, still safe) rather than
 // deleted outright — nothing currently calls it, but removing working
 // code purely for tidiness isn't worth the risk/diff for a dead path
@@ -563,15 +569,26 @@ function validateLocationInput(body, { partial }) {
 // no separate "provision defaults on signup" step to keep in sync.
 // ---------------------------------------------------------------------
 
-async function handleSettings(request, env) {
+async function handleSettings(request, url, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  // Same effective-user pattern as every v2 endpoint (resolveEffectiveUserId)
+  // — added so Admin's "View as Public" toggle (locationsadmin.js) can read/
+  // write Public's check-frequency settings too, through ?userId=public,
+  // exactly like it already does for types/tracked-locations/groups/
+  // marklists. Not very MEANINGFUL for Public specifically (no scheduler
+  // exists yet to act on any user's check-frequency, Public's included),
+  // but kept consistent with every other toggled section rather than
+  // being the one exception.
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
 
   if (request.method === "GET") {
-    let row = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(user.id).first();
+    let row = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(uid).first();
     if (!row) {
-      await env.DB.prepare("INSERT INTO user_settings (user_id) VALUES (?)").bind(user.id).run();
-      row = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(user.id).first();
+      await env.DB.prepare("INSERT INTO user_settings (user_id) VALUES (?)").bind(uid).run();
+      row = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(uid).first();
     }
     return jsonResponse(rowToSettings(row), 200, env);
   }
@@ -581,7 +598,7 @@ async function handleSettings(request, env) {
     const validationError = validateSettingsInput(body);
     if (validationError) return jsonResponse({ error: validationError }, 400, env);
 
-    const existing = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(user.id).first();
+    const existing = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(uid).first();
     const merged = {
       checkFrequencyMinutes: body.checkFrequencyMinutes ?? existing?.check_frequency_minutes ?? 180,
       activeWindowStart: body.activeWindowStart ?? existing?.active_window_start ?? "05:00",
@@ -595,10 +612,10 @@ async function handleSettings(request, env) {
          active_window_start = excluded.active_window_start,
          active_window_end = excluded.active_window_end`
     )
-      .bind(user.id, merged.checkFrequencyMinutes, merged.activeWindowStart, merged.activeWindowEnd)
+      .bind(uid, merged.checkFrequencyMinutes, merged.activeWindowStart, merged.activeWindowEnd)
       .run();
 
-    const updated = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(user.id).first();
+    const updated = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(uid).first();
     return jsonResponse(rowToSettings(updated), 200, env);
   }
 
@@ -1864,8 +1881,8 @@ async function upsertUser(env, claims) {
 /**
  * Every brand-new user gets their own Kayak/Land based user_types rows —
  * without this, a new signed-in user's first location-add would have no
- * types at all to pick from (account.js's own vocabulary is entirely
- * per-user, same as Public's; nothing seeds it automatically otherwise).
+ * types at all to pick from (the type vocabulary is entirely per-user,
+ * same as Public's; nothing seeds it automatically otherwise).
  * Uses INSERT OR IGNORE — harmless if ever called twice for the same
  * user (e.g. a retry), since UNIQUE(user_id, name) would just reject the
  * second attempt rather than error the whole request.
