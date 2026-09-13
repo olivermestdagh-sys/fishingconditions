@@ -2143,6 +2143,191 @@ function parseGpxWaypoints(gpxText) {
 }
 
 /**
+ * Parses a GPX file's <trk> tracks (Lowrance trail export — see
+ * sync.js's own top-of-file comment on why trails come from GPX
+ * specifically, never the .usr export marks import already uses) into
+ * plain {name, points: [{lat, lon, timeMs, timeNaive}]} objects. One
+ * track's own <trkseg> boundaries are NOT treated as meaningful — real
+ * Lowrance exports don't reliably split segments at real trip
+ * boundaries (confirmed directly: one real export had 5 <trk> elements
+ * covering 53 distinct calendar days between them) — every <trkpt>
+ * across every <trkseg> in a <trk> is flattened into one ordered list;
+ * deriveTrackDayGroups below is what actually splits this into
+ * meaningful outings.
+ *
+ * `timeMs` is a real Unix instant (used for gap/duration math);
+ * `timeNaive` is the site's own "YYYY-MM-DD HH:MM:SS" convention,
+ * read directly off the string's own digits (GPX times are always
+ * "Z"-suffixed UTC, and this site's naive convention already treats
+ * digits as local wall-clock — no timezone math either way, same as
+ * every other naive-time conversion on this site).
+ *
+ * Silently drops any point with an unparseable time, OR the specific
+ * garbage placeholder Lowrance emits when a fix briefly had no real
+ * clock time (`1970-01-01T00:00:01Z` — confirmed directly: about 0.6%
+ * of points in a real export carry exactly this value) — a track point
+ * with no trustworthy time is useless for every downstream calculation
+ * here (gap-splitting, dwell detection, duration), so there's no
+ * reasonable partial use for it, unlike a merely-missing name/desc on a
+ * waypoint elsewhere in this file.
+ */
+function parseGpxTracks(gpxText) {
+  try {
+    const doc = new DOMParser().parseFromString(gpxText, "application/xml");
+    if (doc.querySelector("parsererror")) return [];
+    const tracks = [];
+    for (const trk of doc.querySelectorAll("trk")) {
+      const name = trk.querySelector("name")?.textContent || "Unnamed track";
+      const points = [];
+      for (const trkpt of trk.querySelectorAll("trkpt")) {
+        const lat = parseFloat(trkpt.getAttribute("lat"));
+        const lon = parseFloat(trkpt.getAttribute("lon"));
+        const timeText = trkpt.querySelector("time")?.textContent || "";
+        if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
+        if (!timeText || timeText.startsWith("1970-01-01")) continue;
+        const timeMs = Date.parse(timeText);
+        if (Number.isNaN(timeMs)) continue;
+        points.push({ lat, lon, timeMs, timeNaive: timeText.replace("T", " ").replace("Z", "") });
+      }
+      points.sort((a, b) => a.timeMs - b.timeMs);
+      tracks.push({ name, points });
+    }
+    return tracks;
+  } catch (err) {
+    console.error("Could not parse GPX tracks:", err);
+    return [];
+  }
+}
+
+// Tuning constants for deriveTrackDayGroups/detectFishingSegments below —
+// starting values, not finalized. Agreed up front (see README) that these
+// need real calibration against actual trail data once this is live, not
+// a one-shot guess to get exactly right before ever seeing real results.
+const TRACK_DAY_GAP_MINUTES = 45; // a gap longer than this splits into a
+                                   // new day-group even within the same
+                                   // calendar day (two separate outings
+                                   // on one date shouldn't merge into one)
+const DWELL_RADIUS_METERS = 100; // must stay within this radius of a
+                                   // point's own position to count as
+                                   // "dwelling" there — a drifting kayak
+                                   // wanders, doesn't sit at one exact
+                                   // coordinate, so this needs to be a
+                                   // real radius, not point-equality
+const DWELL_WINDOW_MINUTES = 15; // for at least this long, continuously,
+                                   // to count as a genuine fishing stop
+                                   // rather than a red light or a pause
+                                   // to re-rig
+const MIN_SEGMENT_MINUTES = 10; // a detected segment shorter than this
+                                   // (either kind) gets folded into a
+                                   // neighbour rather than standing alone
+                                   // as its own noisy sliver
+
+/**
+ * Splits one track's flattened, time-sorted points into separate
+ * "outings" — by calendar day, AND by any gap longer than
+ * TRACK_DAY_GAP_MINUTES even within the same day (the unit being
+ * switched off between two separate trips on the same date shouldn't
+ * merge them into one). This is what actually defines "a track per
+ * day" for the review UI — the GPX file's own <trk>/<trkseg>
+ * boundaries don't reliably do this (see parseGpxTracks's own comment).
+ */
+function deriveTrackDayGroups(points) {
+  if (points.length === 0) return [];
+  const groups = [];
+  let current = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1];
+    const point = points[i];
+    const gapMinutes = (point.timeMs - prev.timeMs) / 60000;
+    const sameCalendarDay = point.timeNaive.slice(0, 10) === prev.timeNaive.slice(0, 10);
+    if (gapMinutes > TRACK_DAY_GAP_MINUTES || !sameCalendarDay) {
+      groups.push(current);
+      current = [];
+    }
+    current.push(point);
+  }
+  if (current.length > 0) groups.push(current);
+  return groups;
+}
+
+/**
+ * Classifies one day-group's points into alternating "fishing"
+ * (stationary — likely actually fishing) and "transiting" (moving
+ * between spots) segments, purely from position and time — no marks or
+ * user input involved yet, this is just the automatic first pass
+ * (fully overridable by hand afterward, per the design brief).
+ *
+ * For each point, looks forward across a DWELL_WINDOW_MINUTES window
+ * and checks whether every point in that window stays within
+ * DWELL_RADIUS_METERS of it — if so, this point counts as "dwelling".
+ * Consecutive same-classification points become one segment; segments
+ * shorter than MIN_SEGMENT_MINUTES get folded into a neighbour, and
+ * folding can leave two same-kind segments directly touching (their
+ * shared boundary was the thing just folded away) — those get merged
+ * into each other too, rather than reported as artificially split
+ * (confirmed directly against a real 4.5-hour trail: without this
+ * second merge pass, one continuous ~67-minute fishing stop was
+ * reported as two separate ones split at an arbitrary one-second
+ * boundary).
+ *
+ * Returns [] for a group with fewer than 2 points (a lone GPS fix isn't
+ * a segment of anything) — this also quietly handles the real,
+ * confirmed data quirk of a day-group where every point shares the
+ * exact same timestamp (a logging glitch, not a real multi-point
+ * stop): zero time span means the dwell-window check never finds a
+ * window wide enough to judge, so the group falls out as one plain
+ * "transiting" segment rather than crashing on a division by zero.
+ */
+function detectFishingSegments(points) {
+  if (points.length < 2) return [];
+  const n = points.length;
+  const isDwelling = new Array(n).fill(false);
+
+  let windowEnd = 0;
+  for (let i = 0; i < n; i++) {
+    if (windowEnd < i) windowEnd = i;
+    while (windowEnd < n && (points[windowEnd].timeMs - points[i].timeMs) / 60000 < DWELL_WINDOW_MINUTES) {
+      windowEnd++;
+    }
+    const window = points.slice(i, windowEnd);
+    if (window.length < 2) continue;
+    const spanMinutes = (window[window.length - 1].timeMs - window[0].timeMs) / 60000;
+    if (spanMinutes < DWELL_WINDOW_MINUTES * 0.8) continue; // window ran off the end of the group before reaching full length — not enough evidence either way
+    const maxDist = Math.max(...window.map((p) => distanceMetersBetween(points[i].lat, points[i].lon, p.lat, p.lon)));
+    if (maxDist <= DWELL_RADIUS_METERS) isDwelling[i] = true;
+  }
+
+  const rawSegments = [];
+  let start = 0;
+  for (let i = 1; i <= n; i++) {
+    if (i === n || isDwelling[i] !== isDwelling[start]) {
+      rawSegments.push({ kind: isDwelling[start] ? "fishing" : "transiting", startIdx: start, endIdx: i - 1 });
+      start = i;
+    }
+  }
+
+  const folded = [];
+  for (const seg of rawSegments) {
+    const durationMinutes = (points[seg.endIdx].timeMs - points[seg.startIdx].timeMs) / 60000;
+    if (folded.length > 0 && durationMinutes < MIN_SEGMENT_MINUTES) {
+      folded[folded.length - 1].endIdx = seg.endIdx;
+    } else {
+      folded.push({ ...seg });
+    }
+  }
+
+  const merged = [];
+  for (const seg of folded) {
+    if (merged.length > 0 && merged[merged.length - 1].kind === seg.kind) {
+      merged[merged.length - 1].endIdx = seg.endIdx;
+    } else {
+      merged.push({ ...seg });
+    }
+  }
+  return merged;
+}
+
+/**
  * Loads marks (D1, Public's own rows, via GET /api/public/marks) and
  * config/mark_lists.json's live equivalent (GET /api/public/marklists,
  * for the edit form's dropdown options) and plots every mark on an
