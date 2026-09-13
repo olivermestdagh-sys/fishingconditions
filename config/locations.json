@@ -37,32 +37,6 @@
     ]
   },
   {
-    "name": "Betka Beach VIC",
-    "shore": "N",
-    "tidal": true,
-    "locationGroup": null,
-    "locationGroups": [],
-    "tideOffset": null,
-    "willyweatherId": 18288,
-    "willyweatherName": "Betka Beach",
-    "willyweatherRegion": "East Gippsland",
-    "willyweatherState": "VIC",
-    "lat": -37.5775,
-    "lng": 149.7536,
-    "tideMaxObserved": 1.3,
-    "types": [
-      {
-        "type": "Land based",
-        "driveTo": "00:00",
-        "driveBack": "00:00",
-        "setUp": "00:20",
-        "packUp": "00:20",
-        "timeToSpot": "00:20",
-        "timeFromSpot": "00:20"
-      }
-    ]
-  },
-  {
     "name": "Cape Woolamai Beach",
     "shore": "NE",
     "tidal": true,
@@ -231,32 +205,6 @@
     ]
   },
   {
-    "name": "Inverloch",
-    "shore": "WNW",
-    "tidal": true,
-    "locationGroup": null,
-    "locationGroups": [],
-    "tideOffset": null,
-    "willyweatherId": 12374,
-    "willyweatherName": "Inverloch",
-    "willyweatherRegion": "Gippsland",
-    "willyweatherState": "VIC",
-    "lat": -38.633500077966396,
-    "lng": 145.72471618652347,
-    "tideMaxObserved": 2.71,
-    "types": [
-      {
-        "type": "Kayak",
-        "driveTo": "00:00",
-        "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
-      }
-    ]
-  },
-  {
     "name": "Kilcunda, VIC 3995",
     "shore": "N",
     "tidal": true,
@@ -281,32 +229,6 @@
         "packUp": "00:10",
         "timeToSpot": "00:30",
         "timeFromSpot": "00:30"
-      }
-    ]
-  },
-  {
-    "name": "Lakes Entrance Beach VIC",
-    "shore": "NE",
-    "tidal": true,
-    "locationGroup": null,
-    "locationGroups": [],
-    "tideOffset": null,
-    "willyweatherId": 18294,
-    "willyweatherName": "Lakes Entrance Beach",
-    "willyweatherRegion": "East Gippsland",
-    "willyweatherState": "VIC",
-    "lat": -37.8859,
-    "lng": 147.9875,
-    "tideMaxObserved": 1.08,
-    "types": [
-      {
-        "type": "Land based",
-        "driveTo": "00:00",
-        "driveBack": "00:00",
-        "setUp": "00:20",
-        "packUp": "00:20",
-        "timeToSpot": "00:20",
-        "timeFromSpot": "00:20"
       }
     ]
   },
@@ -343,32 +265,6 @@
         "driveBack": "01:05",
         "setUp": "00:10",
         "packUp": "00:15",
-        "timeToSpot": "00:00",
-        "timeFromSpot": "00:00"
-      }
-    ]
-  },
-  {
-    "name": "Mallacoota",
-    "shore": "S",
-    "tidal": true,
-    "locationGroup": null,
-    "locationGroups": [],
-    "tideOffset": null,
-    "willyweatherId": 12642,
-    "willyweatherName": "Mallacoota",
-    "willyweatherRegion": "East Gippsland",
-    "willyweatherState": "VIC",
-    "lat": -37.55435935391175,
-    "lng": 149.7561085224152,
-    "tideMaxObserved": null,
-    "types": [
-      {
-        "type": "Kayak",
-        "driveTo": "00:00",
-        "driveBack": "00:00",
-        "setUp": "00:00",
-        "packUp": "00:00",
         "timeToSpot": "00:00",
         "timeFromSpot": "00:00"
       }
@@ -565,32 +461,6 @@
         "packUp": "00:30",
         "timeToSpot": "00:20",
         "timeFromSpot": "00:20"
-      }
-    ]
-  },
-  {
-    "name": "Terranora Creek - Kennedy Drive Boat Ramp",
-    "shore": "NE",
-    "tidal": true,
-    "locationGroup": null,
-    "locationGroups": [],
-    "tideOffset": null,
-    "willyweatherId": 30385,
-    "willyweatherName": "Terranora Creek - Kennedy Drive Boat Ramp",
-    "willyweatherRegion": "Far North Coast",
-    "willyweatherState": "NSW",
-    "lat": -28.18676843321961,
-    "lng": 153.53226184844974,
-    "tideMaxObserved": 1.49,
-    "types": [
-      {
-        "type": "Kayak",
-        "driveTo": "00:00",
-        "driveBack": "00:00",
-        "setUp": "00:20",
-        "packUp": "00:20",
-        "timeToSpot": "00:05",
-        "timeFromSpot": "00:05"
       }
     ]
   },
