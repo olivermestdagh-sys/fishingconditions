@@ -847,11 +847,39 @@ mocked `/api/marks` POST calls that exactly 2 marks were sent, both
 correctly joined into `"Pilchard, Squid"` — and confirmed the saved
 candidates were correctly un-checked afterward. Zero JS errors.
 
-**Still not built**: promoting a raw trackpoint to a new candidate,
-linking a Catch mark into whichever segment its timestamp falls
-within, and — the last planned phase — actually drawing saved
-Sessions as connected lines on the Location/Live maps (the data now
-persists correctly, but nothing outside the Sync page renders it yet).
+**Phase 5 — add a Catch/POI at any raw trackpoint** (`sync.js`):
+clicking anywhere on a drawn trail line (not just an existing Start/End
+candidate marker) now opens a small menu — "+ Add Catch here" / "+ Add
+POI here" — per the design brief's own "allow us to add to a track
+point a Catch or POI, this is a new GPS point, not the same track
+point". Deliberately does NOT draw a marker per raw trackpoint (a
+single day can have thousands — see `parseGpxTracks`'s own comment on
+real point counts); one click handler on the line itself resolves the
+click down to the nearest actual raw point (`nearestPointTo`, plain
+distance comparison via the existing `distanceMetersBetween`).
+
+Reuses the EXISTING marks-candidate machinery wholesale rather than a
+second, Session-specific way to hold a promoted point — a newly-added
+Catch/POI is pushed straight into the same `candidates` array marks
+import already reviews, pre-filled with the clicked point's own
+location and time, historical conditions looked up immediately (same
+as every other reviewable candidate), and its full edit popup opens
+right away (`openCandidatePopup`, unchanged) so species/etc. can be
+filled in on the spot. It saves through the exact same "Import
+selected" flow as any other mark — no new save path needed.
+
+**Verified**: real browser test — clicked an ACTUAL rendered trail
+polyline on the map (not a simulated event), confirmed the add-mark
+menu appeared, clicked "Add Catch here", and confirmed exactly one new
+candidate was added with the correct lat/lng/time and that its edit
+popup opened automatically. Zero JS errors.
+
+**Still not built**: linking a Catch mark into whichever segment its
+timestamp falls within, and — the last planned phase — actually
+drawing saved Sessions as connected lines on the Location/Live maps
+(the data now persists correctly, but nothing outside the Sync page
+renders it yet). Oliver's own call: Location/Live rendering waits
+until the Sync page itself is considered done.
 
 ### Clustering when marks overlap (Leaflet.markercluster)
 

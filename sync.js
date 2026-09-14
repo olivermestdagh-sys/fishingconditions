@@ -975,6 +975,100 @@ function openCandidatePopup(idx) {
   popupEl.querySelector("[data-mark-cancel]").addEventListener("click", () => reviewMap.closePopup(popup));
 }
 
+/** Nearest point (by plain distance) in a list of {lat, lon} trail points
+ * to a given lat/lng — used to resolve a click anywhere along a drawn
+ * trail line down to the actual nearest raw trackpoint, since the line
+ * itself isn't drawn as individually-clickable points (a day can have
+ * thousands — see parseGpxTracks/detectFishingSegments's own comments
+ * on real point counts). */
+function nearestPointTo(points, lat, lng) {
+  let best = points[0];
+  let bestDist = Infinity;
+  for (const p of points) {
+    const d = distanceMetersBetween(lat, lng, p.lat, p.lon);
+    if (d < bestDist) {
+      bestDist = d;
+      best = p;
+    }
+  }
+  return best;
+}
+
+/**
+ * A small popup offering to add a brand-new Catch or POI mark at a
+ * clicked trail point — this is a genuinely NEW GPS point (per the
+ * design brief's own wording), not the same track point turned into a
+ * Session candidate. Deliberately reuses the EXISTING marks-candidate
+ * machinery wholesale (the `candidates` array, openCandidatePopup, the
+ * "Import selected" save flow) rather than inventing a second, Session-
+ * specific way to hold a Catch/POI — a promoted point IS just an
+ * ordinary mark, with its location and time pre-filled from where it
+ * was clicked, nothing about it needs the Session-only field set
+ * (Start/Stop, carried-forward Bait/Rig/Rod/Berley).
+ */
+function openAddMarkAtPointMenu(point, latlng) {
+  const menu = L.popup({ maxWidth: 200, autoPanPadding: [20, 20] })
+    .setLatLng(latlng)
+    .setContent(
+      `<div style="min-width:140px;">
+        <div class="footnote" style="margin:0 0 6px;">${escapeHtml(point.timeNaive)}</div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <button type="button" class="btn-secondary" data-add-kind="Catch" style="padding:4px 8px;font-size:0.85rem;">+ Add Catch here</button>
+          <button type="button" class="btn-secondary" data-add-kind="POI" style="padding:4px 8px;font-size:0.85rem;">+ Add POI here</button>
+        </div>
+      </div>`
+    )
+    .openOn(reviewMap);
+
+  const menuEl = menu.getElement();
+  menuEl.querySelectorAll("[data-add-kind]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const type = btn.dataset.addKind;
+      reviewMap.closePopup(menu);
+      addMarkCandidateAtPoint(point, type);
+    });
+  });
+}
+
+/**
+ * Creates a brand-new entry in the SAME `candidates` array marks-import
+ * already reviews from, pre-filled with a clicked trail point's own
+ * location and time, then immediately opens its full edit popup (the
+ * same one every other candidate uses) so species/etc can be filled in
+ * right away. Fires the historical-conditions lookup up front too,
+ * matching how every other reviewable candidate already gets it.
+ */
+async function addMarkCandidateAtPoint(point, type) {
+  const key = makeMarkId();
+  const c = {
+    key,
+    id: key,
+    lat: point.lat,
+    lng: point.lon,
+    rawName: "",
+    species: "",
+    name: type === "Catch" ? "New catch" : "New POI",
+    type,
+    notes: "",
+    dateTime: point.timeNaive,
+    visitCount: 1,
+    sourceUuid: null,
+    sourceLabel: "trail-import",
+    matchedExisting: false,
+    selected: true,
+  };
+  try {
+    const result = await lookupHistoricalMarkConditions(point.lat, point.lon, point.timeNaive);
+    Object.assign(c, result);
+  } catch (err) {
+    console.error("Historical lookup failed for a newly-added trail point mark:", err);
+  }
+  candidates.push(c);
+  renderSummary();
+  renderReviewList();
+  openCandidatePopup(candidates.length - 1);
+}
+
 
 
 /**
@@ -1871,7 +1965,19 @@ function renderReviewMap() {
         const segPoints = day.points.slice(seg.startIdx, seg.endIdx + 1);
         const latLngs = segPoints.map((p) => [p.lat, p.lon]);
         if (latLngs.length >= 2) {
-          L.polyline(latLngs, { color: SEGMENT_COLORS[seg.kind], weight: 3 }).addTo(reviewMapLayer);
+          const polyline = L.polyline(latLngs, { color: SEGMENT_COLORS[seg.kind], weight: 3 }).addTo(reviewMapLayer);
+          // Clicking anywhere on the trail line itself (not a candidate
+          // marker) offers to add a brand-new Catch or POI mark at the
+          // nearest actual raw trackpoint — per the design brief's own
+          // "allow us to add to a track point a Catch or POI, this is a
+          // new GPS point, not the same track point". Deliberately NOT a
+          // marker-per-raw-point (a day can have thousands — see the
+          // design brief's own concern about that) — one click handler on
+          // the line itself, resolving to the nearest point programmatically.
+          polyline.on("click", (e) => {
+            const nearestPoint = nearestPointTo(segPoints, e.latlng.lat, e.latlng.lng);
+            openAddMarkAtPointMenu(nearestPoint, e.latlng);
+          });
           allShownLatLngs.push(...latLngs);
         }
         seg.candidates.forEach((cand, candIdx) => {
