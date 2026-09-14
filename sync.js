@@ -896,7 +896,7 @@ function renderCandidateRow(c, i) {
   const visitBadge = c.visitCount > 1 ? `<span class="pill sync-pill-visits">${c.visitCount}×</span>` : "";
   return `
     <div class="candidate-row-compact" data-idx="${i}">
-      <input type="checkbox" data-role="select" data-idx="${i}" ${c.selected ? "checked" : ""} />
+      <span class="tree-checkbox-col"><input type="checkbox" data-role="select" data-idx="${i}" ${c.selected ? "checked" : ""} /></span>
       <span data-role="open-candidate" data-idx="${i}" style="flex:1;">
         ${escapeHtml(c.name || "(unnamed)")} — ${escapeHtml((c.dateTime || "").slice(0, 16))}
       </span>
@@ -1545,14 +1545,27 @@ function cascadeChecked(node, field, value) {
   if (node.candidates) node.candidates.forEach((c) => (c[field] = value));
 }
 
-/** Tri-state summary of a node's own children for one field — "checked"/
+/**
+ * Tri-state summary of a node's own children for one field — "checked"/
  * "unchecked" when every child agrees, "indeterminate" when they don't.
  * A leaf node (a candidate, or a transiting segment with no candidates)
  * has no children to summarise — callers should read its own stored
- * boolean directly instead of calling this. */
+ * boolean directly instead of calling this.
+ *
+ * For the "importChecked" field specifically, a transiting segment is
+ * excluded from the aggregate entirely (not just treated as
+ * "unchecked") — it has nothing importable at all (no candidates, no
+ * checkbox even shown any more — see renderTracksTree), so it
+ * shouldn't be able to drag an otherwise-fully-checked day down to
+ * "indeterminate" just by existing. Safe to apply this filter
+ * unconditionally: day-groups and candidates never have kind ===
+ * "transiting" (only segments do), so this only ever actually removes
+ * anything from a list of segments.
+ */
 function summariseChecked(children, field) {
-  if (children.length === 0) return "unchecked";
-  const values = children.map((c) => childCheckedState(c, field));
+  const relevant = field === "importChecked" ? children.filter((c) => c.kind !== "transiting") : children;
+  if (relevant.length === 0) return "unchecked";
+  const values = relevant.map((c) => childCheckedState(c, field));
   if (values.every((v) => v === "checked")) return "checked";
   if (values.every((v) => v === "unchecked")) return "unchecked";
   return "indeterminate";
@@ -1592,8 +1605,12 @@ function renderTracksTree() {
       if (!day.expanded) return;
       day.segments.forEach((seg, segIdx) => {
         const segCaret = seg.candidates.length > 0 ? `<span class="caret${seg.expanded ? "" : " collapsed"}">▾</span>` : `<span class="caret" style="visibility:hidden;">▾</span>`;
+        // A transiting segment has no candidates — nothing to import — so
+        // its Import column stays genuinely empty (not just unchecked)
+        // rather than offering a checkbox that can never do anything.
+        const segImportCol = seg.kind === "transiting" ? `<span class="tree-checkbox-col"></span>` : `<span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" /></span>`;
         html += `<div class="tracks-tree-node" data-level="segment" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-role="toggle-expand">
-          <span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" /></span>
+          ${segImportCol}
           <span class="tree-checkbox-col"><input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" /></span>
           <span class="tree-node-label" style="padding-left:28px;">${segCaret}<span>${escapeHtml(seg.label)}</span></span>
         </div>`;
@@ -1666,15 +1683,15 @@ function renderTracksTree() {
 function setRowCheckboxes(container, selector, node) {
   const row = container.querySelector(selector);
   if (!row) return;
-  const importBox = row.querySelector('input[data-role="import"]');
+  const importBox = row.querySelector('input[data-role="import"]'); // null for a transiting segment — its Import column is deliberately empty, nothing to import there
   const viewBox = row.querySelector('input[data-role="view"]');
   const isLeaf = !node.dayGroups && !node.segments && !(node.candidates && node.candidates.length > 0);
   if (isLeaf) {
-    importBox.checked = !!node.importChecked;
-    viewBox.checked = !!node.viewChecked;
+    if (importBox) importBox.checked = !!node.importChecked;
+    if (viewBox) viewBox.checked = !!node.viewChecked;
   } else {
-    applyTriState(importBox, childCheckedState(node, "importChecked"));
-    applyTriState(viewBox, childCheckedState(node, "viewChecked"));
+    if (importBox) applyTriState(importBox, childCheckedState(node, "importChecked"));
+    if (viewBox) applyTriState(viewBox, childCheckedState(node, "viewChecked"));
   }
 }
 
