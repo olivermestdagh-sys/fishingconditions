@@ -1066,17 +1066,84 @@ async function runWithConcurrencyLimit(items, limit, worker, onProgress) {
   return results;
 }
 
+/**
+ * Every currently Import-checked session candidate, converted into a
+ * mark-shaped object ready for the SAME saveMarksBatchToD1 (charts.js)
+ * every regular mark import already goes through — a Session is just a
+ * mark with type="Session" plus two new linking fields (sessionRole,
+ * sessionGroupId), not a separate save path or a separate table. A
+ * segment's own Start and End share one groupId (generated once per
+ * segment, regardless of how many of the two actually end up checked)
+ * — what the Location/Live maps will use later to draw the connecting
+ * line between them; a segment with only one side checked just won't
+ * have a line drawn for it, no error either way.
+ *
+ * Bait/Rig/Rod/Berley are genuine multi-selects on a candidate (see
+ * openTrackCandidatePopup) but the marks schema only ever supports one
+ * value per field — joined into a single comma-separated string here,
+ * a deliberate, acceptable compromise rather than a schema change
+ * affecting every mark on the site.
+ */
+function collectCheckedSessionMarks() {
+  const nowStr = nowAsNaiveString();
+  const marks = [];
+  trackData.forEach((track) => {
+    track.dayGroups.forEach((day) => {
+      day.segments.forEach((seg) => {
+        if (seg.kind !== "fishing") return;
+        const checkedCandidates = seg.candidates.filter((c) => c.importChecked);
+        if (checkedCandidates.length === 0) return;
+        const groupId = makeMarkId(); // just a shared linking string here, not itself a real mark id
+        checkedCandidates.forEach((cand) => {
+          const point = day.points[cand.pointIdx];
+          const joined = (arr) => (arr && arr.length > 0 ? arr.join(", ") : undefined);
+          const mark = {
+            id: makeMarkId(),
+            lat: point.lat,
+            lng: point.lon,
+            name: cand.kind === "start" ? "Session start" : "Session end",
+            type: "Session",
+            dateTime: point.timeNaive,
+            createdAt: nowStr,
+            source: "trail-import",
+            sessionRole: cand.kind,
+            sessionGroupId: groupId,
+          };
+          const bait = joined(cand.baits);
+          const rig = joined(cand.rigs);
+          const rod = joined(cand.rods);
+          const berley = joined(cand.berleys);
+          if (bait) mark.bait = bait;
+          if (rig) mark.rig = rig;
+          if (rod) mark.rod = rod;
+          if (berley) mark.berley = berley;
+          if (cand.weatherCondition) mark.weatherCondition = cand.weatherCondition;
+          if (cand.tideCondition) mark.tideCondition = cand.tideCondition;
+          if (cand.barometer != null) mark.barometer = cand.barometer;
+          if (cand.temperature != null) mark.temperature = cand.temperature;
+          if (cand.waterTemperature != null) mark.waterTemperature = cand.waterTemperature;
+          if (cand.windSpeed != null) mark.windSpeed = cand.windSpeed;
+          marks.push(mark);
+        });
+      });
+    });
+  });
+  return marks;
+}
+
 async function handleImportClick() {
   const statusEl = document.getElementById("importStatus");
   const toImport = candidates.filter((c) => c.selected);
-  if (toImport.length === 0) {
+  const sessionMarks = collectCheckedSessionMarks();
+  if (toImport.length === 0 && sessionMarks.length === 0) {
     statusEl.textContent = "Nothing selected to import.";
     statusEl.style.color = "#dc2626";
     return;
   }
   const btn = document.getElementById("btnImportSelected");
   btn.disabled = true;
-  statusEl.textContent = `Importing ${toImport.length} mark${toImport.length === 1 ? "" : "s"}…`;
+  const totalToSave = toImport.length + sessionMarks.length;
+  statusEl.textContent = `Importing ${totalToSave} mark${totalToSave === 1 ? "" : "s"}…`;
   statusEl.style.color = "";
 
   // Weather/Tide/Barometer/Wind are already looked up by this point — see
@@ -1125,7 +1192,7 @@ async function handleImportClick() {
     return mark;
   });
 
-  const result = await saveMarksBatchToD1(newMarks);
+  const result = await saveMarksBatchToD1([...newMarks, ...sessionMarks]);
   if (result.success) {
     statusEl.textContent = `Imported ${result.added} mark${result.added === 1 ? "" : "s"} into data/marks.json.`;
     statusEl.style.color = "#16a34a";
@@ -1133,10 +1200,24 @@ async function handleImportClick() {
     // session (or hitting Export) reflects what was just written, without
     // needing a re-fetch — same reasoning as wireMarkPopupButtons doing the
     // equivalent for a single-mark save (charts.js).
-    existingMarks.push(...newMarks);
+    existingMarks.push(...newMarks, ...sessionMarks);
     candidates = candidates.filter((c) => !c.selected);
+    // Uncheck (not remove — the tree still shows the whole trail for
+    // context) every session candidate that was just saved, so clicking
+    // Import again doesn't silently re-save the exact same points a
+    // second time.
+    trackData.forEach((track) =>
+      track.dayGroups.forEach((day) =>
+        day.segments.forEach((seg) =>
+          seg.candidates.forEach((cand) => {
+            if (cand.importChecked) cand.importChecked = false;
+          })
+        )
+      )
+    );
     renderSummary();
     renderReviewList();
+    renderTracksTree();
   } else {
     statusEl.textContent = "Import failed: " + result.error;
     statusEl.style.color = "#dc2626";

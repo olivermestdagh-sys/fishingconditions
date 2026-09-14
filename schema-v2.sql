@@ -237,6 +237,13 @@ CREATE TABLE IF NOT EXISTS marks (
   bait TEXT,
   rig TEXT,
   rod TEXT,
+  berley TEXT,                       -- REAL BUG, FOUND AND FIXED: this column
+                                      -- never existed even though the client-side
+                                      -- form/MARK_LIST_FIELDS always collected it —
+                                      -- every mark's Berley field was silently
+                                      -- dropped on save, never actually persisted
+  notes TEXT,                        -- same bug, same fix — the edit popup's own
+                                      -- Notes textarea was ALSO silently dropped
   size REAL,
   released INTEGER,                  -- 0/1
   weather_condition TEXT,
@@ -248,6 +255,22 @@ CREATE TABLE IF NOT EXISTS marks (
   barometer REAL,
   wind_direction TEXT,
   wind_speed REAL,
+  session_role TEXT,                 -- 'start' | 'end' — ONLY meaningful when
+                                      -- type = 'Session' (Fishing Sessions
+                                      -- trail-import feature); NULL for every
+                                      -- other mark type
+  session_group_id TEXT,             -- links a Session's Start row to its own
+                                      -- End row (both share the same value) —
+                                      -- what the Location/Live maps use to draw
+                                      -- the connecting line between them. Bait/
+                                      -- Rig/Rod/Berley support MULTIPLE values
+                                      -- for a Session point (unlike every other
+                                      -- mark type, which only ever has one) —
+                                      -- stored here as a comma-joined string in
+                                      -- the same single TEXT columns above,
+                                      -- rather than a schema change affecting
+                                      -- every mark; good enough for display,
+                                      -- not meant to be parsed back apart.
   created_at INTEGER NOT NULL        -- real UTC ms — this row's own D1 insert time, NOT the same thing as created_at_naive above
 );
 
