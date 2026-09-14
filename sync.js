@@ -57,24 +57,27 @@ let searchFilter = "";
 // A GPX file's <trk> data — parsed alongside marks whenever the uploaded
 // file is GPX (never .usr; see parseGpxTracks's own comment, charts.js, for
 // why trail data specifically comes from GPX only). Entirely separate
-// state from `candidates` above — a session isn't a mark, and this tree
-// sits alongside the existing marks review list, not instead of it (this
-// is the SAME "Import from a device export" flow, expanded, not a second
-// one — the marks list above is completely unchanged by any of this).
+// state from `candidates` above — a session isn't a mark. Both now share
+// ONE map and ONE side-panel column (see reviewMap/renderReviewMap below) —
+// this is still the SAME "Import from a device export" flow, expanded, not
+// a second one.
 let trackData = []; // see buildTrackData's own comment for the exact shape
 let selectedCandidateKey = null; // "trackIdx.dayIdx.segIdx.candIdx" of
                                   // whichever candidate point is currently
                                   // highlighted, in the tree AND on the map
                                   // — set from either side, read by both
-let trackMap = null; // the Leaflet map instance for this tree (created once,
-                     // on first file load — see renderTrackMap)
-let trackMapLayer = null; // a plain L.LayerGroup holding every polyline/
-                          // marker currently drawn for trackData — cleared
-                          // and fully redrawn on each render rather than
-                          // patched incrementally, since a full redraw is
-                          // simple and cheap at the point-count a REDUCED
-                          // (line + candidate-marker only, not per-point
-                          // marker) render actually needs
+let reviewMap = null; // the ONE Leaflet map instance shared by both marks
+                      // candidates and track data (created once, on first
+                      // file load — see renderReviewMap)
+let reviewMapLayer = null; // a plain L.LayerGroup holding every polyline/
+                          // marker currently drawn — cleared and fully
+                          // redrawn on each render rather than patched
+                          // incrementally, since a full redraw is simple
+                          // and cheap at the point-count a REDUCED (line +
+                          // candidate-marker only, not per-point marker)
+                          // render actually needs
+let sideGroupCollapsed = { marks: false, tracks: false }; // the two side-
+                          // panel section headers (Marks / Trail data)
 
 // How close two points have to be to count as "the same spot" — both for
 // collapsing repeat device saves of one spot into a single candidate, and
@@ -879,95 +882,25 @@ function renderSummary() {
     `existing mark (not shown — nothing to import there).`;
 }
 
+/**
+ * A single compact row — checkbox, name, date only (per Oliver's own
+ * call: the previous version put the ENTIRE mark-edit form inline, one
+ * copy per row, which turned a review of a couple hundred candidates
+ * into an extremely busy page). Clicking the row (not the checkbox)
+ * opens the full edit form as a map popup instead — see
+ * openCandidatePopup, which reuses buildMarkPopupEditHtml/
+ * collectMarkFormValues (charts.js) directly rather than a second,
+ * inline-specific copy of that form.
+ */
 function renderCandidateRow(c, i) {
-  const speciesOptions = knownSpecies
-    .map((s) => `<option value="${escapeHtml(s)}" ${s === c.species ? "selected" : ""}>${escapeHtml(s)}</option>`)
-    .join("");
-  const speciesIsKnown = knownSpecies.includes(c.species);
-  const extraOption = speciesIsKnown || !c.species ? "" : `<option value="${escapeHtml(c.species)}" selected>${escapeHtml(c.species)} (new)</option>`;
-
-  // No matched-existing badge branch here any more — a row only ever
-  // renders at all when reviewableCandidates() included it, i.e. it's
-  // always genuinely new. See reviewableCandidates' own comment.
-  const visitBadge = c.visitCount > 1 ? `<span class="pill sync-pill-visits">${c.visitCount} visits merged</span>` : "";
-
-  // Mark Type itself is always shown (it's what DRIVES which of the other
-  // fields show at all — see applyMarkFieldVisibility, charts.js, reused
-  // here unchanged) — split out of the generic pick-list loop below so its
-  // own <select> can be found directly (data-mark-type-select) for wiring
-  // a change listener, same convention as the main mark-edit popup.
-  const typeOptionsHtml = markListOptionsHtml(markLists, "Mark Type", c.type);
-
-  // Every OTHER pick-list field a mark can carry (Weather/Tide/Water
-  // Condition, Bait, Rig, Rod, Berley) — driven straight off
-  // MARK_LIST_FIELDS/markListOptionsHtml, the exact same list+lookup the
-  // main mark-edit popup itself uses (buildMarkPopupEditHtml, charts.js),
-  // rather than a second hand-maintained copy that could drift out of
-  // sync with it (an earlier version of this row DID drift: Mark Type was
-  // hardcoded to just Fish/POI here, ignoring anything else added via the
-  // Settings tab, and Water/Bait/Rig/Rod/Berley weren't shown at all).
-  // Species is excluded from this loop and handled separately above/below
-  // it — it gets its own "(new)" labelling for an unrecognised device
-  // species name, which is common and worth flagging distinctly; that
-  // doesn't apply to any of these other fields. Each one is wrapped in a
-  // `display:contents` span carrying `data-field-group` — contributes no
-  // box of its own (so it doesn't disturb the flex layout these sit in),
-  // but lets applyMarkFieldVisibility (charts.js) show/hide it exactly the
-  // same way it already does in the main mark popup, off the SAME
-  // MARK_TYPE_FIELD_KEYS map, rather than a second copy of "which fields
-  // go with which type" logic living here too.
-  const otherListFieldsHtml = MARK_LIST_FIELDS.filter((f) => f.key !== "species" && f.key !== "type")
-    .map(
-      (f) => `<span data-field-group="${f.key}" style="display:contents"><select data-role="${f.key}" data-idx="${i}" title="${escapeHtml(f.label)}">${markListOptionsHtml(markLists, f.label, c[f.key])}</select></span>`
-    )
-    .join("");
-
-  // Wind Direction isn't in MARK_LIST_FIELDS at all — same as the main
-  // popup, it's sourced from SHORE_OPTIONS (charts.js's fixed 16-point
-  // compass list), not an editable Settings-tab pick-list.
-  const windDirectionOptions = SHORE_OPTIONS.map((d) => `<option value="${d}" ${d === c.windDirection ? "selected" : ""}>${d}</option>`).join("");
-
+  const visitBadge = c.visitCount > 1 ? `<span class="pill sync-pill-visits">${c.visitCount}×</span>` : "";
   return `
-    <div class="sync-row" data-idx="${i}">
-      <label class="sync-row-check">
-        <input type="checkbox" data-role="select" data-idx="${i}" ${c.selected ? "checked" : ""} />
-      </label>
-      <div class="sync-row-body">
-        <div class="sync-row-badges">
-          <span class="pill sync-pill-new">new</span>${visitBadge}
-          <span class="sync-row-coords">${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}</span>
-        </div>
-        <div class="sync-row-inputs">
-          <input type="text" data-role="name" data-idx="${i}" value="${escapeHtml(c.name)}" placeholder="Display name" title="Name" />
-          <input type="datetime-local" data-role="dateTime" data-idx="${i}" step="1" value="${naiveToDatetimeLocal(c.dateTime)}" title="Date/Time" />
-          <select data-role="type" data-idx="${i}" data-mark-type-select title="Mark Type">${typeOptionsHtml}</select>
-          <span data-field-group="species" style="display:contents">
-            <select data-role="species" data-idx="${i}" title="Species">
-              <option value="">—</option>${speciesOptions}${extraOption}
-            </select>
-          </span>
-          ${otherListFieldsHtml}
-        </div>
-        <div class="sync-row-inputs">
-          <span data-field-group="size" style="display:contents"><input type="number" data-role="size" data-idx="${i}" value="${c.size != null ? c.size : ""}" min="0" step="1" placeholder="Size (cm)" title="Size (cm)" /></span>
-          <span data-field-group="barometer" style="display:contents"><input type="number" data-role="barometer" data-idx="${i}" value="${c.barometer != null ? c.barometer : ""}" min="0" step="0.1" placeholder="hPa" title="Barometer (hPa)" /></span>
-          <span data-field-group="temperature" style="display:contents"><input type="number" data-role="temperature" data-idx="${i}" value="${c.temperature != null ? c.temperature : ""}" step="0.1" placeholder="Air °C" title="Temperature (°C)" /></span>
-          <span data-field-group="waterTemperature" style="display:contents"><input type="number" data-role="waterTemperature" data-idx="${i}" value="${c.waterTemperature != null ? c.waterTemperature : ""}" step="0.1" placeholder="Water °C" title="Water Temp (°C)" /></span>
-          <span data-field-group="waterDepth" style="display:contents"><input type="number" data-role="waterDepth" data-idx="${i}" value="${c.waterDepth != null ? c.waterDepth : ""}" min="0" step="0.1" placeholder="Depth (m)" title="Water Depth (m)" /></span>
-          <span data-field-group="windDirection" style="display:contents">
-            <select data-role="windDirection" data-idx="${i}" title="Wind Direction">
-              <option value=""${c.windDirection ? "" : " selected"}>Wind</option>${windDirectionOptions}
-            </select>
-          </span>
-          <span data-field-group="windSpeed" style="display:contents"><input type="number" data-role="windSpeed" data-idx="${i}" value="${c.windSpeed != null ? c.windSpeed : ""}" min="0" step="1" placeholder="km/h" title="Wind Speed (km/h)" /></span>
-        </div>
-        <span data-field-group="notes" style="display:contents"><textarea data-role="notes" data-idx="${i}" rows="2" placeholder="Notes">${escapeHtml(c.notes)}</textarea></span>
-        <span data-field-group="released" style="display:contents">
-          <label style="display:inline-flex;align-items:center;gap:4px;font-size:0.8rem;">
-            <input type="checkbox" data-role="released" data-idx="${i}" ${c.released ? "checked" : ""} /> Released
-          </label>
-        </span>
-      </div>
+    <div class="candidate-row-compact" data-idx="${i}">
+      <input type="checkbox" data-role="select" data-idx="${i}" ${c.selected ? "checked" : ""} />
+      <span data-role="open-candidate" data-idx="${i}" style="flex:1;">
+        ${escapeHtml(c.name || "(unnamed)")} — ${escapeHtml((c.dateTime || "").slice(0, 16))}
+      </span>
+      ${visitBadge}
     </div>`;
 }
 
@@ -981,14 +914,14 @@ function renderReviewList() {
   const slice = filtered.slice(0, visibleCount);
   container.innerHTML = slice.map((i) => renderCandidateRow(candidates[i], i)).join("");
 
-  // Apply each row's own field visibility for its CURRENT type — the same
-  // MARK_TYPE_FIELD_KEYS-driven function the main mark-edit popup uses
-  // (charts.js), just run once per row here since sync.js has no per-row
-  // "just opened" moment to hook the way a Leaflet popup does.
-  container.querySelectorAll(".sync-row").forEach((rowEl) => {
-    const idx = Number(rowEl.dataset.idx);
-    const c = candidates[idx];
-    if (c) applyMarkFieldVisibility(rowEl, c.type);
+  container.querySelectorAll('input[data-role="select"]').forEach((el) => {
+    el.addEventListener("change", (e) => {
+      const idx = Number(e.currentTarget.dataset.idx);
+      if (candidates[idx]) candidates[idx].selected = e.currentTarget.checked;
+    });
+  });
+  container.querySelectorAll('[data-role="open-candidate"]').forEach((el) => {
+    el.addEventListener("click", (e) => openCandidatePopup(Number(e.currentTarget.dataset.idx)));
   });
 
   const showMoreBtn = document.getElementById("btnShowMore");
@@ -1002,6 +935,47 @@ function renderReviewList() {
       (filtered.length !== totalReviewable ? ` (filtered from ${totalReviewable} new)` : "");
   }
 }
+
+/**
+ * Opens a candidate's full edit form as a Leaflet popup on the shared
+ * reviewMap — the SAME buildMarkPopupEditHtml (charts.js) the main
+ * marks map already uses, not a second hand-built form. Panned/centred
+ * to the candidate's own coordinates so the popup has somewhere
+ * sensible to anchor even though there's no permanent marker sitting
+ * there under it (candidates aren't drawn as their own map markers —
+ * there can be a couple hundred of them, and they're not spatially
+ * interesting the way a trail is; the list IS their real home).
+ *
+ * Save writes the form's values back into candidates[idx] directly (via
+ * collectMarkFormValues, charts.js) and closes the popup — nothing is
+ * sent to the backend from here; that only happens later, for whatever
+ * ends up checked, when "Import selected marks" is actually clicked.
+ */
+function openCandidatePopup(idx) {
+  const c = candidates[idx];
+  if (!c) return;
+  if (!reviewMap) renderReviewMap(); // first candidate opened before any file-driven render — make sure the map exists
+  const popup = L.popup({ maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" })
+    .setLatLng([c.lat, c.lng])
+    .setContent(buildMarkPopupEditHtml(c, markLists))
+    .openOn(reviewMap);
+
+  const popupEl = popup.getElement();
+  applyMarkFieldVisibility(popupEl, c.type);
+  const typeSelect = popupEl.querySelector("[data-mark-type-select]");
+  if (typeSelect) typeSelect.addEventListener("change", () => applyMarkFieldVisibility(popupEl, typeSelect.value));
+
+  popupEl.querySelector("[data-mark-save]").addEventListener("click", () => {
+    const form = popupEl.querySelector("[data-mark-form]");
+    const updated = collectMarkFormValues(form, c);
+    Object.assign(c, updated);
+    reviewMap.closePopup(popup);
+    renderReviewList();
+  });
+  popupEl.querySelector("[data-mark-cancel]").addEventListener("click", () => reviewMap.closePopup(popup));
+}
+
+
 
 /**
  * Bulk-selects/deselects, always scoped to whatever the current search
@@ -1178,13 +1152,14 @@ function buildTrackData(gpxText) {
             label: `${seg.kind === "fishing" ? "Fishing" : "Transiting"} ${timeLabel}`,
             importChecked: seg.kind === "fishing",
             viewChecked: true,
+            expanded: false, // segments start collapsed too — a day with several stops shouldn't dump every one of their Start/End rows straight into view
             candidates,
           };
         });
         const dayLabel = new Date(points[0].timeMs).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-        return { label: dayLabel, points, segments, importChecked: true, viewChecked: true };
+        return { label: dayLabel, points, segments, importChecked: true, viewChecked: true, expanded: false };
       });
-      return { name: track.name, dayGroups, importChecked: true, viewChecked: true };
+      return { name: track.name, dayGroups, importChecked: true, viewChecked: true, expanded: false };
     })
     .filter((t) => t.dayGroups.length > 0);
 }
@@ -1245,6 +1220,7 @@ async function handleFileInputChange(e) {
 
       candidates = groups.map((g, i) => ({
       key: `c${i}`,
+      id: `c${i}`, // alias of key — buildMarkPopupEditHtml/collectMarkFormValues (charts.js) expect `id`, reused directly for the candidate edit popup rather than a second copy of that form
       lat: g.lat,
       lng: g.lng,
       rawName: g.rawName,
@@ -1317,21 +1293,21 @@ async function handleFileInputChange(e) {
 
       renderSummary();
       renderReviewList();
-      document.getElementById("reviewSection").style.display = "block";
       candidateStatusPrefix = `${candidates.length} distinct spot${candidates.length === 1 ? "" : "s"} found from ${rawWaypoints.length} raw waypoints`;
-    } else {
-      document.getElementById("reviewSection").style.display = "none";
     }
 
-    // Fishing Sessions tree — independent of whether any marks were also
-    // found in this same file (a trail-only export with no waypoints at
-    // all is a completely normal thing to upload here).
-    document.getElementById("tracksSection").style.display = trackData.length > 0 ? "block" : "none";
+    // ONE combined section now covers both marks candidates and track data
+    // — shown whenever EITHER has something in it (a trail-only export
+    // with no waypoints at all is a completely normal thing to upload
+    // here, and vice versa).
+    document.getElementById("reviewSection").style.display = rawWaypoints.length > 0 || trackData.length > 0 ? "block" : "none";
+    document.getElementById("marksGroupBody").style.display = sideGroupCollapsed.marks ? "none" : "block";
+    document.getElementById("tracksGroupBody").style.display = sideGroupCollapsed.tracks ? "none" : "block";
     if (trackData.length > 0) {
       selectedCandidateKey = null;
       renderTracksTree();
-      renderTrackMap();
     }
+    if (rawWaypoints.length > 0 || trackData.length > 0) renderReviewMap();
 
     const totalDays = trackData.reduce((sum, t) => sum + t.dayGroups.length, 0);
     const trackStatusSuffix = trackData.length > 0 ? `${totalDays} track day${totalDays === 1 ? "" : "s"} found` : "";
@@ -1405,28 +1381,38 @@ function renderTracksTree() {
 
   let html = "";
   trackData.forEach((track, trackIdx) => {
-    html += `<div class="tracks-tree-node" data-level="track" data-track="${trackIdx}">
+    const trackCaret = `<span class="caret${track.expanded ? "" : " collapsed"}">▾</span>`;
+    html += `<div class="tracks-tree-node" data-level="track" data-track="${trackIdx}" data-role="toggle-expand">
+      ${trackCaret}
       <input type="checkbox" data-role="import" data-track="${trackIdx}" />
       <input type="checkbox" data-role="view" data-track="${trackIdx}" />
       <span>${escapeHtml(track.name)}</span>
     </div>`;
+    if (!track.expanded) return;
     track.dayGroups.forEach((day, dayIdx) => {
-      html += `<div class="tracks-tree-node" data-level="day" style="padding-left:20px;" data-track="${trackIdx}" data-day="${dayIdx}">
+      const dayCaret = `<span class="caret${day.expanded ? "" : " collapsed"}">▾</span>`;
+      html += `<div class="tracks-tree-node" data-level="day" style="padding-left:18px;" data-track="${trackIdx}" data-day="${dayIdx}" data-role="toggle-expand">
+        ${dayCaret}
         <input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" />
         <input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" />
         <span>${escapeHtml(day.label)}</span>
       </div>`;
+      if (!day.expanded) return;
       day.segments.forEach((seg, segIdx) => {
-        html += `<div class="tracks-tree-node" data-level="segment" style="padding-left:40px;" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}">
+        const segCaret = seg.candidates.length > 0 ? `<span class="caret${seg.expanded ? "" : " collapsed"}">▾</span>` : `<span class="caret" style="visibility:hidden;">▾</span>`;
+        html += `<div class="tracks-tree-node" data-level="segment" style="padding-left:36px;" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-role="toggle-expand">
+          ${segCaret}
           <input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" />
           <input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" />
           <span>${escapeHtml(seg.label)}</span>
         </div>`;
+        if (!seg.expanded) return;
         seg.candidates.forEach((cand, candIdx) => {
           const key = candidateKey(trackIdx, dayIdx, segIdx, candIdx);
           const isSelected = key === selectedCandidateKey;
           const candLabel = `${cand.kind === "start" ? "Start" : "End"} ${day.points[cand.pointIdx].timeNaive.slice(11, 16)}`;
-          html += `<div class="tracks-tree-node${isSelected ? " tracks-tree-node-selected" : ""}" data-level="candidate" style="padding-left:60px;" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">
+          html += `<div class="tracks-tree-node${isSelected ? " tracks-tree-node-selected" : ""}" data-level="candidate" style="padding-left:54px;" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">
+            <span class="caret" style="visibility:hidden;">▾</span>
             <input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}" />
             <input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}" />
             <span data-role="select-candidate">${candLabel}</span>
@@ -1437,9 +1423,12 @@ function renderTracksTree() {
   });
   container.innerHTML = html;
 
-  // Apply each row's own checked/indeterminate display — done as a
-  // second pass, after the HTML is in the DOM, since indeterminate isn't
-  // settable via a plain HTML attribute, only the live DOM property.
+  // Apply each visible row's own checked/indeterminate display — done as
+  // a second pass, after the HTML is in the DOM, since indeterminate isn't
+  // settable via a plain HTML attribute, only the live DOM property. Only
+  // ever queries for rows that are ACTUALLY in the DOM right now (a
+  // collapsed parent's children were never rendered above) — querySelector
+  // returning null for a currently-hidden node is expected, not an error.
   trackData.forEach((track, trackIdx) => {
     setRowCheckboxes(container, `[data-track="${trackIdx}"][data-level="track"]`, track);
     track.dayGroups.forEach((day, dayIdx) => {
@@ -1455,14 +1444,31 @@ function renderTracksTree() {
 
   container.querySelectorAll('input[data-role="import"]').forEach((el) => el.addEventListener("change", onTreeCheckboxChange));
   container.querySelectorAll('input[data-role="view"]').forEach((el) => el.addEventListener("change", onTreeCheckboxChange));
+  container.querySelectorAll('[data-role="toggle-expand"]').forEach((el) => {
+    el.addEventListener("click", (e) => {
+      if (e.target.matches('input[type="checkbox"]')) return; // clicking a checkbox shouldn't ALSO toggle expand/collapse
+      const { track, day, seg } = e.currentTarget.dataset;
+      let node = trackData[Number(track)];
+      if (day !== undefined) node = node.dayGroups[Number(day)];
+      if (seg !== undefined) {
+        node = node.segments[Number(seg)];
+        if (node.candidates.length === 0) return; // a transiting segment has nothing to expand into
+      }
+      node.expanded = !node.expanded;
+      renderTracksTree();
+    });
+  });
   container.querySelectorAll('[data-role="select-candidate"]').forEach((el) => {
     el.addEventListener("click", (e) => {
       const row = e.currentTarget.closest(".tracks-tree-node");
       selectedCandidateKey = candidateKey(row.dataset.track, row.dataset.day, row.dataset.seg, row.dataset.cand);
       renderTracksTree();
-      renderTrackMap();
+      renderReviewMap();
     });
   });
+
+  const countEl = document.getElementById("marksGroupCount");
+  if (countEl) countEl.textContent = String(reviewableCandidates().length);
 }
 
 function setRowCheckboxes(container, selector, node) {
@@ -1490,22 +1496,30 @@ function onTreeCheckboxChange(e) {
   if (cand !== undefined) node = node.candidates[Number(cand)];
   cascadeChecked(node, field, el.checked);
   renderTracksTree();
-  renderTrackMap();
+  renderReviewMap();
 }
 
-const SEGMENT_COLORS = { fishing: "#d97706", transiting: "#6b7280" }; // amber for likely-fishing stretches, grey for travel — deliberately distinct from any mark colour on the OTHER maps, since this is a different kind of thing being shown
+const SEGMENT_COLORS = { fishing: "#d97706", transiting: "#6b7280" }; // amber for likely-fishing stretches, grey for travel — deliberately distinct from any mark colour on the shared map, since this is a different kind of thing being shown
 
-function renderTrackMap() {
-  const mapEl = document.getElementById("tracksMap");
+/**
+ * The ONE shared map for this whole review page — track segments (as
+ * polylines) and candidate points, both drawn here; marks candidates
+ * don't get their own permanent markers (there can be a couple hundred
+ * of them, and the list is their real home — see openCandidatePopup),
+ * but a mark's edit popup still opens ON this same map, at its own
+ * coordinates, when a candidate row is clicked.
+ */
+function renderReviewMap() {
+  const mapEl = document.getElementById("reviewMap");
   if (!mapEl) return;
 
-  if (!trackMap) {
-    trackMap = L.map("tracksMap");
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors" }).addTo(trackMap);
-    trackMapLayer = L.layerGroup().addTo(trackMap);
+  if (!reviewMap) {
+    reviewMap = L.map("reviewMap");
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors" }).addTo(reviewMap);
+    reviewMapLayer = L.layerGroup().addTo(reviewMap);
   }
 
-  trackMapLayer.clearLayers();
+  reviewMapLayer.clearLayers();
   const allShownLatLngs = [];
 
   trackData.forEach((track, trackIdx) => {
@@ -1515,7 +1529,7 @@ function renderTrackMap() {
         const segPoints = day.points.slice(seg.startIdx, seg.endIdx + 1);
         const latLngs = segPoints.map((p) => [p.lat, p.lon]);
         if (latLngs.length >= 2) {
-          L.polyline(latLngs, { color: SEGMENT_COLORS[seg.kind], weight: 3 }).addTo(trackMapLayer);
+          L.polyline(latLngs, { color: SEGMENT_COLORS[seg.kind], weight: 3 }).addTo(reviewMapLayer);
           allShownLatLngs.push(...latLngs);
         }
         seg.candidates.forEach((cand, candIdx) => {
@@ -1529,12 +1543,12 @@ function renderTrackMap() {
             weight: 2,
             fillColor: cand.kind === "start" ? "#16a34a" : "#dc2626",
             fillOpacity: 1,
-          }).addTo(trackMapLayer);
+          }).addTo(reviewMapLayer);
           marker.bindTooltip(`${cand.kind === "start" ? "Start" : "End"} — ${point.timeNaive}`);
           marker.on("click", () => {
             selectedCandidateKey = key;
             renderTracksTree();
-            renderTrackMap();
+            renderReviewMap();
           });
           allShownLatLngs.push([point.lat, point.lon]);
         });
@@ -1543,9 +1557,9 @@ function renderTrackMap() {
   });
 
   if (allShownLatLngs.length > 0) {
-    trackMap.fitBounds(allShownLatLngs, { padding: [20, 20] });
+    reviewMap.fitBounds(allShownLatLngs, { padding: [20, 20] });
   } else {
-    trackMap.setView([-38.1, 145.1], 9); // Port Phillip/Western Port default — nothing to show yet
+    reviewMap.setView([-38.1, 145.1], 9); // Port Phillip/Western Port default — nothing to show yet
   }
 }
 
@@ -1608,64 +1622,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderReviewList();
   });
 
-  // Event delegation on the (static) list container — rows themselves get
-  // fully replaced on every render (renderReviewList/btnShowMore/search),
-  // so listeners attached to the container itself, rather than to
-  // individual rows, keep working without needing to be re-wired each time.
-  // All the pick-list <select> fields (Mark Type, Species, and everything
-  // in MARK_LIST_FIELDS) plus Wind Direction share one plain
-  // "just copy the value across" handling — listed explicitly here rather
-  // than inferred from the DOM, so a stray/unexpected data-role on some
-  // other element can never silently get treated as a mark field.
-  const SYNC_SELECT_ROLES = new Set([...MARK_LIST_FIELDS.map((f) => f.key), "windDirection"]);
-  document.getElementById("reviewList").addEventListener("change", (e) => {
-    const idx = Number(e.target.dataset.idx);
-    if (Number.isNaN(idx)) return;
-    const c = candidates[idx];
-    if (!c) return;
-    const role = e.target.dataset.role;
-    if (role === "select") c.selected = e.target.checked;
-    else if (SYNC_SELECT_ROLES.has(role)) {
-      c[role] = e.target.value || undefined;
-      // Changing Type live re-applies field visibility on THIS row (same
-      // as the main mark-edit popup does) — the actual filtering-out of
-      // any now-inapplicable field's stored value happens at Import time
-      // (see handleImportClick), not here; this is purely the visual
-      // show/hide.
-      if (role === "type") {
-        const rowEl = e.target.closest(".sync-row");
-        if (rowEl) applyMarkFieldVisibility(rowEl, c.type);
-      }
-    }
-  });
-  document.getElementById("reviewList").addEventListener("input", (e) => {
-    const idx = Number(e.target.dataset.idx);
-    if (Number.isNaN(idx)) return;
-    const c = candidates[idx];
-    if (!c) return;
-    const role = e.target.dataset.role;
-    if (role === "name") c.name = e.target.value;
-    else if (role === "notes") c.notes = e.target.value;
-    else if (role === "released") c.released = e.target.checked;
-    else if (role === "dateTime") c.dateTime = datetimeLocalToNaive(e.target.value);
-    else if (role === "size") {
-      const v = e.target.value;
-      c.size = v === "" ? undefined : Math.round(Number(v));
-    } else if (role === "barometer") {
-      const v = e.target.value;
-      c.barometer = v === "" ? undefined : Number(v);
-    } else if (role === "temperature") {
-      const v = e.target.value;
-      c.temperature = v === "" ? undefined : Number(v);
-    } else if (role === "waterTemperature") {
-      const v = e.target.value;
-      c.waterTemperature = v === "" ? undefined : Number(v);
-    } else if (role === "waterDepth") {
-      const v = e.target.value;
-      c.waterDepth = v === "" ? undefined : Number(v);
-    } else if (role === "windSpeed") {
-      const v = e.target.value;
-      c.windSpeed = v === "" ? undefined : Math.round(Number(v));
-    }
+  document.querySelectorAll('[data-role="toggle-group"]').forEach((el) => {
+    el.addEventListener("click", () => {
+      const group = el.dataset.group;
+      sideGroupCollapsed[group] = !sideGroupCollapsed[group];
+      el.classList.toggle("collapsed", sideGroupCollapsed[group]);
+      const bodyId = group === "marks" ? "marksGroupBody" : "tracksGroupBody";
+      document.getElementById(bodyId).style.display = sideGroupCollapsed[group] ? "none" : "block";
+    });
   });
 });

@@ -585,9 +585,70 @@ Weather/Tide/Barometer auto-filled from the historical lookup already
 used elsewhere), promoting an ordinary trackpoint to a new candidate,
 linking a Catch mark into whichever segment its timestamp falls
 within, and saving any of this anywhere — there is no Session data
-model or backend endpoint yet. Also not done: the existing marks
-review list itself has no map/View capability — this phase only added
-that to the new Tracks section, not retroactively to marks.
+model or backend endpoint yet.
+
+**Phase 2 revision — layout, compact candidates, popup editing,
+collapsible tree** (real feedback after using Phase 2, all fixed):
+
+- **The map now dominates the page.** `sync.html`'s `<main>` picked up
+  the `wide` class (1100px — the same one `index.html`'s Week Ahead
+  Gantt chart already uses), and the map/side-panel split changed from
+  a loose 3:1 flex ratio to a fixed 280px side column with the map
+  taking every remaining pixel. Confirmed directly: went from a
+  352px/300px near-even split (the old 720px-capped `<main>` combined
+  with the side panel's own `min-width:300px` was forcing them level
+  regardless of the flex ratio) to 752px/280px. Deliberately did NOT
+  adopt the fully edge-to-edge `map-fullpage-body` pattern
+  Location/Live use — this page has real non-map content above the
+  review section (file upload, export controls) that needs to stay in
+  normal padded-card layout, unlike those two pages which are entirely
+  their own map.
+- **Marks and tracks now share ONE section, one map, one side column**
+  — the previous two separate `<section class="summary-card">` blocks
+  ("Review candidates" and "Fishing Sessions") are now one, with two
+  collapsible groups (Marks / Trail data) stacked in the same right
+  column. `reviewMap`/`reviewMapLayer` replaced the track-only
+  `trackMap`/`trackMapLayer` — the same map now draws both track
+  polylines/candidates and hosts a mark candidate's edit popup.
+- **Candidate mark rows are compact now** — checkbox, name, date, done.
+  The entire inline edit form (Type/Species/Bait/Rig/Rod/Berley/
+  Size/Barometer/Temperature/Water Temp/Depth/Wind/Notes/Released —
+  one full copy per row) is gone from the list. Clicking a row instead
+  opens that candidate's full edit form as a **map popup**, reusing
+  `buildMarkPopupEditHtml`/`collectMarkFormValues`/
+  `applyMarkFieldVisibility` (`charts.js`) directly — the exact same
+  form the main marks map already uses, not a second hand-built copy.
+  Save writes the result back into `candidates[]` and closes the
+  popup; nothing reaches the backend from here — that still only
+  happens later, for whatever ends up checked, when "Import selected
+  marks" is clicked.
+- **The Track → Day → Segment tree is now genuinely collapsible** —
+  starts fully collapsed (a 60-day tree rendering all 288 segments and
+  246 candidates flat, as Phase 2 originally did, was exactly the
+  "busy looking list" this fixes). Each level has its own `expanded`
+  boolean and a caret toggle; a transiting segment (no candidates
+  under it) shows a disabled, hidden-visibility caret instead of a
+  clickable one, since there's nothing to expand into.
+
+**Verified**: re-ran the real 82,238-point trail file through the
+actual Sync page. Confirmed the map/side-panel width ratio directly
+(752px vs 280px), confirmed compact rows have zero inline `<select>`
+elements, confirmed clicking a candidate opens exactly one popup form
+and that editing+saving it correctly updates the compact row's own
+text, and confirmed the tree starts with zero day/segment/candidate
+rows in the DOM and correctly reveals one level at a time as each
+parent gets expanded — zero JS errors throughout.
+
+**Still not done, unchanged from before**: point-field editing for
+track candidates (Start/Stop/Bait/Rig/Rod/Berley/weather-tide
+auto-fill), promoting a raw trackpoint to a candidate, catch-linking,
+and any actual save/storage — still no Session data model or backend
+endpoint at all. Also still not done: marks candidates have no map
+markers of their own (they're accessible via the list + popup-at-
+their-own-coordinates, not a permanent pin) — worth flagging in case
+that's wanted later, since a candidate list can run into the hundreds
+and a marker per one would need its own clustering story, not
+something to add lightly.
 
 ### Clustering when marks overlap (Leaflet.markercluster)
 

@@ -7,12 +7,20 @@
 <link rel="stylesheet" href="style.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
-  .tracks-layout { display: flex; gap: 16px; flex-wrap: wrap; }
-  .tracks-tree-panel { flex: 1; min-width: 280px; max-height: 520px; overflow-y: auto; border: 1px solid var(--grey-200); border-radius: 8px; padding: 8px; }
-  .tracks-map-panel { flex: 2; min-width: 320px; }
-  #tracksMap { height: 520px; border-radius: 8px; }
-  .tracks-tree-node { display: flex; align-items: center; gap: 8px; padding: 4px 2px; font-size: 0.85rem; border-radius: 6px; }
+  .sync-review-layout { display: flex; gap: 12px; align-items: stretch; }
+  .sync-review-map-panel { flex: 1 1 auto; min-width: 0; }
+  #reviewMap { height: 78vh; min-height: 480px; border-radius: 8px; }
+  .sync-review-side-panel { flex: 0 0 280px; max-height: 78vh; overflow-y: auto; border: 1px solid var(--grey-200); border-radius: 8px; padding: 8px; }
+  .sync-side-group-title { font-weight: 600; font-size: 0.9rem; padding: 6px 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .sync-side-group-title .caret { display: inline-block; width: 0.9em; transition: transform 0.1s; }
+  .sync-side-group-title.collapsed .caret { transform: rotate(-90deg); }
+  .candidate-row-compact { display: flex; align-items: center; gap: 8px; padding: 4px 4px; font-size: 0.85rem; border-radius: 6px; cursor: pointer; }
+  .candidate-row-compact:hover, .candidate-row-compact-selected { background: var(--blue-100, #eaf2fb); }
+  .tracks-tree-node { display: flex; align-items: center; gap: 6px; padding: 3px 2px; font-size: 0.82rem; border-radius: 6px; }
+  .tracks-tree-node[data-level="track"], .tracks-tree-node[data-level="day"] { cursor: pointer; }
   .tracks-tree-node[data-level="track"] { font-weight: 600; }
+  .tracks-tree-node .caret { display: inline-block; width: 0.9em; font-size: 0.75em; transition: transform 0.1s; flex-shrink: 0; }
+  .tracks-tree-node .caret.collapsed { transform: rotate(-90deg); }
   .tracks-tree-node[data-level="candidate"] span[data-role="select-candidate"] { cursor: pointer; text-decoration: underline dotted; }
   .tracks-tree-node-selected { background: var(--blue-100, #eaf2fb); }
 </style>
@@ -32,7 +40,7 @@
   <a href="locations.html">Settings</a>
 </nav>
 
-<main>
+<main class="wide">
   <section id="syncNotConnected" class="summary-card" style="display:none;">
     <div class="summary-title" style="margin-bottom:6px;">Not signed in</div>
     <p class="footnote" style="margin:0;text-align:left;">
@@ -58,12 +66,12 @@
     </section>
 
     <section id="reviewSection" class="summary-card" style="display:none;">
-      <div class="summary-title" style="margin-bottom:6px;">Review candidates</div>
-      <div id="syncSummary" class="footnote" style="margin:0 0 12px;text-align:left;"></div>
+      <div class="summary-title" style="margin-bottom:6px;">Review</div>
+      <div id="syncSummary" class="footnote" style="margin:0 0 10px;text-align:left;"></div>
 
       <div class="filter-row" style="margin-bottom:10px;align-items:center;">
         <div style="flex:2;min-width:200px;">
-          <input type="text" id="syncSearchBox" placeholder="Filter by species or name…" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+          <input type="text" id="syncSearchBox" placeholder="Filter marks by species or name…" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button type="button" id="btnSelectAllNew" class="btn-secondary">Select all new</button>
@@ -71,30 +79,33 @@
         </div>
       </div>
 
-      <div id="reviewList" class="sync-review-list"></div>
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;">
-        <button type="button" id="btnShowMore" class="btn-secondary" style="display:none;">Show 100 more</button>
-        <span id="reviewCount" class="footnote" style="margin:0;"></span>
+      <div class="sync-review-layout">
+        <div class="sync-review-map-panel"><div id="reviewMap"></div></div>
+        <div class="sync-review-side-panel">
+          <div class="sync-side-group-title" data-role="toggle-group" data-group="marks">
+            <span class="caret">▾</span><span>Marks (<span id="marksGroupCount">0</span>)</span>
+          </div>
+          <div id="marksGroupBody">
+            <div id="reviewList"></div>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
+              <button type="button" id="btnShowMore" class="btn-secondary" style="display:none;">Show 100 more</button>
+              <span id="reviewCount" class="footnote" style="margin:0;"></span>
+            </div>
+          </div>
+
+          <div class="sync-side-group-title" data-role="toggle-group" data-group="tracks" style="margin-top:10px;">
+            <span class="caret">▾</span><span>Trail data</span>
+          </div>
+          <div id="tracksGroupBody">
+            <div id="tracksTree"></div>
+          </div>
+        </div>
       </div>
 
       <div style="margin-top:16px;">
         <button type="button" id="btnImportSelected" class="btn-primary">Import selected marks</button>
       </div>
       <div id="importStatus" style="margin-top:10px;font-size:0.85rem;"></div>
-    </section>
-
-    <section id="tracksSection" class="summary-card" style="display:none;">
-      <div class="summary-title" style="margin-bottom:6px;">Fishing Sessions (trail data)</div>
-      <p class="footnote" style="margin:0 0 12px;text-align:left;">
-        Detected automatically from this file's GPS trail — stretches where you likely stopped to fish
-        (shown in amber) versus travelling between spots (grey). Tick <strong>View</strong> to show something
-        on the map, <strong>Import</strong> to save it as a Session once that's built. Nothing here is saved
-        yet — this is a preview/review step.
-      </p>
-      <div class="tracks-layout">
-        <div class="tracks-tree-panel" id="tracksTree"></div>
-        <div class="tracks-map-panel"><div id="tracksMap"></div></div>
-      </div>
     </section>
 
     <section class="summary-card">
