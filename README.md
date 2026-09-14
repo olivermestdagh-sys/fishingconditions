@@ -978,6 +978,32 @@ one to create a new Transiting segment between them — and confirmed
 its label now reads correctly (e.g. "Transiting 13:19–13:20") instead
 of blank.
 
+**Phase 6 fix — converting a segment or using +/- reset the map's
+zoom** (real bug, reported directly after using the label fix above):
+`renderReviewMap` used to unconditionally re-fit the view to
+everything currently visible on EVERY redraw — so zooming into a
+segment, then converting it or clicking its first +/-, silently
+snapped the map back out to the whole day, since both of those actions
+redraw the map afterward. Confirmed exactly why: the segment-click
+zoom handler called `zoomMapToSegment` (which correctly zooms in) and
+then immediately called `renderReviewMap()` right after — which itself
+always ended with its own `fitBounds` covering everything, undoing the
+zoom one line later.
+
+Fixed by making the auto-fit conditional — `renderReviewMap({
+fitBounds: true })` only for the initial file load (where zooming to
+show the whole trail IS the right first move) or when the map is being
+created for the very first time; every other redraw (a checkbox
+change, a conversion, a +/- edit, opening a popup) now redraws the map's
+CONTENT only, leaving the camera exactly where it was.
+
+**Verified**: real browser test against the actual trail file —
+zoomed into a segment, converted a Transiting segment to Fishing, and
+confirmed the zoom level stayed identical; then zoomed into a
+(now-Fishing) segment and clicked its "+" button, confirming BOTH the
+zoom level and the map's centre point stayed exactly the same
+afterward. Zero JS errors.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
