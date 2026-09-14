@@ -2378,8 +2378,29 @@ function stepTimeIndex(points, fromIdx, direction) {
   }
 }
 
-function newTransitingSegment(startIdx, endIdx) {
-  return { kind: "transiting", startIdx, endIdx, candidates: [], importChecked: false, viewChecked: true, expanded: false, label: "" };
+/** The exact label format used everywhere a segment's own boundaries
+ * are known — shared here so every place that CHANGES startIdx/endIdx
+ * (creating a new segment, or reshaping an existing one) can keep its
+ * label in sync in one call, rather than each site reformatting this
+ * by hand (or forgetting to, which is exactly how a newly-created
+ * transiting segment ended up with a blank label — confirmed directly:
+ * newTransitingSegment set label:"" and nothing ever filled it in). */
+function segmentLabel(kind, points, startIdx, endIdx) {
+  const kindLabel = kind === "fishing" ? "Fishing" : "Transiting";
+  return `${kindLabel} ${points[startIdx].timeNaive.slice(11, 16)}–${points[endIdx].timeNaive.slice(11, 16)}`;
+}
+
+function newTransitingSegment(points, startIdx, endIdx) {
+  return {
+    kind: "transiting",
+    startIdx,
+    endIdx,
+    candidates: [],
+    importChecked: false,
+    viewChecked: true,
+    expanded: false,
+    label: segmentLabel("transiting", points, startIdx, endIdx),
+  };
 }
 
 /**
@@ -2394,10 +2415,11 @@ function newTransitingSegment(startIdx, endIdx) {
  *    of the two functions to actually apply anything.
  *
  * Every reshape keeps day.segments as an exact, gapless, non-overlapping
- * partition of day.points, and keeps every "fishing" segment's own two
- * candidates' pointIdx in lockstep with its own startIdx/endIdx at all
- * times — the single invariant everything else (rendering, the tree,
- * saving) depends on.
+ * partition of day.points, keeps every "fishing" segment's own two
+ * candidates' pointIdx in lockstep with its own startIdx/endIdx, AND
+ * keeps every touched segment's own label in sync with its (possibly
+ * new) boundaries — three invariants everything else (rendering, the
+ * tree, saving) depends on.
  */
 function stepCandidateTime(day, segIdx, candIdx, direction) {
   const segments = day.segments;
@@ -2420,6 +2442,7 @@ function stepCandidateTime(day, segIdx, candIdx, direction) {
 function shrinkSegmentBoundary(day, segIdx, front, newIdx) {
   const segments = day.segments;
   const seg = segments[segIdx];
+  const points = day.points;
   if (front) {
     const givenEnd = newIdx - 1;
     const neighbourIdx = segIdx - 1;
@@ -2431,11 +2454,12 @@ function shrinkSegmentBoundary(day, segIdx, front, newIdx) {
     // without ever asking. Reclaimed space always becomes (or extends)
     // a transiting buffer instead.
     if (neighbourIdx >= 0 && segments[neighbourIdx].kind === seg.kind) {
-      segments.splice(neighbourIdx + 1, 0, newTransitingSegment(seg.startIdx, givenEnd));
+      segments.splice(neighbourIdx + 1, 0, newTransitingSegment(points, seg.startIdx, givenEnd));
     } else if (neighbourIdx >= 0) {
       segments[neighbourIdx].endIdx = givenEnd;
+      segments[neighbourIdx].label = segmentLabel(segments[neighbourIdx].kind, points, segments[neighbourIdx].startIdx, givenEnd);
     } else {
-      segments.unshift(newTransitingSegment(seg.startIdx, givenEnd));
+      segments.unshift(newTransitingSegment(points, seg.startIdx, givenEnd));
     }
     seg.startIdx = newIdx;
     seg.candidates[0].pointIdx = newIdx;
@@ -2443,21 +2467,24 @@ function shrinkSegmentBoundary(day, segIdx, front, newIdx) {
     const givenStart = newIdx + 1;
     const neighbourIdx = segIdx + 1;
     if (neighbourIdx < segments.length && segments[neighbourIdx].kind === seg.kind) {
-      segments.splice(neighbourIdx, 0, newTransitingSegment(givenStart, seg.endIdx));
+      segments.splice(neighbourIdx, 0, newTransitingSegment(points, givenStart, seg.endIdx));
     } else if (neighbourIdx < segments.length) {
       segments[neighbourIdx].startIdx = givenStart;
+      segments[neighbourIdx].label = segmentLabel(segments[neighbourIdx].kind, points, givenStart, segments[neighbourIdx].endIdx);
     } else {
-      segments.push(newTransitingSegment(givenStart, seg.endIdx));
+      segments.push(newTransitingSegment(points, givenStart, seg.endIdx));
     }
     seg.endIdx = newIdx;
     seg.candidates[1].pointIdx = newIdx;
   }
+  seg.label = segmentLabel(seg.kind, points, seg.startIdx, seg.endIdx);
   return { ok: true };
 }
 
 function growSegmentBoundary(day, segIdx, front, newIdx) {
   const segments = day.segments;
   const seg = segments[segIdx];
+  const points = day.points;
   const neighbourIdx = front ? segIdx - 1 : segIdx + 1;
   if (neighbourIdx < 0 || neighbourIdx >= segments.length) return { ok: false, reason: "edge-of-day" };
   const neighbour = segments[neighbourIdx];
@@ -2496,13 +2523,16 @@ function growSegmentBoundary(day, segIdx, front, newIdx) {
     }
   } else if (front) {
     neighbour.endIdx = clampedIdx - 1;
+    neighbour.label = segmentLabel(neighbour.kind, points, neighbour.startIdx, neighbour.endIdx);
     seg.startIdx = clampedIdx;
     seg.candidates[0].pointIdx = clampedIdx;
   } else {
     neighbour.startIdx = clampedIdx + 1;
+    neighbour.label = segmentLabel(neighbour.kind, points, neighbour.startIdx, neighbour.endIdx);
     seg.endIdx = clampedIdx;
     seg.candidates[1].pointIdx = clampedIdx;
   }
+  seg.label = segmentLabel(seg.kind, points, seg.startIdx, seg.endIdx);
   return { ok: true };
 }
 
@@ -2530,7 +2560,7 @@ function confirmBoundaryMerge(day, segIdx, front, absorbedIdx, sameKindIdx) {
     };
     merged.candidates[0].pointIdx = merged.startIdx;
     merged.candidates[1].pointIdx = merged.endIdx;
-    merged.label = `Fishing ${day.points[merged.startIdx].timeNaive.slice(11, 16)}–${day.points[merged.endIdx].timeNaive.slice(11, 16)}`;
+    merged.label = segmentLabel(merged.kind, day.points, merged.startIdx, merged.endIdx);
     segments.splice(a, b - a + 1, merged);
     return merged;
   }
@@ -2554,6 +2584,7 @@ function confirmBoundaryMerge(day, segIdx, front, absorbedIdx, sameKindIdx) {
       seg.endIdx = neighbour.endIdx;
       seg.candidates[1].pointIdx = neighbour.endIdx;
     }
+    seg.label = segmentLabel(seg.kind, day.points, seg.startIdx, seg.endIdx);
     return null;
   }
   return { ok: "confirm", applyMerge, applyKeep };

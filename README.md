@@ -945,6 +945,39 @@ drawing saved Sessions as connected lines on the Location/Live maps
 renders it yet). Oliver's own call: Location/Live rendering waits
 until the Sync page itself is considered done.
 
+**Phase 6 fix — blank labels on newly-created Transiting segments**
+(real bug, reported with a screenshot after using Phase 6): converting
+two adjacent windows to Fishing, then using +/- to shrink one back
+away from the other, correctly created a new Transiting segment
+between them — but its own label was blank. Root cause:
+`newTransitingSegment` set `label: ""` and nothing ever filled it in
+afterward. Investigating turned up the same gap in two more places
+that had gone unnoticed: neither `shrinkSegmentBoundary` nor
+`growSegmentBoundary` updated a segment's own label after changing its
+boundaries (so a Fishing segment's label could ALSO go stale after an
+edit, just less visibly than a blank Transiting one), and
+`confirmBoundaryMerge`'s "keep separate" path left the surviving
+segment's label unrefreshed after it absorbed the deleted buffer.
+
+Fixed with one shared `segmentLabel(kind, points, startIdx, endIdx)`
+helper (`charts.js`) now called everywhere a segment's boundaries
+change, rather than each site formatting this by hand (or forgetting
+to) — `newTransitingSegment`, both branches of `shrinkSegmentBoundary`
+and `growSegmentBoundary` (the segment being edited AND whichever
+neighbour it just gave space to or took space from), and both
+`applyMerge`/`applyKeep` in `confirmBoundaryMerge`. `sync.js`'s
+`convertSegmentKind` also switched to the same shared helper instead
+of its own separate copy of the same formatting logic.
+
+**Verified**: re-ran the label-correctness check across 100 randomized
+edit sequences (50 steps each) built on the same fuzz-testing approach
+as the original algorithm, confirming no segment's label ever goes
+blank or stale after any sequence of edits. Then reproduced the exact
+reported scenario directly — two adjacent Fishing segments, shrinking
+one to create a new Transiting segment between them — and confirmed
+its label now reads correctly (e.g. "Transiting 13:19–13:20") instead
+of blank.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
