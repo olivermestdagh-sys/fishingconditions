@@ -802,6 +802,57 @@ real fishing segments (catching the bug above before it shipped), and
 confirmed the View icon ends in a fully consistent (not partially
 mixed) state either way. Zero JS errors.
 
+**Phase 4 — save/storage** (`schema-v2.sql`,
+`migration-marks-session-and-berley-fix.sql`, `user-backend.js`,
+`sync.js`): a Session is now a real, saveable thing — genuinely just a
+mark with `type = "Session"`, not a separate table or save path, per
+the original design brief's own call ("save those points as a new type
+called Session").
+
+- **A real, unrelated bug found and fixed along the way**: the marks
+  table never actually had `berley` or `notes` columns at all, even
+  though the client-side form has always collected both — every mark's
+  Berley and Notes fields were being silently dropped on save,
+  discovered only because Session points needed Berley to persist too.
+  Fixed in the same migration.
+- **Two new columns link a Session's pair**: `session_role` ('start' |
+  'end') and `session_group_id` (shared by one segment's own Start and
+  End row — what a future Location/Live map render will use to draw
+  the connecting line between them). `insertOrUpdateMark`,
+  `mergeMarkFields`, and `rowToMark` (`user-backend.js`) all extended
+  to carry all four new fields through create, update, and read.
+- **Bait/Rig/Rod/Berley are joined into a single string on save** — a
+  Session candidate supports genuine multiple values for these (see
+  Phase 3), but the marks schema only ever supports one value per
+  field; rather than a schema change affecting every mark on the site,
+  the values are comma-joined at save time (e.g. `"Pilchard, Squid"`)
+  — good enough for display, not meant to be parsed back apart.
+- **The existing "Import selected" button now saves both** — checked
+  marks candidates AND every Import-checked session candidate point,
+  in the same batch, through the exact same `saveMarksBatchToD1`
+  (`charts.js`) every mark import already used; genuinely one save
+  path, not two. After a successful save, saved session candidates are
+  un-checked (not removed — the tree still shows the whole trail for
+  context) so clicking Import again doesn't silently resave the same
+  points.
+
+**Verified**: the migration was checked against a simulated real
+pre-migration marks table (confirmed the new columns apply cleanly and
+an existing row is untouched); the extended insert was verified
+directly against real SQLite. End-to-end: uploaded the real trail
+file, isolated one real fishing segment, set a multi-select Bait value
+on its Start point, clicked Import, and confirmed via the actual
+mocked `/api/marks` POST calls that exactly 2 marks were sent, both
+`type: "Session"`, sharing the same `sessionGroupId`, with Bait
+correctly joined into `"Pilchard, Squid"` — and confirmed the saved
+candidates were correctly un-checked afterward. Zero JS errors.
+
+**Still not built**: promoting a raw trackpoint to a new candidate,
+linking a Catch mark into whichever segment its timestamp falls
+within, and — the last planned phase — actually drawing saved
+Sessions as connected lines on the Location/Live maps (the data now
+persists correctly, but nothing outside the Sync page renders it yet).
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
