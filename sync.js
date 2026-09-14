@@ -1141,8 +1141,8 @@ function buildTrackData(gpxText) {
           const candidates =
             seg.kind === "fishing"
               ? [
-                  { kind: "start", pointIdx: seg.startIdx, importChecked: true, viewChecked: true },
-                  { kind: "end", pointIdx: seg.endIdx, importChecked: true, viewChecked: true },
+                  { kind: "start", pointIdx: seg.startIdx, importChecked: true, viewChecked: true, baits: [], rigs: [], rods: [], berleys: [] },
+                  { kind: "end", pointIdx: seg.endIdx, importChecked: true, viewChecked: true, baits: [], rigs: [], rods: [], berleys: [] },
                 ]
               : [];
           return {
@@ -1340,6 +1340,192 @@ function candidateKey(trackIdx, dayIdx, segIdx, candIdx) {
   return `${trackIdx}.${dayIdx}.${segIdx}.${candIdx}`;
 }
 
+/**
+ * Every candidate in one day-group, in chronological order, regardless
+ * of which segment it belongs to — segments are already produced in
+ * time order (detectFishingSegments, charts.js) and each one's own
+ * [start, end] pair is naturally ordered too, so flattening in place is
+ * enough; no separate sort needed. This is what "carried forward"
+ * (Bait/Rig/Rod/Berley) is actually relative to — one real fishing
+ * trip's worth of gear choices, not the whole multi-day track.
+ */
+function flattenDayCandidates(day) {
+  const flat = [];
+  day.segments.forEach((seg, segIdx) => {
+    seg.candidates.forEach((cand, candIdx) => flat.push({ segIdx, candIdx, cand }));
+  });
+  return flat;
+}
+
+/**
+ * Applies a just-saved candidate's Bait/Rig/Rod/Berley to every
+ * chronologically LATER candidate in the same day that doesn't already
+ * have its own value for that field — matching the design brief's own
+ * "carried forward to every point after, unless changed at a later
+ * point" rule. Stops propagating a given field as soon as it reaches a
+ * candidate that already has a non-empty value there, since that value
+ * was set more recently (by definition — it's already there) and
+ * shouldn't be silently overwritten by going back and editing an
+ * earlier point.
+ */
+function propagateCarryForwardFields(day, fromSegIdx, fromCandIdx, savedCandidate) {
+  const flat = flattenDayCandidates(day);
+  const fromIndex = flat.findIndex((f) => f.segIdx === fromSegIdx && f.candIdx === fromCandIdx);
+  if (fromIndex === -1) return;
+  for (const field of ["baits", "rigs", "rods", "berleys"]) {
+    const value = savedCandidate[field];
+    if (!value || value.length === 0) continue;
+    for (let i = fromIndex + 1; i < flat.length; i++) {
+      const target = flat[i].cand;
+      if (target[field] && target[field].length > 0) break; // already explicitly set further along — don't overwrite it
+      target[field] = [...value];
+    }
+  }
+}
+
+/** Same idea as markListOptionsHtml (charts.js), but for a <select
+ * multiple> — every known value for this list, marking any that are in
+ * `currentValues` (an array) as selected, rather than a single value. */
+function multiSelectOptionsHtml(markLists, listLabel, currentValues) {
+  const values = markLists.filter((r) => r.field === listLabel).map((r) => r.value);
+  for (const v of currentValues || []) {
+    if (!values.includes(v)) values.push(v);
+  }
+  return values.map((v) => `<option value="${escapeHtml(v)}"${(currentValues || []).includes(v) ? " selected" : ""}>${escapeHtml(v)}</option>`).join("");
+}
+
+/**
+ * The edit popup for a track candidate (Start/Stop fishing point) —
+ * genuinely different fields from a mark's own popup: Kind (Start/Stop,
+ * overridable — see the design brief's own wording), multi-select
+ * Bait/Rig/Rod/Berley (carried forward — see propagateCarryForwardFields
+ * above; marks only ever support ONE value per field, but one fishing
+ * stop can genuinely involve trying several), and Weather/Tide/
+ * Barometer/Temperature/Water Temp/Wind — auto-filled from the same
+ * historical lookup a Catch mark already uses (see openTrackCandidatePopup),
+ * shown editable here only so an auto-filled value can be corrected by
+ * hand if it's ever wrong, not because it's meant to be set manually as
+ * a matter of course.
+ */
+function buildTrackCandidatePopupHtml(candidate, point, markLists) {
+  const weatherFieldsHtml = [
+    { key: "weatherCondition", label: "Weather", list: "Weather Condition" },
+    { key: "tideCondition", label: "Tide", list: "Tide Condition" },
+  ]
+    .map(
+      (f) => `<label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">${f.label}
+        <select name="${f.key}" style="${MARK_POPUP_INPUT_STYLE}">${markListOptionsHtml(markLists, f.list, candidate[f.key])}</select>
+      </label>`
+    )
+    .join("");
+  const numericFieldsHtml = [
+    { key: "barometer", label: "Barometer (hPa)", step: "0.1" },
+    { key: "temperature", label: "Air Temp (°C)", step: "0.1" },
+    { key: "waterTemperature", label: "Water Temp (°C)", step: "0.1" },
+    { key: "windSpeed", label: "Wind Speed (km/h)", step: "1" },
+  ]
+    .map(
+      (f) => `<label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">${f.label}
+        <input type="number" name="${f.key}" step="${f.step}" value="${candidate[f.key] != null ? candidate[f.key] : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
+      </label>`
+    )
+    .join("");
+
+  return `
+    <div data-candidate-popup style="min-width:230px;max-width:270px;">
+      <form data-candidate-form onsubmit="return false;">
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:0 0 2px;">Point time
+          <input type="text" readonly value="${escapeHtml(point.timeNaive)}" style="${MARK_POPUP_INPUT_STYLE}background:var(--grey-100);color:var(--grey-500);" />
+        </label>
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">This point is
+          <select name="kind" style="${MARK_POPUP_INPUT_STYLE}">
+            <option value="start"${candidate.kind === "start" ? " selected" : ""}>Start fishing</option>
+            <option value="end"${candidate.kind === "end" ? " selected" : ""}>Stop fishing</option>
+          </select>
+        </label>
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Bait (carries forward until changed)
+          <select name="baits" multiple size="3" style="${MARK_POPUP_INPUT_STYLE}">${multiSelectOptionsHtml(markLists, "Bait", candidate.baits)}</select>
+        </label>
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Rig (carries forward)
+          <select name="rigs" multiple size="3" style="${MARK_POPUP_INPUT_STYLE}">${multiSelectOptionsHtml(markLists, "Rig", candidate.rigs)}</select>
+        </label>
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Rod (carries forward)
+          <select name="rods" multiple size="3" style="${MARK_POPUP_INPUT_STYLE}">${multiSelectOptionsHtml(markLists, "Rod", candidate.rods)}</select>
+        </label>
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Berley (carries forward)
+          <select name="berleys" multiple size="3" style="${MARK_POPUP_INPUT_STYLE}">${multiSelectOptionsHtml(markLists, "Berley", candidate.berleys)}</select>
+        </label>
+        <div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--grey-200);">
+          <div class="footnote" style="margin:0 0 4px;">Auto-filled — correct by hand if needed</div>
+          ${weatherFieldsHtml}
+          ${numericFieldsHtml}
+        </div>
+      </form>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button type="button" class="btn-primary" data-candidate-save style="padding:4px 10px;font-size:0.85rem;">Save</button>
+        <button type="button" class="btn-secondary" data-candidate-cancel style="padding:4px 10px;font-size:0.85rem;">Cancel</button>
+      </div>
+      <div data-candidate-save-status style="margin-top:6px;font-size:0.8rem;"></div>
+    </div>
+  `;
+}
+
+/**
+ * Opens a track candidate's edit popup on the shared reviewMap, at its
+ * own point's coordinates. Fires the same historical-lookup
+ * (lookupHistoricalMarkConditions, charts.js) a Catch mark already gets,
+ * but only the FIRST time this exact candidate is opened (its own
+ * `historicalLookupDone` flag) — re-opening an already-looked-up
+ * candidate shouldn't spend another billed WillyWeather call.
+ */
+async function openTrackCandidatePopup(trackIdx, dayIdx, segIdx, candIdx) {
+  const day = trackData[trackIdx].dayGroups[dayIdx];
+  const seg = day.segments[segIdx];
+  const candidate = seg.candidates[candIdx];
+  const point = day.points[candidate.pointIdx];
+
+  if (!candidate.historicalLookupDone) {
+    candidate.historicalLookupDone = true; // set before the await — never fire twice even if a user double-opens while the first lookup is still in flight
+    try {
+      const result = await lookupHistoricalMarkConditions(point.lat, point.lon, point.timeNaive);
+      Object.assign(candidate, result);
+    } catch (err) {
+      console.error("Historical lookup failed for a track candidate:", err);
+    }
+  }
+
+  if (!reviewMap) renderReviewMap();
+  const popup = L.popup({ maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" })
+    .setLatLng([point.lat, point.lon])
+    .setContent(buildTrackCandidatePopupHtml(candidate, point, markLists))
+    .openOn(reviewMap);
+
+  const popupEl = popup.getElement();
+  popupEl.querySelector("[data-candidate-save]").addEventListener("click", () => {
+    const form = popupEl.querySelector("[data-candidate-form]");
+    const val = (name) => form.querySelector(`[name="${name}"]`).value;
+    const multiVal = (name) => Array.from(form.querySelectorAll(`[name="${name}"] option:checked`)).map((o) => o.value);
+
+    candidate.kind = val("kind");
+    candidate.baits = multiVal("baits");
+    candidate.rigs = multiVal("rigs");
+    candidate.rods = multiVal("rods");
+    candidate.berleys = multiVal("berleys");
+    for (const key of ["weatherCondition", "tideCondition"]) {
+      candidate[key] = val(key) || undefined;
+    }
+    for (const key of ["barometer", "temperature", "waterTemperature", "windSpeed"]) {
+      const raw = val(key);
+      candidate[key] = raw === "" ? undefined : Number(raw);
+    }
+
+    propagateCarryForwardFields(day, segIdx, candIdx, candidate);
+    reviewMap.closePopup(popup);
+    renderTracksTree();
+  });
+  popupEl.querySelector("[data-candidate-cancel]").addEventListener("click", () => reviewMap.closePopup(popup));
+}
+
 /** Cascades a new checked value down to every descendant of a tree node —
  * ticking/unticking a Track, Day, or Segment row applies the same value
  * to everything nested under it, rather than leaving children stranded
@@ -1461,9 +1647,11 @@ function renderTracksTree() {
   container.querySelectorAll('[data-role="select-candidate"]').forEach((el) => {
     el.addEventListener("click", (e) => {
       const row = e.currentTarget.closest(".tracks-tree-node");
-      selectedCandidateKey = candidateKey(row.dataset.track, row.dataset.day, row.dataset.seg, row.dataset.cand);
+      const { track, day, seg, cand } = row.dataset;
+      selectedCandidateKey = candidateKey(track, day, seg, cand);
       renderTracksTree();
       renderReviewMap();
+      openTrackCandidatePopup(Number(track), Number(day), Number(seg), Number(cand));
     });
   });
 
@@ -1549,6 +1737,7 @@ function renderReviewMap() {
             selectedCandidateKey = key;
             renderTracksTree();
             renderReviewMap();
+            openTrackCandidatePopup(trackIdx, dayIdx, segIdx, candIdx);
           });
           allShownLatLngs.push([point.lat, point.lon]);
         });

@@ -639,16 +639,48 @@ text, and confirmed the tree starts with zero day/segment/candidate
 rows in the DOM and correctly reveals one level at a time as each
 parent gets expanded — zero JS errors throughout.
 
-**Still not done, unchanged from before**: point-field editing for
-track candidates (Start/Stop/Bait/Rig/Rod/Berley/weather-tide
-auto-fill), promoting a raw trackpoint to a candidate, catch-linking,
-and any actual save/storage — still no Session data model or backend
-endpoint at all. Also still not done: marks candidates have no map
-markers of their own (they're accessible via the list + popup-at-
-their-own-coordinates, not a permanent pin) — worth flagging in case
-that's wanted later, since a candidate list can run into the hundreds
-and a marker per one would need its own clustering story, not
-something to add lightly.
+**Phase 3 — point editing** (`sync.js`): clicking a Start/Stop candidate
+(tree row or map marker) now opens a real edit popup, on the same
+shared map, at that point's own coordinates:
+- **Kind** (Start fishing / Stop fishing) is editable — the design
+  brief's own "able to override the auto-detection" — a plain label
+  change, doesn't move the point or restructure the segment.
+- **Bait / Rig / Rod / Berley are genuine multi-selects** — a real
+  departure from how a mark's own single-value bait/rig/rod/berley
+  works (marks only ever support one each), since one fishing stop can
+  plausibly involve trying several. Carries forward: saving a value
+  propagates it to every chronologically LATER candidate in the SAME
+  day (across all its segments — flattened via `flattenDayCandidates`)
+  that doesn't already have its own value there, stopping as soon as it
+  reaches one that does (so going back and editing an earlier point
+  never silently overwrites a more-recent explicit choice further
+  along). Confirmed directly: setting Bait on a segment's Start point
+  correctly appeared on its own End point afterward.
+- **Weather/Tide/Barometer/Temperature/Water Temp/Wind Speed are
+  auto-filled**, not carried forward — the exact same
+  `lookupHistoricalMarkConditions` a Catch mark already uses, fired
+  once per candidate (an own `historicalLookupDone` flag stops a
+  re-open from spending a second billed WillyWeather call), shown
+  editable only so a wrong auto-fill can be hand-corrected, not as the
+  normal way of setting it.
+
+**Verified**: real browser test (historical lookup stubbed — it hits
+real external APIs, not what's under test here) confirmed opening a
+candidate correctly auto-fills its weather fields, confirmed setting
+Bait on a Start point and saving correctly carries it forward onto
+that segment's own End point, and confirmed the Kind dropdown saves —
+zero JS errors.
+
+**Still not done**: promoting a raw trackpoint to a new candidate,
+linking a Catch mark into whichever segment its timestamp falls
+within, and any actual save/storage — still no Session data model or
+backend endpoint at all; everything built so far only exists in this
+page's own in-memory state until the browser tab closes. Also still
+not done: marks candidates have no map markers of their own (they're
+accessible via the list + popup-at-their-own-coordinates, not a
+permanent pin) — worth flagging in case that's wanted later, since a
+candidate list can run into the hundreds and a marker per one would
+need its own clustering story, not something to add lightly.
 
 ### Clustering when marks overlap (Leaflet.markercluster)
 
