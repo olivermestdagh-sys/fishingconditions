@@ -1529,7 +1529,7 @@ async function handleFileInputChange(e) {
       selectedCandidateKey = null;
       renderTracksTree();
     }
-    if (rawWaypoints.length > 0 || trackData.length > 0) renderReviewMap();
+    if (rawWaypoints.length > 0 || trackData.length > 0) renderReviewMap({ fitBounds: true });
 
     const totalDays = trackData.reduce((sum, t) => sum + t.dayGroups.length, 0);
     const trackStatusSuffix = trackData.length > 0 ? `${totalDays} track day${totalDays === 1 ? "" : "s"} found` : "";
@@ -2065,14 +2065,35 @@ function onStepCandidateClick(trackIdx, dayIdx, segIdx, candIdx, direction) {
   // to go) — nothing to do, the click just has no effect.
 }
 
-function renderReviewMap() {
+/**
+ * The ONE shared map for this whole review page — track segments (as
+ * polylines) and candidate points, both drawn here; marks candidates
+ * don't get their own permanent markers (there can be a couple hundred
+ * of them, and the list is their real home — see openCandidatePopup),
+ * but a mark's edit popup still opens ON this same map, at its own
+ * coordinates, when a candidate row is clicked.
+ *
+ * REAL BUG, FOUND AND FIXED: this used to unconditionally re-fit the
+ * view to everything currently visible on every single redraw — which
+ * meant converting a segment, or the very first +/- click, silently
+ * undid whatever zoom zoomMapToDay/zoomMapToSegment had JUST set,
+ * snapping back out to the whole day. Now only fits when explicitly
+ * asked (`fitBounds: true` — the initial file load) or when this map
+ * is being created for the very first time; every other redraw (a
+ * checkbox change, a conversion, a +/- edit, opening a popup) redraws
+ * the CONTENT only and leaves the camera exactly where the person left
+ * it.
+ */
+function renderReviewMap({ fitBounds = false } = {}) {
   const mapEl = document.getElementById("reviewMap");
   if (!mapEl) return;
 
+  let isNewMap = false;
   if (!reviewMap) {
     reviewMap = L.map("reviewMap");
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors" }).addTo(reviewMap);
     reviewMapLayer = L.layerGroup().addTo(reviewMap);
+    isNewMap = true;
   }
 
   reviewMapLayer.clearLayers();
@@ -2130,10 +2151,12 @@ function renderReviewMap() {
     });
   });
 
-  if (allShownLatLngs.length > 0) {
-    reviewMap.fitBounds(allShownLatLngs, { padding: [20, 20] });
-  } else {
-    reviewMap.setView([-38.1, 145.1], 9); // Port Phillip/Western Port default — nothing to show yet
+  if (fitBounds || isNewMap) {
+    if (allShownLatLngs.length > 0) {
+      reviewMap.fitBounds(allShownLatLngs, { padding: [20, 20] });
+    } else {
+      reviewMap.setView([-38.1, 145.1], 9); // Port Phillip/Western Port default — nothing to show yet
+    }
   }
 }
 
