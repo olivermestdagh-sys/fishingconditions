@@ -2029,7 +2029,7 @@ function convertSegmentKind(trackIdx, dayIdx, segIdx) {
     seg.importChecked = false;
     seg.candidates = [];
   }
-  seg.label = `${seg.kind === "fishing" ? "Fishing" : "Transiting"} ${day.points[seg.startIdx].timeNaive.slice(11, 16)}–${day.points[seg.endIdx].timeNaive.slice(11, 16)}`;
+  seg.label = segmentLabel(seg.kind, day.points, seg.startIdx, seg.endIdx);
   renderTracksTree();
   renderReviewMap();
 }
