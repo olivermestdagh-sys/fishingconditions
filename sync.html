@@ -16,12 +16,15 @@
   .sync-side-group-title.collapsed .caret { transform: rotate(-90deg); }
   .candidate-row-compact { display: flex; align-items: center; gap: 8px; padding: 4px 4px; font-size: 0.85rem; border-radius: 6px; cursor: pointer; }
   .candidate-row-compact:hover, .candidate-row-compact-selected { background: var(--blue-100, #eaf2fb); }
-  .tracks-tree-node { display: flex; align-items: center; gap: 6px; padding: 3px 2px; font-size: 0.82rem; border-radius: 6px; }
+  .tracks-tree-node { display: flex; align-items: center; gap: 4px; padding: 3px 2px; font-size: 0.82rem; border-radius: 6px; }
   .tracks-tree-node[data-level="track"], .tracks-tree-node[data-level="day"] { cursor: pointer; }
   .tracks-tree-node[data-level="track"] { font-weight: 600; }
-  .tracks-tree-node .caret { display: inline-block; width: 0.9em; font-size: 0.75em; transition: transform 0.1s; flex-shrink: 0; }
-  .tracks-tree-node .caret.collapsed { transform: rotate(-90deg); }
-  .tracks-tree-node[data-level="candidate"] span[data-role="select-candidate"] { cursor: pointer; text-decoration: underline dotted; }
+  .tree-checkbox-col { width: 32px; flex-shrink: 0; text-align: center; }
+  .tree-node-label { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+  .tree-node-label .caret { display: inline-block; width: 0.9em; font-size: 0.75em; transition: transform 0.1s; flex-shrink: 0; }
+  .tree-node-label .caret.collapsed { transform: rotate(-90deg); }
+  .tracks-tree-header { display: flex; align-items: center; gap: 4px; font-size: 0.72rem; font-weight: 600; color: var(--grey-500); text-transform: uppercase; letter-spacing: 0.02em; padding: 0 2px 4px; border-bottom: 1px solid var(--grey-200); margin-bottom: 4px; }
+  .tracks-tree-node[data-level="candidate"] .tree-node-label span[data-role="select-candidate"] { cursor: pointer; text-decoration: underline dotted; }
   .tracks-tree-node-selected { background: var(--blue-100, #eaf2fb); }
 </style>
 </head>
@@ -97,6 +100,11 @@
             <span class="caret">▾</span><span>Trail data</span>
           </div>
           <div id="tracksGroupBody">
+            <div class="tracks-tree-header">
+              <span class="tree-checkbox-col">Import</span>
+              <span class="tree-checkbox-col">View</span>
+              <span></span>
+            </div>
             <div id="tracksTree"></div>
           </div>
         </div>
