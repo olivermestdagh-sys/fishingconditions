@@ -682,6 +682,46 @@ permanent pin) — worth flagging in case that's wanted later, since a
 candidate list can run into the hundreds and a marker per one would
 need its own clustering story, not something to add lightly.
 
+**Phase 3 fixes — real timezone conversion, tree layout** (real
+feedback after using Phase 3):
+
+- **Trail timestamps are now converted to the browser's local
+  timezone, not left as raw UTC.** A genuine, deliberate exception to
+  this site's usual naive-time convention (digits already ARE local,
+  no conversion — everywhere else on this site, including GPX
+  waypoint marks) — confirmed directly that a Lowrance trail's own
+  `<time>` is real UTC, hours off from local when read the same way.
+  Converted once, in `parseGpxTracks` (`charts.js`), using the
+  browser's own local `Date` getters rather than the UTC ones — `timeMs`
+  itself stays a genuine UTC epoch (used only for relative gap/duration
+  math, unaffected by timezone), only the derived `timeNaive` (what
+  everything else — day-grouping, labels, the point-time display —
+  actually uses) reflects local time. `deriveTrackDayGroups`'s calendar-
+  day split benefits automatically, since it already grouped by
+  whatever `timeNaive`'s own date digits said. Verified with an exact
+  cross-check against a real point: raw UTC `00:57:51` correctly became
+  `10:57:51` — exactly the +10h AEST offset for a September date (before
+  Australian daylight saving starts).
+- **Checkbox columns are now genuinely aligned, and the collapse caret
+  moved to their right** — previously the caret came first and the
+  checkboxes were just inline flex items, so both drifted with each
+  tree depth's own indentation rather than forming a clean column.
+  Each row's Import/View checkboxes now sit in their own fixed-width
+  column (`.tree-checkbox-col`), with the caret and label in a
+  separately-indented span after them — confirmed directly: a track
+  row's own Import checkbox and a day row's own Import checkbox now
+  render at the exact same x-position, regardless of the label's
+  indentation.
+- **Added a header row** ("Import" / "View") above the tree, in the
+  same fixed-width columns, so it's clear what each tick actually does
+  — this was in the original mockup but had been dropped along the way.
+
+**Verified**: real browser test, with the browser's own timezone
+forced to `Australia/Melbourne` — confirmed the exact +10h conversion
+above, confirmed the header row reads "Import"/"View", and confirmed
+a track row's and a day row's Import checkboxes align to the same
+pixel x-position. Zero JS errors.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough

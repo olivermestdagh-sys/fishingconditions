@@ -1156,7 +1156,15 @@ function buildTrackData(gpxText) {
             candidates,
           };
         });
-        const dayLabel = new Date(points[0].timeMs).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+        // Derived directly from the naive string's own digits (now the
+        // browser's local calendar date — see parseGpxTracks's own
+        // comment, charts.js) rather than re-parsing timeMs as a real
+        // Date — timeMs is still a genuine UTC epoch, and formatting
+        // THAT with any timezone other than "UTC" would silently
+        // re-shift it a second time; simplest and correct is to just
+        // read the digits already sitting in timeNaive.
+        const [y, m, d] = points[0].timeNaive.slice(0, 10).split("-");
+        const dayLabel = new Date(Number(y), Number(m) - 1, Number(d)).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
         return { label: dayLabel, points, segments, importChecked: true, viewChecked: true, expanded: false };
       });
       return { name: track.name, dayGroups, importChecked: true, viewChecked: true, expanded: false };
@@ -1569,39 +1577,35 @@ function renderTracksTree() {
   trackData.forEach((track, trackIdx) => {
     const trackCaret = `<span class="caret${track.expanded ? "" : " collapsed"}">▾</span>`;
     html += `<div class="tracks-tree-node" data-level="track" data-track="${trackIdx}" data-role="toggle-expand">
-      ${trackCaret}
-      <input type="checkbox" data-role="import" data-track="${trackIdx}" />
-      <input type="checkbox" data-role="view" data-track="${trackIdx}" />
-      <span>${escapeHtml(track.name)}</span>
+      <span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" /></span>
+      <span class="tree-checkbox-col"><input type="checkbox" data-role="view" data-track="${trackIdx}" /></span>
+      <span class="tree-node-label">${trackCaret}<span>${escapeHtml(track.name)}</span></span>
     </div>`;
     if (!track.expanded) return;
     track.dayGroups.forEach((day, dayIdx) => {
       const dayCaret = `<span class="caret${day.expanded ? "" : " collapsed"}">▾</span>`;
-      html += `<div class="tracks-tree-node" data-level="day" style="padding-left:18px;" data-track="${trackIdx}" data-day="${dayIdx}" data-role="toggle-expand">
-        ${dayCaret}
-        <input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" />
-        <input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" />
-        <span>${escapeHtml(day.label)}</span>
+      html += `<div class="tracks-tree-node" data-level="day" data-track="${trackIdx}" data-day="${dayIdx}" data-role="toggle-expand">
+        <span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" /></span>
+        <span class="tree-checkbox-col"><input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" /></span>
+        <span class="tree-node-label" style="padding-left:14px;">${dayCaret}<span>${escapeHtml(day.label)}</span></span>
       </div>`;
       if (!day.expanded) return;
       day.segments.forEach((seg, segIdx) => {
         const segCaret = seg.candidates.length > 0 ? `<span class="caret${seg.expanded ? "" : " collapsed"}">▾</span>` : `<span class="caret" style="visibility:hidden;">▾</span>`;
-        html += `<div class="tracks-tree-node" data-level="segment" style="padding-left:36px;" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-role="toggle-expand">
-          ${segCaret}
-          <input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" />
-          <input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" />
-          <span>${escapeHtml(seg.label)}</span>
+        html += `<div class="tracks-tree-node" data-level="segment" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-role="toggle-expand">
+          <span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" /></span>
+          <span class="tree-checkbox-col"><input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" /></span>
+          <span class="tree-node-label" style="padding-left:28px;">${segCaret}<span>${escapeHtml(seg.label)}</span></span>
         </div>`;
         if (!seg.expanded) return;
         seg.candidates.forEach((cand, candIdx) => {
           const key = candidateKey(trackIdx, dayIdx, segIdx, candIdx);
           const isSelected = key === selectedCandidateKey;
           const candLabel = `${cand.kind === "start" ? "Start" : "End"} ${day.points[cand.pointIdx].timeNaive.slice(11, 16)}`;
-          html += `<div class="tracks-tree-node${isSelected ? " tracks-tree-node-selected" : ""}" data-level="candidate" style="padding-left:54px;" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">
-            <span class="caret" style="visibility:hidden;">▾</span>
-            <input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}" />
-            <input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}" />
-            <span data-role="select-candidate">${candLabel}</span>
+          html += `<div class="tracks-tree-node${isSelected ? " tracks-tree-node-selected" : ""}" data-level="candidate" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">
+            <span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}" /></span>
+            <span class="tree-checkbox-col"><input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}" /></span>
+            <span class="tree-node-label" style="padding-left:42px;"><span class="caret" style="visibility:hidden;">▾</span><span data-role="select-candidate">${candLabel}</span></span>
           </div>`;
         });
       });

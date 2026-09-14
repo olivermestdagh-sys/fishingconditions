@@ -2187,7 +2187,21 @@ function parseGpxTracks(gpxText) {
         if (!timeText || timeText.startsWith("1970-01-01")) continue;
         const timeMs = Date.parse(timeText);
         if (Number.isNaN(timeMs)) continue;
-        points.push({ lat, lon, timeMs, timeNaive: timeText.replace("T", " ").replace("Z", "") });
+        // Unlike this site's usual "naive" convention (digits already ARE
+        // local wall-clock, no conversion — see the top-of-file naive-time
+        // note), a Lowrance trail's own <time> is genuine UTC — confirmed
+        // directly against real known local fishing times, which were
+        // hours off if read the same way GPX waypoint marks already are.
+        // Converted here, once, to the browser's OWN local timezone —
+        // everything downstream (day-grouping by calendar day, gap
+        // detection, every displayed label) then works consistently off
+        // this correctly-localized naive string. timeMs itself stays a
+        // real UTC epoch (used only for relative gap/duration math, which
+        // is unaffected by timezone either way).
+        const d = new Date(timeMs);
+        const pad = (n) => String(n).padStart(2, "0");
+        const timeNaive = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        points.push({ lat, lon, timeMs, timeNaive });
       }
       points.sort((a, b) => a.timeMs - b.timeMs);
       tracks.push({ name, points });
