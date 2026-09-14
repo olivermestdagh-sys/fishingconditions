@@ -1367,6 +1367,7 @@ function buildTrackData(gpxText) {
             importChecked: seg.kind === "fishing",
             viewChecked: true,
             expanded: false, // segments start collapsed too — a day with several stops shouldn't dump every one of their Start/End rows straight into view
+            hue: seg.kind === "fishing" ? randomSegmentHue() : undefined,
             candidates,
           };
         });
@@ -1845,7 +1846,8 @@ function renderTracksTree() {
         // rather than offering a checkbox that can never do anything.
         const segImportCol = seg.kind === "transiting" ? `<span class="tree-checkbox-col"></span>` : `<span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" /></span>`;
         const convertTitle = seg.kind === "fishing" ? "Convert to Transiting" : "Convert to Fishing";
-        html += `<div class="tracks-tree-node" data-level="segment" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}">
+        const segRowStyle = seg.kind === "fishing" ? ` style="background:${segmentBackgroundTint(seg)};"` : "";
+        html += `<div class="tracks-tree-node" data-level="segment" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}"${segRowStyle}>
           ${segImportCol}
           <span class="tree-checkbox-col"><input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" /></span>
           <span class="tree-node-label" style="padding-left:28px;">${segCaret}<span data-role="zoom-highlight-segment" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}">${escapeHtml(seg.label)}</span></span>
@@ -1858,14 +1860,26 @@ function renderTracksTree() {
           const key = candidateKey(trackIdx, dayIdx, segIdx, candIdx);
           const isSelected = key === selectedCandidateKey;
           const candLabel = `${cand.kind === "start" ? "Start" : "End"} ${day.points[cand.pointIdx].timeNaive.slice(11, 16)}`;
+          // Only shown when the move would actually succeed right now
+          // (canStepCandidateTime, charts.js) — a real, reported bug:
+          // showing a +/- that always failed, then quietly no-op'ing the
+          // click, still left the tree looking like it had "reset" with
+          // no obvious cause. A blank space in its place keeps the two
+          // columns aligned rather than the row visibly shifting.
+          const minusBtn = canStepCandidateTime(day, segIdx, candIdx, -1)
+            ? `<span class="candidate-step-btn" data-role="step-candidate" data-dir="-1" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">−</span>`
+            : `<span class="candidate-step-btn" style="visibility:hidden;">−</span>`;
+          const plusBtn = canStepCandidateTime(day, segIdx, candIdx, 1)
+            ? `<span class="candidate-step-btn" data-role="step-candidate" data-dir="1" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">+</span>`
+            : `<span class="candidate-step-btn" style="visibility:hidden;">+</span>`;
           html += `<div class="tracks-tree-node${isSelected ? " tracks-tree-node-selected" : ""}" data-level="candidate" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">
             <span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}" /></span>
             <span class="tree-checkbox-col"><input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}" /></span>
             <span class="tree-node-label" style="padding-left:42px;">
               <span class="caret" style="visibility:hidden;">▾</span>
-              <span class="candidate-step-btn" data-role="step-candidate" data-dir="-1" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">−</span>
+              ${minusBtn}
               <span data-role="select-candidate" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">${candLabel}</span>
-              <span class="candidate-step-btn" data-role="step-candidate" data-dir="1" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">+</span>
+              ${plusBtn}
             </span>
           </div>`;
         });
@@ -1977,7 +1991,21 @@ function onTreeCheckboxChange(e) {
   renderReviewMap();
 }
 
-const SEGMENT_COLORS = { fishing: "#d97706", transiting: "#6b7280" }; // amber for likely-fishing stretches, grey for travel — deliberately distinct from any mark colour on the shared map, since this is a different kind of thing being shown
+const SEGMENT_COLORS = { transiting: "#6b7280" }; // grey for travel; each
+                                   // individual FISHING segment gets its
+                                   // own random colour instead (seg.hue,
+                                   // see randomSegmentHue below) — Oliver's
+                                   // own call, so distinct fishing stops
+                                   // are visually distinguishable from each
+                                   // other on the map, not just from
+                                   // transiting stretches.
+
+function segmentLineColor(seg) {
+  return seg.kind === "fishing" ? `hsl(${seg.hue}, 70%, 42%)` : SEGMENT_COLORS.transiting;
+}
+function segmentBackgroundTint(seg) {
+  return seg.kind === "fishing" ? `hsl(${seg.hue}, 70%, 94%)` : "";
+}
 
 /** Fits the map to every point under one day — clicking a day's own
  * label, per Oliver's own call, not its caret (which only expands/
@@ -2020,6 +2048,7 @@ function convertSegmentKind(trackIdx, dayIdx, segIdx) {
     seg.kind = "fishing";
     seg.importChecked = true;
     seg.expanded = true;
+    seg.hue = randomSegmentHue();
     seg.candidates = [
       { kind: "start", pointIdx: seg.startIdx, importChecked: true, viewChecked: true, baits: [], rigs: [], rods: [], berleys: [] },
       { kind: "end", pointIdx: seg.endIdx, importChecked: true, viewChecked: true, baits: [], rigs: [], rods: [], berleys: [] },
@@ -2027,6 +2056,7 @@ function convertSegmentKind(trackIdx, dayIdx, segIdx) {
   } else {
     seg.kind = "transiting";
     seg.importChecked = false;
+    seg.hue = undefined;
     seg.candidates = [];
   }
   seg.label = segmentLabel(seg.kind, day.points, seg.startIdx, seg.endIdx);
@@ -2108,7 +2138,7 @@ function renderReviewMap({ fitBounds = false } = {}) {
         if (latLngs.length >= 2) {
           const isHighlighted = `${trackIdx}.${dayIdx}.${segIdx}` === highlightedSegmentKey;
           const polyline = L.polyline(latLngs, {
-            color: SEGMENT_COLORS[seg.kind],
+            color: segmentLineColor(seg),
             weight: isHighlighted ? 7 : 3,
             opacity: isHighlighted ? 1 : 0.8,
           }).addTo(reviewMapLayer);

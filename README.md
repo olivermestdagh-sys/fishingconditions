@@ -1004,6 +1004,41 @@ confirmed the zoom level stayed identical; then zoomed into a
 zoom level and the map's centre point stayed exactly the same
 afterward. Zero JS errors.
 
+**Phase 6 fix — hide +/- at a boundary, distinct colours per fishing
+segment** (real feedback again):
+
+- **A +/- button no longer renders at all when that move would be
+  blocked** — `canStepCandidateTime` (`charts.js`) mirrors every one of
+  `stepCandidateTime`'s own blocking checks (own paired candidate,
+  already at the day's own edge, or — for a growing move — no segment
+  at all on that side) without mutating anything, purely to decide
+  whether to show the button in the first place. Oliver's own report:
+  clicking a +/- that always failed, even though the failure itself
+  was handled quietly, still somehow left the tree looking reset with
+  no obvious cause — rather than chase that down, this sidesteps it
+  entirely by never offering a click that couldn't do anything. A
+  hidden (not removed) placeholder keeps both columns aligned.
+- **Every fishing segment now gets its own random colour** — a fresh
+  hue assigned once at creation (`randomSegmentHue`, `charts.js`,
+  called from `buildTrackData`'s initial detection, a Transiting→
+  Fishing conversion, and a boundary-edit merge) and kept stable
+  afterward, rather than re-rolled on every redraw. Used both for that
+  segment's own map line (`segmentLineColor`) and a matching light
+  background tint on its own row in the tree (`segmentBackgroundTint`,
+  applied via `segmentLabel`'s sibling helpers, `sync.js`) — so a
+  fishing segment's line and its list entry are visually tied
+  together, and distinct sessions are easy to tell apart at a glance.
+  Transiting segments stay the fixed grey either way.
+
+**Verified**: real browser test against the actual trail file —
+confirmed 93 real fishing segments received 80 distinct random hues
+(not one shared colour), confirmed the map actually draws that many
+distinct line colours, confirmed a fishing segment's own row picks up
+a matching background tint, and confirmed directly that a candidate
+already sitting at the very edge of its day's own points renders its
+blocked-direction button as non-clickable rather than present-but-
+broken. Zero JS errors.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
