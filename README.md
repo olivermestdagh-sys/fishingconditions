@@ -722,6 +722,47 @@ above, confirmed the header row reads "Import"/"View", and confirmed
 a track row's and a day row's Import checkboxes align to the same
 pixel x-position. Zero JS errors.
 
+**Phase 3 fixes, round 2** (real feedback again):
+
+- **Header text replaced with icons** — "Import"/"View" didn't fit the
+  narrow side column comfortably. Both the tree header and marks list
+  now use small inline SVGs instead (a floppy disk for Import, an eye
+  for View — the same visual language other software already uses for
+  these), letting `.tree-checkbox-col` shrink from 32px to 24px per
+  column for a noticeably tighter fit.
+- **The Marks list now has its own header too** — just the floppy
+  disk icon, above its own (now aligned) checkbox column, matching the
+  Tracks tree's own header styling rather than being the one list left
+  unlabelled.
+- **Transiting segments no longer show an Import checkbox at all** —
+  they have no candidates and never will (nothing to import), so
+  offering a checkbox that could never do anything was pointless
+  clutter. Their View checkbox stays, since seeing the travel line
+  itself is still useful. This surfaced a real logic gap while fixing
+  it: a Day's own aggregate Import tri-state was counting every
+  transiting segment as an "unchecked" contributor, meaning a day could
+  never show as fully checked even when every one of its actual fishing
+  segments was — fixed by excluding transiting segments from that
+  specific aggregate entirely (`summariseChecked`), confirmed directly:
+  a day with both kinds now correctly shows fully checked once its
+  fishing segments are, unaffected by however many transiting ones sit
+  alongside them.
+- **`DWELL_RADIUS_METERS` dropped from 100 to 5** — Oliver's own call,
+  to start tuning the dwell-detection threshold much tighter after
+  seeing real segments at 100m look too generous. Confirmed the trail
+  still produces real fishing segments at this radius (75 across the
+  whole 53-day trail, down from before, as expected for a much
+  stricter test) — not zero, so the algorithm still functions
+  meaningfully at this setting, just more conservatively.
+
+**Verified**: real browser test — confirmed the headers are icon-only
+(no leftover text), confirmed a transiting segment has zero import
+checkboxes but still has its view checkbox, confirmed a fishing
+segment still has its import checkbox, confirmed a day containing both
+kinds shows its Import checkbox as genuinely fully checked (not
+indeterminate) once its fishing segments are, and confirmed the new
+radius value is live. Zero JS errors.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough

@@ -2221,7 +2221,10 @@ const TRACK_DAY_GAP_MINUTES = 45; // a gap longer than this splits into a
                                    // new day-group even within the same
                                    // calendar day (two separate outings
                                    // on one date shouldn't merge into one)
-const DWELL_RADIUS_METERS = 100; // must stay within this radius of a
+const DWELL_RADIUS_METERS = 5; // was 100 — Oliver's own call to start
+                                   // experimenting much tighter, after
+                                   // seeing real detected segments look
+                                   // too generous at 100m. Must stay within a
                                    // point's own position to count as
                                    // "dwelling" there — a drifting kayak
                                    // wanders, doesn't sit at one exact
