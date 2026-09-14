@@ -2344,6 +2344,221 @@ function detectFishingSegments(points) {
   return merged;
 }
 
+// ---------------------------------------------------------------------
+// Editing a Fishing segment's Start/End boundary in place (+/- on a
+// candidate row, sync.js) and reshaping the segment structure around it
+// as needed. Ported from a Python prototype verified against 40,000
+// randomized edit sequences (500 seeds x 80 steps each), each one
+// checked for full structural consistency after every single step —
+// see technical-learnings.md for the two real bugs that prototype
+// caught before this ever reached real code (a same-kind adjacency
+// that could form silently without ever prompting, and a shrink
+// blindly corrupting a DIFFERENT segment's own candidate).
+// ---------------------------------------------------------------------
+
+const CANDIDATE_STEP_MS = 60000; // ~1 minute per +/- click — confirmed
+                                   // with Oliver directly: literally
+                                   // "next raw point" would be far too
+                                   // fine-grained where points are only
+                                   // a second or two apart
+
+/** The point index reached by walking ~CANDIDATE_STEP_MS of elapsed time
+ * from points[fromIdx], in the given direction (+1 later, -1 earlier) —
+ * clamped to the day's own first/last point rather than going out of
+ * bounds. */
+function stepTimeIndex(points, fromIdx, direction) {
+  const fromMs = points[fromIdx].timeMs;
+  let idx = fromIdx;
+  while (true) {
+    const next = idx + direction;
+    if (next < 0) return 0;
+    if (next >= points.length) return points.length - 1;
+    idx = next;
+    if (Math.abs(points[idx].timeMs - fromMs) >= CANDIDATE_STEP_MS) return idx;
+  }
+}
+
+function newTransitingSegment(startIdx, endIdx) {
+  return { kind: "transiting", startIdx, endIdx, candidates: [], importChecked: false, viewChecked: true, expanded: false, label: "" };
+}
+
+/**
+ * Moves one Start or End candidate later or earlier in time by
+ * CANDIDATE_STEP_MS, reshaping the segment structure around it as
+ * needed. Returns:
+ *  - {ok: true} — applied directly, day.segments already updated.
+ *  - {ok: false, reason} — blocked (own paired candidate, or genuinely
+ *    nowhere left to go — see each reason inline).
+ *  - {ok: "confirm", applyMerge, applyKeep} — this move would touch a
+ *    same-kind segment; caller must ask the user and invoke exactly one
+ *    of the two functions to actually apply anything.
+ *
+ * Every reshape keeps day.segments as an exact, gapless, non-overlapping
+ * partition of day.points, and keeps every "fishing" segment's own two
+ * candidates' pointIdx in lockstep with its own startIdx/endIdx at all
+ * times — the single invariant everything else (rendering, the tree,
+ * saving) depends on.
+ */
+function stepCandidateTime(day, segIdx, candIdx, direction) {
+  const segments = day.segments;
+  const seg = segments[segIdx];
+  const cand = seg.candidates[candIdx];
+  const isStart = cand.kind === "start";
+  const front = isStart;
+  const growing = (isStart && direction < 0) || (!isStart && direction > 0);
+
+  const other = seg.candidates[1 - candIdx];
+  const newIdx = stepTimeIndex(day.points, cand.pointIdx, direction);
+
+  if (front && newIdx > other.pointIdx) return { ok: false, reason: "own-end" };
+  if (!front && newIdx < other.pointIdx) return { ok: false, reason: "own-start" };
+  if (newIdx === cand.pointIdx) return { ok: false, reason: "no-change" };
+
+  return growing ? growSegmentBoundary(day, segIdx, front, newIdx) : shrinkSegmentBoundary(day, segIdx, front, newIdx);
+}
+
+function shrinkSegmentBoundary(day, segIdx, front, newIdx) {
+  const segments = day.segments;
+  const seg = segments[segIdx];
+  if (front) {
+    const givenEnd = newIdx - 1;
+    const neighbourIdx = segIdx - 1;
+    // A same-kind neighbour (reachable via a prior "keep separate"
+    // choice, or a manual Transiting<->Fishing conversion) is never a
+    // valid destination for reclaimed space — it has its own separately
+    // tracked Start/End, and silently moving THOSE to absorb this
+    // segment's giveaway would shift a different segment's own boundary
+    // without ever asking. Reclaimed space always becomes (or extends)
+    // a transiting buffer instead.
+    if (neighbourIdx >= 0 && segments[neighbourIdx].kind === seg.kind) {
+      segments.splice(neighbourIdx + 1, 0, newTransitingSegment(seg.startIdx, givenEnd));
+    } else if (neighbourIdx >= 0) {
+      segments[neighbourIdx].endIdx = givenEnd;
+    } else {
+      segments.unshift(newTransitingSegment(seg.startIdx, givenEnd));
+    }
+    seg.startIdx = newIdx;
+    seg.candidates[0].pointIdx = newIdx;
+  } else {
+    const givenStart = newIdx + 1;
+    const neighbourIdx = segIdx + 1;
+    if (neighbourIdx < segments.length && segments[neighbourIdx].kind === seg.kind) {
+      segments.splice(neighbourIdx, 0, newTransitingSegment(givenStart, seg.endIdx));
+    } else if (neighbourIdx < segments.length) {
+      segments[neighbourIdx].startIdx = givenStart;
+    } else {
+      segments.push(newTransitingSegment(givenStart, seg.endIdx));
+    }
+    seg.endIdx = newIdx;
+    seg.candidates[1].pointIdx = newIdx;
+  }
+  return { ok: true };
+}
+
+function growSegmentBoundary(day, segIdx, front, newIdx) {
+  const segments = day.segments;
+  const seg = segments[segIdx];
+  const neighbourIdx = front ? segIdx - 1 : segIdx + 1;
+  if (neighbourIdx < 0 || neighbourIdx >= segments.length) return { ok: false, reason: "edge-of-day" };
+  const neighbour = segments[neighbourIdx];
+
+  if (neighbour.kind === seg.kind) {
+    // Already directly touching a same-kind segment — nothing to
+    // absorb first, so "keep separate" here is simply "don't move".
+    return confirmBoundaryMerge(day, segIdx, front, null, neighbourIdx);
+  }
+
+  let clampedIdx, fullyConsumed;
+  if (front) {
+    clampedIdx = Math.max(newIdx, neighbour.startIdx);
+    fullyConsumed = clampedIdx === neighbour.startIdx;
+  } else {
+    clampedIdx = Math.min(newIdx, neighbour.endIdx);
+    fullyConsumed = clampedIdx === neighbour.endIdx;
+  }
+
+  if (fullyConsumed) {
+    const beyondIdx = front ? neighbourIdx - 1 : neighbourIdx + 1;
+    if (beyondIdx >= 0 && beyondIdx < segments.length && segments[beyondIdx].kind === seg.kind) {
+      // Fully consuming `neighbour` (a different kind) would leave seg
+      // directly touching a same-kind segment beyond it — ask BEFORE
+      // doing that, not after, so the adjacency never forms unconfirmed
+      // even momentarily.
+      return confirmBoundaryMerge(day, segIdx, front, neighbourIdx, beyondIdx);
+    }
+    segments.splice(neighbourIdx, 1);
+    if (front) {
+      seg.startIdx = neighbour.startIdx;
+      seg.candidates[0].pointIdx = neighbour.startIdx;
+    } else {
+      seg.endIdx = neighbour.endIdx;
+      seg.candidates[1].pointIdx = neighbour.endIdx;
+    }
+  } else if (front) {
+    neighbour.endIdx = clampedIdx - 1;
+    seg.startIdx = clampedIdx;
+    seg.candidates[0].pointIdx = clampedIdx;
+  } else {
+    neighbour.startIdx = clampedIdx + 1;
+    seg.endIdx = clampedIdx;
+    seg.candidates[1].pointIdx = clampedIdx;
+  }
+  return { ok: true };
+}
+
+/**
+ * seg at segIdx is touching a same-kind segment at sameKindIdx, either
+ * directly (absorbedIdx null) or after fully consuming a different-kind
+ * buffer at absorbedIdx. Returns the two callbacks the caller (sync.js)
+ * invokes based on the user's own choice — see each one's own comment
+ * for exactly what "merge" vs "keep separate" does.
+ */
+function confirmBoundaryMerge(day, segIdx, front, absorbedIdx, sameKindIdx) {
+  function applyMerge() {
+    const segments = day.segments;
+    const indices = absorbedIdx != null ? [segIdx, absorbedIdx, sameKindIdx] : [segIdx, sameKindIdx];
+    const a = Math.min(...indices);
+    const b = Math.max(...indices);
+    const merged = {
+      kind: segments[a].kind,
+      startIdx: segments[a].startIdx,
+      endIdx: segments[b].endIdx,
+      candidates: [segments[a].candidates[0], segments[b].candidates[1]],
+      importChecked: true,
+      viewChecked: true,
+      expanded: false,
+    };
+    merged.candidates[0].pointIdx = merged.startIdx;
+    merged.candidates[1].pointIdx = merged.endIdx;
+    merged.label = `Fishing ${day.points[merged.startIdx].timeNaive.slice(11, 16)}–${day.points[merged.endIdx].timeNaive.slice(11, 16)}`;
+    segments.splice(a, b - a + 1, merged);
+    return merged;
+  }
+  // "Keep separate" still lets an absorbed different-kind buffer vanish
+  // (that part of the move was never in question) but stops short of
+  // merging the two same-kind segments — they stay separate, each
+  // keeping their own full Start/End. With no absorbedIdx at all (seg
+  // was already directly touching), there's nothing to give up short of
+  // the same-kind boundary, so this is a true no-op.
+  function applyKeep() {
+    if (absorbedIdx == null) return null;
+    const segments = day.segments;
+    const neighbour = segments[absorbedIdx];
+    segments.splice(absorbedIdx, 1);
+    const realSegIdx = absorbedIdx < segIdx ? segIdx - 1 : segIdx;
+    const seg = segments[realSegIdx];
+    if (front) {
+      seg.startIdx = neighbour.startIdx;
+      seg.candidates[0].pointIdx = neighbour.startIdx;
+    } else {
+      seg.endIdx = neighbour.endIdx;
+      seg.candidates[1].pointIdx = neighbour.endIdx;
+    }
+    return null;
+  }
+  return { ok: "confirm", applyMerge, applyKeep };
+}
+
 /**
  * Loads marks (D1, Public's own rows, via GET /api/public/marks) and
  * config/mark_lists.json's live equivalent (GET /api/public/marklists,

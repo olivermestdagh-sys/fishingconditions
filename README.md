@@ -874,6 +874,70 @@ menu appeared, clicked "Add Catch here", and confirmed exactly one new
 candidate was added with the correct lat/lng/time and that its edit
 popup opened automatically. Zero JS errors.
 
+**Phase 6 — editing segment boundaries and inserting new Fishing
+segments** (`charts.js`, `sync.js`, `sync.html`): the last big piece of
+the Sync page itself.
+
+- **Map zoom/highlight on click** — a Day's own label (not its caret,
+  which only expands/collapses it) zooms the map to fit every point
+  under that day; a Segment's own label zooms AND highlights it (drawn
+  at weight 7 instead of 3 on the map) until another row is clicked.
+- **Transiting ↔ Fishing conversion** — a small swap icon to the right
+  of every segment row. Converting Transiting → Fishing creates
+  Start/End candidates at that window's own extremes, ready to edit
+  from there (Oliver's own design: "I will edit the start/end from
+  there"); Fishing → Transiting discards its candidates. Deliberately
+  NEVER auto-merges with whatever now sits alongside it either
+  direction — Oliver's own call ("I may go from stationary fishing
+  straight into trawling" — two adjacent same-kind segments can be a
+  real, intentional distinction).
+- **+/- buttons on every Start/End candidate row** ("− Start 11:38 +"),
+  stepping that point ~1 minute later or earlier and reshaping the
+  segment structure around it — the genuinely hard part of this whole
+  phase. Moving a boundary either gives space to a neighbour (or
+  creates a new Transiting segment if none exists) or takes space from
+  one; when a move would touch a segment of the SAME kind, a
+  confirm() dialog asks to merge (collapse into one, keeping the outer
+  Start/End, dropping the two in the middle) or keep separate (any
+  now-empty buffer between them still vanishes, but the two segments
+  stay separate rather than merging).
+
+**How the boundary-editing logic was built and verified** — worth
+recording in full, since this was the highest-risk piece of the whole
+Fishing Sessions feature: prototyped first in Python, then fuzz-tested
+with 40,000 randomized edit sequences (500 seeds × 80 steps each),
+checking full structural correctness (no gaps, no overlaps, every
+"fishing" segment's own candidates in lockstep with its own
+boundaries) after EVERY single step. That caught two real bugs before
+they ever reached real code:
+1. A same-kind adjacency could form silently — consuming a tiny middle
+   segment and landing directly against a same-kind one beyond it —
+   without ever triggering the merge prompt, only discovered (if at
+   all) on some later click. Fixed so it's checked before the
+   consumption happens, not after.
+2. Shrinking a segment could silently extend a DIFFERENT, same-kind
+   segment's own boundary without ever asking, since that segment has
+   its own separately-tracked Start/End. Fixed so reclaimed space
+   always becomes a new Transiting buffer instead of merging into a
+   same-kind neighbour.
+
+Only once the Python prototype passed 500 seeds cleanly was the logic
+ported to real JavaScript (`stepCandidateTime`/`growSegmentBoundary`/
+`shrinkSegmentBoundary`/`confirmBoundaryMerge`, `charts.js`) — then
+fuzz-tested AGAIN, in an actual browser, for another 18,000 randomized
+operations, zero failures, confirming the port itself introduced
+nothing new.
+
+**Verified further**: real browser tests against the actual trail file
+confirmed clicking a day's label changes the map's bounds, clicking a
+segment's label renders a visibly thicker (weight 7) highlighted line,
+converting a Transiting segment to Fishing correctly changes the
+segment-kind counts with no auto-merge, and — using a controlled
+3-segment scenario (fishing / 1-point-transiting / fishing) matching
+one of the algorithm's own verified test cases — clicking a real "+"
+button correctly triggers exactly one confirm() dialog and, on accept,
+correctly merges all 3 segments into 1. Zero JS errors throughout.
+
 **Still not built**: linking a Catch mark into whichever segment its
 timestamp falls within, and — the last planned phase — actually
 drawing saved Sessions as connected lines on the Location/Live maps
