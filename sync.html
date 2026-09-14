@@ -28,6 +28,14 @@
   .tree-header-icon { cursor: pointer; border-radius: 4px; }
   .tree-header-icon:hover { background: var(--blue-100, #eaf2fb); color: var(--blue-900, #0b2a4a); }
   .tracks-tree-node[data-level="candidate"] .tree-node-label span[data-role="select-candidate"] { cursor: pointer; text-decoration: underline dotted; }
+  .tracks-tree-node[data-level="day"] .tree-node-label span[data-role="zoom-day"],
+  .tracks-tree-node[data-level="segment"] .tree-node-label span[data-role="zoom-highlight-segment"] { cursor: pointer; }
+  .tracks-tree-node[data-level="day"] .tree-node-label span[data-role="zoom-day"]:hover,
+  .tracks-tree-node[data-level="segment"] .tree-node-label span[data-role="zoom-highlight-segment"]:hover { text-decoration: underline; }
+  .segment-convert-icon { margin-left: auto; padding: 2px 4px; cursor: pointer; border-radius: 4px; color: var(--grey-500); flex-shrink: 0; }
+  .segment-convert-icon:hover { background: var(--blue-100, #eaf2fb); color: var(--blue-900, #0b2a4a); }
+  .candidate-step-btn { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; cursor: pointer; font-weight: 700; color: var(--grey-500); flex-shrink: 0; }
+  .candidate-step-btn:hover { background: var(--blue-100, #eaf2fb); color: var(--blue-900, #0b2a4a); }
   .tracks-tree-node-selected { background: var(--blue-100, #eaf2fb); }
 </style>
 </head>

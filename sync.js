@@ -66,6 +66,11 @@ let selectedCandidateKey = null; // "trackIdx.dayIdx.segIdx.candIdx" of
                                   // whichever candidate point is currently
                                   // highlighted, in the tree AND on the map
                                   // — set from either side, read by both
+let highlightedSegmentKey = null; // "trackIdx.dayIdx.segIdx" of whichever
+                                  // segment was just clicked in the tree
+                                  // (its label, not its caret) — drawn
+                                  // with emphasis on the map until another
+                                  // segment or day is clicked
 let reviewMap = null; // the ONE Leaflet map instance shared by both marks
                       // candidates and track data (created once, on first
                       // file load — see renderReviewMap)
@@ -1815,31 +1820,38 @@ function renderTracksTree() {
 
   let html = "";
   trackData.forEach((track, trackIdx) => {
-    const trackCaret = `<span class="caret${track.expanded ? "" : " collapsed"}">▾</span>`;
-    html += `<div class="tracks-tree-node" data-level="track" data-track="${trackIdx}" data-role="toggle-expand">
+    const trackCaret = `<span class="caret${track.expanded ? "" : " collapsed"}" data-role="toggle-expand" data-track="${trackIdx}">▾</span>`;
+    html += `<div class="tracks-tree-node" data-level="track" data-track="${trackIdx}">
       <span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" /></span>
       <span class="tree-checkbox-col"><input type="checkbox" data-role="view" data-track="${trackIdx}" /></span>
       <span class="tree-node-label">${trackCaret}<span>${escapeHtml(track.name)}</span></span>
     </div>`;
     if (!track.expanded) return;
     track.dayGroups.forEach((day, dayIdx) => {
-      const dayCaret = `<span class="caret${day.expanded ? "" : " collapsed"}">▾</span>`;
-      html += `<div class="tracks-tree-node" data-level="day" data-track="${trackIdx}" data-day="${dayIdx}" data-role="toggle-expand">
+      const dayCaret = `<span class="caret${day.expanded ? "" : " collapsed"}" data-role="toggle-expand" data-track="${trackIdx}" data-day="${dayIdx}">▾</span>`;
+      html += `<div class="tracks-tree-node" data-level="day" data-track="${trackIdx}" data-day="${dayIdx}">
         <span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" /></span>
         <span class="tree-checkbox-col"><input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" /></span>
-        <span class="tree-node-label" style="padding-left:14px;">${dayCaret}<span>${escapeHtml(day.label)}</span></span>
+        <span class="tree-node-label" style="padding-left:14px;">${dayCaret}<span data-role="zoom-day" data-track="${trackIdx}" data-day="${dayIdx}">${escapeHtml(day.label)}</span></span>
       </div>`;
       if (!day.expanded) return;
       day.segments.forEach((seg, segIdx) => {
-        const segCaret = seg.candidates.length > 0 ? `<span class="caret${seg.expanded ? "" : " collapsed"}">▾</span>` : `<span class="caret" style="visibility:hidden;">▾</span>`;
+        const hasCandidates = seg.candidates.length > 0;
+        const segCaret = hasCandidates
+          ? `<span class="caret${seg.expanded ? "" : " collapsed"}" data-role="toggle-expand" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}">▾</span>`
+          : `<span class="caret" style="visibility:hidden;">▾</span>`;
         // A transiting segment has no candidates — nothing to import — so
         // its Import column stays genuinely empty (not just unchecked)
         // rather than offering a checkbox that can never do anything.
         const segImportCol = seg.kind === "transiting" ? `<span class="tree-checkbox-col"></span>` : `<span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" /></span>`;
-        html += `<div class="tracks-tree-node" data-level="segment" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-role="toggle-expand">
+        const convertTitle = seg.kind === "fishing" ? "Convert to Transiting" : "Convert to Fishing";
+        html += `<div class="tracks-tree-node" data-level="segment" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}">
           ${segImportCol}
           <span class="tree-checkbox-col"><input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" /></span>
-          <span class="tree-node-label" style="padding-left:28px;">${segCaret}<span>${escapeHtml(seg.label)}</span></span>
+          <span class="tree-node-label" style="padding-left:28px;">${segCaret}<span data-role="zoom-highlight-segment" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}">${escapeHtml(seg.label)}</span></span>
+          <span class="segment-convert-icon" data-role="convert-segment" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" title="${convertTitle}">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M7 7h11l-3.5-3.5L16 2l6 6-6 6-1.5-1.5L18 9H7V7zm10 10H6l3.5 3.5L8 22l-6-6 6-6 1.5 1.5L6 15h11v2z"/></svg>
+          </span>
         </div>`;
         if (!seg.expanded) return;
         seg.candidates.forEach((cand, candIdx) => {
@@ -1849,7 +1861,12 @@ function renderTracksTree() {
           html += `<div class="tracks-tree-node${isSelected ? " tracks-tree-node-selected" : ""}" data-level="candidate" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">
             <span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}" /></span>
             <span class="tree-checkbox-col"><input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}" /></span>
-            <span class="tree-node-label" style="padding-left:42px;"><span class="caret" style="visibility:hidden;">▾</span><span data-role="select-candidate">${candLabel}</span></span>
+            <span class="tree-node-label" style="padding-left:42px;">
+              <span class="caret" style="visibility:hidden;">▾</span>
+              <span class="candidate-step-btn" data-role="step-candidate" data-dir="-1" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">−</span>
+              <span data-role="select-candidate" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">${candLabel}</span>
+              <span class="candidate-step-btn" data-role="step-candidate" data-dir="1" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">+</span>
+            </span>
           </div>`;
         });
       });
@@ -1880,14 +1897,10 @@ function renderTracksTree() {
   container.querySelectorAll('input[data-role="view"]').forEach((el) => el.addEventListener("change", onTreeCheckboxChange));
   container.querySelectorAll('[data-role="toggle-expand"]').forEach((el) => {
     el.addEventListener("click", (e) => {
-      if (e.target.matches('input[type="checkbox"]')) return; // clicking a checkbox shouldn't ALSO toggle expand/collapse
       const { track, day, seg } = e.currentTarget.dataset;
       let node = trackData[Number(track)];
       if (day !== undefined) node = node.dayGroups[Number(day)];
-      if (seg !== undefined) {
-        node = node.segments[Number(seg)];
-        if (node.candidates.length === 0) return; // a transiting segment has nothing to expand into
-      }
+      if (seg !== undefined) node = node.segments[Number(seg)];
       node.expanded = !node.expanded;
       renderTracksTree();
     });
@@ -1900,6 +1913,35 @@ function renderTracksTree() {
       renderTracksTree();
       renderReviewMap();
       openTrackCandidatePopup(Number(track), Number(day), Number(seg), Number(cand));
+    });
+  });
+  container.querySelectorAll('[data-role="zoom-day"]').forEach((el) => {
+    el.addEventListener("click", (e) => {
+      const { track, day } = e.currentTarget.dataset;
+      highlightedSegmentKey = null;
+      zoomMapToDay(Number(track), Number(day));
+    });
+  });
+  container.querySelectorAll('[data-role="zoom-highlight-segment"]').forEach((el) => {
+    el.addEventListener("click", (e) => {
+      const { track, day, seg } = e.currentTarget.dataset;
+      highlightedSegmentKey = `${track}.${day}.${seg}`;
+      zoomMapToSegment(Number(track), Number(day), Number(seg));
+      renderReviewMap();
+    });
+  });
+  container.querySelectorAll('[data-role="convert-segment"]').forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const { track, day, seg } = e.currentTarget.dataset;
+      convertSegmentKind(Number(track), Number(day), Number(seg));
+    });
+  });
+  container.querySelectorAll('[data-role="step-candidate"]').forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const { track, day, seg, cand, dir } = e.currentTarget.dataset;
+      onStepCandidateClick(Number(track), Number(day), Number(seg), Number(cand), Number(dir));
     });
   });
 
@@ -1937,14 +1979,92 @@ function onTreeCheckboxChange(e) {
 
 const SEGMENT_COLORS = { fishing: "#d97706", transiting: "#6b7280" }; // amber for likely-fishing stretches, grey for travel — deliberately distinct from any mark colour on the shared map, since this is a different kind of thing being shown
 
+/** Fits the map to every point under one day — clicking a day's own
+ * label, per Oliver's own call, not its caret (which only expands/
+ * collapses it). */
+function zoomMapToDay(trackIdx, dayIdx) {
+  const day = trackData[trackIdx].dayGroups[dayIdx];
+  const latLngs = day.points.map((p) => [p.lat, p.lon]);
+  if (!reviewMap) renderReviewMap();
+  if (latLngs.length > 0) reviewMap.fitBounds(latLngs, { padding: [20, 20] });
+}
+
+/** Fits the map to one segment's own points — clicking a segment's own
+ * label (not its caret) both zooms to it AND highlights it (see
+ * highlightedSegmentKey, drawn with emphasis in renderReviewMap). */
+function zoomMapToSegment(trackIdx, dayIdx, segIdx) {
+  const day = trackData[trackIdx].dayGroups[dayIdx];
+  const seg = day.segments[segIdx];
+  const segPoints = day.points.slice(seg.startIdx, seg.endIdx + 1);
+  const latLngs = segPoints.map((p) => [p.lat, p.lon]);
+  if (!reviewMap) renderReviewMap();
+  if (latLngs.length > 0) reviewMap.fitBounds(latLngs, { padding: [40, 40] });
+}
+
 /**
- * The ONE shared map for this whole review page — track segments (as
- * polylines) and candidate points, both drawn here; marks candidates
- * don't get their own permanent markers (there can be a couple hundred
- * of them, and the list is their real home — see openCandidatePopup),
- * but a mark's edit popup still opens ON this same map, at its own
- * coordinates, when a candidate row is clicked.
+ * Flips a segment's own kind — Transiting becomes Fishing (candidates
+ * created at its own extremes, so the person can then edit them from
+ * there with the +/- buttons, per the design brief's own "just set the
+ * start/end to the extremes of that Transiting window, I will edit the
+ * start/end from there") — or Fishing becomes Transiting (its
+ * candidates discarded entirely). Deliberately does NOT auto-merge with
+ * whatever now sits alongside it either direction — Oliver's own call
+ * ("I may go from stationary fishing straight into trawling" — two
+ * adjacent segments of the same kind can be a real, intentional
+ * distinction, not always noise to collapse away).
  */
+function convertSegmentKind(trackIdx, dayIdx, segIdx) {
+  const day = trackData[trackIdx].dayGroups[dayIdx];
+  const seg = day.segments[segIdx];
+  if (seg.kind === "transiting") {
+    seg.kind = "fishing";
+    seg.importChecked = true;
+    seg.expanded = true;
+    seg.candidates = [
+      { kind: "start", pointIdx: seg.startIdx, importChecked: true, viewChecked: true, baits: [], rigs: [], rods: [], berleys: [] },
+      { kind: "end", pointIdx: seg.endIdx, importChecked: true, viewChecked: true, baits: [], rigs: [], rods: [], berleys: [] },
+    ];
+  } else {
+    seg.kind = "transiting";
+    seg.importChecked = false;
+    seg.candidates = [];
+  }
+  seg.label = `${seg.kind === "fishing" ? "Fishing" : "Transiting"} ${day.points[seg.startIdx].timeNaive.slice(11, 16)}–${day.points[seg.endIdx].timeNaive.slice(11, 16)}`;
+  renderTracksTree();
+  renderReviewMap();
+}
+
+/**
+ * Handles a +/- click on a candidate row — see stepCandidateTime
+ * (charts.js) for the actual boundary-reshaping logic this wraps; this
+ * is just the UI glue: apply directly on a plain success, surface a
+ * confirm() dialog for the merge-or-keep-separate choice (matching the
+ * confirm() already used elsewhere on this page — e.g. removing a
+ * tier), and quietly do nothing for a blocked move (own paired
+ * candidate, or genuinely nowhere left to go) rather than an intrusive
+ * error for what's really just the edge of what's possible right now.
+ */
+function onStepCandidateClick(trackIdx, dayIdx, segIdx, candIdx, direction) {
+  const day = trackData[trackIdx].dayGroups[dayIdx];
+  const result = stepCandidateTime(day, segIdx, candIdx, direction);
+  if (result.ok === true) {
+    renderTracksTree();
+    renderReviewMap();
+  } else if (result.ok === "confirm") {
+    const merge = confirm(
+      "This point would now touch another Fishing segment of the same kind.\n\n" +
+        "OK = merge them into one Fishing segment (keeping the outer Start/End, dropping the two in the middle)\n" +
+        "Cancel = keep them as two separate Fishing segments"
+    );
+    if (merge) result.applyMerge();
+    else result.applyKeep();
+    renderTracksTree();
+    renderReviewMap();
+  }
+  // result.ok === false: blocked (own paired candidate, or nowhere left
+  // to go) — nothing to do, the click just has no effect.
+}
+
 function renderReviewMap() {
   const mapEl = document.getElementById("reviewMap");
   if (!mapEl) return;
@@ -1965,7 +2085,12 @@ function renderReviewMap() {
         const segPoints = day.points.slice(seg.startIdx, seg.endIdx + 1);
         const latLngs = segPoints.map((p) => [p.lat, p.lon]);
         if (latLngs.length >= 2) {
-          const polyline = L.polyline(latLngs, { color: SEGMENT_COLORS[seg.kind], weight: 3 }).addTo(reviewMapLayer);
+          const isHighlighted = `${trackIdx}.${dayIdx}.${segIdx}` === highlightedSegmentKey;
+          const polyline = L.polyline(latLngs, {
+            color: SEGMENT_COLORS[seg.kind],
+            weight: isHighlighted ? 7 : 3,
+            opacity: isHighlighted ? 1 : 0.8,
+          }).addTo(reviewMapLayer);
           // Clicking anywhere on the trail line itself (not a candidate
           // marker) offers to add a brand-new Catch or POI mark at the
           // nearest actual raw trackpoint — per the design brief's own
