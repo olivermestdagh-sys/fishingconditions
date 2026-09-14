@@ -763,6 +763,45 @@ kinds shows its Import checkbox as genuinely fully checked (not
 indeterminate) once its fishing segments are, and confirmed the new
 radius value is live. Zero JS errors.
 
+**Phase 3 fixes, round 3**: `DWELL_RADIUS_METERS` raised from 5 to 10
+(5 was too tight — Oliver's own call after trying it against real
+days). Both header icon sets are now clickable, acting as a genuine
+select-all/deselect-all toggle:
+
+- The Marks header's floppy disk toggles every currently-reviewable,
+  search-filtered candidate's own selection — `onToggleAllMarks`, using
+  the exact same `reviewableCandidates`/`candidateMatchesSearch` scope
+  the existing "Select all new"/"Deselect all" buttons already use, not
+  a second definition of that scope.
+- The Tracks header's floppy disk and eye each toggle their OWN field
+  (Import or View) across the ENTIRE tree at once — `onToggleAllTracks`,
+  cascading the opposite of whatever `summariseChecked` currently
+  reports for the whole tree.
+
+**A real bug this surfaced and fixed**: the very first version of the
+tracks toggle-all did nothing when clicked, because `summariseChecked`
+was still only excluding *transiting segments* from the "importChecked"
+aggregate (see the previous round's fix) — it wasn't excluding a *day*,
+or even a whole *track*, made entirely of segments with nothing
+importable in them. With a tight dwell radius, plenty of real days have
+zero fishing segments at all, and each one of those was still being
+counted as "unchecked" in the whole-tree aggregate — so the tree could
+never actually report "fully checked" even when every real fishing
+segment already was, and clicking the toggle just silently re-selected
+everything that was already selected. Fixed with a proper recursive
+check (`hasAnyImportableCandidate`, walking Track → Day → Segment →
+candidate) instead of the narrower segment-only filter — confirmed
+directly: toggling now correctly flips all 93 real fishing segments'
+Import state in one click, both directions.
+
+**Verified**: real browser test — confirmed the new radius value is
+live, confirmed the Marks header icon toggles selection for every
+reviewable/filtered candidate and flips back on a second click,
+confirmed the Tracks header's Import icon does the same across all 93
+real fishing segments (catching the bug above before it shipped), and
+confirmed the View icon ends in a fully consistent (not partially
+mixed) state either way. Zero JS errors.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough

@@ -993,6 +993,40 @@ function setAllSelected(value) {
   renderReviewList();
 }
 
+/**
+ * The floppy-disk header icon above the Marks list — a quick select/
+ * deselect-all, scoped the same way the existing "Select all new"/
+ * "Deselect all" buttons already are (reviewableCandidates, filtered by
+ * whatever search is active). Acts as a genuine TOGGLE: if everything
+ * currently in scope is already selected, clicking clears them all;
+ * otherwise it selects everything in scope (including a partial/mixed
+ * selection) — same "select everything unless there's nothing left to
+ * select" convention as the tracks header icons below.
+ */
+function onToggleAllMarks() {
+  const relevant = reviewableCandidates().filter(candidateMatchesSearch);
+  const allSelected = relevant.length > 0 && relevant.every((c) => c.selected);
+  setAllSelected(!allSelected);
+}
+
+/**
+ * The floppy-disk/eye header icons above the Tracks tree — select/
+ * deselect (or show/hide) everything across the WHOLE tree for one
+ * field at once, not just one row. Same toggle convention as
+ * onToggleAllMarks: checks whether every TOP-LEVEL track already
+ * reports "checked" for this field (via the same summariseChecked
+ * used for each row's own tri-state display — a transiting segment is
+ * correctly excluded from the "importChecked" check the same way it
+ * already is everywhere else), and cascades the opposite value down
+ * to everything if not.
+ */
+function onToggleAllTracks(field) {
+  const allChecked = trackData.length > 0 && summariseChecked(trackData, field) === "checked";
+  trackData.forEach((track) => cascadeChecked(track, field, !allChecked));
+  renderTracksTree();
+  renderReviewMap();
+}
+
 // How many marks' historical-conditions lookups (see
 // lookupHistoricalMarkConditions, charts.js) run at once during an import —
 // each one is a real, billed WillyWeather call plus an Open-Meteo call, so
@@ -1546,24 +1580,42 @@ function cascadeChecked(node, field, value) {
 }
 
 /**
+ * Whether a node has ANY importable content underneath it at all —
+ * recurses through Track -> Day -> Segment to the actual candidates.
+ * A transiting segment (empty candidates array) has none; a day or
+ * track made ENTIRELY of transiting segments has none either, even
+ * though it's not itself a segment — this needs to be checked at
+ * every level, not just "is this one segment transiting", since a
+ * day/track can just as easily have zero fishing content of its own.
+ */
+function hasAnyImportableCandidate(node) {
+  if (node.dayGroups) return node.dayGroups.some(hasAnyImportableCandidate);
+  if (node.segments) return node.segments.some(hasAnyImportableCandidate);
+  if (node.candidates) return node.candidates.length > 0; // a segment: only a "fishing" one ever has candidates at all
+  return node.kind === "start" || node.kind === "end"; // an actual candidate itself
+}
+
+/**
  * Tri-state summary of a node's own children for one field — "checked"/
  * "unchecked" when every child agrees, "indeterminate" when they don't.
  * A leaf node (a candidate, or a transiting segment with no candidates)
  * has no children to summarise — callers should read its own stored
  * boolean directly instead of calling this.
  *
- * For the "importChecked" field specifically, a transiting segment is
- * excluded from the aggregate entirely (not just treated as
- * "unchecked") — it has nothing importable at all (no candidates, no
- * checkbox even shown any more — see renderTracksTree), so it
- * shouldn't be able to drag an otherwise-fully-checked day down to
- * "indeterminate" just by existing. Safe to apply this filter
- * unconditionally: day-groups and candidates never have kind ===
- * "transiting" (only segments do), so this only ever actually removes
- * anything from a list of segments.
+ * For the "importChecked" field specifically, any child with NO
+ * importable content underneath it at all — a transiting segment, but
+ * just as easily a day or even a whole track made entirely of
+ * transiting segments — is excluded from the aggregate entirely (not
+ * just treated as "unchecked"). Confirmed this needed to go beyond just
+ * segments: a day with zero fishing segments was reporting "unchecked"
+ * for Import, which then made the WHOLE TREE'S own toggle-all icon
+ * think there was still something left unchecked even when every real
+ * fishing segment already was — clicking it then re-selected
+ * everything (a no-op) instead of correctly deselecting, since the
+ * check for "is everything already checked" was never actually true.
  */
 function summariseChecked(children, field) {
-  const relevant = field === "importChecked" ? children.filter((c) => c.kind !== "transiting") : children;
+  const relevant = field === "importChecked" ? children.filter(hasAnyImportableCandidate) : children;
   if (relevant.length === 0) return "unchecked";
   const values = relevant.map((c) => childCheckedState(c, field));
   if (values.every((v) => v === "checked")) return "checked";
@@ -1840,5 +1892,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       const bodyId = group === "marks" ? "marksGroupBody" : "tracksGroupBody";
       document.getElementById(bodyId).style.display = sideGroupCollapsed[group] ? "none" : "block";
     });
+  });
+
+  const toggleAllMarksIcon = document.querySelector('[data-role="toggle-all-marks"]');
+  if (toggleAllMarksIcon) toggleAllMarksIcon.addEventListener("click", onToggleAllMarks);
+  document.querySelectorAll('[data-role="toggle-all-tracks"]').forEach((el) => {
+    el.addEventListener("click", () => onToggleAllTracks(el.dataset.field));
   });
 });
