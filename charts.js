@@ -2385,6 +2385,20 @@ function stepTimeIndex(points, fromIdx, direction) {
  * by hand (or forgetting to, which is exactly how a newly-created
  * transiting segment ended up with a blank label — confirmed directly:
  * newTransitingSegment set label:"" and nothing ever filled it in). */
+/** A fresh random hue for one new fishing segment — assigned once, at
+ * creation (buildTrackData/convertSegmentKind, sync.js, or a boundary-
+ * edit merge just below), and kept stable on the segment object from
+ * then on, rather than re-randomized on every render (which would make
+ * a segment's own colour flicker every time anything redraws). Lives
+ * here (not sync.js) since a boundary-edit merge needs it too, and
+ * charts.js loads first. Fixed saturation/lightness elsewhere
+ * (segmentLineColor/segmentBackgroundTint, sync.js) — only the hue
+ * varies, so every segment reads at the same visual "weight" regardless
+ * of which random hue it landed on. */
+function randomSegmentHue() {
+  return Math.floor(Math.random() * 360);
+}
+
 function segmentLabel(kind, points, startIdx, endIdx) {
   const kindLabel = kind === "fishing" ? "Fishing" : "Transiting";
   return `${kindLabel} ${points[startIdx].timeNaive.slice(11, 16)}–${points[endIdx].timeNaive.slice(11, 16)}`;
@@ -2401,6 +2415,39 @@ function newTransitingSegment(points, startIdx, endIdx) {
     expanded: false,
     label: segmentLabel("transiting", points, startIdx, endIdx),
   };
+}
+
+/**
+ * Pure, non-mutating check for whether stepCandidateTime would actually
+ * do anything if called right now, in this exact direction — mirrors
+ * every one of its own blocking conditions (own paired candidate,
+ * already at the day's own edge, and — for a growing move only — no
+ * segment at all exists on that side to grow into) without touching
+ * any state. Used purely to decide whether to even SHOW a +/- button
+ * in the first place (renderTracksTree, sync.js) — a real, reported
+ * bug: showing a button that always failed, then handling that failure
+ * quietly, still left the tree in a confusing state after the click;
+ * simplest fix is to never offer a click that can't do anything.
+ */
+function canStepCandidateTime(day, segIdx, candIdx, direction) {
+  const seg = day.segments[segIdx];
+  const cand = seg.candidates[candIdx];
+  const isStart = cand.kind === "start";
+  const front = isStart;
+  const growing = (isStart && direction < 0) || (!isStart && direction > 0);
+
+  const other = seg.candidates[1 - candIdx];
+  const newIdx = stepTimeIndex(day.points, cand.pointIdx, direction);
+
+  if (front && newIdx > other.pointIdx) return false;
+  if (!front && newIdx < other.pointIdx) return false;
+  if (newIdx === cand.pointIdx) return false;
+
+  if (growing) {
+    const neighbourIdx = front ? segIdx - 1 : segIdx + 1;
+    if (neighbourIdx < 0 || neighbourIdx >= day.segments.length) return false;
+  }
+  return true;
 }
 
 /**
@@ -2557,6 +2604,7 @@ function confirmBoundaryMerge(day, segIdx, front, absorbedIdx, sameKindIdx) {
       importChecked: true,
       viewChecked: true,
       expanded: false,
+      hue: randomSegmentHue(),
     };
     merged.candidates[0].pointIdx = merged.startIdx;
     merged.candidates[1].pointIdx = merged.endIdx;
