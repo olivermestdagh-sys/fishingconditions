@@ -1039,6 +1039,46 @@ already sitting at the very edge of its day's own points renders its
 blocked-direction button as non-clickable rather than present-but-
 broken. Zero JS errors.
 
+**Phase 7 — catch-linking**: the last piece of the Sync page itself.
+A Catch mark whose own time falls inside a Fishing segment's own time
+window, AND whose own location sits within `CATCH_LINK_RADIUS_METERS`
+(1000m — Oliver's own starting value, tunable the same way
+`DWELL_RADIUS_METERS` already is) of that segment's points, now shows
+up nested under it in the tree — `findLinkedCatchIndices`, `sync.js`.
+
+This is a purely computed relationship, recalculated fresh on every
+render — nothing new is ever saved. A Catch never gains a "my segment"
+field; a segment never gains a "my catches" list. The nested row is
+the exact same underlying mark object from the flat `candidates` list
+marks-import already reviews — its own checkbox toggles the same
+`selected` property the Marks list itself reads, and clicking it opens
+the exact same edit popup (`openCandidatePopup`) a Marks-list row
+would, not a second, tree-specific view of it. Editing a Catch there
+now also re-renders the tree (not just the Marks list), since a
+change to its own time/location could affect which segment(s) it
+links to.
+
+Cardinality is asymmetric by design, confirmed directly with Oliver: a
+day's segments partition time gaplessly with no overlap, so one
+catch's own timestamp can only ever fall inside one segment's window
+on its own — but as an explicit fallback (in case two different days'
+time ranges ever coincide, or a data anomaly slips through), a catch
+that matches more than one segment links to ALL of them, not just the
+first found. Only Fishing segments get anything nested under them —
+Transiting never does.
+
+**Verified**: real browser test against the actual trail file —
+confirmed the real dataset's own marks and trail timestamps come from
+genuinely unrelated sources (established earlier in this project), so
+a real-world match isn't guaranteed to exist by chance; injected a
+Catch directly onto a real segment's own path and time, confirmed it
+rendered as a linked-catch row, confirmed toggling its checkbox in the
+tree updated the SAME candidate object the Marks list reads, and
+confirmed clicking it opened the same shared edit popup. Separately
+constructed the explicit multi-segment fallback case directly and
+confirmed a matching catch links to every matching segment, not just
+one. Zero JS errors.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
