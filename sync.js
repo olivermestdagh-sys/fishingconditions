@@ -1317,10 +1317,12 @@ function collectCheckedSessionMarks() {
   const marks = [];
   trackData.forEach((track) => {
     track.dayGroups.forEach((day) => {
-      day.segments.forEach((seg) => {
+      const fishingSeqNumbers = computeFishingSequenceNumbers(day);
+      day.segments.forEach((seg, segIdx) => {
         if (seg.kind !== "fishing") return;
         const checkedCandidates = seg.candidates.filter((c) => c.importChecked);
         if (checkedCandidates.length === 0) return;
+        const seqNum = fishingSeqNumbers.get(segIdx);
         const groupId = makeMarkId(); // just a shared linking string here, not itself a real mark id
         checkedCandidates.forEach((cand) => {
           const point = day.points[cand.pointIdx];
@@ -1329,7 +1331,11 @@ function collectCheckedSessionMarks() {
             id: makeMarkId(),
             lat: point.lat,
             lng: point.lon,
-            name: cand.kind === "start" ? "Session start" : "Session end",
+            // "Session N start"/"Session N end" — the SAME sequence
+            // number shown in the tree at the moment of saving
+            // (computeFishingSequenceNumbers), so what's saved always
+            // matches what was actually seen on screen.
+            name: cand.kind === "start" ? `Session ${seqNum} start` : `Session ${seqNum} end`,
             type: "Session",
             dateTime: point.timeNaive,
             createdAt: nowStr,
@@ -1484,8 +1490,8 @@ function buildTrackData(gpxText) {
           const candidates =
             seg.kind === "fishing"
               ? [
-                  { kind: "start", pointIdx: seg.startIdx, importChecked: true, viewChecked: true, baits: [], rigs: [], rods: [], berleys: [] },
-                  { kind: "end", pointIdx: seg.endIdx, importChecked: true, viewChecked: true, baits: [], rigs: [], rods: [], berleys: [] },
+                  { kind: "start", pointIdx: seg.startIdx, importChecked: true, viewChecked: true, baits: [], rigs: [], rods: [], berleys: [], baitsExplicit: false, rigsExplicit: false, rodsExplicit: false, berleysExplicit: false },
+                  { kind: "end", pointIdx: seg.endIdx, importChecked: true, viewChecked: true, baits: [], rigs: [], rods: [], berleys: [], baitsExplicit: false, rigsExplicit: false, rodsExplicit: false, berleysExplicit: false },
                 ]
               : [];
           return {
@@ -1821,6 +1827,30 @@ function diagnoseCatchLinking(nameSubstring) {
 }
 window.diagnoseCatchLinking = diagnoseCatchLinking;
 
+/**
+ * Every Fishing segment's own sequence number within one day, in time
+ * order (1, 2, 3...) — Transiting segments don't get a number at all.
+ * Computed fresh here rather than stored on the segment itself, so it
+ * never needs updating at every one of the many places segments get
+ * created or merged (a conversion, a boundary-edit merge, a shrink
+ * creating a new buffer) — it's always correct simply by being derived
+ * from whatever the current segments array actually looks like, right
+ * when it's needed, both for display (renderTracksTree) and for
+ * naming a saved Session (collectCheckedSessionMarks) — the same
+ * numbers a person sees in the tree are exactly what ends up saved.
+ */
+function computeFishingSequenceNumbers(day) {
+  const numbers = new Map();
+  let n = 0;
+  day.segments.forEach((seg, idx) => {
+    if (seg.kind === "fishing") {
+      n++;
+      numbers.set(idx, n);
+    }
+  });
+  return numbers;
+}
+
 function candidateKey(trackIdx, dayIdx, segIdx, candIdx) {
   return `${trackIdx}.${dayIdx}.${segIdx}.${candIdx}`;
 }
@@ -1853,6 +1883,29 @@ function flattenDayCandidates(day) {
  * shouldn't be silently overwritten by going back and editing an
  * earlier point.
  */
+/**
+ * Applies a just-saved candidate's Bait/Rig/Rod/Berley to every
+ * chronologically LATER candidate in the same day that doesn't already
+ * have an EXPLICITLY-set value of its own for that field — matching
+ * the design brief's own "carried forward to every point after, unless
+ * changed at a later point" rule.
+ *
+ * REAL BUG, FOUND AND FIXED: this used to stop propagating a field the
+ * moment it found ANY non-empty value further along — but a value that
+ * arrived via an EARLIER propagation pass isn't a deliberate choice for
+ * that specific point, just inherited stale. Converting a Transiting
+ * segment to Fishing between two already-linked Fishing segments (so
+ * three end up in a row) and then setting a new value on the MIDDLE
+ * one's own candidate couldn't flow through to the LAST one — the last
+ * one's existing value had only ever been inherited from the FIRST one,
+ * back before the middle segment existed as fishing at all, but looked
+ * "already set" all the same. Fixed by tracking genuine explicitness
+ * separately per field (`baitsExplicit` etc., set only when a
+ * candidate's OWN popup is saved with a non-empty value for that field
+ * — see openTrackCandidatePopup — never by propagation itself) — only
+ * an explicit value blocks further propagation now; a merely-inherited
+ * one gets freely overwritten as propagation continues past it.
+ */
 function propagateCarryForwardFields(day, fromSegIdx, fromCandIdx, savedCandidate) {
   const flat = flattenDayCandidates(day);
   const fromIndex = flat.findIndex((f) => f.segIdx === fromSegIdx && f.candIdx === fromCandIdx);
@@ -1860,9 +1913,10 @@ function propagateCarryForwardFields(day, fromSegIdx, fromCandIdx, savedCandidat
   for (const field of ["baits", "rigs", "rods", "berleys"]) {
     const value = savedCandidate[field];
     if (!value || value.length === 0) continue;
+    const explicitKey = `${field}Explicit`;
     for (let i = fromIndex + 1; i < flat.length; i++) {
       const target = flat[i].cand;
-      if (target[field] && target[field].length > 0) break; // already explicitly set further along — don't overwrite it
+      if (target[explicitKey]) break; // genuinely set on THIS point's own save — don't overwrite it
       target[field] = [...value];
     }
   }
@@ -1996,6 +2050,14 @@ async function openTrackCandidatePopup(trackIdx, dayIdx, segIdx, candIdx) {
     candidate.rigs = multiVal("rigs");
     candidate.rods = multiVal("rods");
     candidate.berleys = multiVal("berleys");
+    // Marks THIS point's own field as genuinely, deliberately set —
+    // never done by propagateCarryForwardFields itself, only here, on a
+    // real save of this exact candidate's own popup — see that
+    // function's own comment for why the distinction matters.
+    candidate.baitsExplicit = candidate.baits.length > 0;
+    candidate.rigsExplicit = candidate.rigs.length > 0;
+    candidate.rodsExplicit = candidate.rods.length > 0;
+    candidate.berleysExplicit = candidate.berleys.length > 0;
     for (const key of ["weatherCondition", "tideCondition"]) {
       candidate[key] = val(key) || undefined;
     }
@@ -2099,6 +2161,7 @@ function renderTracksTree() {
         <span class="tree-node-label" style="padding-left:14px;">${dayCaret}<span data-role="zoom-day" data-track="${trackIdx}" data-day="${dayIdx}">${escapeHtml(day.label)}</span></span>
       </div>`;
       if (!day.expanded) return;
+      const fishingSeqNumbers = computeFishingSequenceNumbers(day);
       day.segments.forEach((seg, segIdx) => {
         const hasCandidates = seg.candidates.length > 0;
         const segCaret = hasCandidates
@@ -2110,10 +2173,19 @@ function renderTracksTree() {
         const segImportCol = seg.kind === "transiting" ? `<span class="tree-checkbox-col"></span>` : `<span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" /></span>`;
         const convertTitle = seg.kind === "fishing" ? "Convert to Transiting" : "Convert to Fishing";
         const segRowStyle = seg.kind === "fishing" ? ` style="background:${segmentBackgroundTint(seg)};"` : "";
+        // "Fishing 11:14–11:57" -> "Fishing 1 11:14–11:57" — only for
+        // display; seg.label itself stays the plain time-range string
+        // (used elsewhere, e.g. the candidate popup's own point-time
+        // reference), computed fresh from the CURRENT segments every
+        // render rather than stored, so it's automatically correct
+        // after a conversion/merge changes how many fishing segments
+        // there are — never goes stale, never needs updating at each
+        // of the many places segments themselves change.
+        const segDisplayLabel = seg.kind === "fishing" ? seg.label.replace(/^Fishing /, `Fishing ${fishingSeqNumbers.get(segIdx)} `) : seg.label;
         html += `<div class="tracks-tree-node" data-level="segment" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}"${segRowStyle}>
           ${segImportCol}
           <span class="tree-checkbox-col"><input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" /></span>
-          <span class="tree-node-label" style="padding-left:28px;">${segCaret}<span data-role="zoom-highlight-segment" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}">${escapeHtml(seg.label)}</span></span>
+          <span class="tree-node-label" style="padding-left:28px;">${segCaret}<span data-role="zoom-highlight-segment" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}">${escapeHtml(segDisplayLabel)}</span></span>
           <span class="segment-convert-icon" data-role="convert-segment" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" title="${convertTitle}">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M7 7h11l-3.5-3.5L16 2l6 6-6 6-1.5-1.5L18 9H7V7zm10 10H6l3.5 3.5L8 22l-6-6 6-6 1.5 1.5L6 15h11v2z"/></svg>
           </span>
@@ -2362,8 +2434,8 @@ function convertSegmentKind(trackIdx, dayIdx, segIdx) {
     seg.expanded = true;
     seg.hue = randomSegmentHue();
     seg.candidates = [
-      { kind: "start", pointIdx: seg.startIdx, importChecked: true, viewChecked: true, baits: [], rigs: [], rods: [], berleys: [] },
-      { kind: "end", pointIdx: seg.endIdx, importChecked: true, viewChecked: true, baits: [], rigs: [], rods: [], berleys: [] },
+      { kind: "start", pointIdx: seg.startIdx, importChecked: true, viewChecked: true, baits: [], rigs: [], rods: [], berleys: [], baitsExplicit: false, rigsExplicit: false, rodsExplicit: false, berleysExplicit: false },
+      { kind: "end", pointIdx: seg.endIdx, importChecked: true, viewChecked: true, baits: [], rigs: [], rods: [], berleys: [], baitsExplicit: false, rigsExplicit: false, rodsExplicit: false, berleysExplicit: false },
     ];
   } else {
     seg.kind = "transiting";
