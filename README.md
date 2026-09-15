@@ -1435,6 +1435,33 @@ regression suite (Edit → Save, Delete, new-mark creation) to confirm
 none of it broke along the way — all still pass. Zero JS errors
 throughout.
 
+**Side panel: a fourth bug, same underlying cause as the width one**
+— reported directly: in edit mode, the panel's own scrollbar stopped
+about three-quarters of the way down, well short of the panel's real
+bottom. `.mark-popup-leaflet .leaflet-popup-content` carries a
+`max-height: 60vh` — genuinely needed for a FLOATING popup (so a tall
+edit form can't render partly off-screen with the Save button
+unreachable), but once that same content sits inside
+`#markDetailPanel` (which already provides its own full-height scroll
+area), the old 60vh cap was still capping the content to 60% of the
+*viewport* height, on top of the panel's own scrolling — so the
+panel's scrollbar only ever reflected that truncated inner box, never
+the panel's actual height. Fixed with a second, more specific rule
+(`.mark-detail-panel .mark-popup-leaflet .leaflet-popup-content {
+max-height: none; overflow-y: visible; }`) that naturally outranks the
+first by specificity — no `!important` needed here, unlike the width
+fix, since this is two stylesheet rules settling by normal cascade
+rules rather than fighting a leftover inline style.
+
+**Verified**: real browser test with a deliberately tall viewport
+(1000px — this is what makes the bug visible; a short window can
+hide it), switched a real mark into edit mode, confirmed the cap's
+computed `max-height` is now `none` inside the panel, and confirmed
+the form's own content genuinely extends to ~1129px — far past where
+the old 600px (60vh of 1000px) cap would have cut it off. Screenshot
+confirms the full form now visibly fills the panel using its own
+scrollbar, all the way down to the last field. Zero JS errors.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
