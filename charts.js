@@ -1960,6 +1960,15 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       if (options.state) {
         options.state.marksById.delete(mark.id);
         options.state.markersById.delete(mark.id);
+        // A deleted Session mark's own connecting line (renderSessionLines,
+        // just above) would otherwise still point at it — recomputed from
+        // whatever's left in marksById now that this one's gone, rather
+        // than tracked incrementally; cheap enough at real mark counts and
+        // correct regardless of which half of a pair got deleted. Runs
+        // unconditionally (not just for type === "Session") since a stray
+        // mismatch there is exactly the kind of thing worth being
+        // defensive about rather than trusting the type check alone.
+        if (options.map) renderSessionLines(options.map, options.state, Array.from(options.state.marksById.values()));
       }
     });
   }
@@ -3024,7 +3033,56 @@ async function loadAndRenderMarks(map, state) {
     wireMarkPopupButtons(popupEl, marker, mark, state.markLists, { state, map });
   });
 
+  renderSessionLines(map, state, marks);
+
   initMarkControls(map, state);
+}
+
+/**
+ * Draws a connecting line between a Fishing Session's own Start and End
+ * marks (type: "Session", linked by a shared sessionGroupId — see the
+ * Sync page's own save flow, sync.js, for where these actually get
+ * created). A Session is otherwise just an ordinary mark — same
+ * cluster group, same popup, same Edit/Copy/Delete via the exact same
+ * generic flow every other mark already uses (deleteMarkFromD1 is
+ * keyed only by mark id, with no type-specific handling needed at all)
+ * — this is the one piece that genuinely needed new code: two separate
+ * markers don't imply a line between them on their own.
+ *
+ * Deliberately a separate, plain layer (not inside state.markerLayer)
+ * — a session's own start/end can sit a real distance apart, and a
+ * connecting line shouldn't be subject to marker clustering the way
+ * the two endpoint markers themselves are.
+ *
+ * A group missing one side entirely (the other half was deleted, or
+ * only one side was ever imported to begin with) simply draws no line
+ * for that group — not an error, just nothing to connect.
+ */
+function renderSessionLines(map, state, marks) {
+  if (state.sessionLineLayer) {
+    map.removeLayer(state.sessionLineLayer);
+  }
+  state.sessionLineLayer = L.layerGroup().addTo(map);
+
+  const groups = new Map(); // sessionGroupId -> {start, end}
+  for (const mark of marks) {
+    if (mark.type !== "Session" || !mark.sessionGroupId || mark.lat == null || mark.lng == null) continue;
+    const entry = groups.get(mark.sessionGroupId) || {};
+    if (mark.sessionRole === "start" && !entry.start) entry.start = mark;
+    else if (mark.sessionRole === "end" && !entry.end) entry.end = mark;
+    groups.set(mark.sessionGroupId, entry);
+  }
+
+  for (const { start, end } of groups.values()) {
+    if (!start || !end) continue;
+    L.polyline(
+      [
+        [start.lat, start.lng],
+        [end.lat, end.lng],
+      ],
+      { color: "#7c3aed", weight: 3, opacity: 0.8, dashArray: "6 4" }
+    ).addTo(state.sessionLineLayer);
+  }
 }
 
 /**
