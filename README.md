@@ -1586,6 +1586,36 @@ rather than an application bug — not something diagnosable further
 without the Worker's own server-side logs. Worth watching for whether
 it recurs; flagged here rather than guessed at.
 
+### Mark-editing dropdowns only ever showed Public's own options (charts.js, sync.js)
+
+Reported directly: moving a Rod option from Public's account to the
+signed-in Admin's own (via the Settings page's Mark Lists editor,
+using the "View as Public" toggle fixed just above) made it vanish
+from the Rod dropdown entirely when editing a Catch — regardless of
+which account a given option actually lives under, every mark-editing
+dropdown (Species/Bait/Rig/Rod/Weather/Tide/Water/Berley/Mark Type,
+wherever they appear) should show all of them.
+
+Root cause: both `loadAndRenderMarks` (charts.js — Location/Live) and
+the Sync page's own init (sync.js) only ever fetched
+`/api/public/marklists` — Public's own list, and nothing else. Fixed
+with one shared helper, `fetchUnionedMarkLists` (charts.js): fetches
+Public's own list AND the signed-in Admin's own personal list (`/api/
+marklists`, omitting `?userId=` so it resolves to the current
+session's own user), merged by field+value, with the Admin's own copy
+winning on a genuine clash between the two — more likely to be the
+intentionally-current one, having just been curated or moved there.
+Both call sites already only ever run once an admin session is
+confirmed (`cachedIsAdmin`/`canSync()`), so the authenticated half of
+this fetch is always reachable, never a 401.
+
+**Verified**: real browser test reproducing the exact reported
+scenario — a Rod option on Public's own list, a DIFFERENT Rod option
+on the Admin's own — confirmed `state.markLists` contains the union of
+both, and confirmed the actual, real Rod `<select>` inside a real edit
+popup shows both options together. Separately confirmed sync.js's own
+`markLists` variable gets the same union. Zero JS errors.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
