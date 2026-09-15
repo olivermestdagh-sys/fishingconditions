@@ -90,6 +90,77 @@ main {
   height: 100%;
 }
 
+/* Wraps the map + the mark detail panel (below) in a flex row so the
+   panel sits permanently to the right of the map rather than floating
+   over it — real, reported friction: a Leaflet popup positioned right
+   above whatever you clicked, on a map already busy with marks and
+   Session lines, could easily bury the very point (and its neighbours)
+   you were trying to look at. Only wraps the map itself; the hover
+   panel (.location-hover-panel, above) stays a direct child of `main`
+   so its own position:absolute (relative to `main`, the nearest
+   positioned ancestor) is completely unaffected by this wrapper. */
+.map-with-panel-layout {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+.map-with-panel-layout .location-map-fullpage {
+  flex: 1;
+  min-width: 0; /* a flex child's own content (the map) would otherwise refuse to shrink below its intrinsic width, quietly pushing the panel out of view instead of actually sharing space with it */
+}
+
+/* A real Leaflet popup element gets reparented straight into this panel
+   while open (wireMarkPopupButtons' own popupopen handler, charts.js)
+   — not a copy, the SAME DOM node, so every button/listener already
+   wired onto it keeps working untouched. autoPan is turned off for
+   every mark popup (bindPopup's own options) specifically because of
+   this — Leaflet's own auto-pan-to-keep-the-popup-visible logic
+   assumes the popup is still floating in its usual spot near the
+   marker, and would compute nonsense offsets (and could visibly jerk
+   the map around) once it's actually sitting over here instead. */
+.mark-detail-panel {
+  width: 340px;
+  flex-shrink: 0;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--white);
+  border-left: 1px solid var(--grey-200);
+  padding: 14px;
+}
+/* The reparented popup no longer needs its own floating chrome (the
+   little downward-pointing tip, the anchoring/tip-container Leaflet
+   normally draws beneath it) now that it's sitting in a fixed panel
+   rather than anchored to a specific point on the map. */
+.mark-detail-panel .leaflet-popup-tip-container,
+.mark-detail-panel .leaflet-popup-tip {
+  display: none;
+}
+.mark-detail-panel .leaflet-popup-content-wrapper {
+  box-shadow: none;
+  border-radius: 0;
+}
+.mark-detail-panel .leaflet-popup {
+  position: static; /* Leaflet positions its own popup container with inline transform/left/bottom styles meant for floating over the map — static here simply ignores all of that once it's inside this panel, letting normal document flow lay it out instead */
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  /* Not enough width for map + a 340px column on a phone — the panel
+     drops below the map instead, capped to just under half the
+     available height so the map itself stays usably visible above it
+     rather than getting squeezed to almost nothing. */
+  .map-with-panel-layout {
+    flex-direction: column;
+  }
+  .mark-detail-panel {
+    width: 100%;
+    height: auto;
+    max-height: 45%;
+    border-left: none;
+    border-top: 1px solid var(--grey-200);
+  }
+}
+
 /* Small floating banner over the Live tab's map, shown while GPS is still
    resolving or failed entirely — before there's any matched location to
    open a proper hover panel for. Hidden (display:none, set in JS) once a
