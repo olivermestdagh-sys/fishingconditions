@@ -1177,6 +1177,51 @@ confirmed its tree row renders with zero checkboxes and a "(saved)"
 tag, and confirmed clicking it opens the read-only popup (not an edit
 form). Zero JS errors.
 
+**Phase 8 — Location/Live map rendering**: the last planned phase.
+`loadAndRenderMarks` (`charts.js`) already loads and renders every
+Session mark exactly like any other mark — same cluster group, same
+popup, same generic Edit/Copy/Delete via `wireMarkPopupButtons`/
+`deleteMarkFromD1` (keyed only by mark id, with no type-specific
+handling needed at all). The one genuinely new piece: two separate
+markers don't imply a connecting line between them on their own.
+
+`renderSessionLines` groups every loaded `type: "Session"` mark by its
+own `sessionGroupId`, and for each group with BOTH a `start` and an
+`end` present, draws a dashed line between them (a separate, plain
+layer — not inside the marker-cluster group, since a session's own
+start/end can sit a real distance apart and clustering shouldn't apply
+to the line itself). A group missing one side (the other half deleted,
+or only one side ever imported) simply draws no line for it — not an
+error, just nothing to connect.
+
+Deleting a mark now also re-runs `renderSessionLines` — confirmed this
+was necessary directly: without it, deleting one side of a pair left
+the line still pointing at a now-nonexistent mark. Recomputed fresh
+from whatever's left in `state.marksById` rather than tracked
+incrementally — simple and correct regardless of which half got
+deleted, and cheap enough at real mark counts since this only runs on
+a deliberate delete action, not on any hot path.
+
+**Verified**: built an isolated test harness (`loadAndRenderMarks`
+doesn't need the full Location/Live page, just a real Leaflet map and
+its own `state` object) with a real Start/End pair, an intentionally
+orphaned Start with no matching End, and an ordinary Catch mark mixed
+in. Confirmed a real connecting line rendered between the matched
+pair, confirmed the orphan drew nothing and caused no error, then
+deleted the Start side of the real pair through the actual Delete
+button (via `showMarkerOnceVisible` — a marker inside a cluster isn't
+individually poppable until shown, the same real constraint this
+codebase already worked around once before for exactly this reason)
+and confirmed the line disappeared correctly, while the underlying
+mark itself was genuinely removed through the same generic delete flow
+every other mark already uses. Zero JS errors.
+
+**That's every phase of Fishing Sessions now built**, from the
+original design brief through to this one: parsing and dwell
+detection, the tree/map review UI, point editing, save/storage,
+adding a Catch/POI at any trackpoint, segment boundary editing,
+catch-linking, and now Location/Live rendering.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
