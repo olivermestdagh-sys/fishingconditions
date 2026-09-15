@@ -75,7 +75,10 @@
         anything within 20m of a mark already tracked is left out of the list entirely, so nothing gets
         imported twice. Review and edit below, then import only what you actually want kept.
       </p>
-      <input type="file" id="syncFileInput" accept=".gpx,.usr" />
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <input type="file" id="syncFileInput" accept=".gpx,.usr" />
+        <button type="button" id="btnClearSavedReview" class="btn-secondary" style="display:none;">Clear saved review</button>
+      </div>
       <div id="parseStatus" style="margin-top:10px;font-size:0.85rem;"></div>
     </section>
 

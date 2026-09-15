@@ -84,6 +84,97 @@ let reviewMapLayer = null; // a plain L.LayerGroup holding every polyline/
 let sideGroupCollapsed = { marks: false, tracks: false }; // the two side-
                           // panel section headers (Marks / Trail data)
 
+// ---------------------------------------------------------------------
+// Persisting a loaded-but-not-yet-saved import across page navigation.
+//
+// This site is a genuinely multi-page one (each "tab" is its own HTML
+// file), so clicking Location/Live/anywhere else and back is a REAL
+// page reload — every plain JS variable (candidates, trackData, all of
+// it) is gone the moment that happens, unless something outlives the
+// page itself. Real gap Oliver reported directly: checking something
+// on another tab mid-review meant reloading the whole file and losing
+// every edit made so far.
+//
+// Uses IndexedDB, not sessionStorage/localStorage — deliberately: a
+// full real trail's own raw points (lat/lon/timeMs/timeNaive per point)
+// already run to several megabytes on their own for a genuinely large
+// import (confirmed directly against the actual 82,238-point trail
+// used throughout this feature's own testing), close to or past what
+// browsers typically allow for the synchronous Web Storage APIs.
+// IndexedDB's quota is far larger and it stores structured JS values
+// natively — no manual JSON stringify/parse step needed either.
+// ---------------------------------------------------------------------
+
+const REVIEW_STATE_DB_NAME = "fishingconditions-sync-review";
+const REVIEW_STATE_STORE = "state";
+const REVIEW_STATE_KEY = "current";
+let persistDebounceTimer = null;
+
+function openReviewStateDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(REVIEW_STATE_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore(REVIEW_STATE_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/** The actual write — debounced (see schedulePersistReviewState) rather
+ * than called directly from anywhere else, so rapid-fire changes (a
+ * fast typing session, repeated +/- clicks) coalesce into one write
+ * instead of one per keystroke. Best-effort: a failure here shouldn't
+ * interrupt the person's actual work, just means this specific save
+ * didn't happen — logged, not surfaced as an error in the UI. */
+async function persistReviewState() {
+  try {
+    const db = await openReviewStateDB();
+    const tx = db.transaction(REVIEW_STATE_STORE, "readwrite");
+    tx.objectStore(REVIEW_STATE_STORE).put({ candidates, trackData, savedAt: Date.now() }, REVIEW_STATE_KEY);
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.error("Failed to persist review state:", err);
+  }
+}
+
+function schedulePersistReviewState() {
+  clearTimeout(persistDebounceTimer);
+  persistDebounceTimer = setTimeout(persistReviewState, 800);
+}
+
+async function loadPersistedReviewState() {
+  try {
+    const db = await openReviewStateDB();
+    const tx = db.transaction(REVIEW_STATE_STORE, "readonly");
+    const req = tx.objectStore(REVIEW_STATE_STORE).get(REVIEW_STATE_KEY);
+    return await new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (err) {
+    console.error("Failed to load persisted review state:", err);
+    return null;
+  }
+}
+
+/** Only ever called explicitly — from the "Clear saved review" button,
+ * or after a successful full import with nothing left unselected — not
+ * automatically just because the tree looks empty for some other
+ * reason (e.g. mid-render). */
+async function clearPersistedReviewState() {
+  try {
+    const db = await openReviewStateDB();
+    const tx = db.transaction(REVIEW_STATE_STORE, "readwrite");
+    tx.objectStore(REVIEW_STATE_STORE).delete(REVIEW_STATE_KEY);
+  } catch (err) {
+    console.error("Failed to clear persisted review state:", err);
+  }
+}
+
 // How close two points have to be to count as "the same spot" — both for
 // collapsing repeat device saves of one spot into a single candidate, and
 // for recognising a candidate that's already tracked in marks.json. Fixed
@@ -912,6 +1003,7 @@ function renderCandidateRow(c, i) {
 function renderReviewList() {
   const container = document.getElementById("reviewList");
   if (!container) return;
+  schedulePersistReviewState(); // any render of this list follows a real mutation almost everywhere it's called — see this function's own comment for why hooking the two shared render functions covers essentially every change point
   const filtered = [];
   candidates.forEach((c, i) => {
     if (!c.matchedExisting && candidateMatchesSearch(c)) filtered.push(i);
@@ -1525,6 +1617,7 @@ async function handleFileInputChange(e) {
     // with no waypoints at all is a completely normal thing to upload
     // here, and vice versa).
     document.getElementById("reviewSection").style.display = rawWaypoints.length > 0 || trackData.length > 0 ? "block" : "none";
+    document.getElementById("btnClearSavedReview").style.display = rawWaypoints.length > 0 || trackData.length > 0 ? "inline-block" : "none";
     document.getElementById("marksGroupBody").style.display = sideGroupCollapsed.marks ? "none" : "block";
     document.getElementById("tracksGroupBody").style.display = sideGroupCollapsed.tracks ? "none" : "block";
     if (trackData.length > 0) {
@@ -1603,6 +1696,64 @@ function findLinkedCatchIndices(day, seg) {
   });
   return linked;
 }
+
+/**
+ * Console diagnostic — NOT part of the normal UI. Run from the browser
+ * console (F12) after a file is loaded, e.g. `diagnoseCatchLinking("gummy")`
+ * (a plain substring match against every candidate's own name, case-
+ * insensitive — matches "Chelsea gummy" AND "Chels gummy" in one call).
+ * Reports, for each match: whether its own type is actually "Catch" at
+ * all, and for every currently-loaded Fishing segment, whether its time
+ * falls in that segment's own window and — if so — exactly how far away
+ * it is from the segment's own path, so a near-miss on distance (the
+ * most likely real-world cause) is visible directly rather than a bare
+ * "not linking" with no way to tell why.
+ */
+function diagnoseCatchLinking(nameSubstring) {
+  const needle = nameSubstring.toLowerCase();
+  const matches = candidates.filter((c) => (c.name || "").toLowerCase().includes(needle));
+  if (matches.length === 0) {
+    console.log(`No candidate found with a name containing "${nameSubstring}". Check spelling, or that the file with this mark is actually loaded.`);
+    return;
+  }
+  matches.forEach((c) => {
+    console.log(`--- "${c.name}" ---`);
+    console.log(`type: ${c.type} | dateTime: ${c.dateTime} | lat/lng: ${c.lat}, ${c.lng}`);
+    if (c.type !== "Catch") {
+      console.log(`  -> NOT eligible to link at all: type is "${c.type}", not "Catch".`);
+      return;
+    }
+    let anyLink = false;
+    let anyTimeMatch = false;
+    trackData.forEach((track, ti) => {
+      track.dayGroups.forEach((day, di) => {
+        day.segments.forEach((seg, si) => {
+          if (seg.kind !== "fishing") return;
+          const startTime = day.points[seg.startIdx].timeNaive;
+          const endTime = day.points[seg.endIdx].timeNaive;
+          const inWindow = c.dateTime >= startTime && c.dateTime <= endTime;
+          if (!inWindow) return;
+          anyTimeMatch = true;
+          const segPoints = day.points.slice(seg.startIdx, seg.endIdx + 1);
+          const nearest = nearestPointTo(segPoints, c.lat, c.lng);
+          const dist = distanceMetersBetween(c.lat, c.lng, nearest.lat, nearest.lon);
+          if (dist <= CATCH_LINK_RADIUS_METERS) {
+            console.log(`  -> LINKS to "${seg.label}" (track ${ti}, day ${di}, segment ${si}) — ${dist.toFixed(0)}m away`);
+            anyLink = true;
+          } else {
+            console.log(`  -- time matches "${seg.label}" (track ${ti}, day ${di}, segment ${si}) but it's ${dist.toFixed(0)}m away — over the ${CATCH_LINK_RADIUS_METERS}m limit`);
+          }
+        });
+      });
+    });
+    if (!anyLink && !anyTimeMatch) {
+      console.log(`  -> NOT linking to anything currently loaded — its own dateTime (${c.dateTime}) doesn't fall inside ANY loaded Fishing segment's own time window. Either the wrong file/day is loaded, or this mark's own timestamp doesn't actually correspond to this trip.`);
+    } else if (!anyLink) {
+      console.log(`  -> Time matched something, but every match was too far away (see above) — try raising CATCH_LINK_RADIUS_METERS if this genuinely is the right spot.`);
+    }
+  });
+}
+window.diagnoseCatchLinking = diagnoseCatchLinking;
 
 function candidateKey(trackIdx, dayIdx, segIdx, candIdx) {
   return `${trackIdx}.${dayIdx}.${segIdx}.${candIdx}`;
@@ -1863,6 +2014,7 @@ function applyTriState(checkboxEl, state) {
 function renderTracksTree() {
   const container = document.getElementById("tracksTree");
   if (!container) return;
+  schedulePersistReviewState(); // see renderReviewList's own comment — same reasoning applies here
 
   let html = "";
   trackData.forEach((track, trackIdx) => {
@@ -2305,6 +2457,38 @@ document.addEventListener("DOMContentLoaded", async () => {
   existingMarks = existingMarksRes.ok ? await existingMarksRes.json() : []; // bare array now — see handlePublicMarks, user-backend.js
   markLists = listsRes.ok ? await listsRes.json() : [];
   knownSpecies = markLists.filter((r) => r.field === "Species").map((r) => r.value);
+
+  // Restore a loaded-but-not-yet-saved review from a previous visit to
+  // this page, if one exists — see the persistence block's own comment,
+  // near the top of this file, for why this is needed at all (a real
+  // page reload, not just a re-render, happens every time another tab
+  // is clicked on this site).
+  const persisted = await loadPersistedReviewState();
+  if (persisted && ((persisted.candidates && persisted.candidates.length > 0) || (persisted.trackData && persisted.trackData.length > 0))) {
+    candidates = persisted.candidates || [];
+    trackData = persisted.trackData || [];
+    document.getElementById("reviewSection").style.display = "block";
+    document.getElementById("marksGroupBody").style.display = sideGroupCollapsed.marks ? "none" : "block";
+    document.getElementById("tracksGroupBody").style.display = sideGroupCollapsed.tracks ? "none" : "block";
+    renderReviewList();
+    renderTracksTree();
+    renderReviewMap({ fitBounds: true });
+    const statusEl = document.getElementById("parseStatus");
+    statusEl.textContent = `Restored your unsaved review from ${new Date(persisted.savedAt).toLocaleString()} — showing where you left off.`;
+    statusEl.style.color = "#16a34a";
+    document.getElementById("btnClearSavedReview").style.display = "inline-block";
+  }
+
+  document.getElementById("btnClearSavedReview").addEventListener("click", async () => {
+    if (!confirm("Discard your current unsaved review? This can't be undone.")) return;
+    candidates = [];
+    trackData = [];
+    await clearPersistedReviewState();
+    document.getElementById("reviewSection").style.display = "none";
+    document.getElementById("btnClearSavedReview").style.display = "none";
+    document.getElementById("parseStatus").textContent = "Cleared.";
+    document.getElementById("parseStatus").style.color = "";
+  });
 
   document.getElementById("syncFileInput").addEventListener("change", handleFileInputChange);
   document.getElementById("btnSelectAllNew").addEventListener("click", () => setAllSelected(true));

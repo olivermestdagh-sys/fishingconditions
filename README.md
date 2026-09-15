@@ -1079,6 +1079,64 @@ constructed the explicit multi-segment fallback case directly and
 confirmed a matching catch links to every matching segment, not just
 one. Zero JS errors.
 
+**Phase 7 addendum — persisting a loaded-but-unsaved review across
+page navigation** (`sync.js`): a real, reported gap. This site is
+genuinely multi-page (every "tab" is its own HTML file), so clicking
+Location/Live/anywhere else and back is a real page reload — every
+plain JS variable, `candidates`/`trackData` included, is gone the
+instant that happens. Checking something on another tab mid-review
+meant losing every edit and re-uploading from scratch.
+
+Fixed with IndexedDB, not sessionStorage/localStorage — deliberately:
+a genuinely large real trail's own raw points alone already run to
+several megabytes (confirmed directly against the actual 82,238-point
+trail used throughout this feature's own testing), close to or past
+what browsers typically allow the synchronous Web Storage APIs.
+IndexedDB's quota is far larger, and it stores structured JS values
+natively with no manual serialize/parse step. A debounced save
+(`schedulePersistReviewState`) is hooked into the two shared render
+functions (`renderReviewList`/`renderTracksTree`) rather than scattered
+across every individual mutation site — since nearly every place that
+changes `candidates` or `trackData` already calls one or both of those
+right afterward, this one hook covers essentially all of them. On page
+load, any persisted review is restored automatically, with a status
+message naming when it was last saved; a new "Clear saved review"
+button (shown whenever there's something to clear) discards it
+explicitly, with a confirmation first.
+
+**Verified**: real browser test — uploaded the real trail file, made a
+specific edit, confirmed IndexedDB held it, then did exactly what was
+reported: navigated to a genuinely different page load of the same
+URL (not just a re-render) and confirmed that SPECIFIC edit survived,
+the review section was visible again, and the "Clear saved review"
+button appeared. Then confirmed clicking that button actually cleared
+IndexedDB and hid the review section. Zero JS errors.
+
+**A console diagnostic for catch-linking questions** — reported
+directly: two real catches ("Chelsea gummy"/"Chels gummy") expected to
+link into a loaded track weren't showing up, with no way to see why
+from the UI alone. Added `diagnoseCatchLinking(nameSubstring)`
+(`sync.js`, attached to `window` — run from the browser console, not
+part of the normal UI), which finds every candidate whose name
+contains the given substring (case-insensitive — one call matches
+both "Chelsea gummy" and "Chels gummy") and reports, for each: whether
+its own type is actually "Catch" at all, and for every currently-
+loaded Fishing segment, whether its time falls inside that segment's
+window and — if so — exactly how far away it is, so a near-miss on
+distance (confirmed, via testing, to be a real and likely cause) is
+visible directly instead of a bare "not linking" with nothing to go on.
+
+**Verified**: real browser test constructed three deliberately distinct
+cases against the real loaded trail — a catch placed directly on a
+real segment's own path and time (confirmed it reports a genuine
+link), the same time but 5–6km away (confirmed it reports a clear
+distance near-miss with the actual metres shown), and a POI instead of
+a Catch (confirmed it reports the type mismatch plainly). Also surfaced
+something worth knowing directly: the real uploaded file already has
+roughly 200 marks named "Gummy Shark", so searching a bare substring
+like "gummy" will report on all of them at once — a more specific term
+("Chelsea", "Chels", or the full name) avoids that noise in practice.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
