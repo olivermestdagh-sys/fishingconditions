@@ -976,6 +976,7 @@ function openCandidatePopup(idx) {
     Object.assign(c, updated);
     reviewMap.closePopup(popup);
     renderReviewList();
+    renderTracksTree(); // a Catch's own name/time/location can change here, and any of those could affect its linked-catch row (or its link itself — see findLinkedCatchIndices) under a Fishing segment
   });
   popupEl.querySelector("[data-mark-cancel]").addEventListener("click", () => reviewMap.closePopup(popup));
 }
@@ -1559,6 +1560,50 @@ async function handleFileInputChange(e) {
  * DOM data-attribute and as selectedCandidateKey's own value — so a
  * click on either the tree row or the map marker can find and highlight
  * the same candidate from the other side. */
+// How close a Catch mark's own lat/lng needs to be to a Fishing
+// segment's own points to count as "logged during this session" —
+// time alone isn't quite enough (a backdated mark, device clock drift,
+// or two different trail days whose time ranges happen to coincide
+// could all share a timestamp purely by chance). Oliver's own starting
+// value — like DWELL_RADIUS_METERS, a number to tune once real data is
+// in front of it, not a final answer.
+const CATCH_LINK_RADIUS_METERS = 1000;
+
+/**
+ * Every candidate (from the flat marks list, NOT the trackData tree —
+ * a Catch never moves into the Sessions data model, this is purely a
+ * computed relationship recalculated fresh on every render) whose own
+ * time falls inside this Fishing segment's own time window AND whose
+ * own location sits within CATCH_LINK_RADIUS_METERS of the segment's
+ * points. A transiting segment never has anything linked to it — only
+ * ever called for a fishing one.
+ *
+ * Cardinality is asymmetric by construction: a day's segments partition
+ * time gaplessly with no overlap, so one catch's single timestamp can
+ * only ever fall inside one segment's window on ITS OWN — but as a
+ * deliberate fallback (Oliver's own call, in case two different days'
+ * time ranges ever coincide, or a data anomaly slips through), this
+ * doesn't stop at the first match — a catch that somehow matches
+ * several segments shows up nested under every one of them, rather
+ * than being arbitrarily assigned to just one.
+ */
+function findLinkedCatchIndices(day, seg) {
+  if (seg.kind !== "fishing") return [];
+  const startTime = day.points[seg.startIdx].timeNaive;
+  const endTime = day.points[seg.endIdx].timeNaive;
+  const segPoints = day.points.slice(seg.startIdx, seg.endIdx + 1);
+  const linked = [];
+  candidates.forEach((c, idx) => {
+    if (c.type !== "Catch") return;
+    if (!c.dateTime || c.dateTime < startTime || c.dateTime > endTime) return;
+    const nearest = nearestPointTo(segPoints, c.lat, c.lng);
+    if (distanceMetersBetween(c.lat, c.lng, nearest.lat, nearest.lon) <= CATCH_LINK_RADIUS_METERS) {
+      linked.push(idx);
+    }
+  });
+  return linked;
+}
+
 function candidateKey(trackIdx, dayIdx, segIdx, candIdx) {
   return `${trackIdx}.${dayIdx}.${segIdx}.${candIdx}`;
 }
@@ -1883,6 +1928,24 @@ function renderTracksTree() {
             </span>
           </div>`;
         });
+        // Linked Catches — a purely computed relationship (findLinkedCatchIndices),
+        // never stored on the segment or the catch itself. Still just an
+        // ordinary mark from the flat `candidates` list underneath — its
+        // checkbox and click both operate on that SAME object, so this
+        // never drifts out of sync with the Marks list above.
+        if (seg.kind === "fishing") {
+          findLinkedCatchIndices(day, seg).forEach((idx) => {
+            const c = candidates[idx];
+            html += `<div class="tracks-tree-node" data-level="linked-catch" data-candidate-idx="${idx}">
+              <span class="tree-checkbox-col"><input type="checkbox" data-role="linked-catch-select" data-candidate-idx="${idx}" ${c.selected ? "checked" : ""} /></span>
+              <span class="tree-checkbox-col"></span>
+              <span class="tree-node-label" style="padding-left:42px;">
+                <span class="caret" style="visibility:hidden;">▾</span>
+                <span data-role="open-linked-catch" data-candidate-idx="${idx}">🐟 ${escapeHtml(c.name || "(unnamed)")} — ${escapeHtml((c.dateTime || "").slice(11, 16))}</span>
+              </span>
+            </div>`;
+          });
+        }
       });
     });
   });
@@ -1956,6 +2019,18 @@ function renderTracksTree() {
       e.stopPropagation();
       const { track, day, seg, cand, dir } = e.currentTarget.dataset;
       onStepCandidateClick(Number(track), Number(day), Number(seg), Number(cand), Number(dir));
+    });
+  });
+  container.querySelectorAll('[data-role="linked-catch-select"]').forEach((el) => {
+    el.addEventListener("change", (e) => {
+      const idx = Number(e.currentTarget.dataset.candidateIdx);
+      if (candidates[idx]) candidates[idx].selected = e.currentTarget.checked;
+      renderReviewList(); // the SAME candidate's checkbox in the Marks list must reflect this too
+    });
+  });
+  container.querySelectorAll('[data-role="open-linked-catch"]').forEach((el) => {
+    el.addEventListener("click", (e) => {
+      openCandidatePopup(Number(e.currentTarget.dataset.candidateIdx));
     });
   });
 
