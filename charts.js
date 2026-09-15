@@ -3133,8 +3133,33 @@ async function loadAndRenderMarks(map, state) {
    * separate popup implementation) so Edit/Delete/etc. all keep working
    * completely unchanged, operating on the exact same marker and mark
    * object as ever.
+   *
+   * REAL BUG, FOUND AND FIXED (round two — the first attempt wasn't
+   * enough): confirmed directly with a 3+ marker cluster (the first
+   * fix was only ever tested with 2) that a leg close enough to the
+   * cluster's own original centre stayed unclickable even with a
+   * correctly-sized, correctly-positioned overlay sitting right there —
+   * elementFromPoint at that exact point showed why: the cluster's own
+   * icon (a plain HTML DIV, left in the DOM at the original centre
+   * throughout the whole spiderfy — the faded circle visible in the
+   * middle of a spiderfied cluster) lives in Leaflet's markerPane,
+   * which sits ABOVE the plain overlayPane an SVG renderer uses by
+   * default in Leaflet's own fixed pane ordering
+   * (tilePane<overlayPane<shadowPane<markerPane<tooltipPane<popupPane).
+   * bringToFront() only reorders layers WITHIN one pane, so it could
+   * never have won against a different, higher pane regardless of when
+   * or how often it was called. Fixed by giving the overlay its own
+   * dedicated pane, explicitly created above markerPane (600) but
+   * below tooltipPane (650) in Leaflet's own scheme — high enough to
+   * always win against the cluster's own lingering icon, without
+   * outranking an actual tooltip.
    */
-  state.spiderfyOverlayRenderer = L.svg();
+  if (!map.getPane("spiderfyOverlayPane")) {
+    map.createPane("spiderfyOverlayPane");
+    map.getPane("spiderfyOverlayPane").style.zIndex = 625;
+    map.getPane("spiderfyOverlayPane").style.pointerEvents = "none"; // the pane itself never needs to catch clicks — only the individual marker paths inside it do (Leaflet sets pointer-events back to "auto" per-path automatically)
+  }
+  state.spiderfyOverlayRenderer = L.svg({ pane: "spiderfyOverlayPane" });
   state.spiderfyOverlayLayer = L.layerGroup().addTo(map);
   state.markerLayer.on("spiderfied", (e) => {
     state.spiderfyOverlayLayer.clearLayers();

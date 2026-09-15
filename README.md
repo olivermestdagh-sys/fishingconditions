@@ -1506,6 +1506,47 @@ distinct tooltip on hover (matching the exact reported case — "Session
 click/edit still works completely unchanged, with the new listeners in
 place.
 
+**Round two — the first fix wasn't actually enough**: reported back
+directly, with a real screenshot of a larger (6-7 marker) cluster,
+that "1 and 11 o'clock" were still unclickable even with the fix
+applied. Reproduced properly this time with 3+ marker clusters (the
+first round's testing only ever covered 2) and found a genuine second
+bug: a leg close enough to the cluster's own original centre stayed
+unclickable even with a correctly-sized, correctly-positioned overlay
+sitting right there. `elementFromPoint` at that exact spot showed why —
+the cluster's own icon (a plain HTML DIV, left in the DOM at the
+original centre for the whole time a cluster is spiderfied open — the
+faded circle visible in the middle of the screenshot) lives in
+Leaflet's `markerPane`, which sits ABOVE the plain `overlayPane` an SVG
+renderer uses by default, in Leaflet's own fixed pane ordering.
+`bringToFront()` only reorders layers WITHIN one pane, so it could
+never have won against a different, higher pane no matter how or when
+it was called — the first fix's `bringToFront()` call was addressing
+the wrong problem entirely for this specific case. Fixed by giving the
+overlay its own dedicated pane, created explicitly above `markerPane`
+(600) but below `tooltipPane` (650) in Leaflet's own numbering — high
+enough to always win against the cluster's own lingering icon, without
+outranking an actual tooltip.
+
+**Verified**: reproduced the exact regression with a 3-marker cluster
+first — confirmed one leg genuinely unclickable, confirmed via
+`elementFromPoint` that the cluster's own centre icon DIV was the
+element actually receiving the click — then confirmed the pane fix
+resolves it (all 3 legs clickable, `elementFromPoint` now correctly
+resolves to the overlay itself at all 3 positions). Scaled up to a
+7-marker cluster matching the screenshot's own scale — all 7 legs
+visible and clickable, zero JS errors. Re-ran the original 2-marker
+case to confirm no regression there either. One separate, pre-existing
+quirk surfaced along the way and deliberately left alone rather than
+folded into this fix without asking first: two markers close enough
+together can show both of their tooltips at once on hover, rather than
+just the one being pointed at — not the bug that was reported (which
+was "no tooltip at all", not "the wrong one too"), and not something
+this fix's own code touches (tooltip binding/positioning is completely
+unchanged) — more likely something that was always there and simply
+harder to notice while one of the two markers was invisible to begin
+with. Flagging it rather than fixing it unprompted.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
