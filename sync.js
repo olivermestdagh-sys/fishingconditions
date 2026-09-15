@@ -2173,7 +2173,7 @@ function renderTracksTree() {
         const segImportCol = seg.kind === "transiting" ? `<span class="tree-checkbox-col"></span>` : `<span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" /></span>`;
         const convertTitle = seg.kind === "fishing" ? "Convert to Transiting" : "Convert to Fishing";
         const segRowStyle = seg.kind === "fishing" ? ` style="background:${segmentBackgroundTint(seg)};"` : "";
-        // "Fishing 11:14–11:57" -> "Fishing 1 11:14–11:57" — only for
+        // "Fishing 11:14–11:57" -> "Fishing 1 (11:14–11:57)" — only for
         // display; seg.label itself stays the plain time-range string
         // (used elsewhere, e.g. the candidate popup's own point-time
         // reference), computed fresh from the CURRENT segments every
@@ -2181,7 +2181,7 @@ function renderTracksTree() {
         // after a conversion/merge changes how many fishing segments
         // there are — never goes stale, never needs updating at each
         // of the many places segments themselves change.
-        const segDisplayLabel = seg.kind === "fishing" ? seg.label.replace(/^Fishing /, `Fishing ${fishingSeqNumbers.get(segIdx)} `) : seg.label;
+        const segDisplayLabel = seg.kind === "fishing" ? seg.label.replace(/^Fishing (.+)$/, `Fishing ${fishingSeqNumbers.get(segIdx)} ($1)`) : seg.label;
         html += `<div class="tracks-tree-node" data-level="segment" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}"${segRowStyle}>
           ${segImportCol}
           <span class="tree-checkbox-col"><input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" /></span>

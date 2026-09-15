@@ -1315,6 +1315,12 @@ explicitly; and confirmed deleting Start actually deletes both Start
 and End together (leaving the unrelated Catch untouched) and removes
 the now-orphaned line. Zero JS errors.
 
+**Sync page label format tweak**: "Fishing 1 11:14–11:57" ->
+"Fishing 1 (11:14–11:57)" — the sequence number stays outside the
+parentheses, the time range moves inside. Verified directly: the
+regex correctly produces `Fishing 1 (11:14–11:57)` from the underlying
+`Fishing 11:14–11:57` label.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
