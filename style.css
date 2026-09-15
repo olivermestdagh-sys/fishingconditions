@@ -2693,6 +2693,26 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
   margin-right: 4px;
 }
 
+/* REAL BUG, FOUND AND FIXED: the 60vh cap just above is correct for a
+   FLOATING popup (without it, a tall edit form could render partly
+   off-screen on mobile with no way to reach Save) — but once the same
+   popup is reparented into the fixed #markDetailPanel
+   (attachPopupToDetailPanel, charts.js), that panel already provides
+   its own full-height scroll area (height:100%; overflow-y:auto — see
+   .mark-detail-panel above). Capping the content to 60% of the
+   VIEWPORT height on top of that left the panel's own scrollbar
+   representing only that truncated 60vh box, not the panel's actual
+   full height — reported directly: the scrollbar visibly stopped
+   about three-quarters down the panel, well short of its own bottom.
+   Higher specificity (3 classes vs 2) naturally wins over the rule
+   above without needing !important — this is two stylesheet rules
+   settling by normal cascade rules, not fighting an inline style the
+   way the earlier width fix had to. */
+.mark-detail-panel .mark-popup-leaflet .leaflet-popup-content {
+  max-height: none;
+  overflow-y: visible;
+}
+
 /* PART 1 of 2 (see the .map-has-open-popup rule below for part 2, and
    wireMapPopupZIndexToggle's own comment in charts.js for the full story)
    — raises Leaflet's own popup PANE, above every OTHER pane inside the
