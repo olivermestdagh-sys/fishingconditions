@@ -3060,9 +3060,10 @@ async function loadAndRenderMarks(map, state) {
   // Best-effort — the edit form's dropdowns just fall back to "no options
   // besides the current value" if this fails, rather than blocking the
   // whole marks layer from rendering over a pick-list fetch problem.
+  // fetchUnionedMarkLists (its own comment, above) merges in the signed-in
+  // Admin's own personal marklist rows too, not just Public's.
   try {
-    const listsRes = await fetch(`${MARK_LISTS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" });
-    if (listsRes.ok) state.markLists = await listsRes.json();
+    state.markLists = await fetchUnionedMarkLists();
   } catch (err) {
     console.error("Could not load mark lists (edit dropdowns will be limited):", err);
   }
@@ -4426,6 +4427,45 @@ const MARKS_FILE_PATH = "https://fishingconditions-users.oliver-mestdagh.workers
 // harmless no-ops against a live API rather than a static file, not worth
 // removing just for tidiness.
 const MARK_LISTS_FILE_PATH = "https://fishingconditions-users.oliver-mestdagh.workers.dev/api/public/marklists";
+
+/**
+ * Public's own mark-list vocabulary, UNIONED with the signed-in Admin's
+ * own personal marklist rows (via /api/marklists, omitting ?userId= so
+ * it resolves to the current session's own user — resolveEffectiveUserId,
+ * user-backend.js) — every call site here (loadAndRenderMarks, sync.js's
+ * own init) already only ever runs once cachedIsAdmin is confirmed true,
+ * so this authenticated fetch is always reachable, never a 401.
+ *
+ * REAL BUG, FOUND AND FIXED: every mark-editing dropdown (Species/Bait/
+ * Rig/Rod/etc, wherever they appear) used to read ONLY Public's own
+ * list — reported directly: moving a Rod option from Public's account
+ * to the Admin's own (via the Settings page's Mark Lists editor) made
+ * it vanish from the Rod dropdown entirely when editing a Catch,
+ * regardless of which account a given option techically lives under.
+ * Deduplicated by field+value; the Admin's own copy wins on a genuine
+ * clash between the two — more likely to be the intentionally-current
+ * one, having just been curated or moved there.
+ */
+async function fetchUnionedMarkLists() {
+  let publicList = [];
+  let ownList = [];
+  try {
+    const res = await fetch(`${MARK_LISTS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" });
+    if (res.ok) publicList = await res.json();
+  } catch (err) {
+    console.error("Could not load Public's mark lists:", err);
+  }
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/marklists?_=${Date.now()}`, { credentials: "include", cache: "no-store" });
+    if (res.ok) ownList = await res.json();
+  } catch (err) {
+    console.error("Could not load the signed-in account's own mark lists:", err);
+  }
+  const merged = new Map(); // "field|value" -> row, own account wins on a clash
+  for (const row of publicList) merged.set(`${row.field}|${row.value}`, row);
+  for (const row of ownList) merged.set(`${row.field}|${row.value}`, row);
+  return Array.from(merged.values());
+}
 
 /**
  * Shape of one entry in data/marks.json's `marks` array:

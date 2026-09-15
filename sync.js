@@ -2602,17 +2602,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   // loadAndRenderMarks's own try/catch (charts.js) already does for the
   // identical fetch pair.
   let existingMarksRes = { ok: false };
-  let listsRes = { ok: false };
   try {
-    [existingMarksRes, listsRes] = await Promise.all([
-      fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" }),
-      fetch(`${MARK_LISTS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" }),
-    ]);
+    existingMarksRes = await fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" });
   } catch (err) {
-    console.error("Could not reach the marks/mark-lists endpoints:", err);
+    console.error("Could not reach the marks endpoint:", err);
   }
   existingMarks = existingMarksRes.ok ? await existingMarksRes.json() : []; // bare array now — see handlePublicMarks, user-backend.js
-  markLists = listsRes.ok ? await listsRes.json() : [];
+  // fetchUnionedMarkLists (charts.js) merges in the signed-in Admin's own
+  // personal marklist rows too, not just Public's — same real bug/fix as
+  // loadAndRenderMarks's own identical call.
+  try {
+    markLists = await fetchUnionedMarkLists();
+  } catch (err) {
+    console.error("Could not reach the mark-lists endpoints:", err);
+    markLists = [];
+  }
   knownSpecies = markLists.filter((r) => r.field === "Species").map((r) => r.value);
 
   // Restore a loaded-but-not-yet-saved review from a previous visit to
