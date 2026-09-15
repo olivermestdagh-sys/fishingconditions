@@ -1470,7 +1470,7 @@ function buildMarkPopupViewHtml(mark) {
         <button type="button" class="btn-secondary" data-mark-delete style="padding:4px 10px;font-size:0.85rem;color:#dc2626;">Delete</button>
       </div>
       <div data-mark-delete-confirm style="display:none;margin-top:8px;padding:8px;border:1px solid #fecaca;background:#fef2f2;border-radius:6px;font-size:0.85rem;">
-        <div style="margin-bottom:6px;">Delete this mark? This can't be undone.</div>
+        <div style="margin-bottom:6px;">${mark.type === "Session" ? "Delete this Fishing Session? Both its Start and End are deleted together. This can't be undone." : "Delete this mark? This can't be undone."}</div>
         <button type="button" class="btn-secondary" data-mark-delete-confirm-yes style="padding:4px 10px;font-size:0.85rem;background:#dc2626;color:#fff;border-color:#dc2626;">Yes, delete</button>
         <button type="button" class="btn-secondary" data-mark-delete-cancel style="padding:4px 10px;font-size:0.85rem;">Cancel</button>
       </div>
@@ -1940,7 +1940,24 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       L.DomEvent.stop(e);
       const statusEl = popupEl.querySelector("[data-mark-delete-status]");
       deleteConfirmYesBtn.disabled = true;
-      if (statusEl) statusEl.textContent = "Deleting…";
+
+      // A Session's own pair (same sessionGroupId, the OTHER role) is
+      // deleted together with it — Oliver's own call: deleting either
+      // half of a session should remove the whole thing, not leave an
+      // orphaned other half behind (especially useful while testing —
+      // repeated imports/deletes shouldn't need two separate delete
+      // actions for what's really one thing).
+      let pairedMark = null;
+      if (mark.type === "Session" && mark.sessionGroupId && options.state) {
+        for (const other of options.state.marksById.values()) {
+          if (other.id !== mark.id && other.type === "Session" && other.sessionGroupId === mark.sessionGroupId) {
+            pairedMark = other;
+            break;
+          }
+        }
+      }
+
+      if (statusEl) statusEl.textContent = pairedMark ? "Deleting both…" : "Deleting…";
       const result = await deleteMarkFromD1(mark.id);
       if (!result.success) {
         deleteConfirmYesBtn.disabled = false;
@@ -1950,6 +1967,20 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         }
         return;
       }
+
+      let pairResult = { success: true };
+      if (pairedMark) {
+        pairResult = await deleteMarkFromD1(pairedMark.id);
+        if (!pairResult.success && statusEl) {
+          // The clicked mark is already gone at this point — no sensible
+          // way to "undo" that, so this is reported plainly rather than
+          // retried automatically; the person can delete the remaining
+          // orphaned half manually if this happens.
+          statusEl.textContent = `Deleted this one, but couldn't delete its pair: ${pairResult.error}`;
+          statusEl.style.color = "#dc2626";
+        }
+      }
+
       // Success — remove the marker from the map and both of state's own
       // lookup maps (marksById/markersById), same bookkeeping loadAndRenderMarks
       // itself does when a mark is first added, just in reverse. isNew marks
@@ -1960,6 +1991,14 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       if (options.state) {
         options.state.marksById.delete(mark.id);
         options.state.markersById.delete(mark.id);
+        if (pairedMark && pairResult.success) {
+          const pairedMarker = options.state.markersById.get(pairedMark.id);
+          if (pairedMarker) {
+            if (options.state.markerLayer) options.state.markerLayer.removeLayer(pairedMarker);
+            options.state.markersById.delete(pairedMark.id);
+          }
+          options.state.marksById.delete(pairedMark.id);
+        }
         // A deleted Session mark's own connecting line (renderSessionLines,
         // just above) would otherwise still point at it — recomputed from
         // whatever's left in marksById now that this one's gone, rather
@@ -3031,6 +3070,18 @@ async function loadAndRenderMarks(map, state) {
     // for it; startNewMarkEntry wires that popup's buttons itself, directly.
     if (!mark || !marker) return;
     wireMarkPopupButtons(popupEl, marker, mark, state.markLists, { state, map });
+    // Selecting either half of a Session highlights BOTH markers and the
+    // line connecting them (highlightSessionPair) — Oliver's own call,
+    // so a session reads as one thing at a glance rather than two
+    // separate pins that happen to share a purple line somewhere nearby.
+    if (mark.type === "Session" && mark.sessionGroupId) highlightSessionPair(map, state, mark.sessionGroupId);
+  });
+  map.on("popupclose", (e) => {
+    const popupEl = e.popup.getElement();
+    const root = popupEl.querySelector("[data-mark-id]");
+    if (!root) return;
+    const mark = state.marksById.get(root.dataset.markId);
+    if (mark && mark.type === "Session") clearSessionHighlight(map, state);
   });
 
   renderSessionLines(map, state, marks);
@@ -3057,6 +3108,13 @@ async function loadAndRenderMarks(map, state) {
  * A group missing one side entirely (the other half was deleted, or
  * only one side was ever imported to begin with) simply draws no line
  * for that group — not an error, just nothing to connect.
+ *
+ * Whichever session is currently selected (state.highlightedSessionGroupId
+ * — set/cleared by the popupopen/popupclose handlers in loadAndRenderMarks,
+ * whenever a Session mark's own popup opens or closes) draws its line
+ * noticeably thicker and fully opaque, so the pair a person just clicked
+ * is obviously the one connected by it, not just "some purple line
+ * somewhere nearby".
  */
 function renderSessionLines(map, state, marks) {
   if (state.sessionLineLayer) {
@@ -3073,16 +3131,62 @@ function renderSessionLines(map, state, marks) {
     groups.set(mark.sessionGroupId, entry);
   }
 
-  for (const { start, end } of groups.values()) {
+  for (const [groupId, { start, end }] of groups.entries()) {
     if (!start || !end) continue;
+    const isHighlighted = groupId === state.highlightedSessionGroupId;
     L.polyline(
       [
         [start.lat, start.lng],
         [end.lat, end.lng],
       ],
-      { color: "#7c3aed", weight: 3, opacity: 0.8, dashArray: "6 4" }
+      { color: "#7c3aed", weight: isHighlighted ? 6 : 3, opacity: isHighlighted ? 1 : 0.8, dashArray: isHighlighted ? null : "6 4" }
     ).addTo(state.sessionLineLayer);
   }
+}
+
+/** The highlight style applied to a Session's own pair of markers while
+ * either one's popup is open — a plainly bigger, brighter ring, restored
+ * back to markStyleFor's own normal style (clearSessionHighlight) the
+ * moment the popup closes. */
+function highlightSessionMarker(marker, mark, state) {
+  const style = markStyleFor(mark, state);
+  marker.setStyle({ radius: style.radius + 4, color: "#7c3aed", weight: 3, fillColor: style.fillColor });
+}
+
+/**
+ * Called from loadAndRenderMarks' own popupopen handler whenever a
+ * Session mark's popup opens — finds its own pair via sessionGroupId,
+ * highlights both markers, and re-renders the session lines so the
+ * pair's own connecting line draws with the same emphasis (see
+ * renderSessionLines' own comment).
+ */
+function highlightSessionPair(map, state, groupId) {
+  state.highlightedSessionGroupId = groupId;
+  for (const [id, mark] of state.marksById.entries()) {
+    if (mark.type === "Session" && mark.sessionGroupId === groupId) {
+      const marker = state.markersById.get(id);
+      if (marker) highlightSessionMarker(marker, mark, state);
+    }
+  }
+  renderSessionLines(map, state, Array.from(state.marksById.values()));
+}
+
+/** Reverses highlightSessionPair — restores every Session marker's
+ * normal style and redraws session lines with no highlight active. */
+function clearSessionHighlight(map, state) {
+  const groupId = state.highlightedSessionGroupId;
+  state.highlightedSessionGroupId = null;
+  if (!groupId) return;
+  for (const [id, mark] of state.marksById.entries()) {
+    if (mark.type === "Session" && mark.sessionGroupId === groupId) {
+      const marker = state.markersById.get(id);
+      if (marker) {
+        const style = markStyleFor(mark, state);
+        marker.setStyle({ radius: style.radius, color: style.color, weight: style.weight, fillColor: style.fillColor });
+      }
+    }
+  }
+  renderSessionLines(map, state, Array.from(state.marksById.values()));
 }
 
 /**
@@ -3563,7 +3667,7 @@ function initMarkControls(map, state) {
  */
 function createMarkLayerState() {
   const saved = loadMarkViewSettings();
-  return { marksById: new Map(), markersById: new Map(), markLists: [], groupByKey: saved.groupByKey, filters: saved.filters, canvasRenderer: null };
+  return { marksById: new Map(), markersById: new Map(), markLists: [], groupByKey: saved.groupByKey, filters: saved.filters, canvasRenderer: null, highlightedSessionGroupId: null };
 }
 
 /**

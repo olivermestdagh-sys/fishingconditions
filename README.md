@@ -1222,6 +1222,99 @@ detection, the tree/map review UI, point editing, save/storage,
 adding a Catch/POI at any trackpoint, segment boundary editing,
 catch-linking, and now Location/Live rendering.
 
+**Session added to the Mark Type filter** (`migration-session-mark-
+type.sql`): the map's own Filters modal (`showMarkFilterModal`,
+`charts.js`) only ever shows Mark Type values actually registered in
+the Settings-tab pick-list (`user_mark_lists`, `field = "Mark Type"`)
+— Session marks already rendered correctly, but "Session" itself was
+never added there (it's only ever been a raw string used
+programmatically by the Sync page's own save flow), so there was no
+way to filter them in or out like any other type. Fixed with a
+migration alone — no code change needed at all, since filtering
+already works generically off whatever's in the pick-list.
+Idempotent (`INSERT OR IGNORE` gated on an existence check) — safe to
+run more than once.
+
+**Verified**: real browser test — confirmed "Session" now appears as
+a filterable chip under Mark Type, confirmed excluding it via the
+filter hides Session marks from the map while leaving other mark
+types (a regular Catch, in the test) untouched, matching how every
+other Mark Type value already behaves. Zero JS errors.
+
+**Sequence numbers on Fishing sessions** (`sync.js`): "Fishing
+11:14–11:57" becomes "Fishing 1 11:14–11:57" — numbered per day, in
+time order. `computeFishingSequenceNumbers` computes this fresh every
+render rather than storing it on the segment, so it's automatically
+correct after a conversion or merge changes how many fishing segments
+exist, without needing to touch every one of the many places segments
+themselves change. The same numbers, computed the same way, are used
+when naming a saved Session ("Session 1 start"/"Session 1 end") — what
+gets saved always matches exactly what was on screen at the moment of
+saving.
+
+**Verified**: real browser test against the actual trail — confirmed
+displayed labels are correctly numbered in time order, confirmed
+converting a Transiting segment to Fishing correctly renumbers every
+segment after it, and confirmed 188 real saved Session marks were all
+named following the exact "Session N start/end" pattern. Zero JS
+errors.
+
+**A real, reported carry-forward bug, fixed**: converting a Transiting
+segment to Fishing between two already-linked Fishing segments (so
+three end up in a row), then editing the new middle one's own Bait/
+Rig/Rod/Berley, couldn't make that new value flow through to the last
+segment — it kept showing whatever had carried forward from the
+FIRST segment instead. Root cause: `propagateCarryForwardFields`
+stopped propagating a field the instant it found ANY non-empty value
+further along, treating "has a value" as "deliberately set for this
+point" — but a value that arrived via an EARLIER propagation pass
+isn't a deliberate choice for that specific point, just inherited
+stale, and the newly-converted middle segment's own fresh value
+correctly should have overwritten it. Fixed by tracking genuine
+explicitness separately, per field (`baitsExplicit`/`rigsExplicit`/
+`rodsExplicit`/`berleysExplicit`) — set only when a candidate's OWN
+popup is saved with a non-empty value for that field, never by
+propagation itself; only a genuinely explicit value blocks further
+propagation now, a merely-inherited one gets freely overwritten as
+propagation continues past it.
+
+**Verified**: reproduced the exact reported scenario directly — two
+Fishing segments (A, C) with a Transiting (B) between them; set A's
+Bait explicitly (correctly propagates to C, since B has no candidates
+yet); converted B to Fishing (fresh, non-explicit, empty candidates);
+set B's own Bait to a different value — confirmed it now correctly
+flows through B's own End and all the way into C's Start/End,
+replacing the previously-stuck stale value from A.
+
+**Location/Live: selecting either half of a session highlights both,
+and the line between them** (`charts.js`): clicking a Start or End
+marker now highlights BOTH markers in the pair (a bigger, brighter
+purple ring) and draws their connecting line noticeably thicker and
+fully opaque, so a session reads as one thing at a glance rather than
+two pins that happen to share a line somewhere nearby
+(`highlightSessionPair`/`clearSessionHighlight`, hooked into
+`loadAndRenderMarks`'s own `popupopen`/`popupclose` handlers). Clears
+back to normal the moment the popup closes.
+
+**Delete either half, delete the pair**: Oliver's own call, especially
+useful while test-importing and cleaning up repeatedly — deleting
+either a Session's Start or its End now finds and deletes its own pair
+too, in the same action, with an updated confirmation message naming
+this explicitly ("Both its Start and End are deleted together").
+Handles the edge case where the first delete succeeds but the pair's
+own delete fails — reported plainly rather than silently left
+ambiguous, since the first one is already gone by that point and
+there's no sensible way to undo it automatically.
+
+**Verified**: built an isolated test harness with a real Start/End
+pair plus an unrelated Catch mark. Confirmed opening Start's popup
+highlights BOTH markers (not the unrelated Catch) and thickens the
+connecting line; confirmed closing the popup restores every marker's
+normal style; confirmed the delete confirmation names the pair
+explicitly; and confirmed deleting Start actually deletes both Start
+and End together (leaving the unrelated Catch untouched) and removes
+the now-orphaned line. Zero JS errors.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
