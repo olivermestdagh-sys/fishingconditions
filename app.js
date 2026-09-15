@@ -137,6 +137,12 @@ function selectLocationByKey(key) {
  * before that was wired up, it just wasn't being read back yet.
  */
 function showLocationHoverPanel() {
+  // Closes the mark detail panel first, if open — real, reported bug:
+  // both panels open at once left the conditions graph squeezed into
+  // whatever width the mark panel didn't already take, rather than its
+  // own full width. The two serve different purposes and were never
+  // meant to compete for the same space simultaneously.
+  if (typeof closeMarkDetailPanel === "function") closeMarkDetailPanel();
   document.getElementById("locationHoverPanel").style.display = "block";
 }
 

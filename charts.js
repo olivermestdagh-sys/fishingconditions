@@ -1863,13 +1863,23 @@ async function saveMarksBatchToD1(newMarks) {
  * runs) is left with Leaflet's completely normal floating popup, no
  * different from before.
  */
-function attachPopupToDetailPanel(popup) {
+let markDetailPanelMap = null; // the map whose popup is currently shown in #markDetailPanel, if any — set/cleared below, used by closeMarkDetailPanel
+
+function attachPopupToDetailPanel(popup, map) {
   const panel = document.getElementById("markDetailPanel");
   const popupEl = popup.getElement();
   if (!panel || !popupEl) return;
+  // Same mutual-exclusivity fix as closeMarkDetailPanel's own comment,
+  // the other direction — opening a mark now closes whichever hover
+  // panel this page has, if either is currently showing. Page-specific
+  // function names (conditions.html vs live.html), so both are checked
+  // defensively rather than assuming which one exists here.
+  if (typeof hideLocationHoverPanel === "function") hideLocationHoverPanel();
+  if (typeof hideLiveHoverPanel === "function") hideLiveHoverPanel();
   panel.innerHTML = "";
   panel.appendChild(popupEl);
   panel.style.display = "block";
+  markDetailPanelMap = map;
 }
 
 /** Reverses attachPopupToDetailPanel — called on popupclose, whether or
@@ -1881,6 +1891,21 @@ function attachPopupToDetailPanel(popup) {
 function detachDetailPanel() {
   const panel = document.getElementById("markDetailPanel");
   if (panel) panel.style.display = "none";
+  markDetailPanelMap = null;
+}
+
+/**
+ * Closes whichever mark popup is currently shown in the side panel, if
+ * any — called from showLocationHoverPanel (app.js) and
+ * showLiveHoverPanel (live.js) right before either one opens its own
+ * conditions-graph panel. Real, reported bug: both panels open at the
+ * same time left the graph squeezed into whatever width the mark panel
+ * hadn't already taken, rather than its own intended full width — the
+ * two were never meant to compete for the same space simultaneously.
+ * A plain no-op when nothing is currently open.
+ */
+function closeMarkDetailPanel() {
+  if (markDetailPanelMap) markDetailPanelMap.closePopup();
 }
 
 function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {}) {
@@ -3105,7 +3130,7 @@ async function loadAndRenderMarks(map, state) {
     // (startNewMarkEntry) — that one never reaches state.marksById until
     // saved, so it has to be handled here, before the mark/marker lookup
     // below, rather than folded into the same guard.
-    attachPopupToDetailPanel(e.popup);
+    attachPopupToDetailPanel(e.popup, map);
     const mark = state.marksById.get(root.dataset.markId);
     const marker = state.markersById.get(root.dataset.markId);
     // A brand-new draft (see startNewMarkEntry) also has a data-mark-id but

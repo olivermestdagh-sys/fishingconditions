@@ -138,10 +138,41 @@ main {
 .mark-detail-panel .leaflet-popup-content-wrapper {
   box-shadow: none;
   border-radius: 0;
+  /* Leaflet computes and inline-styles this wrapper's own width based on
+     its `maxWidth` bind option (260px) and where it expected to float —
+     real, reported bug: once reparented into this fixed-width panel,
+     that inline width didn't actually match the panel's own width, so
+     the content ended up needing horizontal scrolling to read at all.
+     !important is genuinely needed here, not just for tidiness — an
+     inline style (which is what Leaflet sets) otherwise always wins
+     over a plain stylesheet rule regardless of selector specificity. */
+  width: 100% !important;
+  box-sizing: border-box;
+}
+.mark-detail-panel .leaflet-popup-content {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 13px 16px !important; /* same idea as the wrapper above — Leaflet's own inline margin assumes the popup's old floating width, not this panel's */
+  box-sizing: border-box;
 }
 .mark-detail-panel .leaflet-popup {
-  position: static; /* Leaflet positions its own popup container with inline transform/left/bottom styles meant for floating over the map — static here simply ignores all of that once it's inside this panel, letting normal document flow lay it out instead */
-  margin: 0;
+  /* THREE overrides needed, not two — confirmed directly by inspecting
+     the actual inline style Leaflet left on this element:
+     `transform: translate3d(600px, 334px, 0px); bottom: -7px; left: -144px;`.
+     position/margin (below) neutralize the margin- and left/bottom-based
+     part of Leaflet's positioning, but a CSS transform applies
+     REGARDLESS of position value — position:static doesn't make
+     transform:translate3d(...) stop applying, unlike left/bottom (which
+     genuinely are ignored once position is static). That translate3d
+     was the actual, sole cause of the panel's scrollable width
+     ballooning to nearly 3x its visible size — every individual
+     element's own content measured well within the panel on its own;
+     it was being dragged hundreds of pixels sideways by this transform,
+     not overflowing from its own content. */
+  position: static !important;
+  margin: 0 !important;
+  transform: none !important;
+  width: 100% !important;
 }
 
 @media (max-width: 760px) {
@@ -2742,13 +2773,19 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
 .mark-controls-bar {
   position: absolute;
   top: 56px;
-  right: 10px;
+  /* Left, not right — the side panel (see .map-with-panel-layout below)
+     now permanently occupies the map's own right edge whenever a mark's
+     popup is open, and this bar used to sit right on top of it there.
+     55px clears Leaflet's own default zoom control (top:10px; left:10px;
+     roughly 30-34px wide including its border) with a clean gap, rather
+     than butting right up against it. */
+  left: 55px;
   z-index: 500;
   background: var(--white);
   border-radius: 12px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
   padding: 8px 10px;
-  max-width: calc(100vw - 20px);
+  max-width: calc(100vw - 65px);
 }
 
 /* flex-wrap:wrap is the actual fix for the Filters button running off the
