@@ -1851,6 +1851,38 @@ async function saveMarksBatchToD1(newMarks) {
  * on this exact same popup behaves exactly like one opened on an
  * already-existing mark, Cancel included.
  */
+/**
+ * Moves a mark popup's own DOM element into the fixed #markDetailPanel
+ * (conditions.html/live.html only — real, reported friction: a floating
+ * popup positioned right above whatever was clicked could bury the very
+ * point, and its neighbours, someone was trying to look at). The SAME
+ * node, not a copy, so every listener already wired onto it (or about
+ * to be, via wireMarkPopupButtons, called right after this) keeps
+ * working untouched — only where it visually lives changes. A page
+ * with no such panel (there isn't one everywhere loadAndRenderMarks
+ * runs) is left with Leaflet's completely normal floating popup, no
+ * different from before.
+ */
+function attachPopupToDetailPanel(popup) {
+  const panel = document.getElementById("markDetailPanel");
+  const popupEl = popup.getElement();
+  if (!panel || !popupEl) return;
+  panel.innerHTML = "";
+  panel.appendChild(popupEl);
+  panel.style.display = "block";
+}
+
+/** Reverses attachPopupToDetailPanel — called on popupclose, whether or
+ * not a popup was ever actually moved into the panel in the first
+ * place (harmless either way). Leaflet removes the popup's own element
+ * from wherever it currently lives when the popup itself closes, so
+ * this only needs to hide the now-empty panel, not manage the popup
+ * element's own lifecycle. */
+function detachDetailPanel() {
+  const panel = document.getElementById("markDetailPanel");
+  if (panel) panel.style.display = "none";
+}
+
 function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {}) {
   // Belt-and-braces alongside Leaflet's own automatic handling of the same
   // popup container — see this function's own comment above.
@@ -2108,7 +2140,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
             fillColor: freshStyle.fillColor,
             fillOpacity: 0.85,
           }, markListsForShape).addTo(options.state.markerLayer);
-          marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
+          marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet", autoPan: false });
           marker.unbindTooltip();
           marker.bindTooltip(markTooltipText(mark, options.state), { direction: "top" });
           if (options.state) options.state.markersById.set(mark.id, marker);
@@ -3041,7 +3073,7 @@ async function loadAndRenderMarks(map, state) {
       fillOpacity: 0.85,
     }, state.markLists).addTo(state.markerLayer);
     marker.bindTooltip(markTooltipText(mark, state), { direction: "top" });
-    marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
+    marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet", autoPan: false });
     // Only fires the actual distance lookups the first time each mark's
     // popup is genuinely opened by a click — with a couple thousand marks
     // loaded, computing this eagerly for every single one regardless of
@@ -3063,6 +3095,17 @@ async function loadAndRenderMarks(map, state) {
     const popupEl = e.popup.getElement();
     const root = popupEl.querySelector("[data-mark-id]");
     if (!root) return; // some other feature's popup, not one of ours
+    // Move the popup's own DOM element into the fixed side panel, if this
+    // page has one (#markDetailPanel — conditions.html/live.html; a page
+    // without one just keeps Leaflet's normal floating popup untouched).
+    // The SAME node, not a copy — every listener wireMarkPopupButtons is
+    // about to attach (or already has, for a re-render) keeps working
+    // exactly as before; only where it visually lives changes. Runs for
+    // EVERY one of our mark popups, including a brand-new draft
+    // (startNewMarkEntry) — that one never reaches state.marksById until
+    // saved, so it has to be handled here, before the mark/marker lookup
+    // below, rather than folded into the same guard.
+    attachPopupToDetailPanel(e.popup);
     const mark = state.marksById.get(root.dataset.markId);
     const marker = state.markersById.get(root.dataset.markId);
     // A brand-new draft (see startNewMarkEntry) also has a data-mark-id but
@@ -3080,6 +3123,7 @@ async function loadAndRenderMarks(map, state) {
     const popupEl = e.popup.getElement();
     const root = popupEl.querySelector("[data-mark-id]");
     if (!root) return;
+    detachDetailPanel();
     const mark = state.marksById.get(root.dataset.markId);
     if (mark && mark.type === "Session") clearSessionHighlight(map, state);
   });
@@ -3768,7 +3812,7 @@ function startNewMarkEntry(map, lat, lng, state, defaults = {}) {
     fillColor: style.fillColor,
     fillOpacity: 0.85,
   }, state.markLists).addTo(state.markerLayer);
-  marker.bindPopup(buildMarkPopupEditHtml(draft, state.markLists), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
+  marker.bindPopup(buildMarkPopupEditHtml(draft, state.markLists), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet", autoPan: false });
   // showMarkerOnceVisible (not zoomToShowLayer directly, and not a plain
   // openPopup) — a spot just clicked on the map is usually already
   // zoomed in enough that this resolves immediately with no visible
@@ -3852,7 +3896,7 @@ function startCopiedMarkEntry(map, sourceMark, state) {
     fillColor: style.fillColor,
     fillOpacity: 0.85,
   }, state.markLists).addTo(state.markerLayer);
-  marker.bindPopup(buildMarkPopupEditHtml(draft, state.markLists), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" });
+  marker.bindPopup(buildMarkPopupEditHtml(draft, state.markLists), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet", autoPan: false });
   // showMarkerOnceVisible — same reasoning as startNewMarkEntry's own
   // copy of this comment: this copy lands at the SAME point as its
   // source mark, which by definition already has at least one mark

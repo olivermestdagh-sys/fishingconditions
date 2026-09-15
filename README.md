@@ -1321,6 +1321,69 @@ parentheses, the time range moves inside. Verified directly: the
 regex correctly produces `Fishing 1 (11:14–11:57)` from the underlying
 `Fishing 11:14–11:57` label.
 
+**A Location/Live spiderfy bug flagged, diagnosed, not caused by
+this feature**: reported directly — a session point that had been
+selected once showed no tooltip and wasn't clickable afterward. My own
+first theory (that highlighting a marker's radius via `setStyle`
+somehow corrupted a diamond/cross shape's own custom geometry) turned
+out to be wrong on closer inspection — Leaflet 1.9.4's own
+`CircleMarker.setStyle` already extracts and applies `radius`
+correctly, confirmed directly against the real vendored source, not
+just assumed. Real diagnostic answers narrowed it down properly
+instead: reloading the page does NOT fix the affected point (rules out
+anything to do with this session's own highlight/clear-highlight
+code, which can't have run yet on a fresh load, before any selection
+has happened), it happens to every session point once selected, and —
+the key detail — it's consistently the marker sitting at the "10
+o'clock" position once a cluster is expanded/spiderfied, regardless of
+which cluster. This points at Leaflet.markercluster's own spiderfy
+positioning logic (or its interaction with vector-shape markers at a
+specific leg position), not at anything built for Sessions. Parked
+for its own dedicated investigation, at Oliver's own request, while
+the side panel below was built instead.
+
+**Location/Live: mark editing moved into a fixed side panel, not a
+floating popup** (`charts.js`, `conditions.html`, `live.html`,
+`style.css`): real, reported friction — a Leaflet popup floats right
+above whatever's clicked, and with a busy map (Session lines, nearby
+marks), the popup could easily bury the very point — and its
+neighbours — someone was trying to look at.
+
+Rather than rewrite `wireMarkPopupButtons` (a large, shared function
+with several places that call real Leaflet popup methods — `setPopupContent`,
+`closePopup`, a full popup-recreation branch when a mark's Type changes
+its own shape) to stop depending on Leaflet's popup system altogether,
+the popup's own DOM element is reparented — moved, not copied — into a
+new fixed `#markDetailPanel` the moment it opens (`attachPopupToDetailPanel`).
+Since it's the same node, every listener already wired onto it (Edit,
+Copy, Delete, Save, Cancel — all of `wireMarkPopupButtons`'s own logic)
+keeps working completely untouched; only where it visually lives
+changes. `autoPan` is turned off on every mark popup now, since
+Leaflet's own auto-pan-to-keep-the-popup-visible logic assumes the
+popup is still floating near the marker — left on, it would compute
+nonsense offsets (and could visibly jerk the map) once the popup is
+actually sitting in the fixed panel instead. `detachDetailPanel` hides
+the (now-empty, Leaflet cleans up the element itself on close) panel
+again once the popup closes. Covers both an existing mark being edited
+and a brand-new, not-yet-saved draft (`startNewMarkEntry`) — both flow
+through the exact same `popupopen` handler.
+
+The panel sits to the right of the map on wider viewports, matching
+the request directly, and drops below the map (capped to under half
+the screen height) on narrow ones, where there simply isn't room for
+both side by side.
+
+**Verified**: built a real test harness using the actual page markup
+and CSS (not a stub), confirmed opening a mark moves its popup content
+genuinely inside `#markDetailPanel` (and confirmed it's no longer
+sitting in Leaflet's own floating popup pane at all), confirmed the
+panel sits to the right of the map without overlapping it, confirmed
+Edit → change a field → Save still works correctly end to end, confirmed
+Delete still works and the panel hides itself again afterward, confirmed
+a brand-new (unsaved) mark also opens in the panel rather than floating,
+and confirmed the panel correctly stacks below the map instead of
+beside it at phone width. Zero JS errors throughout.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
