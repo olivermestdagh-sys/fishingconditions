@@ -1547,6 +1547,45 @@ unchanged) — more likely something that was always there and simply
 harder to notice while one of the two markers was invisible to begin
 with. Flagging it rather than fixing it unprompted.
 
+### Settings page: "View as Public" not remembered across reloads (locationsadmin.js)
+
+Reported directly as "not loading any of my settings — missing mark
+lists etc", with a screenshot showing Mark Type/Species genuinely
+empty and a failed Check Frequency load. Investigated live rather than
+guessed at: the Mark Type/Species fetch itself was actually succeeding
+(200) — the real cause was that `viewingAsPublic` was a plain variable
+that always reset to `false` on every fresh page load, with no memory
+of which side was last chosen. Since virtually all of this site's
+actual configured data (mark lists, tracked locations, etc.) lives
+under Public rather than the Admin's own account, reloading this page
+always landed back on the Admin's own, genuinely near-empty account —
+looking exactly like real data had gone missing, when clicking "View
+as Public" the whole time would have shown it was there all along.
+
+Fixed by persisting the choice to `localStorage`
+(`VIEWING_AS_PUBLIC_STORAGE_KEY`), the same pattern already used for
+every other per-browser preference on this page — restored once, the
+first time `isAdmin` is known to be true on a given page load, so it
+doesn't fight with an in-progress toggle on later calls to the same
+refresh function (sign-out, or the toggle button itself).
+
+**Verified**: real browser test — confirmed a genuinely fresh load
+(no persisted state) still defaults to the Admin's own account,
+unchanged from before; confirmed toggling to Public and reloading now
+correctly stays on Public instead of resetting; confirmed toggling
+back to "my account" and reloading again correctly stays there too,
+so this isn't just a one-way stuck state. Zero JS errors.
+
+Separately, live network inspection also turned up a real `503` from
+`GET /api/settings` specifically (every other endpoint on the same
+page load — `/api/marklists`, `/api/tracked-locations`,
+`/api/admin/users`, etc. — succeeded). `handleSettings`
+(`user-backend.js`) has no code path that returns a 503 explicitly, so
+this is most likely a transient Cloudflare Worker or D1-level issue
+rather than an application bug — not something diagnosable further
+without the Worker's own server-side logs. Worth watching for whether
+it recurs; flagged here rather than guessed at.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough

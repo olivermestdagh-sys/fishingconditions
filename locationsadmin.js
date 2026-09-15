@@ -99,6 +99,22 @@ let viewingAsPublic = false; // Admin-only toggle state — when true, every
                           // Check frequency) operates on Public's data
                           // instead of the signed-in Admin's own. See
                           // effectiveUserIdParam() and onToggleViewAsPublic.
+                          // REAL BUG, FOUND AND FIXED: this used to reset to
+                          // false on every fresh page load, with no memory of
+                          // which side was last chosen — and since virtually
+                          // all of this site's actual configured data (mark
+                          // lists, tracked locations, etc.) lives under
+                          // Public rather than the Admin's own account,
+                          // reloading this page meant landing back on the
+                          // Admin's own, genuinely near-empty data every
+                          // single time, looking exactly like data had gone
+                          // missing. Now persisted via VIEWING_AS_PUBLIC_STORAGE_KEY
+                          // (see refreshPageForCurrentUser's own one-time-
+                          // restore logic, and onToggleViewAsPublic below),
+                          // the same localStorage pattern already used for
+                          // every other per-browser preference on this page.
+const VIEWING_AS_PUBLIC_STORAGE_KEY = "fishingconditions.viewingAsPublic";
+let hasRestoredViewingAsPublic = false; // ensures the one-time restore below only ever runs once per page load — see refreshPageForCurrentUser
 
 /**
  * Every fetch to a v2/v1-with-override endpoint appends this instead of a
@@ -343,7 +359,18 @@ async function init() {
 async function refreshPageForCurrentUser() {
   currentUser = await checkSignedIn();
   isAdmin = !!currentUser && currentUser.role === "admin";
-  if (!isAdmin) viewingAsPublic = false; // can't be mid-toggle if sign-out happened, or a Basic account somehow reached this state
+  if (!isAdmin) {
+    viewingAsPublic = false; // can't be mid-toggle if sign-out happened, or a Basic account somehow reached this state
+  } else if (!hasRestoredViewingAsPublic) {
+    // Only ever restores from storage the FIRST time isAdmin is known to
+    // be true on this page load — onToggleViewAsPublic already manages
+    // viewingAsPublic (in memory and in storage) directly on every
+    // subsequent call to this same function, and letting THIS branch run
+    // again there would just overwrite that in-progress toggle right
+    // back to whatever was last persisted.
+    viewingAsPublic = localStorage.getItem(VIEWING_AS_PUBLIC_STORAGE_KEY) === "1";
+    hasRestoredViewingAsPublic = true;
+  }
 
   const signedOutCard = document.getElementById("signedOutCard");
   const signedInCard = document.getElementById("signedInCard");
@@ -411,6 +438,7 @@ async function onSignOut() {
  */
 async function onToggleViewAsPublic() {
   viewingAsPublic = !viewingAsPublic;
+  localStorage.setItem(VIEWING_AS_PUBLIC_STORAGE_KEY, viewingAsPublic ? "1" : "0");
   await refreshPageForCurrentUser();
 }
 
