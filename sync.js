@@ -1073,6 +1073,42 @@ function openCandidatePopup(idx) {
   popupEl.querySelector("[data-mark-cancel]").addEventListener("click", () => reviewMap.closePopup(popup));
 }
 
+/**
+ * A deliberately simple, read-only popup for an already-saved mark
+ * linked into a Fishing segment (findLinkedCatchIndices) — NOT the
+ * full Edit/Copy/Delete view (buildMarkPopupViewHtml/
+ * wireMarkPopupButtons) the main Location/Live maps use for an
+ * existing mark. That flow is tightly coupled to THEIR OWN map state
+ * (a real `state.markerLayer`/`marksById`/`markersById`, and a real
+ * persistent marker object per mark) — none of which this page has;
+ * candidates here are deliberately NOT drawn as permanent markers (see
+ * openCandidatePopup's own comment). Reusing it properly would mean
+ * building a second, parallel version of that whole state machinery
+ * just for this one read-only case — not a reasonable trade for what's
+ * needed here. Points the person at the Location/Live tab instead for
+ * any actual edit or delete.
+ */
+function openExistingMarkViewPopup(mark) {
+  if (!reviewMap) renderReviewMap();
+  const fields = [
+    ["Type", mark.type],
+    ["Date/Time", mark.dateTime],
+    ["Species", mark.species],
+    ["Notes", mark.notes],
+  ].filter(([, v]) => v != null && v !== "");
+  const rowsHtml = fields.map(([label, value]) => `<div style="display:flex;gap:6px;font-size:0.85rem;margin-bottom:3px;"><span style="font-weight:600;min-width:70px;">${escapeHtml(label)}</span><span>${escapeHtml(String(value))}</span></div>`).join("");
+  L.popup({ maxWidth: 240, autoPanPadding: [20, 20] })
+    .setLatLng([mark.lat, mark.lng])
+    .setContent(`
+      <div style="min-width:180px;">
+        <div style="font-weight:700;margin-bottom:4px;">${escapeHtml(mark.name || "(unnamed)")}</div>
+        ${rowsHtml}
+        <div class="footnote" style="margin:6px 0 0;">Already saved — edit or delete it from the Location or Live tab.</div>
+      </div>
+    `)
+    .openOn(reviewMap);
+}
+
 /** Nearest point (by plain distance) in a list of {lat, lon} trail points
  * to a given lat/lng — used to resolve a click anywhere along a drawn
  * trail line down to the actual nearest raw trackpoint, since the line
@@ -1680,28 +1716,56 @@ const CATCH_LINK_RADIUS_METERS = 1000;
  * several segments shows up nested under every one of them, rather
  * than being arbitrarily assigned to just one.
  */
+/**
+ * Every mark whose own time falls inside this Fishing segment's own
+ * time window AND whose own location sits within
+ * CATCH_LINK_RADIUS_METERS of the segment's points — searching BOTH
+ * `candidates` (this import's own pending review list) AND
+ * `existingMarks` (every mark already saved in D1, loaded once at page
+ * init for the existing dedup logic).
+ *
+ * REAL BUG, FOUND AND FIXED: this only ever searched `candidates` at
+ * first — so a catch logged the ordinary way (the ordinary Location/
+ * Live map, not through this GPX import at all) could never show up
+ * here no matter how well its time and location actually matched,
+ * since it was never IN candidates to begin with. Confirmed directly
+ * against a real report: two real catches, both already-saved marks
+ * (`source: "Manual"`), correctly matching a loaded trail's own time
+ * and location, were invisible to this function for exactly that
+ * reason.
+ *
+ * Returns `{source, idx}` pairs rather than bare indices — `source`
+ * distinguishes which list `idx` indexes into, since the two calling
+ * code needs to treat them differently (an existingMarks entry has
+ * nothing to "import" — it's already saved).
+ */
 function findLinkedCatchIndices(day, seg) {
   if (seg.kind !== "fishing") return [];
   const startTime = day.points[seg.startIdx].timeNaive;
   const endTime = day.points[seg.endIdx].timeNaive;
   const segPoints = day.points.slice(seg.startIdx, seg.endIdx + 1);
   const linked = [];
-  candidates.forEach((c, idx) => {
-    if (c.type !== "Catch") return;
-    if (!c.dateTime || c.dateTime < startTime || c.dateTime > endTime) return;
-    const nearest = nearestPointTo(segPoints, c.lat, c.lng);
-    if (distanceMetersBetween(c.lat, c.lng, nearest.lat, nearest.lon) <= CATCH_LINK_RADIUS_METERS) {
-      linked.push(idx);
-    }
-  });
+  const checkList = (list, source) => {
+    list.forEach((c, idx) => {
+      if (c.type !== "Catch") return;
+      if (!c.dateTime || c.dateTime < startTime || c.dateTime > endTime) return;
+      const nearest = nearestPointTo(segPoints, c.lat, c.lng);
+      if (distanceMetersBetween(c.lat, c.lng, nearest.lat, nearest.lon) <= CATCH_LINK_RADIUS_METERS) {
+        linked.push({ source, idx });
+      }
+    });
+  };
+  checkList(candidates, "candidate");
+  checkList(existingMarks, "existing");
   return linked;
 }
 
 /**
  * Console diagnostic — NOT part of the normal UI. Run from the browser
  * console (F12) after a file is loaded, e.g. `diagnoseCatchLinking("gummy")`
- * (a plain substring match against every candidate's own name, case-
- * insensitive — matches "Chelsea gummy" AND "Chels gummy" in one call).
+ * (a plain substring match against every candidate's AND every already-
+ * saved mark's own name, case-insensitive — matches "Chelsea gummy" AND
+ * "Chels gummy" in one call, wherever either of them actually lives).
  * Reports, for each match: whether its own type is actually "Catch" at
  * all, and for every currently-loaded Fishing segment, whether its time
  * falls in that segment's own window and — if so — exactly how far away
@@ -1711,13 +1775,15 @@ function findLinkedCatchIndices(day, seg) {
  */
 function diagnoseCatchLinking(nameSubstring) {
   const needle = nameSubstring.toLowerCase();
-  const matches = candidates.filter((c) => (c.name || "").toLowerCase().includes(needle));
+  const candidateMatches = candidates.filter((c) => (c.name || "").toLowerCase().includes(needle)).map((c) => ({ c, from: "candidates (pending import)" }));
+  const existingMatches = existingMarks.filter((c) => (c.name || "").toLowerCase().includes(needle)).map((c) => ({ c, from: "existingMarks (already saved)" }));
+  const matches = [...candidateMatches, ...existingMatches];
   if (matches.length === 0) {
-    console.log(`No candidate found with a name containing "${nameSubstring}". Check spelling, or that the file with this mark is actually loaded.`);
+    console.log(`No mark found with a name containing "${nameSubstring}", in either the pending import list or the already-saved marks. Check spelling.`);
     return;
   }
-  matches.forEach((c) => {
-    console.log(`--- "${c.name}" ---`);
+  matches.forEach(({ c, from }) => {
+    console.log(`--- "${c.name}" (found in: ${from}) ---`);
     console.log(`type: ${c.type} | dateTime: ${c.dateTime} | lat/lng: ${c.lat}, ${c.lng}`);
     if (c.type !== "Catch") {
       console.log(`  -> NOT eligible to link at all: type is "${c.type}", not "Catch".`);
@@ -2080,20 +2146,33 @@ function renderTracksTree() {
             </span>
           </div>`;
         });
-        // Linked Catches — a purely computed relationship (findLinkedCatchIndices),
-        // never stored on the segment or the catch itself. Still just an
-        // ordinary mark from the flat `candidates` list underneath — its
-        // checkbox and click both operate on that SAME object, so this
-        // never drifts out of sync with the Marks list above.
+        // Linked Catches — a purely computed relationship
+        // (findLinkedCatchIndices), never stored on the segment or the
+        // catch itself. Searches BOTH the pending-import `candidates`
+        // list AND `existingMarks` (real bug, fixed — see
+        // findLinkedCatchIndices's own comment: an already-saved catch,
+        // logged the ordinary way rather than through this GPX import,
+        // was invisible here no matter how well it actually matched).
+        // A `candidate` match's checkbox/click operate on that SAME
+        // object as the Marks list above; an `existing` match has
+        // nothing to import (it's already saved) — shown read-only,
+        // with a real edit/delete popup on click instead.
         if (seg.kind === "fishing") {
-          findLinkedCatchIndices(day, seg).forEach((idx) => {
-            const c = candidates[idx];
-            html += `<div class="tracks-tree-node" data-level="linked-catch" data-candidate-idx="${idx}">
-              <span class="tree-checkbox-col"><input type="checkbox" data-role="linked-catch-select" data-candidate-idx="${idx}" ${c.selected ? "checked" : ""} /></span>
+          findLinkedCatchIndices(day, seg).forEach(({ source, idx }) => {
+            const c = source === "candidate" ? candidates[idx] : existingMarks[idx];
+            const checkboxCol =
+              source === "candidate"
+                ? `<span class="tree-checkbox-col"><input type="checkbox" data-role="linked-catch-select" data-candidate-idx="${idx}" ${c.selected ? "checked" : ""} /></span>`
+                : `<span class="tree-checkbox-col" title="Already saved">✓</span>`;
+            const rowAttrs = source === "candidate" ? `data-role-source="candidate" data-candidate-idx="${idx}"` : `data-role-source="existing" data-existing-idx="${idx}"`;
+            const clickRole = source === "candidate" ? "open-linked-catch" : "open-linked-existing-catch";
+            const savedTag = source === "existing" ? ` <span class="footnote" style="margin:0;">(saved)</span>` : "";
+            html += `<div class="tracks-tree-node" data-level="linked-catch" ${rowAttrs}>
+              ${checkboxCol}
               <span class="tree-checkbox-col"></span>
               <span class="tree-node-label" style="padding-left:42px;">
                 <span class="caret" style="visibility:hidden;">▾</span>
-                <span data-role="open-linked-catch" data-candidate-idx="${idx}">🐟 ${escapeHtml(c.name || "(unnamed)")} — ${escapeHtml((c.dateTime || "").slice(11, 16))}</span>
+                <span data-role="${clickRole}" data-idx="${idx}">🐟 ${escapeHtml(c.name || "(unnamed)")} — ${escapeHtml((c.dateTime || "").slice(11, 16))}</span>${savedTag}
               </span>
             </div>`;
           });
@@ -2182,7 +2261,13 @@ function renderTracksTree() {
   });
   container.querySelectorAll('[data-role="open-linked-catch"]').forEach((el) => {
     el.addEventListener("click", (e) => {
-      openCandidatePopup(Number(e.currentTarget.dataset.candidateIdx));
+      openCandidatePopup(Number(e.currentTarget.dataset.idx));
+    });
+  });
+  container.querySelectorAll('[data-role="open-linked-existing-catch"]').forEach((el) => {
+    el.addEventListener("click", (e) => {
+      const mark = existingMarks[Number(e.currentTarget.dataset.idx)];
+      if (mark) openExistingMarkViewPopup(mark);
     });
   });
 

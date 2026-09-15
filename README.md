@@ -1137,6 +1137,46 @@ roughly 200 marks named "Gummy Shark", so searching a bare substring
 like "gummy" will report on all of them at once — a more specific term
 ("Chelsea", "Chels", or the full name) avoids that noise in practice.
 
+**Phase 7 fix — catch-linking never actually checked already-saved
+marks** (real bug, reported directly with a console screenshot and a
+mark popup): "Chelsea gummy"/"Chels gummy" — real catches that should
+have linked to a loaded track — turned up nowhere, including in the
+`diagnoseCatchLinking` tool itself. The mark's own popup gave it away:
+`Source: Manual`, with Edit/Copy/Delete buttons — an already-saved
+mark, logged the ordinary way through the Location/Live map, never
+part of this GPX import's own `candidates` list at all. Both
+`findLinkedCatchIndices` and `diagnoseCatchLinking` only ever searched
+`candidates` — an already-saved mark was structurally invisible to
+either one, no matter how well its actual time and location matched.
+
+Fixed by searching `existingMarks` (every mark already in D1, loaded
+once at page init for the existing dedup logic) as well as
+`candidates` in both places — `findLinkedCatchIndices` now returns
+`{source, idx}` pairs so the caller knows which list `idx` indexes
+into, since the two need different treatment: a `candidate` match
+still shares its checkbox/click with the ordinary Marks-list row; an
+`existing` match has nothing to import (it's already saved) — shown
+with a "(saved)" tag and no checkbox at all. Clicking it opens a
+deliberately simple, read-only popup (`openExistingMarkViewPopup`)
+rather than the main map's own full Edit/Copy/Delete flow
+(`buildMarkPopupViewHtml`/`wireMarkPopupButtons`) — that flow is
+tightly coupled to the main map's own state (`markerLayer`/
+`marksById`/`markersById`, a real persistent marker per mark), none of
+which this page has; building a second, parallel version of all that
+just for this one read-only case wasn't a reasonable trade. The
+read-only popup points to the Location/Live tab for any actual edit
+or delete.
+
+**Verified**: real browser test — injected an already-saved mark
+(`source: "Manual"`, matching exactly what the real report turned out
+to be) directly into `existingMarks` at a real segment's own path and
+time, confirmed `diagnoseCatchLinking` now finds it and reports a
+genuine link labelled "existingMarks (already saved)", confirmed
+`findLinkedCatchIndices` returns it with `source: "existing"`,
+confirmed its tree row renders with zero checkboxes and a "(saved)"
+tag, and confirmed clicking it opens the read-only popup (not an edit
+form). Zero JS errors.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
