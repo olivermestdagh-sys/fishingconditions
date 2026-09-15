@@ -3108,6 +3108,81 @@ async function loadAndRenderMarks(map, state) {
     state.markersById.set(mark.id, marker);
   }
 
+  /**
+   * A cluster spiderfied open uses the SAME Canvas-rendered CircleMarkers
+   * as everywhere else on this map — and that combination turned out to
+   * be unreliable specifically during spiderfy, confirmed directly with
+   * a real reproduction: a spiderfied marker could render with literally
+   * zero size (no tooltip, unclickable), while the exact same setup
+   * using SVG rendering never showed this, run after run. Reported
+   * independently too — a session point consistently unusable at one
+   * particular spiderfy leg position ("10 o'clock"), across different
+   * clusters.
+   *
+   * Rather than switch every mark on the map to SVG (a real cost at a
+   * couple thousand marks — Canvas exists here specifically for that
+   * scale), a small SVG-rendered stand-in is drawn on top of each
+   * marker for exactly as long as it's actually spiderfied open, always
+   * — not just for whichever ones happen to fail at that moment, since
+   * the failure wasn't reliably tied to one specific marker or
+   * position, only to Canvas rendering during spiderfy in general. The
+   * real marker underneath, and every other marker on the map, keeps
+   * using Canvas exactly as before; this only ever affects the handful
+   * of markers actually spiderfied open at any one moment. Clicking the
+   * stand-in fires a real "click" on the ORIGINAL marker (not a
+   * separate popup implementation) so Edit/Delete/etc. all keep working
+   * completely unchanged, operating on the exact same marker and mark
+   * object as ever.
+   */
+  state.spiderfyOverlayRenderer = L.svg();
+  state.spiderfyOverlayLayer = L.layerGroup().addTo(map);
+  state.markerLayer.on("spiderfied", (e) => {
+    state.spiderfyOverlayLayer.clearLayers();
+    for (const spiderfiedMarker of e.markers) {
+      let markId = null;
+      for (const [id, m] of state.markersById.entries()) {
+        if (m === spiderfiedMarker) {
+          markId = id;
+          break;
+        }
+      }
+      const mark = markId ? state.marksById.get(markId) : null;
+      if (!mark) continue;
+      const style = markStyleFor(mark, state);
+      const overlay = L.circleMarker(spiderfiedMarker.getLatLng(), {
+        renderer: state.spiderfyOverlayRenderer,
+        radius: style.radius,
+        color: style.color,
+        weight: style.weight,
+        fillColor: style.fillColor,
+        fillOpacity: 0.85,
+      }).addTo(state.spiderfyOverlayLayer);
+      overlay.bindTooltip(markTooltipText(mark, state), { direction: "top" });
+      // stopPropagation is genuinely required, not just tidy — confirmed
+      // directly: without it, this click bubbles up to the map, where
+      // Leaflet.markercluster's own "clicked somewhere outside the
+      // spiderfied set" handler treats it as exactly that (this overlay
+      // is a separate layer of my own, not part of the cluster's own
+      // recognized spiderfy legs) and immediately collapses the spiderfy
+      // — which closes the popup this same click had just opened, one
+      // event later. Net effect looked like the click did nothing at all.
+      overlay.on("click", (e) => {
+        L.DomEvent.stopPropagation(e);
+        spiderfiedMarker.fire("click");
+      });
+    }
+    // Added to `map` (not state.markerLayer, which is Canvas-only), so its
+    // own SVG pane needs to be explicitly raised above the cluster group's
+    // own Canvas pane — otherwise stacking order between the two falls out
+    // of whichever happened to attach to the shared overlay pane first,
+    // which isn't reliable enough to depend on for "is this actually
+    // clickable" to hold every time.
+    state.spiderfyOverlayLayer.eachLayer((l) => l.bringToFront());
+  });
+  state.markerLayer.on("unspiderfied", () => {
+    state.spiderfyOverlayLayer.clearLayers();
+  });
+
   // One delegated listener for the whole map rather than one per marker —
   // same reasoning as the canvas renderer above: with a couple thousand
   // points, a per-marker popupopen listener would trade away exactly the
