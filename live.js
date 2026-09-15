@@ -246,6 +246,9 @@ let isPanelExpanded = false;
 let hasRenderedExpandedContentForCurrentLoc = false;
 
 function showLiveHoverPanel() {
+  // See showLocationHoverPanel's own comment (app.js) — same real bug,
+  // same fix, on the Live tab's own hover panel.
+  if (typeof closeMarkDetailPanel === "function") closeMarkDetailPanel();
   document.getElementById("liveHoverPanel").style.display = "block";
 }
 

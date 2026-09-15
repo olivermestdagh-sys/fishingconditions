@@ -1384,6 +1384,57 @@ a brand-new (unsaved) mark also opens in the panel rather than floating,
 and confirmed the panel correctly stacks below the map instead of
 beside it at phone width. Zero JS errors throughout.
 
+**Side panel: three real bugs it introduced, all reported directly
+with screenshots, all fixed**:
+
+1. **Filter box now overlapping the panel** — `.mark-controls-bar`
+   (Colour by / Filters) used to float over the map's top-right corner,
+   which is exactly where the new side panel now permanently lives
+   whenever a mark is open. Moved to the top-left instead, positioned
+   to clear Leaflet's own default zoom control (`left: 55px`, roughly
+   matching that control's own width plus a clean gap) rather than
+   collide with either it or the panel.
+
+2. **Popup content needing horizontal scroll inside the panel** — a
+   real, subtle bug, confirmed directly rather than guessed at: `.leaflet-popup`'s
+   `position: static` override (to pull it into normal document flow
+   inside the panel) was correct, but Leaflet ALSO leaves a
+   `transform: translate3d(...)` inline style on the same element for
+   its own floating-over-the-map positioning — and a CSS transform
+   applies regardless of `position` value, unlike `margin`/`left`/`bottom`
+   (which genuinely do stop applying once `position` is `static`).
+   Measured directly: every individual piece of content inside the
+   popup fit comfortably within the panel's own width on its own — the
+   whole popup element itself was simply being dragged several hundred
+   pixels sideways by that leftover transform, which is what was
+   actually inflating the panel's scrollable width. Fixed with
+   `transform: none !important` alongside the existing `position`/`margin`
+   overrides.
+
+3. **The Live tab's own conditions-graph panel getting squeezed to a
+   sliver** — investigated directly with a real test rather than
+   patched blind: the hover panel's own width measured completely
+   correctly (full width) even with the mark panel simultaneously open,
+   so the two panels' CSS isn't actually fighting over layout the way
+   it first looked. The more robust fix — and arguably the right
+   behaviour regardless of the exact cause — was to make the two
+   mutually exclusive: opening either one now closes the other
+   (`closeMarkDetailPanel`, charts.js, wired into both
+   `showLocationHoverPanel`/`showLiveHoverPanel`; and the reverse,
+   `attachPopupToDetailPanel` now closes whichever hover panel exists
+   on the current page). They were never meant to compete for the same
+   screen space at once.
+
+**Verified**: real browser tests, all three together — confirmed the
+filter box now sits clear of both the zoom control and the panel area;
+confirmed the popup's own `scrollWidth` now matches the panel's
+`clientWidth` almost exactly (340 vs 339, down from 940 before the
+fix); confirmed opening the hover panel closes the mark panel and vice
+versa, in both directions. Then re-ran the full existing side-panel
+regression suite (Edit → Save, Delete, new-mark creation) to confirm
+none of it broke along the way — all still pass. Zero JS errors
+throughout.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
