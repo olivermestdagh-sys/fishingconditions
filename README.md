@@ -1462,6 +1462,50 @@ the old 600px (60vh of 1000px) cap would have cut it off. Screenshot
 confirms the full form now visibly fills the panel using its own
 scrollbar, all the way down to the last field. Zero JS errors.
 
+**The 10 o'clock spiderfy bug — root-caused and fixed** (`charts.js`):
+reported directly, with a screenshot pinpointing the exact broken
+point — a spiderfied marker with no tooltip and no click response,
+consistently at one particular leg position, across different
+clusters. Reproduced properly this time (earlier attempts were mostly
+lost to fumbling live-map navigation, not the bug itself): a real
+2-marker cluster, spiderfied open, showed one leg rendering with
+literally zero width and height — nothing there to hover or click —
+while the exact same setup using SVG rendering instead of this map's
+usual Canvas renderer never showed it, run after run. Canvas exists
+here specifically for performance at real scale (a couple thousand
+marks), so the fix isn't "switch everything to SVG" — it's a small
+SVG-rendered stand-in drawn on top of a marker for exactly as long as
+it's actually spiderfied open, for every spiderfied marker, not just
+whichever one happens to fail at that moment (the failure wasn't
+reliably tied to one specific marker or position — only to Canvas
+rendering during spiderfy in general). Clicking the stand-in fires a
+real `"click"` on the ORIGINAL marker, so Edit/Delete/etc. all operate
+on the exact same marker and mark object as ever, completely
+unchanged.
+
+Two real implementation bugs turned up and got fixed along the way,
+not just the rendering one:
+1. The `spiderfied`/`unspiderfied` events fire on the marker cluster
+   group itself, not the map — confirmed directly against the actual
+   plugin source (traced the minified variable to `this._group` in
+   both the animated and non-animated spiderfy code paths) after an
+   incorrect first guess.
+2. The stand-in's own click was bubbling up to the map, where
+   Leaflet.markercluster's own "clicked somewhere outside the
+   spiderfied set" handling treated it as exactly that and immediately
+   collapsed the spiderfy — closing the popup the same click had just
+   opened, one event later, so the click looked like it silently did
+   nothing. Fixed with `L.DomEvent.stopPropagation`.
+
+**Verified**: real browser tests — 6 fresh trials, each its own clean
+page load at a different location, confirmed both spiderfied legs
+visible (non-zero size) and clickable in all 6, zero JS errors across
+any of them. Separately confirmed both markers show their own correct,
+distinct tooltip on hover (matching the exact reported case — "Session
+3 start"/"Session 3 end"). Then confirmed normal, non-clustered marker
+click/edit still works completely unchanged, with the new listeners in
+place.
+
 ### Clustering when marks overlap (Leaflet.markercluster)
 
 With a couple thousand real marks, plenty of them sit close enough
