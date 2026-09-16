@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Olie's Kayak and Surf Fishing Conditions – Reports</title>
+<link rel="stylesheet" href="style.css" />
+<style>
+  .reports-filter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px 14px; margin-bottom: 4px; }
+  .reports-filter-field label { display: block; font-size: 0.78rem; font-weight: 600; color: var(--grey-700, #444); margin-bottom: 3px; }
+  .reports-filter-field select, .reports-filter-field input { width: 100%; box-sizing: border-box; }
+  .reports-range-row { display: flex; gap: 6px; align-items: center; }
+  .reports-range-row input { width: 100%; }
+  .reports-summary-line { font-size: 0.85rem; color: var(--grey-600, #666); margin: 6px 0 14px; }
+  .report-block { margin-bottom: 28px; }
+  .report-block h3 { margin: 0 0 4px; }
+  .report-block .footnote { margin: 0 0 10px; }
+  .report-chart-wrap { position: relative; height: 280px; }
+  table.report-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  table.report-table th, table.report-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grey-200, #e5e5e5); }
+  table.report-table th { font-weight: 600; white-space: nowrap; }
+  table.report-table tbody tr:hover { background: var(--blue-100, #eaf2fb); }
+  .report-empty { font-size: 0.85rem; color: var(--grey-500, #888); padding: 12px 0; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Olie's Kayak and Surf Fishing Conditions</h1>
+  <div id="status" class="updated">Reports</div>
+</header>
+
+<nav class="tabnav">
+  <a href="index.html">Week Ahead</a>
+  <a href="conditions.html">Location</a>
+  <a href="live.html">Live</a>
+  <a href="sync.html">Sync</a>
+  <a href="reports.html" class="active">Reports</a>
+  <a href="locations.html">Settings</a>
+</nav>
+
+<main class="wide">
+  <section id="reportsNotConnected" class="summary-card" style="display:none;">
+    <div class="summary-title" style="margin-bottom:6px;">Not signed in</div>
+    <p class="footnote" style="margin:0;text-align:left;">
+      Reports are only available signed in as Admin — see the Settings tab to sign in.
+    </p>
+  </section>
+
+  <section id="reportsMain" style="display:none;">
+    <section class="summary-card gc-filters">
+      <div class="filters-toggle" id="reportsFiltersToggle" role="button" tabindex="0">
+        <label class="loc-edit-label" style="margin:0;">Filters</label>
+        <span class="schedule-toggle-hint" id="reportsFiltersToggleHint">▸ tap to show</span>
+      </div>
+      <div class="filters-content collapsed" id="reportsFiltersContent">
+        <div class="reports-filter-grid" id="reportsFilterGrid"></div>
+        <div style="margin-top:10px;display:flex;gap:8px;">
+          <button type="button" id="reportsApplyFiltersBtn" class="btn-primary">Apply filters</button>
+          <button type="button" id="reportsResetFiltersBtn" class="btn-secondary">Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="reports-summary-line" id="reportsSummaryLine"></div>
+
+    <section class="summary-card report-block" id="reportTideBlock">
+      <h3>Catch rate by tide stage</h3>
+      <p class="footnote">Every logged Catch, grouped by the tide stage recorded at the time.</p>
+      <div class="report-chart-wrap"><canvas id="reportTideChart"></canvas></div>
+      <div id="reportTideEmpty" class="report-empty" style="display:none;">No catches match the current filters.</div>
+    </section>
+
+    <section class="summary-card report-block" id="reportGearBlock">
+      <h3>Bait, rig &amp; rod effectiveness</h3>
+      <p class="footnote">Catch counts for each bait/rig/rod actually used — a session's own gear, carried onto every catch logged during it.</p>
+      <div id="reportGearTables"></div>
+      <div id="reportGearEmpty" class="report-empty" style="display:none;">No catches match the current filters.</div>
+    </section>
+
+    <section class="summary-card report-block" id="reportLocationBlock">
+      <h3>Catches by location</h3>
+      <p class="footnote">Every catch matched to its nearest tracked location.</p>
+      <div id="reportLocationTableWrap"></div>
+      <div id="reportLocationEmpty" class="report-empty" style="display:none;">No catches match the current filters.</div>
+    </section>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="charts.js"></script>
+<script src="reports.js"></script>
+</body></html>
