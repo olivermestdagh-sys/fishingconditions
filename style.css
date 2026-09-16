@@ -855,6 +855,7 @@ tbody tr:nth-child(even) {
 
 .tabnav a {
   flex: 1;
+  min-width: 0; /* REAL BUG, FOUND AND FIXED: flex items don't shrink below their own text's natural width by default — with 5 tabs this happened to just barely fit, but adding a 6th (Reports) pushed the nav's own total width past the viewport at phone width, confirmed directly against the previously-deployed 5-tab version (no overflow) vs this one (25px over at 390px) before this fix. min-width:0 lets flex:1 actually compress each tab to fit, wrapping its own label onto a second line rather than refusing to shrink at all. */
   text-align: center;
   padding: 10px;
   border-radius: 10px 10px 0 0;
@@ -863,6 +864,17 @@ tbody tr:nth-child(even) {
   font-weight: 600;
   font-size: 0.85rem;
   background: #e7edf5;
+}
+
+@media (max-width: 480px) {
+  .tabnav {
+    padding: 8px 6px 0;
+    gap: 2px;
+  }
+  .tabnav a {
+    padding: 8px 2px;
+    font-size: 0.72rem;
+  }
 }
 
 .tabnav a.active {

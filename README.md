@@ -2766,6 +2766,80 @@ decision, a tier's cap being raised and immediately unblocking further
 creation with no code change, and the fail-closed behaviour for a
 Basic user with no tier) was verified end-to-end against real SQLite.
 
+## Reports (`reports.html`, `reports.js`)
+
+A new tab, added after Sessions/catch-linking/Location-Live rendering
+were all settled, per Oliver's own explicit "not yet" earlier in this
+project. Client-side aggregation over the same `/api/public/marks`
+data every other page already reads — no new backend endpoints, no new
+D1 queries, matching this whole site's existing architecture. Admin-
+gated the same way Sync is (`cachedIsAdmin`).
+
+Filters cover date range, Species/Weather Condition/Tide Condition/
+Water Condition/Bait/Rig/Rod/Berley (built dynamically from whatever
+values actually appear in the current data, not a hardcoded list —
+so a field with no values recorded yet just doesn't show a filter for
+it at all), plus Temperature and Water Depth as genuinely new numeric
+range filters, per Oliver's own answer to the original scoping
+questions. Every report only ever considers `type: "Catch"` marks —
+Sessions/POI/Mark aren't "a catch" and would skew every count if
+included.
+
+Three reports for v1, chosen from a longer brainstormed list as the
+most "solid" starting set (Oliver's own instruction — a few reports
+done well over a flexible axis-picker):
+
+1. **Catch rate by tide stage** — a bar chart (Chart.js, already a
+   site dependency) of catch counts grouped by `tideCondition`.
+2. **Bait/rig/rod effectiveness** — three side-by-side tables, one per
+   field, catch counts per option actually used. Bait/Rig/Rod store
+   comma-joined multi-values (established convention throughout this
+   codebase, e.g. the Sync page's own carry-forward fields) — each
+   value is split and counted individually, so "Pipi, Squid" correctly
+   counts toward both Pipi's and Squid's own totals rather than being
+   treated as one combined, unmatched string.
+3. **Catches by location** — every catch matched to its nearest
+   tracked location (`config/locations.json`, the same file
+   `findNearestTrackedLocation` already uses for a single popup — this
+   report loads that list ONCE itself and does its own bulk nearest-
+   match scan locally, rather than repeating that function's own
+   per-call fetch-and-scan once per catch, for potentially thousands
+   of them).
+
+**Two real bugs found and fixed while building this, neither about
+the reports' own data**:
+1. Table headers were unreadable — dark text (my own override) on a
+   dark blue background (a pre-existing, site-wide `thead th` rule I
+   hadn't accounted for). Fixed by removing my own conflicting `color`
+   override entirely, letting the existing site-wide table style apply
+   cleanly instead of fighting it — same white-on-blue headers every
+   other table on the site already uses.
+2. Adding "Reports" as a sixth nav tab broke the tab bar at phone
+   width, site-wide — confirmed directly by comparing against the
+   currently-deployed 5-tab version at 390px (no overflow) versus this
+   one before the fix (25px over). Flex items don't shrink below their
+   own text's natural width by default; five tabs happened to just fit,
+   a sixth didn't. Fixed with `min-width: 0` on `.tabnav a` (lets
+   `flex: 1` actually compress each tab, wrapping its label onto a
+   second line rather than refusing to shrink at all) plus a tighter
+   padding/font-size at ≤480px to keep it comfortable at real phone
+   widths, not just technically non-overflowing.
+
+**Verified**: real browser tests with deliberately varied catch data
+(different tide stages, comma-joined bait/rig/rod combinations,
+several distinct locations, a spread of temperatures) — confirmed the
+tide chart's own Chart.js data correctly matches real counts, confirmed
+comma-joined multi-values split and count correctly rather than being
+tallied as one unmatched combined string, confirmed nearest-location
+matching against real distance calculations, confirmed Session/POI
+marks are correctly excluded from every count. Confirmed the Species
+filter and the Temperature range filter each correctly narrow every
+report, and confirmed Reset restores the unfiltered view. Confirmed
+the not-signed-in gate hides the whole page correctly. Confirmed zero
+horizontal overflow at phone width after the nav fix, and confirmed
+the desktop nav is completely unaffected by the mobile-only media
+query. Zero JS errors throughout.
+
 ## Troubleshooting
 
 - **Page loads but says "Not updated yet"**: the scheduled job hasn't run
