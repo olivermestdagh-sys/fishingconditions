@@ -2840,6 +2840,98 @@ horizontal overflow at phone width after the nav fix, and confirmed
 the desktop nav is completely unaffected by the mobile-only media
 query. Zero JS errors throughout.
 
+## Multi-select and bulk edit (Location/Live maps)
+
+First of a two-part request (the second — filtered/selected export from
+the Sync page — is planned but not built yet; see the contentious-points
+discussion this was scoped from). Ctrl (or Cmd, for cross-platform
+parity) is the modifier throughout: Ctrl+click toggles one mark in or
+out of the selection, Ctrl+drag on the map itself draws a box and
+toggles every mark whose own lat/lng falls inside it — by real
+geographic position, not just whichever happen to be individually
+visible at the current zoom, so a box drawn over a collapsed cluster
+correctly toggles its members too (Oliver's own call on that point). A
+plain click, with or without an active selection, still opens that
+mark's normal popup and leaves the selection completely untouched
+(also Oliver's own call) — closing that popup reverts the panel back
+to showing the selection summary if one is still active, rather than
+just going blank.
+
+Once ≥1 marks are selected, the shared side panel
+(`#markDetailPanel` — the same one a single mark's own edit popup
+already uses) shows "N marks selected" with Bulk edit / Clear
+selection. The bulk-edit form gives every field a genuine tri-state:
+"No change" (a distinct sentinel from an actual empty value — a plain
+2-option dropdown can't tell "leave as-is" apart from "clear it"),
+an explicit clear, or a real value — and only ever sends the fields
+actually touched. **No backend changes were needed for this at all**:
+`mergeMarkFields` (`user-backend.js`) already treats an omitted key in
+the request body as "leave this exactly as it is" — confirmed directly
+by reading that code before building anything, rather than assumed.
+Saving does one `saveMarkToD1` PUT per selected mark (the exact same
+call a single mark's own edit form already makes), reports a clear
+count on partial failure rather than silently losing track of which
+ones didn't save, and only clears the selection on a fully successful
+save (a partial failure leaves it in place so the person can retry).
+
+**A real bug found and fixed while building the Ctrl+click side of
+this**: stopping propagation on the "click" event alone wasn't
+enough — mousedown always fires before click, and the map's own
+box-select mousedown handler doesn't know or care whether a mousedown
+landed on a marker or on open water; it started a drag either way once
+it saw Ctrl held. A held-Ctrl click on a marker was being silently
+swallowed by the box-select logic (a near-zero-movement "drag" it
+correctly ignores) before the marker's own click handler ever got a
+chance to fire — toggling nothing. Confirmed directly by instrumenting
+every relevant event and observing the real firing order, rather than
+assumed from reading the code. Fixed by also stopping propagation on
+the marker's own mousedown, not just its click.
+
+**A significant test-environment limitation, found and worked around
+rather than chased as a bug**: a real, physical mouse click on a
+Canvas-rendered marker could not be made to register through
+Playwright's own synthetic mouse events in this sandbox — confirmed to
+be completely unrelated to anything built here by testing the exact
+same click against the currently-deployed, completely untouched
+`charts.js` and finding the identical failure. Canvas-rendered shapes
+have no individual DOM element of their own to click, unlike SVG, and
+whatever Playwright's synthetic events don't provide that a real
+mouse/browser combination does, no amount of retrying or waiting
+resolved it. Rather than leave this logic unverified, the toggle logic
+itself was verified by firing the exact same Leaflet events
+(`marker.fire('mousedown'/'click', {originalEvent: {ctrlKey: true,
+...}})`) that a real click would produce — a deliberate substitution
+for the specific part Playwright couldn't drive, not a weaker test
+standing in for a real one. The box-select drag itself needed no such
+workaround, since it operates on the map's own container-level mouse
+events rather than depending on Canvas shape hit-testing — real mouse
+drag simulation confirmed it directly.
+
+**Verified**: the selection toggle logic (via direct event firing, for
+the reason above) — Ctrl+click selecting, toggling back off, a second
+mark added without disturbing the first, the panel's own count
+updating correctly including plural/singular wording. A plain click on
+an already-selected mark opens its popup without clearing the
+selection, and closing that popup correctly reverts the panel back to
+the selection summary. Clear selection empties the set and hides the
+panel. Separately, box-select verified with real mouse drag
+simulation: the visual box appears mid-drag and is removed on release,
+selects only the marks actually inside it (confirmed a mark just
+outside the box is excluded), and normal drag-to-pan still works
+immediately afterwards. The full bulk-edit save flow verified against
+mocked PUT requests: only the two fields actually touched appear in
+the request body (confirmed by inspecting the real request payload),
+identical values sent for every selected mark, untouched fields
+(bait, notes, species) remain exactly as they were per-mark after
+save with no cross-contamination between marks, and the selection
+clears on full success. Partial failure verified separately: the
+correct "N of M, showing the real server error" message, the
+selection preserved (not cleared) so the person can retry, and only
+the mark that actually succeeded has its local state updated.
+Finally, confirmed normal single-mark popup/edit/save and the
+existing hover-panel mutual exclusivity (`closeMarkDetailPanel`) are
+completely unaffected by any of this. Zero JS errors throughout.
+
 ## Troubleshooting
 
 - **Page loads but says "Not updated yet"**: the scheduled job hasn't run
