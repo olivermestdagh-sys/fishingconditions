@@ -327,6 +327,58 @@
     ]
   },
   {
+    "name": "Point Leo",
+    "shore": "NW",
+    "tidal": true,
+    "locationGroup": null,
+    "locationGroups": [],
+    "tideOffset": null,
+    "willyweatherId": 13865,
+    "willyweatherName": "Point Leo",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.417619693844,
+    "lng": 145.07783174514773,
+    "tideMaxObserved": 3,
+    "types": [
+      {
+        "type": "Land based",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
+  },
+  {
+    "name": "Point Leo Surf Beach",
+    "shore": "N",
+    "tidal": true,
+    "locationGroup": null,
+    "locationGroups": [],
+    "tideOffset": null,
+    "willyweatherId": 31748,
+    "willyweatherName": "Point Leo Surf Beach",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.42521838040787,
+    "lng": 145.0703859329224,
+    "tideMaxObserved": 3,
+    "types": [
+      {
+        "type": "Land based",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
+  },
+  {
     "name": "Rosebud Pier, VIC",
     "shore": "E",
     "tidal": true,
@@ -379,6 +431,32 @@
         "packUp": "00:40",
         "timeToSpot": "00:20",
         "timeFromSpot": "00:20"
+      }
+    ]
+  },
+  {
+    "name": "Somers Beach",
+    "shore": "N",
+    "tidal": true,
+    "locationGroup": null,
+    "locationGroups": [],
+    "tideOffset": null,
+    "willyweatherId": 31745,
+    "willyweatherName": "Somers Beach",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.39426386067292,
+    "lng": 145.1585125923157,
+    "tideMaxObserved": 3,
+    "types": [
+      {
+        "type": "Land based",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
       }
     ]
   },
