@@ -118,6 +118,20 @@ main {
    assumes the popup is still floating in its usual spot near the
    marker, and would compute nonsense offsets (and could visibly jerk
    the map around) once it's actually sitting over here instead. */
+
+/** The temporary rectangle drawn while Ctrl+dragging on the map to
+ * box-select marks (initMarkSelectionBoxDrag, charts.js) — a plain
+ * absolutely-positioned div, sized/positioned directly in JS on every
+ * mousemove rather than via any Leaflet layer, since it only ever
+ * needs to exist for the duration of one drag gesture. */
+.mark-select-box {
+  position: absolute;
+  border: 2px dashed #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  pointer-events: none; /* the box itself must never intercept the very mouseup that finishes the drag */
+  z-index: 1000;
+}
+
 .mark-detail-panel {
   width: 340px;
   flex-shrink: 0;

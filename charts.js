@@ -1864,8 +1864,9 @@ async function saveMarksBatchToD1(newMarks) {
  * different from before.
  */
 let markDetailPanelMap = null; // the map whose popup is currently shown in #markDetailPanel, if any — set/cleared below, used by closeMarkDetailPanel
+let markDetailPanelState = null; // that map's own state object, alongside markDetailPanelMap — used by detachDetailPanel to know whether to revert to showing an active selection summary rather than just hiding the panel
 
-function attachPopupToDetailPanel(popup, map) {
+function attachPopupToDetailPanel(popup, map, state) {
   const panel = document.getElementById("markDetailPanel");
   const popupEl = popup.getElement();
   if (!panel || !popupEl) return;
@@ -1880,18 +1881,30 @@ function attachPopupToDetailPanel(popup, map) {
   panel.appendChild(popupEl);
   panel.style.display = "block";
   markDetailPanelMap = map;
+  markDetailPanelState = state;
 }
 
 /** Reverses attachPopupToDetailPanel — called on popupclose, whether or
  * not a popup was ever actually moved into the panel in the first
  * place (harmless either way). Leaflet removes the popup's own element
  * from wherever it currently lives when the popup itself closes, so
- * this only needs to hide the now-empty panel, not manage the popup
- * element's own lifecycle. */
+ * this only needs to manage the PANEL's own visible content, not the
+ * popup element's own lifecycle.
+ *
+ * A plain click opening an individual mark's popup while a multi-mark
+ * selection is already active doesn't clear that selection (Oliver's
+ * own call) — it just temporarily covers the selection summary the
+ * panel was showing. So closing that popup should bring the summary
+ * back, not just go blank, as long as the selection is still non-empty. */
 function detachDetailPanel() {
   const panel = document.getElementById("markDetailPanel");
-  if (panel) panel.style.display = "none";
+  if (markDetailPanelMap && markDetailPanelState && markDetailPanelState.selectedMarkIds.size > 0) {
+    renderSelectionPanel(markDetailPanelMap, markDetailPanelState);
+  } else if (panel) {
+    panel.style.display = "none";
+  }
   markDetailPanelMap = null;
+  markDetailPanelState = null;
 }
 
 /**
@@ -1903,10 +1916,20 @@ function detachDetailPanel() {
  * hadn't already taken, rather than its own intended full width — the
  * two were never meant to compete for the same space simultaneously.
  * A plain no-op when nothing is currently open.
+ *
+ * Directly hides the panel too, not just via closing a popup — a
+ * selection summary or bulk-edit form can also be showing in there
+ * with no popup involved at all, and closePopup() alone wouldn't touch
+ * that. The underlying selection itself is left completely alone
+ * either way (marks stay highlighted on the map) — this only ever
+ * affects what the panel is currently showing.
  */
 function closeMarkDetailPanel() {
   if (markDetailPanelMap) markDetailPanelMap.closePopup();
+  const panel = document.getElementById("markDetailPanel");
+  if (panel) panel.style.display = "none";
 }
+
 
 function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {}) {
   // Belt-and-braces alongside Leaflet's own automatic handling of the same
@@ -2168,6 +2191,24 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
           marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet", autoPan: false });
           marker.unbindTooltip();
           marker.bindTooltip(markTooltipText(mark, options.state), { direction: "top" });
+          // Same Ctrl/Cmd-click-to-select wiring loadAndRenderMarks gives
+          // every marker at creation (including the same real mousedown-
+          // vs-click ordering fix — see that code's own comment for why
+          // stopping propagation on "click" alone isn't enough) — this one
+          // just got torn down and recreated (a Type change needing a
+          // different shape), so it needs it wired again from scratch; the
+          // old marker's own listeners went with it.
+          if (options.map) {
+            marker.on("mousedown", (e) => {
+              if (isSelectModifierKey(e.originalEvent)) L.DomEvent.stop(e);
+            });
+            marker.on("click", (e) => {
+              if (!isSelectModifierKey(e.originalEvent)) return;
+              L.DomEvent.stop(e);
+              marker.closePopup();
+              toggleMarkSelection(options.map, options.state, mark.id);
+            });
+          }
           if (options.state) options.state.markersById.set(mark.id, marker);
           // showMarkerOnceVisible (not zoomToShowLayer directly, and not a
           // plain openPopup) — the freshly re-created marker could easily
@@ -3100,6 +3141,29 @@ async function loadAndRenderMarks(map, state) {
     }, state.markLists).addTo(state.markerLayer);
     marker.bindTooltip(markTooltipText(mark, state), { direction: "top" });
     marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet", autoPan: false });
+    // Ctrl (or Cmd) turns a click into a selection toggle instead of the
+    // normal open-the-popup behaviour.
+    //
+    // REAL BUG, FOUND AND FIXED: stopping propagation on the "click" event
+    // alone isn't enough — mousedown always fires before click, and the
+    // map's own box-select mousedown handler (initMarkSelectionBoxDrag,
+    // below) doesn't know or care whether a mousedown landed on a marker
+    // or on open water; it starts a drag either way once it sees Ctrl
+    // held. Confirmed directly: without also stopping mousedown here, a
+    // held-Ctrl click on a marker was silently swallowed by the box-select
+    // logic (a near-zero-movement "drag" it correctly ignores) before this
+    // handler's own "click" ever got a chance to fire at all — toggling
+    // nothing. Stopping mousedown too prevents the box-select drag from
+    // ever starting for a mousedown that began on a specific marker.
+    marker.on("mousedown", (e) => {
+      if (isSelectModifierKey(e.originalEvent)) L.DomEvent.stop(e);
+    });
+    marker.on("click", (e) => {
+      if (!isSelectModifierKey(e.originalEvent)) return;
+      L.DomEvent.stop(e);
+      marker.closePopup();
+      toggleMarkSelection(map, state, mark.id);
+    });
     // Only fires the actual distance lookups the first time each mark's
     // popup is genuinely opened by a click — with a couple thousand marks
     // loaded, computing this eagerly for every single one regardless of
@@ -3231,7 +3295,7 @@ async function loadAndRenderMarks(map, state) {
     // (startNewMarkEntry) — that one never reaches state.marksById until
     // saved, so it has to be handled here, before the mark/marker lookup
     // below, rather than folded into the same guard.
-    attachPopupToDetailPanel(e.popup, map);
+    attachPopupToDetailPanel(e.popup, map, state);
     const mark = state.marksById.get(root.dataset.markId);
     const marker = state.markersById.get(root.dataset.markId);
     // A brand-new draft (see startNewMarkEntry) also has a data-mark-id but
@@ -3257,6 +3321,7 @@ async function loadAndRenderMarks(map, state) {
   renderSessionLines(map, state, marks);
 
   initMarkControls(map, state);
+  initMarkSelectionBoxDrag(map, state);
 }
 
 /**
@@ -3825,6 +3890,346 @@ function initMarkControls(map, state) {
   refresh(); // respects whatever was restored from localStorage on load
 }
 
+// ---------------------------------------------------------------------
+// Multi-select and bulk edit — Ctrl(or Cmd)+click toggles one mark,
+// Ctrl+drag on the map itself box-selects (toggling) every mark inside
+// it. Shared here rather than built separately for Location/Live and
+// the Sync page's own export map, since both need the exact same
+// mechanics.
+// ---------------------------------------------------------------------
+
+/** Ctrl (or Cmd, for cross-platform parity) is this whole feature's own
+ * "select, don't do the normal thing" modifier throughout — checked
+ * directly against the raw DOM event (originalEvent), since that's the
+ * only place a browser actually exposes it; Leaflet's own event
+ * wrapper doesn't add an equivalent of its own. */
+function isSelectModifierKey(domEvent) {
+  return !!(domEvent && (domEvent.ctrlKey || domEvent.metaKey));
+}
+
+/**
+ * Visually marks one marker as selected (a plainly bigger, brighter
+ * ring) or restores it to its own normal markStyleFor() styling — same
+ * idea, and the same real bug already found and worked around, as
+ * highlightSessionMarker's own comment: setRadius (not passing radius
+ * through setStyle) is what actually resizes a diamond/cross shape
+ * correctly, not just a plain circle.
+ */
+function applyMarkSelectionVisual(marker, mark, state, selected) {
+  const style = markStyleFor(mark, state);
+  if (selected) {
+    marker.setStyle({ color: "#f59e0b", weight: 3, fillColor: style.fillColor });
+    marker.setRadius(style.radius + 4);
+  } else {
+    marker.setStyle({ color: style.color, weight: style.weight, fillColor: style.fillColor });
+    marker.setRadius(style.radius);
+  }
+}
+
+/** Toggles one mark's own selection state, WITHOUT re-rendering the
+ * summary panel — used directly by the box-select loop below so
+ * selecting many marks at once only re-renders the panel once at the
+ * end, not once per mark toggled. toggleMarkSelection (below) is the
+ * single-mark version most callers actually want. */
+function toggleMarkSelectionSilent(state, markId) {
+  const marker = state.markersById.get(markId);
+  const mark = state.marksById.get(markId);
+  if (!marker || !mark) return;
+  if (state.selectedMarkIds.has(markId)) {
+    state.selectedMarkIds.delete(markId);
+    applyMarkSelectionVisual(marker, mark, state, false);
+  } else {
+    state.selectedMarkIds.add(markId);
+    applyMarkSelectionVisual(marker, mark, state, true);
+  }
+}
+
+function toggleMarkSelection(map, state, markId) {
+  toggleMarkSelectionSilent(state, markId);
+  renderSelectionPanel(map, state);
+}
+
+/** Deselects everything, restoring every currently-selected marker's
+ * own normal styling and hiding the summary panel (renderSelectionPanel
+ * itself hides the panel once the selection is empty). */
+function clearMarkSelection(map, state) {
+  for (const markId of state.selectedMarkIds) {
+    const marker = state.markersById.get(markId);
+    const mark = state.marksById.get(markId);
+    if (marker && mark) applyMarkSelectionVisual(marker, mark, state, false);
+  }
+  state.selectedMarkIds.clear();
+  renderSelectionPanel(map, state);
+}
+
+/**
+ * Ctrl+drag on the map itself (not on a marker) draws a temporary
+ * selection box, and on release TOGGLES every mark whose own lat/lng
+ * falls inside it — matched by real geographic position against every
+ * loaded mark, not just whichever happen to be individually visible at
+ * the current zoom, so a box drawn over a collapsed cluster correctly
+ * toggles its members even though it isn't showing them individually
+ * right now (Oliver's own call).
+ *
+ * Deliberately built on raw mousedown/mousemove/mouseup rather than any
+ * Leaflet drag-handler class, since this needs to coexist with the
+ * map's own normal drag-to-pan — completely unchanged, still works
+ * without the modifier — rather than replace it. The map's own
+ * dragging is explicitly disabled only for the duration of a held-
+ * Ctrl drag and re-enabled the moment it ends, so a plain drag
+ * immediately afterwards still pans exactly as it always has.
+ */
+function initMarkSelectionBoxDrag(map, state) {
+  let boxStart = null; // container-point where the drag began
+  let boxEl = null; // the temporary visual rectangle, a direct child of the map's own container
+
+  function updateBoxEl(p1, p2) {
+    const left = Math.min(p1.x, p2.x);
+    const top = Math.min(p1.y, p2.y);
+    const width = Math.abs(p2.x - p1.x);
+    const height = Math.abs(p2.y - p1.y);
+    boxEl.style.left = `${left}px`;
+    boxEl.style.top = `${top}px`;
+    boxEl.style.width = `${width}px`;
+    boxEl.style.height = `${height}px`;
+  }
+
+  map.on("mousedown", (e) => {
+    if (!isSelectModifierKey(e.originalEvent)) return;
+    L.DomEvent.stop(e);
+    map.dragging.disable();
+    boxStart = e.containerPoint;
+    boxEl = document.createElement("div");
+    boxEl.className = "mark-select-box";
+    map.getContainer().appendChild(boxEl);
+    updateBoxEl(boxStart, boxStart);
+  });
+
+  map.on("mousemove", (e) => {
+    if (!boxStart) return;
+    updateBoxEl(boxStart, e.containerPoint);
+  });
+
+  map.on("mouseup", (e) => {
+    if (!boxStart) return;
+    const p1 = boxStart;
+    const p2 = e.containerPoint;
+    boxStart = null;
+    if (boxEl) {
+      boxEl.remove();
+      boxEl = null;
+    }
+    map.dragging.enable();
+
+    // A genuinely tiny drag (a Ctrl+click on empty water with barely any
+    // pointer movement) isn't a meaningful box — toggling nothing is the
+    // right behaviour for it, not an accidental single-point selection.
+    if (Math.abs(p2.x - p1.x) < 4 && Math.abs(p2.y - p1.y) < 4) return;
+
+    const bounds = L.latLngBounds(map.containerPointToLatLng(p1), map.containerPointToLatLng(p2));
+    for (const markId of state.marksById.keys()) {
+      const mark = state.marksById.get(markId);
+      if (mark.lat == null || mark.lng == null) continue;
+      if (bounds.contains([mark.lat, mark.lng])) toggleMarkSelectionSilent(state, markId);
+    }
+    renderSelectionPanel(map, state);
+  });
+}
+
+/**
+ * Shows "N marks selected" plus Bulk edit / Clear selection in the
+ * shared #markDetailPanel — the same panel an individual mark's popup
+ * already uses (attachPopupToDetailPanel), but written directly into
+ * it rather than reparenting a Leaflet popup, since there's no single
+ * popup involved for a multi-mark selection. Hides the panel entirely
+ * once the selection is empty, rather than showing "0 selected".
+ */
+function renderSelectionPanel(map, state) {
+  const panel = document.getElementById("markDetailPanel");
+  if (!panel) return;
+  const count = state.selectedMarkIds.size;
+  if (count === 0) {
+    panel.style.display = "none";
+    panel.innerHTML = "";
+    return;
+  }
+  panel.innerHTML = `
+    <div data-selection-summary style="padding:4px;">
+      <div style="font-weight:700;margin-bottom:10px;">${count} mark${count === 1 ? "" : "s"} selected</div>
+      <button type="button" data-bulk-edit-btn class="btn-primary" style="margin-right:8px;">Bulk edit</button>
+      <button type="button" data-clear-selection-btn class="btn-secondary">Clear selection</button>
+    </div>
+  `;
+  panel.style.display = "block";
+  panel.querySelector("[data-bulk-edit-btn]").addEventListener("click", () => renderBulkEditForm(map, state));
+  panel.querySelector("[data-clear-selection-btn]").addEventListener("click", () => clearMarkSelection(map, state));
+}
+
+/** One tri-state field for the bulk-edit form below — "No change" is a
+ * distinct sentinel from an actual empty value (a real, explicit
+ * "clear this field on every selected mark"), which a plain 2-option
+ * dropdown can't express. Reuses the exact same pick-list values a
+ * single mark's own edit form shows (markListOptionsHtml's own source
+ * data), just with this sentinel prepended. */
+function bulkEditPicklistFieldHtml(field, markLists) {
+  const values = markLists.filter((r) => r.field === field.listLabel).map((r) => r.value);
+  return `
+    <div style="margin-bottom:8px;">
+      <label style="display:block;font-size:0.8rem;font-weight:600;margin-bottom:2px;">${escapeHtml(field.displayLabel)}
+        <select name="${field.key}" style="${MARK_POPUP_INPUT_STYLE}">
+          <option value="__nochange__" selected>— No change —</option>
+          <option value="">(clear)</option>
+          ${values.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("")}
+        </select>
+      </label>
+    </div>`;
+}
+
+/** A plain number input's own blank state already unambiguously means
+ * "didn't touch this one" for bulk-edit purposes (there's no realistic
+ * need to explicitly blank out a barometer reading across many marks
+ * at once the way there is for, say, Species) — so this doesn't need
+ * the same explicit tri-state sentinel the picklist fields above do. */
+function bulkEditNumericFieldHtml(key, label, step, min) {
+  return `
+    <div style="margin-bottom:8px;">
+      <label style="display:block;font-size:0.8rem;font-weight:600;margin-bottom:2px;">${escapeHtml(label)}
+        <input type="number" name="${key}" placeholder="No change" ${min != null ? `min="${min}"` : ""} step="${step}" style="${MARK_POPUP_INPUT_STYLE}" />
+      </label>
+    </div>`;
+}
+
+function renderBulkEditForm(map, state) {
+  const panel = document.getElementById("markDetailPanel");
+  if (!panel) return;
+  const count = state.selectedMarkIds.size;
+  const picklistFieldsHtml = MARK_POPUP_OPTIONAL_FIELDS.map((f) => bulkEditPicklistFieldHtml(f, state.markLists)).join("");
+  panel.innerHTML = `
+    <div data-bulk-edit-form style="padding:4px;">
+      <div style="font-weight:700;margin-bottom:6px;">Bulk edit ${count} mark${count === 1 ? "" : "s"}</div>
+      <p class="footnote" style="margin:0 0 10px;">Only fields you change here get updated — anything left as "No change" stays exactly as it is on every mark.</p>
+      <form data-bulk-edit-form-el onsubmit="return false;">
+        ${picklistFieldsHtml}
+        ${bulkEditNumericFieldHtml("size", "Size (cm)", "1", "0")}
+        ${bulkEditNumericFieldHtml("barometer", "Barometer (hPa)", "0.1", "0")}
+        ${bulkEditNumericFieldHtml("temperature", "Temperature (°C)", "0.1")}
+        ${bulkEditNumericFieldHtml("waterTemperature", "Water Temp (°C)", "0.1")}
+        ${bulkEditNumericFieldHtml("waterDepth", "Water Depth (m)", "0.1", "0")}
+        <div style="margin-bottom:8px;">
+          <label style="display:block;font-size:0.8rem;font-weight:600;margin-bottom:2px;">Wind Direction
+            <select name="windDirection" style="${MARK_POPUP_INPUT_STYLE}">
+              <option value="__nochange__" selected>— No change —</option>
+              <option value="">(clear)</option>
+              ${SHORE_OPTIONS.map((d) => `<option value="${d}">${d}</option>`).join("")}
+            </select>
+          </label>
+        </div>
+        ${bulkEditNumericFieldHtml("windSpeed", "Wind Speed (km/h)", "1", "0")}
+        <div style="margin-bottom:8px;">
+          <label style="display:block;font-size:0.8rem;font-weight:600;margin-bottom:2px;">Released
+            <select name="released" style="${MARK_POPUP_INPUT_STYLE}">
+              <option value="__nochange__" selected>— No change —</option>
+              <option value="1">Yes</option>
+              <option value="0">No</option>
+            </select>
+          </label>
+        </div>
+        <div style="margin-bottom:8px;">
+          <label style="display:block;font-size:0.8rem;font-weight:600;margin-bottom:2px;">Notes
+            <textarea name="notes" placeholder="No change" rows="2" style="${MARK_POPUP_INPUT_STYLE}"></textarea>
+          </label>
+        </div>
+        <div data-bulk-edit-status style="margin:8px 0;font-size:0.85rem;"></div>
+        <button type="button" data-bulk-edit-save class="btn-primary" style="margin-right:8px;">Save to ${count} mark${count === 1 ? "" : "s"}</button>
+        <button type="button" data-bulk-edit-cancel class="btn-secondary">Cancel</button>
+      </form>
+    </div>
+  `;
+  panel.style.display = "block";
+  panel.querySelector("[data-bulk-edit-cancel]").addEventListener("click", () => renderSelectionPanel(map, state));
+  panel.querySelector("[data-bulk-edit-save]").addEventListener("click", () => handleBulkEditSave(map, state));
+}
+
+/**
+ * Reads the bulk-edit form, returning ONLY the fields actually
+ * touched — anything left at its own "No change" sentinel (picklist/
+ * tri-state fields) or left blank (numeric/text fields, where blank
+ * means "didn't touch this one") is simply omitted from the returned
+ * object entirely, never set to null/empty by omission. The backend's
+ * own mergeMarkFields (user-backend.js) already treats an omitted key
+ * as "leave this exactly as it is on this mark" — confirmed directly
+ * against that code before building this — so nothing else is needed
+ * on the save side to get "only edited fields get updated" right.
+ */
+function collectBulkEditFormValues(form) {
+  const updates = {};
+  for (const field of MARK_POPUP_OPTIONAL_FIELDS) {
+    const raw = form.querySelector(`[name="${field.key}"]`).value;
+    if (raw === "__nochange__") continue;
+    updates[field.key] = raw; // "" here is a deliberate clear, distinct from the __nochange__ sentinel above
+  }
+  for (const key of ["size", "barometer", "temperature", "waterTemperature", "waterDepth", "windSpeed"]) {
+    const raw = form.querySelector(`[name="${key}"]`).value;
+    if (raw === "") continue;
+    updates[key] = Number(raw);
+  }
+  const windDirection = form.querySelector('[name="windDirection"]').value;
+  if (windDirection !== "__nochange__") updates.windDirection = windDirection;
+  const released = form.querySelector('[name="released"]').value;
+  if (released !== "__nochange__") updates.released = released === "1";
+  const notes = form.querySelector('[name="notes"]').value;
+  if (notes !== "") updates.notes = notes;
+  return updates;
+}
+
+/** Saves the same partial-update body to every selected mark — one PUT
+ * per mark (reusing saveMarkToD1, the exact same call a single mark's
+ * own edit form already makes; the backend's own partial-merge logic
+ * is what actually makes "only touched fields change" work, not
+ * anything special here), since there's no bulk-update endpoint and
+ * building one wasn't needed once the per-mark merge already worked
+ * correctly. Reports a clear count on partial failure rather than
+ * silently losing track of which ones didn't save. */
+async function handleBulkEditSave(map, state) {
+  const panel = document.getElementById("markDetailPanel");
+  const form = panel.querySelector("[data-bulk-edit-form-el]");
+  const statusEl = panel.querySelector("[data-bulk-edit-status]");
+  const saveBtn = panel.querySelector("[data-bulk-edit-save]");
+  const updates = collectBulkEditFormValues(form);
+  if (Object.keys(updates).length === 0) {
+    statusEl.textContent = "Nothing changed — pick at least one field to update.";
+    statusEl.style.color = "#dc2626";
+    return;
+  }
+  saveBtn.disabled = true;
+  const markIds = Array.from(state.selectedMarkIds);
+  statusEl.textContent = `Saving to ${markIds.length} mark${markIds.length === 1 ? "" : "s"}…`;
+  statusEl.style.color = "";
+
+  let succeeded = 0;
+  const failures = [];
+  for (const markId of markIds) {
+    const result = await saveMarkToD1({ id: markId, ...updates }, false);
+    if (result.success) {
+      succeeded++;
+      const mark = state.marksById.get(markId);
+      if (mark) Object.assign(mark, updates); // keeps local state in sync so a later popup-open shows the fresh values without a full reload
+    } else {
+      failures.push({ markId, error: result.error });
+    }
+  }
+
+  saveBtn.disabled = false;
+  if (failures.length === 0) {
+    statusEl.textContent = `Saved to all ${succeeded} mark${succeeded === 1 ? "" : "s"}.`;
+    statusEl.style.color = "#16a34a";
+    clearMarkSelection(map, state);
+  } else {
+    statusEl.textContent = `Saved to ${succeeded} of ${markIds.length} — ${failures.length} failed: ${failures.map((f) => f.error).join("; ")}`;
+    statusEl.style.color = "#dc2626";
+  }
+}
+
 /**
  * Fresh, empty {marksById, markersById, markLists} bag — create ONE per map
  * (Location tab, Live tab), pass the SAME object into both loadAndRenderMarks
@@ -3837,7 +4242,7 @@ function initMarkControls(map, state) {
  */
 function createMarkLayerState() {
   const saved = loadMarkViewSettings();
-  return { marksById: new Map(), markersById: new Map(), markLists: [], groupByKey: saved.groupByKey, filters: saved.filters, canvasRenderer: null, highlightedSessionGroupId: null };
+  return { marksById: new Map(), markersById: new Map(), markLists: [], groupByKey: saved.groupByKey, filters: saved.filters, canvasRenderer: null, highlightedSessionGroupId: null, selectedMarkIds: new Set() };
 }
 
 /**
