@@ -2199,6 +2199,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
           // different shape), so it needs it wired again from scratch; the
           // old marker's own listeners went with it.
           if (options.map) {
+            marker._markId = mark.id; // same O(1) cluster-lookup reason as loadAndRenderMarks's own marker creation
             marker.on("mousedown", (e) => {
               if (isSelectModifierKey(e.originalEvent)) L.DomEvent.stop(e);
             });
@@ -3155,6 +3156,7 @@ async function loadAndRenderMarks(map, state) {
     // handler's own "click" ever got a chance to fire at all — toggling
     // nothing. Stopping mousedown too prevents the box-select drag from
     // ever starting for a mousedown that began on a specific marker.
+    marker._markId = mark.id; // O(1) lookup for cluster-level Ctrl+click (see initMarkSelectionBoxDrag's clustermousedown/clusterclick handlers) — getAllChildMarkers() returns marker objects, not ids
     marker.on("mousedown", (e) => {
       if (isSelectModifierKey(e.originalEvent)) L.DomEvent.stop(e);
     });
@@ -4020,6 +4022,15 @@ function initMarkSelectionBoxDrag(map, state) {
       boxEl = null;
     }
     map.dragging.enable();
+    // Set for BOTH the tiny-drag and the real-box cases below — either way,
+    // map.dragging was just disabled and re-enabled for this one gesture,
+    // which is exactly what makes Leaflet fire a spurious "click" on
+    // mouseup regardless of how far the mouse actually moved (see
+    // handleMapClickForMarks's own comment on this same flag for the full
+    // explanation). A Ctrl+click on open water with no real drag intended
+    // is just as affected as a genuine box-select, so this needs to be set
+    // before the tiny-drag early return below, not after it.
+    state._justFinishedBoxSelect = true;
 
     // A genuinely tiny drag (a Ctrl+click on empty water with barely any
     // pointer movement) isn't a meaningful box — toggling nothing is the
@@ -4033,6 +4044,56 @@ function initMarkSelectionBoxDrag(map, state) {
       if (bounds.contains([mark.lat, mark.lng])) toggleMarkSelectionSilent(state, markId);
     }
     renderSelectionPanel(map, state);
+  });
+
+  /**
+   * Ctrl+click on a CLUSTER icon (not an individual marker) selects
+   * every mark inside it — including ones several sub-clusters deep,
+   * not just whichever are directly shown — instead of the group's own
+   * default click behaviour (zoom in, or spiderfy at max zoom).
+   *
+   * state.markerLayer's own _zoomOrSpiderfy (leaflet.markercluster's own
+   * internal handler, bound to "clusterclick" once when the group
+   * itself is first created — always registered before anything added
+   * here, so it always runs first) decides what to do by reading
+   * zoomToBoundsOnClick/spiderfyOnMaxZoom/spiderfyOnEveryZoom directly
+   * off state.markerLayer.options at the moment IT runs — a second
+   * "clusterclick" listener of this code's own further down couldn't
+   * stop it by then, the zoom/spiderfy would already have happened.
+   * "clustermousedown" is what actually gives this a chance to act
+   * first: leaflet.markercluster forwards raw mouse events on a cluster
+   * icon with a "cluster" prefix (see its own overridden fire(), in the
+   * plugin's own source), firing before "clusterclick" for the exact
+   * same physical click — so the three options are only ever turned off
+   * here, then restored the moment this code's own "clusterclick"
+   * handler below has used them, never left off longer than that one
+   * click needs.
+   */
+  let clusterZoomOptionsBackup = null;
+  state.markerLayer.on("clustermousedown", (e) => {
+    if (!isSelectModifierKey(e.originalEvent)) return;
+    clusterZoomOptionsBackup = {
+      zoomToBoundsOnClick: state.markerLayer.options.zoomToBoundsOnClick,
+      spiderfyOnMaxZoom: state.markerLayer.options.spiderfyOnMaxZoom,
+      spiderfyOnEveryZoom: state.markerLayer.options.spiderfyOnEveryZoom,
+    };
+    state.markerLayer.options.zoomToBoundsOnClick = false;
+    state.markerLayer.options.spiderfyOnMaxZoom = false;
+    state.markerLayer.options.spiderfyOnEveryZoom = false;
+  });
+  state.markerLayer.on("clusterclick", (e) => {
+    if (!isSelectModifierKey(e.originalEvent)) return;
+    L.DomEvent.stop(e);
+    for (const marker of e.layer.getAllChildMarkers()) {
+      if (marker._markId) toggleMarkSelectionSilent(state, marker._markId);
+    }
+    renderSelectionPanel(map, state);
+    if (clusterZoomOptionsBackup) {
+      state.markerLayer.options.zoomToBoundsOnClick = clusterZoomOptionsBackup.zoomToBoundsOnClick;
+      state.markerLayer.options.spiderfyOnMaxZoom = clusterZoomOptionsBackup.spiderfyOnMaxZoom;
+      state.markerLayer.options.spiderfyOnEveryZoom = clusterZoomOptionsBackup.spiderfyOnEveryZoom;
+      clusterZoomOptionsBackup = null;
+    }
   });
 }
 
@@ -4056,13 +4117,103 @@ function renderSelectionPanel(map, state) {
   panel.innerHTML = `
     <div data-selection-summary style="padding:4px;">
       <div style="font-weight:700;margin-bottom:10px;">${count} mark${count === 1 ? "" : "s"} selected</div>
-      <button type="button" data-bulk-edit-btn class="btn-primary" style="margin-right:8px;">Bulk edit</button>
-      <button type="button" data-clear-selection-btn class="btn-secondary">Clear selection</button>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+        <button type="button" class="btn-primary" data-bulk-edit-btn>Bulk edit</button>
+        <button type="button" class="btn-secondary" data-bulk-delete-btn style="color:#dc2626;">Delete</button>
+        <button type="button" class="btn-secondary" data-clear-selection-btn>Clear selection</button>
+      </div>
+      <div data-bulk-delete-confirm style="display:none;margin-top:8px;padding:8px;border:1px solid #fecaca;background:#fef2f2;border-radius:6px;font-size:0.85rem;">
+        <div data-bulk-delete-confirm-text style="margin-bottom:6px;"></div>
+        <button type="button" class="btn-secondary" data-bulk-delete-confirm-yes style="padding:4px 10px;font-size:0.85rem;background:#dc2626;color:#fff;border-color:#dc2626;">Yes, delete</button>
+        <button type="button" class="btn-secondary" data-bulk-delete-cancel style="padding:4px 10px;font-size:0.85rem;">Cancel</button>
+        <div data-bulk-delete-status style="margin-top:6px;font-size:0.8rem;"></div>
+      </div>
     </div>
   `;
   panel.style.display = "block";
   panel.querySelector("[data-bulk-edit-btn]").addEventListener("click", () => renderBulkEditForm(map, state));
   panel.querySelector("[data-clear-selection-btn]").addEventListener("click", () => clearMarkSelection(map, state));
+
+  const deleteBtn = panel.querySelector("[data-bulk-delete-btn]");
+  const deleteConfirmBlock = panel.querySelector("[data-bulk-delete-confirm]");
+  deleteBtn.addEventListener("click", () => {
+    // Session pairs not already in the selection get pulled in too, the
+    // same convention the single-mark delete flow already uses (deleting
+    // either half of a session removes the whole thing, never leaving an
+    // orphaned other half behind) — computed fresh here so the
+    // confirmation text is honest about the real number of marks about to
+    // be deleted, not just how many were actually clicked.
+    const idsToDelete = markIdsToDeleteIncludingSessionPairs(state);
+    const extra = idsToDelete.size - count;
+    panel.querySelector("[data-bulk-delete-confirm-text]").textContent =
+      extra > 0
+        ? `Delete ${count} selected mark${count === 1 ? "" : "s"} and ${extra} paired session mark${extra === 1 ? "" : "s"} (${idsToDelete.size} total)? This can't be undone.`
+        : `Delete ${count} mark${count === 1 ? "" : "s"}? This can't be undone.`;
+    deleteConfirmBlock.style.display = "block";
+  });
+  panel.querySelector("[data-bulk-delete-cancel]").addEventListener("click", () => {
+    deleteConfirmBlock.style.display = "none";
+  });
+  panel.querySelector("[data-bulk-delete-confirm-yes]").addEventListener("click", () => handleBulkDeleteConfirm(map, state));
+}
+
+/** Every currently-selected mark's own id, PLUS — for any that's a
+ * Session with its pair not already selected — that pair's id too,
+ * matching the single-mark delete flow's own established rule that
+ * deleting either half of a session always removes the whole thing. */
+function markIdsToDeleteIncludingSessionPairs(state) {
+  const ids = new Set(state.selectedMarkIds);
+  for (const markId of state.selectedMarkIds) {
+    const mark = state.marksById.get(markId);
+    if (!mark || mark.type !== "Session" || !mark.sessionGroupId) continue;
+    for (const other of state.marksById.values()) {
+      if (other.id !== mark.id && other.type === "Session" && other.sessionGroupId === mark.sessionGroupId) {
+        ids.add(other.id);
+      }
+    }
+  }
+  return ids;
+}
+
+/** Deletes every mark returned by markIdsToDeleteIncludingSessionPairs —
+ * one DELETE per mark (reusing deleteMarkFromD1, the exact same call
+ * the single-mark delete flow already makes), removing each from the
+ * map and from state immediately as its own delete succeeds rather
+ * than waiting for all of them, so a partial failure still leaves
+ * whatever DID succeed visibly gone. Reports a clear count and the
+ * real error on partial failure, same as handleBulkEditSave. */
+async function handleBulkDeleteConfirm(map, state) {
+  const panel = document.getElementById("markDetailPanel");
+  const statusEl = panel.querySelector("[data-bulk-delete-status]");
+  const yesBtn = panel.querySelector("[data-bulk-delete-confirm-yes]");
+  yesBtn.disabled = true;
+  const idsToDelete = Array.from(markIdsToDeleteIncludingSessionPairs(state));
+  statusEl.textContent = `Deleting ${idsToDelete.length} mark${idsToDelete.length === 1 ? "" : "s"}…`;
+  statusEl.style.color = "";
+
+  let succeeded = 0;
+  const failures = [];
+  for (const markId of idsToDelete) {
+    const result = await deleteMarkFromD1(markId);
+    if (result.success) {
+      succeeded++;
+      const marker = state.markersById.get(markId);
+      if (marker) state.markerLayer.removeLayer(marker);
+      state.marksById.delete(markId);
+      state.markersById.delete(markId);
+      state.selectedMarkIds.delete(markId);
+    } else {
+      failures.push({ markId, error: result.error });
+    }
+  }
+
+  if (failures.length === 0) {
+    renderSelectionPanel(map, state); // hides the panel once selectedMarkIds is empty
+  } else {
+    yesBtn.disabled = false;
+    statusEl.textContent = `Deleted ${succeeded} of ${idsToDelete.length} — ${failures.length} failed: ${failures.map((f) => f.error).join("; ")}`;
+    statusEl.style.color = "#dc2626";
+  }
 }
 
 /** One tri-state field for the bulk-edit form below — "No change" is a
@@ -4554,6 +4705,21 @@ async function refreshMarkFormConditionsForNewTime(formEl, lat, lng, dateTimeNai
  * nothing at all on Live).
  */
 async function handleMapClickForMarks(map, lat, lng, state, onLocationPreviewClick, defaults = {}) {
+  // REAL BUG, FOUND AND FIXED: a Ctrl+drag box-select (initMarkSelectionBoxDrag)
+  // disables the map's own dragging for the duration of the drag, so Leaflet
+  // never registers the mouse movement as an actual "drag" in its own
+  // right — with no drag handler to attribute it to, it fell back to firing
+  // a plain "click" on mouseup regardless of how much the mouse had actually
+  // moved, landing right here and popping up "What's here?" immediately
+  // after finishing a selection. initMarkSelectionBoxDrag's own mouseup
+  // handler sets this flag the moment a real box (not a tiny, click-like
+  // movement it already ignores) completes; checking and clearing it here,
+  // before anything else, is what stops that same drag's own tail end from
+  // being treated as a second, unrelated click.
+  if (state._justFinishedBoxSelect) {
+    state._justFinishedBoxSelect = false;
+    return;
+  }
   if (!cachedIsAdmin) {
     if (onLocationPreviewClick) onLocationPreviewClick(lat, lng);
     return;

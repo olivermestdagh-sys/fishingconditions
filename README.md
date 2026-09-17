@@ -2932,6 +2932,85 @@ Finally, confirmed normal single-mark popup/edit/save and the
 existing hover-panel mutual exclusivity (`closeMarkDetailPanel`) are
 completely unaffected by any of this. Zero JS errors throughout.
 
+### Three follow-up fixes to multi-select (charts.js)
+
+Reported back directly after trying the feature for real: releasing a
+box-select drag was popping up "What's here?" immediately afterwards,
+Ctrl+clicking a cluster zoomed in instead of selecting it, and bulk
+delete wasn't there at all yet.
+
+**Box-select triggering "What's here?" on release** — root cause:
+`map.dragging.disable()` (needed for the duration of the drag, so the
+map itself doesn't pan underneath it) means Leaflet never registers
+the mouse movement as an actual drag in its own right, so with no drag
+handler to attribute it to, it fell back to firing a plain "click" on
+mouseup regardless of how far the mouse had actually moved — landing
+on `handleMapClickForMarks` and popping the dialog immediately after
+finishing a selection. Fixed with a flag set the moment
+`initMarkSelectionBoxDrag`'s own mouseup handler finishes (for BOTH a
+real box and a tiny, click-like movement — both disable/re-enable
+dragging for the one gesture, so both are equally affected), checked
+and cleared right at the top of `handleMapClickForMarks` before
+anything else runs.
+
+**Ctrl+click on a cluster now selects everything inside it, and
+doesn't zoom or spiderfy** — `state.markerLayer`'s own
+`_zoomOrSpiderfy` (leaflet.markercluster's own internal handler, bound
+to `clusterclick` once when the group is first created, always
+registered before anything added here) decides what to do by reading
+`zoomToBoundsOnClick`/`spiderfyOnMaxZoom`/`spiderfyOnEveryZoom`
+directly off `state.markerLayer.options` at the moment it runs — a
+second `clusterclick` listener of this code's own further down
+couldn't stop it by then, the zoom or spiderfy would already have
+happened. `clustermousedown` is what actually gives this code a
+chance to act first — leaflet.markercluster forwards raw mouse events
+on a cluster icon with a `cluster` prefix (its own overridden `fire()`,
+in the plugin's own source), firing before `clusterclick` for the
+exact same physical click — so the three options are only ever turned
+off there when Ctrl is held, then restored the moment this code's own
+`clusterclick` handler has used them (`cluster.getAllChildMarkers()`,
+recursing through any sub-clusters, not just whichever marks are
+directly shown), never left off longer than that one click needs.
+Each marker got a plain `_markId` property at creation, alongside its
+existing Ctrl+click wiring, so this loop can look each one up in O(1)
+rather than a linear scan over `state.markersById` per marker per
+click.
+
+**Bulk delete** — added, reusing `deleteMarkFromD1` (the exact same
+call the single-mark delete flow already makes) once per mark, with
+the same click-to-reveal confirmation the single-mark delete flow
+already uses rather than a browser `confirm()`. Selecting only one
+half of a Fishing Session pulls its other half in too, automatically,
+matching that same single-mark delete flow's own established rule
+that deleting either half removes the whole session rather than
+leaving an orphaned other half behind — computed fresh each time the
+Delete button is pressed, so the confirmation text is honest about the
+real number of marks about to go, not just how many were actually
+clicked. Each mark is removed from the map and from state as its own
+delete succeeds, rather than waiting for all of them, so a partial
+failure still leaves whatever DID succeed visibly gone; the marks that
+failed stay selected afterwards so they're easy to retry.
+
+**Verified**: real browser tests for all three. The box-select fix —
+confirmed the flag is set after a real Ctrl+drag, confirmed
+`handleMapClickForMarks` does nothing when it's set and correctly
+clears it afterwards, and separately confirmed a genuine, unrelated
+plain click still shows the dialog normally. The cluster fix — a real
+Ctrl+click on a cluster icon confirmed to leave the zoom level
+completely unchanged and the cluster unspiderfied, confirmed it
+selects every mark inside (including one not directly touched),
+confirmed clicking the same cluster again toggles them all back off,
+and — after an early false alarm traced to the test's own marks being
+clustered so tightly they were still one cluster even at the map's own
+max zoom (an artifact of the test data, not the fix) — separately
+confirmed on a fresh page with normally-spaced marks that a plain,
+non-Ctrl click on a cluster still zooms in exactly as it always has.
+Bulk delete — confirmed a plain multi-mark delete removes exactly what
+was selected; confirmed selecting only one half of a session correctly
+deletes both halves; confirmed partial failure reports the real error,
+removes only the mark that actually succeeded, and leaves the failed
+one selected. Zero JS errors throughout all of it.
+
 ## Troubleshooting
 
 - **Page loads but says "Not updated yet"**: the scheduled job hasn't run
