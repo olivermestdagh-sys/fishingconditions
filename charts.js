@@ -1508,23 +1508,35 @@ function buildMarkPopupViewHtml(mark) {
  * fields live without needing to rebuild this HTML from scratch.
  */
 function buildMarkPopupEditHtml(mark, markLists) {
-  const optionalFieldsHtml = MARK_POPUP_OPTIONAL_FIELDS.map(
-    (f) => `
+  // Species is rendered separately, further up (Type, Species, Name — see
+  // the field order below), rather than through this same loop with the
+  // rest — Oliver's own requested order, and also where applySpeciesGate's
+  // own prompt naturally sits right above the one field it's actually
+  // asking for.
+  const otherOptionalFieldsHtml = MARK_POPUP_OPTIONAL_FIELDS.filter((f) => f.key !== "species")
+    .map(
+      (f) => `
       <div data-field-group="${f.key}">
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">${escapeHtml(f.displayLabel)}
           <select name="${f.key}" style="${MARK_POPUP_INPUT_STYLE}">${markListOptionsHtml(markLists, f.listLabel, mark[f.key])}</select>
         </label>
       </div>`
-  ).join("");
+    ).join("");
+  const speciesField = MARK_POPUP_OPTIONAL_FIELDS.find((f) => f.key === "species");
   return `
     <div data-mark-id="${escapeHtml(mark.id)}" style="min-width:220px;max-width:260px;">
       <form data-mark-form onsubmit="return false;">
-        <div data-species-first-prompt style="display:none;margin-bottom:8px;padding:6px 8px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:0.8rem;color:#854d0e;">Choose a species first — the rest of the form unlocks once it's set.</div>
-        <label style="display:block;font-size:0.8rem;font-weight:600;margin:0 0 2px;">Name
-          <input type="text" name="name" value="${escapeHtml(mark.name || "")}" style="${MARK_POPUP_INPUT_STYLE}" />
-        </label>
-        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Type
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:0 0 2px;">Type
           <select name="type" data-mark-type-select style="${MARK_POPUP_INPUT_STYLE}">${markListOptionsHtml(markLists, "Mark Type", mark.type)}</select>
+        </label>
+        <div data-species-first-prompt style="display:none;margin:6px 0;padding:6px 8px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:0.8rem;color:#854d0e;">Choose a species first — the rest of the form unlocks once it's set.</div>
+        <div data-field-group="${speciesField.key}">
+          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">${escapeHtml(speciesField.displayLabel)}
+            <select name="${speciesField.key}" style="${MARK_POPUP_INPUT_STYLE}">${markListOptionsHtml(markLists, speciesField.listLabel, mark[speciesField.key])}</select>
+          </label>
+        </div>
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Name
+          <input type="text" name="name" value="${escapeHtml(mark.name || "")}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
         <div data-species-name-sync-confirm style="display:none;margin:6px 0;padding:6px 8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:0.8rem;">
           <div data-species-name-sync-text style="margin-bottom:4px;"></div>
@@ -1534,7 +1546,7 @@ function buildMarkPopupEditHtml(mark, markLists) {
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Date/Time
           <input type="datetime-local" name="dateTime" step="1" value="${naiveToDatetimeLocal(mark.dateTime)}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
-        ${optionalFieldsHtml}
+        ${otherOptionalFieldsHtml}
         <div data-field-group="size">
           <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Size (cm)
             <input type="number" name="size" min="0" step="1" value="${mark.size != null ? mark.size : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
@@ -3334,14 +3346,29 @@ async function loadAndRenderMarks(map, state) {
       const mark = markId ? state.marksById.get(markId) : null;
       if (!mark) continue;
       const style = markStyleFor(mark, state);
-      const overlay = L.circleMarker(spiderfiedMarker.getLatLng(), {
+      // REAL BUG, FOUND AND FIXED: this used to always be a plain
+      // L.circleMarker, regardless of the mark's own real shape — so a
+      // Catch's own "+" (getCrossMarkerClass) or a POI's own diamond
+      // (getDiamondMarkerClass) got replaced with a plain filled circle
+      // the instant its cluster spiderfied open, sitting opaquely on top
+      // of (and hiding) the real Canvas-rendered shape still underneath
+      // it. Reported directly, with a screenshot: a "+" visibly trapped
+      // inside a circle. createMarkShapeLayer (used for every REAL
+      // marker already, see loadAndRenderMarks below) already knows how
+      // to pick the right shape class for a mark — reused directly here
+      // instead of hardcoding circleMarker, with only the renderer
+      // swapped to this overlay's own SVG one. getDiamondMarkerClass/
+      // getCrossMarkerClass are built by overriding L.CircleMarker's own
+      // _project/_updatePath — the same methods either renderer calls —
+      // so they work identically under SVG, not just Canvas.
+      const overlay = createMarkShapeLayer(spiderfiedMarker.getLatLng(), mark, {
         renderer: state.spiderfyOverlayRenderer,
         radius: style.radius,
         color: style.color,
         weight: style.weight,
         fillColor: style.fillColor,
         fillOpacity: 0.85,
-      }).addTo(state.spiderfyOverlayLayer);
+      }, state.markLists).addTo(state.spiderfyOverlayLayer);
       overlay.bindTooltip(markTooltipText(mark, state), { direction: "top" });
       // stopPropagation is genuinely required, not just tidy — confirmed
       // directly: without it, this click bubbles up to the map, where
