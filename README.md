@@ -3247,6 +3247,69 @@ the real API end to end — worth a glance at that first run's own
 output to confirm real swell data is actually coming through for a
 coastal location, rather than assumed from here.
 
+### Swell broke every OTHER forecast — found and fixed (`fetch_conditions.py`)
+
+The very first live run of the swell code above was also the first
+time it broke something — reported directly, with a screenshot: every
+forecast on the site (temperature, wind, tide, everything) vanished
+the moment the swell deploy landed, while observational (realtime)
+data kept working fine.
+
+That split — forecasts gone, observational fine — is what actually
+pinned this down, and it also revealed a completely separate,
+first-attempt deployment miss along the way: checking the live repo
+directly showed `charts.js` had deployed correctly but
+`scripts/fetch_conditions.py` hadn't gone out at all on the first
+attempt (likely lost in the nested `scripts/` folder during a manual
+GitHub "Upload files" pass) — so the very first version of this bug
+report was actually "nothing changed yet," not a code problem. Once
+that got deployed for real, the actual regression above is what
+showed up.
+
+Root cause: swell had been added as just one more entry in
+`get_weather`'s own single combined `forecasts=` request — the same
+one that ALSO returns temperature, wind, tides, and sunrisesunset all
+together in one response. Both forecasts and observational data come
+from that exact same URL and the exact same single request, so
+whatever swell was doing wasn't a network failure (that would have
+taken observational data down too) — WillyWeather's own API appears to
+decline returning a `forecasts` section at all once swell sits in that
+combined list, while still returning everything else in the response
+normally. Not fully explained even now — this sandbox has no route to
+WillyWeather's real API to test the combined-list request directly and
+confirm the exact mechanism — but the fix doesn't depend on knowing
+the precise cause.
+
+Swell is now fetched as its own completely separate, independent
+request (`get_swell`) — the same pattern `get_moon_phases` already
+uses for its own single-forecast-type concern — and merged into
+`weather["forecasts"]["swell"]` afterwards, in the exact shape
+`build_readings` already expects, needing no further changes there at
+all. A failure here, including WillyWeather rejecting it the same way
+again, is swallowed to an empty dict by `http_get_json`'s own existing
+`or {}` pattern (the same one `get_weather` itself already relies on)
+— so if swell ever misbehaves again, only swell itself is affected,
+never temperature/wind/tides/sunrisesunset again.
+
+**Verified**: mocked `http_get_json` directly and confirmed
+`get_weather`'s own URL no longer mentions swell at all; confirmed
+`get_swell` makes a genuinely separate request containing ONLY swell,
+nothing else; and — the actual regression, reproduced and confirmed
+fixed — simulated a completely failed swell request (`None`, exactly
+matching what a rejected/erroring request looks like) and confirmed
+temperature/wind/tides/sunrisesunset all still come through completely
+untouched. Separately re-confirmed `build_readings` still correctly
+extracts all four swell readings once merged in, unchanged from
+before — this was an isolation fix, not a rewrite of the working
+extraction logic.
+
+**Deployment, explicitly, since it went wrong once already**: this
+file belongs at `scripts/fetch_conditions.py` in the repo — not the
+repo root. If uploading via GitHub's web "Upload files" page, navigate
+into the `scripts` folder first, then upload from there — dragging a
+plain file (not the folder) at the repo root will land it in the wrong
+place with no error or warning that anything's amiss.
+
 ## Troubleshooting
 
 - **Page loads but says "Not updated yet"**: the scheduled job hasn't run
