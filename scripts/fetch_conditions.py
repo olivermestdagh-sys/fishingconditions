@@ -387,7 +387,7 @@ def daily_averages(hourly_dict):
 def get_weather(location_id):
     url = (
         f"{BASE_URL}/{API_KEY}/locations/{location_id}/weather.json"
-        f"?forecasts=temperature,wind,rainfallprobability,tides,sunrisesunset"
+        f"?forecasts=temperature,wind,swell,rainfallprobability,tides,sunrisesunset"
         f"&days={FORECAST_DAYS}&observationalGraphs=temperature,wind"
     )
     data = http_get_json(url)
@@ -517,6 +517,35 @@ def build_readings(weather):
         for entry in day.get("entries", []):
             readings.append(("Wind Forecast (km/h)", entry.get("dateTime"), entry.get("speed")))
             readings.append(("Wind Forecast Dir", entry.get("dateTime"), entry.get("directionText") or entry.get("direction")))
+
+    # Swell — added on request, once Oliver enabled the Swell Height/Period
+    # forecast types on the WillyWeather API key. Confirmed directly against
+    # WillyWeather's own real API docs (Oliver supplied the actual example
+    # response) — height (m), period (sec), direction (degrees) and
+    # directionText (compass letters) all present per entry, null for a
+    # location with no swell data rather than the key being omitted
+    # entirely, which the (forecasts.get("swell") or {}) fallback below
+    # already handles either way (a missing key and a null value both fall
+    # through to {} the same way). Not every location HAS swell data at all
+    # (WillyWeather only returns it for coastal/beach locations, confirmed
+    # in their own docs — "For Locations that do not have swell data, null
+    # will be returned") — so an inland location, or any location
+    # WillyWeather just doesn't have swell for, simply gets no Swell
+    # readings at all, rather than an error. That's really where Oliver's
+    # own "where it exists" ends up being decided: if there's nothing in
+    # this loop, there's nothing for a chart to draw.
+    #
+    # Direction is stored as its own numeric degrees (not the compass-letter
+    # directionText wind's own reading uses) specifically because the chart
+    # side needs a real number to rotate an arrow by — the compass text is
+    # kept as a second, separate reading purely for display/tooltip use.
+    swell_days = ((forecasts.get("swell") or {}).get("days")) or []
+    for day in swell_days:
+        for entry in day.get("entries", []):
+            readings.append(("Swell Height (m)", entry.get("dateTime"), entry.get("height")))
+            readings.append(("Swell Period (s)", entry.get("dateTime"), entry.get("period")))
+            readings.append(("Swell Dir", entry.get("dateTime"), entry.get("direction")))
+            readings.append(("Swell Dir Text", entry.get("dateTime"), entry.get("directionText")))
 
     rain_days = ((forecasts.get("rainfallprobability") or {}).get("days")) or []
     for day in rain_days:
