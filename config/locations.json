@@ -14,7 +14,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3884,
     "lng": 145.1245,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 2.86,
     "types": [
       {
         "type": "Kayak",
@@ -51,7 +51,7 @@
     "willyweatherState": "VIC",
     "lat": -38.54427195995182,
     "lng": 145.34040927886966,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 2.5,
     "types": [
       {
         "type": "Land based",
@@ -79,7 +79,7 @@
     "willyweatherState": "VIC",
     "lat": -38.4079,
     "lng": 145.4234,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 2.68,
     "types": [
       {
         "type": "Kayak",
@@ -107,7 +107,7 @@
     "willyweatherState": "VIC",
     "lat": -38.4348,
     "lng": 145.4426,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 2.68,
     "types": [
       {
         "type": "Kayak",
@@ -135,7 +135,7 @@
     "willyweatherState": "VIC",
     "lat": -38.4758,
     "lng": 145.0286,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 2.5,
     "types": [
       {
         "type": "Kayak",
@@ -163,7 +163,7 @@
     "willyweatherState": "VIC",
     "lat": -38.457,
     "lng": 144.8687,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 1.54,
     "types": [
       {
         "type": "Land based",
@@ -191,7 +191,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3082,
     "lng": 145.1991,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 2.86,
     "types": [
       {
         "type": "Kayak",
@@ -219,7 +219,7 @@
     "willyweatherState": "VIC",
     "lat": -38.5492,
     "lng": 145.4754,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 2.5,
     "types": [
       {
         "type": "Land based",
@@ -247,7 +247,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3052,
     "lng": 145.5214,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 3.04,
     "types": [
       {
         "type": "Kayak",
@@ -285,7 +285,7 @@
     "willyweatherState": "VIC",
     "lat": -38.2117,
     "lng": 145.0349,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 0.82,
     "types": [
       {
         "type": "Kayak",
@@ -313,7 +313,7 @@
     "willyweatherState": "VIC",
     "lat": -38.0734,
     "lng": 145.1197,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 0.81,
     "types": [
       {
         "type": "Kayak",
@@ -341,7 +341,7 @@
     "willyweatherState": "VIC",
     "lat": -38.417619693844,
     "lng": 145.07783174514773,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 2.86,
     "types": [
       {
         "type": "Land based",
@@ -369,7 +369,7 @@
     "willyweatherState": "VIC",
     "lat": -38.42521838040787,
     "lng": 145.0703859329224,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 2.86,
     "types": [
       {
         "type": "Land based",
@@ -397,7 +397,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3503,
     "lng": 144.9073,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 0.8,
     "types": [
       {
         "type": "Kayak",
@@ -425,7 +425,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3131,
     "lng": 144.9911,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 0.8,
     "types": [
       {
         "type": "Kayak",
@@ -453,7 +453,7 @@
     "willyweatherState": "VIC",
     "lat": -38.39426386067292,
     "lng": 145.1585125923157,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 2.86,
     "types": [
       {
         "type": "Land based",
@@ -481,7 +481,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3357,
     "lng": 144.7459,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 1.54,
     "types": [
       {
         "type": "Kayak",
@@ -509,7 +509,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3744,
     "lng": 145.2224,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 2.86,
     "types": [
       {
         "type": "Kayak",
@@ -537,7 +537,7 @@
     "willyweatherState": "VIC",
     "lat": -38.2275,
     "lng": 145.3066,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 2.86,
     "types": [
       {
         "type": "Kayak",
@@ -565,7 +565,7 @@
     "willyweatherState": "VIC",
     "lat": -37.8674,
     "lng": 144.8916,
-    "tideMaxObserved": null,
+    "tideMaxObserved": 0.93,
     "types": [
       {
         "type": "Kayak",
