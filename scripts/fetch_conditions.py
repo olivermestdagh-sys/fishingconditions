@@ -387,11 +387,48 @@ def daily_averages(hourly_dict):
 def get_weather(location_id):
     url = (
         f"{BASE_URL}/{API_KEY}/locations/{location_id}/weather.json"
-        f"?forecasts=temperature,wind,swell,rainfallprobability,tides,sunrisesunset"
+        f"?forecasts=temperature,wind,rainfallprobability,tides,sunrisesunset"
         f"&days={FORECAST_DAYS}&observationalGraphs=temperature,wind"
     )
     data = http_get_json(url)
     return data or {}
+
+
+def get_swell(location_id):
+    """Swell height/period/direction — a SEPARATE, independent request from
+    get_weather's own combined one above, not just another entry added to
+    that same forecasts= list.
+
+    REAL BUG, FOUND AND FIXED: swell WAS simply added to get_weather's own
+    combined forecasts= list at first — reported directly and dramatically:
+    every OTHER forecast (temperature, wind, tides, sunrisesunset) vanished
+    from the site the moment that shipped, while observational (realtime)
+    data kept working fine. That split — forecasts gone, observationalGraphs
+    still fine — is the real tell: both come from the exact same single URL
+    and the exact same single http_get_json call, so whatever swell was
+    doing wasn't a network failure (that would have taken observational
+    data down too) — it was WillyWeather's own API declining to return a
+    "forecasts" section at all once swell sat in that combined list,
+    while still returning everything else in the response normally. Not
+    fully explained (this sandbox has no route to WillyWeather's real API
+    to test the combined-list request directly and confirm the exact
+    mechanism) — but isolating swell into its own request, the same way
+    get_moon_phases (just below) already keeps its own single-forecast-type
+    concern separate from this main call, sidesteps the problem entirely
+    regardless of the exact cause: if swell ever behaves oddly again, only
+    swell itself is affected, never wind/tides/temperature/sunrisesunset
+    again. A failure here (including WillyWeather returning nothing) is
+    swallowed to an empty dict by http_get_json's own "or {}" pattern —
+    matching get_weather's own return above — so a location with no swell,
+    or a request that fails outright, still lets the rest of that
+    location's whole pipeline run completely unaffected.
+    """
+    url = (
+        f"{BASE_URL}/{API_KEY}/locations/{location_id}/weather.json"
+        f"?forecasts=swell&days={FORECAST_DAYS}"
+    )
+    data = http_get_json(url)
+    return ((data or {}).get("forecasts") or {}).get("swell") or {}
 
 
 def extract_sun_times(weather):
@@ -534,6 +571,12 @@ def build_readings(weather):
     # readings at all, rather than an error. That's really where Oliver's
     # own "where it exists" ends up being decided: if there's nothing in
     # this loop, there's nothing for a chart to draw.
+    #
+    # This function itself doesn't care WHERE forecasts["swell"] came from —
+    # see get_swell's own docstring for why that's now a separate request
+    # from get_weather's combined one, merged into this same weather dict
+    # before this function is called, rather than swell being just another
+    # entry in get_weather's own forecasts= list the way it first shipped.
     #
     # Direction is stored as its own numeric degrees (not the compass-letter
     # directionText wind's own reading uses) specifically because the chart
@@ -1203,6 +1246,16 @@ def process_location(loc):
     sst_by_hour = hourly_lookup(sst_hourly)
     velocity_by_hour = hourly_lookup(current_velocity_hourly)
     direction_by_hour = hourly_lookup(current_direction_hourly)
+
+    # Fetched as its own separate request (get_swell's own docstring has the
+    # full story on why) and merged into weather["forecasts"]["swell"] here,
+    # in the exact same shape get_weather's own combined response would have
+    # put it in — so build_readings below needs no changes at all to pick it
+    # up; it already reads forecasts.get("swell") expecting exactly this.
+    if loc_id:
+        swell_forecast = get_swell(loc_id)
+        if swell_forecast:
+            weather.setdefault("forecasts", {})["swell"] = swell_forecast
 
     raw_readings = build_readings(weather)
     if not location_is_tidal:
