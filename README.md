@@ -3011,6 +3011,87 @@ deletes both halves; confirmed partial failure reports the real error,
 removes only the mark that actually succeeded, and leaves the failed
 one selected. Zero JS errors throughout all of it.
 
+### Species-first entry, simpler tooltips, and a cluster-icon CSS fix
+
+Three separate, smaller requests. First two are straightforward and
+fully verified; the third is delivered but its actual real-world
+effect is honestly uncertain — see its own section below.
+
+**Species-first gate on Catch/Mark entry** (`charts.js`,
+`buildMarkPopupEditHtml`/`applySpeciesGate`) — creating or editing a
+Catch or Mark with no Species chosen yet now disables every other
+field in the form (Name, Date/Time, all the optional fields) except
+Type and Species itself, with a short prompt explaining why. Type
+stays usable so a Catch/Mark started by mistake can still be switched
+away without being stuck; Species obviously has to stay usable so the
+gate can ever be cleared. Choosing a species unlocks everything
+immediately, live — re-run on every Type change too (alongside the
+existing `applyMarkFieldVisibility`, right next to it), so switching
+into or out of Catch/Mark re-evaluates the gate rather than leaving it
+stuck from before. Save itself is independently blocked while gated
+too, not just the disabled button — the same "don't just trust the UI
+state" reasoning `handleBulkEditSave` already followed.
+
+Changing Species also now syncs Name: a blank Name is filled with the
+species straight away; a non-blank Name instead gets an inline "Change
+the Name to '{species}' too?" prompt with Yes/No, rather than being
+silently overwritten (or the sync never being offered at all) — using
+this form's own existing click-to-reveal confirmation pattern (Delete
+already works this way) rather than a native `confirm()`.
+
+**Verified**: real browser tests — confirmed every field except
+Type/Species is genuinely disabled (not just visually implied) while
+gated, confirmed Save is disabled too, confirmed choosing a species
+unlocks everything and correctly fills a blank Name. Separately
+confirmed opening an existing mark that already has a species shows no
+gate at all. For the Name-sync prompt: confirmed a non-blank Name is
+never silently touched, confirmed the prompt's own text names the
+actual species, and confirmed both "Yes, change it" and "No, keep it"
+do exactly what they say. Zero JS errors throughout.
+
+**Tooltip simplified** (`charts.js`, `markTooltipText`) — reported
+directly as showing "a lot of redundant info": the old version
+prefixed whatever the current "colour by" grouping was (species by
+default, meaning a species-grouped hover often repeated the species
+twice), appended the source, and duplicated the species again after
+the name. Now always just `name (date) type` — the mark's own type
+field (Catch/Mark/POI/Session), not a literal word — regardless of the
+current colour-by setting, since that's a map-display setting, not
+something a mark's own identity depends on.
+
+**Verified**: confirmed the exact real, bound tooltip content on
+actual markers for two different types matches `name (date) type`
+precisely, nothing else.
+
+**Cluster icon CSS override, delivered but unconfirmed as the real
+fix** (`style.css`) — reported as: a Catch's own "+" shape, inside a
+cluster, hard to make out — "shown within a circle and then being
+hidden by the circle's colour". `createMarkClusterIcon`'s own comment
+claimed a CSS override already existed to strip
+leaflet.markercluster's default circular styling from its custom
+icon, but it never actually did — added one
+(`.mark-cluster-icon`/`.mark-cluster-icon > div`, background and
+border-radius stripped, `!important` to beat the plugin's own rules,
+scoped with a direct-child selector specifically so the satellite
+shapes' own inline background colours — the actual shapes themselves —
+don't get wiped out along with it).
+
+Built and applied, but **its real effect is honestly unconfirmed**:
+tested a 2-mark mixed Catch+Mark cluster and a 5-mark all-Catch
+cluster, and both rendered the "+" shape clearly in every case —
+including against the ORIGINAL, unfixed CSS, with no visible
+difference either way. leaflet.markercluster's own default classes
+weren't even present on the element in this codebase's actual setup
+(a custom `iconCreateFunction`, which this project already uses,
+appears to bypass the plugin's own class-adding step entirely — a
+different conclusion than the original comment assumed). So this is a
+reasonable, harmless defensive change — real CSS specificity issue,
+genuinely fixed — but not a confirmed fix for the exact reported
+visual problem, since that problem couldn't be reproduced in testing
+to check against. If the "+" is still hard to make out after this
+deploys, a screenshot of the actual cluster would allow a proper
+diagnosis rather than another guess.
+
 ## Troubleshooting
 
 - **Page loads but says "Not updated yet"**: the scheduled job hasn't run
