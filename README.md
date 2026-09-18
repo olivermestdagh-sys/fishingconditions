@@ -3150,6 +3150,103 @@ work correctly against the new layout — fields still correctly
 disabled while gated, choosing a species still unlocks everything and
 still auto-fills a blank Name. Zero JS errors.
 
+## Swell forecast (`fetch_conditions.py`, `charts.js`)
+
+Requested directly, once Oliver enabled the Swell Height/Period forecast
+types on the WillyWeather API key: pull swell data where WillyWeather has
+it for a location, add it to the graphs — an arrow facing the swell's own
+direction with its period as a number inside, when a direction reading
+exists, or just the period inside a circle when it doesn't.
+
+**Backend**: `swell` added to the forecast types requested from
+WillyWeather (`get_weather`), and a new reading-extraction block in
+`build_readings` — Swell Height (m), Swell Period (s), Swell Dir (raw
+degrees), Swell Dir Text (compass letters) — following the exact same
+`(forecasts.get(X) or {}).get("days")) or []` fallback pattern `wind`
+and `tides` already use, so a location WillyWeather has no swell data
+for (their own docs: `null` returned for such locations — confirmed
+directly against WillyWeather's own real API documentation, which
+Oliver supplied directly, rather than the best-effort inference from a
+second, independent integration's field names this was first built
+against) simply gets no Swell readings at all, never an error. That's
+genuinely where "where it exists" ends up being decided — nothing
+further downstream needs to know or care whether a location has swell
+or not. Direction is stored as its own raw degrees rather than the
+compass-letter text wind's own reading uses, specifically because the
+chart side needs a real number to point an arrow by — the compass
+text is kept as a second, separate reading purely for potential
+display/tooltip use. Both new reading keys flow straight through the
+existing pivot-into-rows logic with no further script changes needed —
+any new key added to a reading tuple already ends up in
+`data/conditions.json` automatically.
+
+**Frontend**: a new custom plugin, `buildSwellMarkersPlugin`, following
+the exact same structural pattern `buildTideExtremaPlugin` (immediately
+above it) already uses — one glyph per point with a real Swell Period
+reading, positioned at a y matching that point's own Swell Height (the
+same "let the y-position itself carry real information" reasoning
+`buildTideExtremaPlugin` already uses for its own tide-height dots,
+rather than a fixed row). A filled circle with the period number drawn
+upright inside it; when a direction reading exists, a small triangular
+pointer on the circle's own edge faces the swell's travel direction —
+the exact same "+180° from the compass 'from' direction" convention
+`dirToArrowRotation` (used for the existing wind arrows on this same
+chart) already applies, so both read the same way: which way it's
+headed, not where it came from. No direction reading — WillyWeather can
+return a period with no paired direction depending on the model, a
+real rather than hypothetical case — means no pointer at all, just the
+plain circle with the number, per Oliver's own explicit fallback.
+
+The period number is deliberately its own separate, unrotated
+`fillText` call, drawn after the pointer rather than baked into a
+single rotated canvas image the way the existing wind arrows are
+(`makeArrowCanvas`, used as a Chart.js `pointStyle` that Chart.js
+itself rotates) — text baked into a rotated pointStyle image would
+rotate right along with the pointer and end up sideways or upside-down
+at most directions, defeating the entire point of a number meant to be
+read at a glance. A new hidden `ySwell` scale (0–4m, a fixed range in
+the same spirit as `yPressure`'s own fixed range — swell is offshore
+data from WillyWeather's own WaveWatch III / NOAA source, not
+calibrated to any one sheltered bay location the way `yTide`'s own
+per-location max already is) gives the plugin something to position
+against. Wired into the one shared `renderConditionsChart` function
+every page's own graphs already call through (`app.js`, `live.js`,
+`week.js`), so this needed exactly one integration point to reach
+every graph on the site, not three separate ones.
+
+**Verified**: the plugin's own drawing calls tested directly against a
+fake canvas context (this project's own established approach for
+canvas-drawing plugins) — confirmed a point with period+height+direction
+draws exactly one circle, one pointer path, and the period number as its
+own genuinely separate, unrotated `fillText` call; confirmed a point
+with no direction draws the plain circle and number with no pointer
+path at all; confirmed a point with no period reading draws nothing;
+confirmed a point outside the chart's own currently-visible range is
+correctly skipped, same as `buildTideExtremaPlugin`'s own equivalent
+check; and confirmed the pointer's own angle math genuinely applies the
++180° travel-direction convention (a direction of 0°/due-north
+correctly points the pointer south/down, not north/up) — the exact
+convention `dirToArrowRotation` already established for wind, checked
+by name rather than assumed. Separately rendered a real Chart.js
+instance with a mix of directioned, non-directioned, and absent swell
+readings and screenshotted it: circles sit at visibly different
+heights matching their own swell heights, pointers face visibly
+different directions, the one point with no direction shows no
+pointer, and every period number stays upright and legible regardless
+of its own pointer's angle. Zero JS errors throughout.
+
+Not yet done, and worth naming: the swell reading isn't surfaced in
+the chart's own hover tooltip (Chart.js's tooltip only knows about real
+datasets, and these markers are drawn by a plugin rather than being
+one) — this delivery is the requested visual layer only. Also worth
+flagging plainly: the WillyWeather field names themselves are now
+confirmed directly against WillyWeather's own real API documentation
+(Oliver supplied the actual example response), but the very first live
+fetch after this deploys is still the first time this has run against
+the real API end to end — worth a glance at that first run's own
+output to confirm real swell data is actually coming through for a
+coastal location, rather than assumed from here.
+
 ## Troubleshooting
 
 - **Page loads but says "Not updated yet"**: the scheduled job hasn't run

@@ -6797,6 +6797,89 @@ function buildTideExtremaPlugin(rows) {
 }
 
 /**
+ * One glyph per point that has a real Swell Period reading — added on
+ * request, once Oliver enabled the Swell Height/Period forecast types on
+ * the WillyWeather API key (build_readings, fetch_conditions.py). A
+ * filled circle, positioned at a y matching that point's own Swell
+ * Height (mirroring how buildTideExtremaPlugin, just above, positions
+ * its own dots at a real tide height rather than a fixed row — the
+ * y-position itself carries real information, not just a marker lane),
+ * with the swell period drawn upright inside it.
+ *
+ * When a direction reading exists, a small triangular pointer sits on
+ * the circle's own edge facing the swell's travel direction — the same
+ * "from" + 180° convention dirToArrowRotation (above) already uses for
+ * the wind arrows on this same chart, so both read the same way: which
+ * way it's headed, not where it came from. Oliver's own fallback for no
+ * direction: no pointer at all, just the plain circle with the period
+ * number — WillyWeather returns swell with no direction sometimes (their
+ * own docs: null for a location with no swell data at all, but a period
+ * reading can still exist with no paired direction depending on the
+ * model), so this distinction is a real, not hypothetical, case.
+ *
+ * The period number is always its own separate fillText call, drawn
+ * AFTER the pointer and never itself rotated — ctx.rotate() would carry
+ * the text around with the pointer and leave it sideways or upside-down
+ * at most directions, defeating the point of a number that's meant to
+ * be read at a glance.
+ */
+function buildSwellMarkersPlugin(rows) {
+  return {
+    id: "swellMarkers",
+    afterDatasetsDraw(chart) {
+      const { ctx, chartArea, scales } = chart;
+      if (!chartArea || !scales.x || !scales.ySwell) return;
+      const xScale = scales.x;
+      const yScale = scales.ySwell;
+      const { left, right } = chartArea;
+      const radius = 10;
+      ctx.save();
+      ctx.font = "700 10px -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      for (const row of rows) {
+        const period = row["Swell Period (s)"];
+        if (period == null) continue;
+        const x = xScale.getPixelForValue(row._t);
+        if (x < left || x > right) continue; // outside this chart's own visible range
+        const height = row["Swell Height (m)"];
+        const y = yScale.getPixelForValue(height != null ? height : 0);
+        const dir = row["Swell Dir"];
+
+        if (dir != null) {
+          // Pointer on the circle's own edge, facing the travel direction.
+          const travelDeg = (dir + 180) % 360;
+          const rad = (travelDeg * Math.PI) / 180;
+          const tipX = x + Math.sin(rad) * (radius + 6);
+          const tipY = y - Math.cos(rad) * (radius + 6);
+          const spread = 0.42; // radians either side of the tip direction
+          const baseR = radius - 1;
+          ctx.beginPath();
+          ctx.moveTo(tipX, tipY);
+          ctx.lineTo(x + Math.sin(rad + spread) * baseR, y - Math.cos(rad + spread) * baseR);
+          ctx.lineTo(x + Math.sin(rad - spread) * baseR, y - Math.cos(rad - spread) * baseR);
+          ctx.closePath();
+          ctx.fillStyle = "#0e7490";
+          ctx.fill();
+        }
+
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = "#0891b2";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(String(Math.round(period)), x, y + 0.5);
+      }
+      ctx.restore();
+    },
+  };
+}
+
+/**
  * Marks exactly which moment (and which line's value at that moment) the
  * tooltip is currently showing — a vertical crosshair across the full
  * plot height at the tooltip's x-position, plus an enlarged, white-ringed
@@ -7884,6 +7967,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons),
       buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime),
       buildTideExtremaPlugin(rows),
+      buildSwellMarkersPlugin(rows),
       buildTooltipCrosshairPlugin(rows),
       // Skipped in compact mode — nothing to label when there are no axes.
       // Also skipped when hideValueAxes alone is set (x-axis still shows,
@@ -8082,6 +8166,21 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
           position: "left",
           min: 970,
           max: 1050,
+        },
+        ySwell: {
+          // Always hidden, same reasoning as yPressure above — a swell
+          // marker's own y-position already conveys its height visually
+          // (buildSwellMarkersPlugin), no separate readable axis needed.
+          // WillyWeather's swell forecast is offshore data (their own
+          // docs: WaveWatch III / NOAA), not calibrated to any one
+          // sheltered bay location the way yTide's own per-location max
+          // is — a fixed range covering the real range Victoria's open
+          // coast sees is the same reasoning yPressure's own fixed range
+          // already uses, for the same reason.
+          display: false,
+          position: "left",
+          min: 0,
+          max: 4,
         },
       },
       plugins: {
