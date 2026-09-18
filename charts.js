@@ -1092,12 +1092,17 @@ function markStyleFor(mark, state) {
 // its string argument as raw HTML (sets innerHTML), so an unescaped "&" or
 // "<" anywhere in this would silently break the tooltip rather than just
 // display oddly.
+/** REAL BUG, FOUND AND FIXED: this used to prefix the current "colour
+ * by" group value (species by default — meaning a species-grouped
+ * hover often repeated the species twice), append the source, AND
+ * duplicate the species again after the name — reported directly as
+ * "a lot of redundant info". Now always just "name (date) type" —
+ * the mark's own type field (Catch/Mark/POI/Session), not a literal
+ * word — regardless of what state.groupByKey is currently set to,
+ * since that's a map-display setting, not something this mark's own
+ * identity depends on. */
 function markTooltipText(mark, state) {
-  const label = mark.species ? `${escapeHtml(mark.name)} — ${escapeHtml(mark.species)}` : escapeHtml(mark.name);
-  let text = `${label} (${String(mark.dateTime || "").slice(0, 10)})`;
-  if (mark.source) text += ` · ${escapeHtml(mark.source)}`;
-  const groupValue = mark[state.groupByKey];
-  return groupValue ? `${escapeHtml(groupValue)} — ${text}` : text;
+  return `${escapeHtml(mark.name)} (${String(mark.dateTime || "").slice(0, 10)}) ${escapeHtml(mark.type || "")}`;
 }
 
 // The set of optional, pick-list-backed fields a mark can carry, alongside
@@ -1514,12 +1519,18 @@ function buildMarkPopupEditHtml(mark, markLists) {
   return `
     <div data-mark-id="${escapeHtml(mark.id)}" style="min-width:220px;max-width:260px;">
       <form data-mark-form onsubmit="return false;">
+        <div data-species-first-prompt style="display:none;margin-bottom:8px;padding:6px 8px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:0.8rem;color:#854d0e;">Choose a species first — the rest of the form unlocks once it's set.</div>
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:0 0 2px;">Name
           <input type="text" name="name" value="${escapeHtml(mark.name || "")}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Type
           <select name="type" data-mark-type-select style="${MARK_POPUP_INPUT_STYLE}">${markListOptionsHtml(markLists, "Mark Type", mark.type)}</select>
         </label>
+        <div data-species-name-sync-confirm style="display:none;margin:6px 0;padding:6px 8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:0.8rem;">
+          <div data-species-name-sync-text style="margin-bottom:4px;"></div>
+          <button type="button" class="btn-secondary" data-species-name-sync-yes style="padding:2px 8px;font-size:0.8rem;">Yes, change it</button>
+          <button type="button" class="btn-secondary" data-species-name-sync-no style="padding:2px 8px;font-size:0.8rem;">No, keep it</button>
+        </div>
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Date/Time
           <input type="datetime-local" name="dateTime" step="1" value="${naiveToDatetimeLocal(mark.dateTime)}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
@@ -1601,6 +1612,37 @@ function applyMarkFieldVisibility(formEl, type) {
   formEl.querySelectorAll("[data-field-group]").forEach((group) => {
     group.style.display = applicable.includes(group.dataset.fieldGroup) ? "" : "none";
   });
+}
+
+/**
+ * Oliver's own request: when creating or editing a Catch/Mark, Species
+ * has to be set before anything else in the form is usable — not just
+ * another field somewhere in the list. Locks every field except Type
+ * and Species itself (Type stays usable so a Catch/Mark started by
+ * mistake can still be switched away without being stuck; Species
+ * obviously has to stay usable so the gate can ever be cleared) and
+ * shows a short prompt explaining why, for as long as the current type
+ * needs a species and doesn't have one yet. Re-run on every Type change
+ * (alongside applyMarkFieldVisibility, which this runs right next to)
+ * and every Species change, so switching types or picking a species
+ * unlocks the rest of the form immediately, live, without needing to
+ * save/reopen. Save itself is also blocked while gated, as a second,
+ * independent check — not just the fields being disabled — for the
+ * same "don't just trust the UI state" reason handleBulkEditSave
+ * re-checks rather than assuming its own form only ever describes
+ * legal states.
+ */
+function applySpeciesGate(formEl, type, species) {
+  const needsGate = fieldKeysForMarkType(type).includes("species") && !species;
+  const promptEl = formEl.querySelector("[data-species-first-prompt]");
+  if (promptEl) promptEl.style.display = needsGate ? "block" : "none";
+  formEl.querySelectorAll("input, select, textarea").forEach((el) => {
+    if (el.name === "type" || el.name === "species") return;
+    el.disabled = needsGate;
+  });
+  const wrapper = formEl.parentElement;
+  const saveBtn = wrapper ? wrapper.querySelector("[data-mark-save]") : null;
+  if (saveBtn) saveBtn.disabled = needsGate;
 }
 
 /**
@@ -1944,10 +1986,53 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
   const form = popupEl.querySelector("[data-mark-form]");
   if (form) {
     const typeSelect = form.querySelector("[data-mark-type-select]");
+    const speciesSelect = form.querySelector('[name="species"]');
     if (typeSelect) {
       applyMarkFieldVisibility(form, typeSelect.value);
-      typeSelect.addEventListener("change", () => applyMarkFieldVisibility(form, typeSelect.value));
+      if (speciesSelect) applySpeciesGate(form, typeSelect.value, speciesSelect.value);
+      typeSelect.addEventListener("change", () => {
+        applyMarkFieldVisibility(form, typeSelect.value);
+        if (speciesSelect) applySpeciesGate(form, typeSelect.value, speciesSelect.value);
+      });
     }
+
+    // Oliver's own request: changing Species auto-fills a blank Name
+    // with it; a NON-blank Name instead gets an inline yes/no prompt
+    // rather than being overwritten silently (or never offered at
+    // all) — matching this form's own click-to-reveal confirmation
+    // pattern elsewhere (Delete) rather than a native confirm().
+    if (speciesSelect) {
+      const nameInput = form.querySelector('[name="name"]');
+      const syncBlock = form.querySelector("[data-species-name-sync-confirm]");
+      const syncText = form.querySelector("[data-species-name-sync-text]");
+      const syncYes = form.querySelector("[data-species-name-sync-yes]");
+      const syncNo = form.querySelector("[data-species-name-sync-no]");
+      speciesSelect.addEventListener("change", () => {
+        if (typeSelect) applySpeciesGate(form, typeSelect.value, speciesSelect.value);
+        const species = speciesSelect.value;
+        if (syncBlock) syncBlock.style.display = "none";
+        if (!species || !nameInput) return;
+        const currentName = nameInput.value.trim();
+        if (!currentName) {
+          nameInput.value = species;
+        } else if (currentName !== species && syncBlock && syncText) {
+          syncText.textContent = `Change the Name to "${species}" too?`;
+          syncBlock.style.display = "block";
+        }
+      });
+      if (syncYes && syncBlock) {
+        syncYes.addEventListener("click", () => {
+          if (nameInput) nameInput.value = speciesSelect.value;
+          syncBlock.style.display = "none";
+        });
+      }
+      if (syncNo && syncBlock) {
+        syncNo.addEventListener("click", () => {
+          syncBlock.style.display = "none";
+        });
+      }
+    }
+
     // Refreshes Weather/Tide/Barometer/Temperature/Water Temperature/Wind
     // for whatever the Date/Time field's just been changed TO — see
     // refreshMarkFormConditionsForNewTime's own comment above for why
@@ -2116,6 +2201,14 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       const form = popupEl.querySelector("[data-mark-form]");
       const statusEl = popupEl.querySelector("[data-mark-save-status]");
       const updated = collectMarkFormValues(form, mark);
+      // Second, independent check alongside the disabled-button gate
+      // itself (applySpeciesGate) — not just trusting the UI state, the
+      // same reasoning handleBulkEditSave's own re-check follows.
+      if (fieldKeysForMarkType(updated.type).includes("species") && !updated.species) {
+        statusEl.textContent = "Choose a species first.";
+        statusEl.style.color = "#dc2626";
+        return;
+      }
       if (options.isNew) {
         // createdAt is set for real only now, at the actual moment of
         // saving — the draft's own dateTime (defaulted to "now" at

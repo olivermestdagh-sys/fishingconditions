@@ -132,6 +132,33 @@ main {
   z-index: 1000;
 }
 
+/** REAL BUG, FOUND AND FIXED: createMarkClusterIcon's own comment
+ * claimed this override already existed ("no default plugin styling —
+ * see MarkerCluster.Default.css override, style.css") but it never
+ * actually did. leaflet.markercluster adds its OWN classes
+ * (marker-cluster, plus marker-cluster-small/-medium/-large) to the
+ * exact same element mark-cluster-icon is set on — alongside it, not
+ * instead of it — and MarkerCluster.Default.css gives those classes a
+ * semi-transparent coloured background on both the outer element and
+ * its own direct child div. That background sat directly behind this
+ * icon's own satellite shapes (markShapeToCssHtml), reported directly:
+ * a Catch's own "+" specifically was hard to make out, blending into
+ * that colour. `> div`, not a bare descendant selector, is
+ * deliberate — createMarkClusterIcon's own wrapper div (the one the
+ * plugin's own "marker-cluster div" rule targets) is a direct child
+ * of this element, but the individual satellite shape divs are
+ * nested deeper still and DO need their own inline background color
+ * (markShapeToCssHtml) to keep working — a bare "div" descendant
+ * selector with !important would have wiped those out too. */
+.mark-cluster-icon {
+  background: none !important;
+  border-radius: 0 !important;
+}
+.mark-cluster-icon > div {
+  background: none !important;
+  margin: 0 !important;
+}
+
 .mark-detail-panel {
   width: 340px;
   flex-shrink: 0;
