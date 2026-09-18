@@ -3092,6 +3092,64 @@ to check against. If the "+" is still hard to make out after this
 deploys, a screenshot of the actual cluster would allow a proper
 diagnosis rather than another guess.
 
+### The real cluster "+ enclosed in a circle" bug — found from a screenshot
+
+The previous section's guess turned out to be the wrong mechanism
+entirely. Sent a screenshot of the actual cluster with hand-drawn
+arrows pointing at exactly which shapes looked wrong — dashed lines
+radiating from a centre point (a spiderfied cluster, not a collapsed
+one) with two "+" marks visibly trapped inside solid circles.
+
+Root cause: the spiderfy overlay (built earlier — see "The 10 o'clock
+spiderfy bug" above, the fix for zero-size/unclickable Canvas markers
+during spiderfy) always drew a plain `L.circleMarker` for every
+spiderfied mark, regardless of what shape that mark actually is. A
+Catch's own "+" (`getCrossMarkerClass`) or a POI's own diamond
+(`getDiamondMarkerClass`) got replaced with a plain filled circle the
+instant its cluster spiderfied open — sitting opaquely on top of, and
+hiding, the real Canvas-rendered shape still underneath it. Exactly
+matching the screenshot: a "+" visibly enclosed in a circle, the
+circle's own colour hiding it.
+
+`createMarkShapeLayer` (used for every real marker already, in
+`loadAndRenderMarks`) already knows how to pick the correct shape
+class for a mark — the spiderfy overlay now calls that directly
+instead of hardcoding `circleMarker`, with only the renderer swapped
+to the overlay's own SVG one. `getDiamondMarkerClass`/
+`getCrossMarkerClass` are built by overriding `L.CircleMarker`'s own
+`_project`/`_updatePath` — the same methods either renderer calls —
+so they work identically under SVG, not just Canvas; no separate
+SVG-specific shape code was needed.
+
+**Verified**: real browser test — spiderfied a cluster with one Catch,
+one POI, and one Mark, confirmed all 3 overlay markers now report
+their own correct shape (`cross`/`diamond`/`circle` respectively, the
+same `_markShapeName` property every real marker also carries) rather
+than all three being circles. Confirmed the cross and circle overlays
+have genuinely different rendered SVG path geometry, not just a
+different internal label. Screenshot confirms it visually too — the
+"+" now renders as a real, distinct plus shape rather than a solid
+circle. Zero JS errors.
+
+### Field order in the mark edit form (charts.js)
+
+Requested directly, with an annotated screenshot numbering the wanted
+order: Type, Species, Name — Date/Time and everything else following
+after, unchanged. Species is no longer rendered through the same loop
+as the rest of `MARK_POPUP_OPTIONAL_FIELDS`; it's pulled out and
+placed explicitly between Type and Name, which also puts
+`applySpeciesGate`'s own prompt right above the one field it's asking
+for, rather than at the very top of the form above Type.
+
+**Verified**: real browser test — confirmed the actual DOM order of
+form fields is exactly Type, Species, Name, Date/Time (not just visual
+position, the real element order), for both a brand-new mark and an
+existing one being edited. Separately re-confirmed the species gate
+and the Name auto-sync (both added just before this reordering) still
+work correctly against the new layout — fields still correctly
+disabled while gated, choosing a species still unlocks everything and
+still auto-fills a blank Name. Zero JS errors.
+
 ## Troubleshooting
 
 - **Page loads but says "Not updated yet"**: the scheduled job hasn't run
