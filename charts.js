@@ -6806,6 +6806,29 @@ async function loadTideOffsets(allLocations) {
 }
 
 /**
+ * Sets the header's "Updated ..." stamp from the data file's generatedAt.
+ * If the data is more than STALE_DATA_HOURS old (the update job runs every
+ * 3 hours, so this means it has been failing or paused) the stamp turns
+ * amber and says how old it is, instead of quietly showing an old date.
+ */
+const STALE_DATA_HOURS = 12;
+function setUpdatedStamp(el, dt) {
+  if (!el) return;
+  const when = dt.toLocaleString([], { dateStyle: "medium", timeStyle: "short", hour12: false });
+  const ageHours = (Date.now() - dt.getTime()) / 3600000;
+  if (ageHours > STALE_DATA_HOURS) {
+    const age = ageHours >= 48 ? `${Math.floor(ageHours / 24)} days` : `${Math.floor(ageHours)} h`;
+    el.textContent = `⚠ Data is ${age} old · ${when}`;
+    el.classList.add("stale");
+    el.title = `The data hasn't refreshed for over ${STALE_DATA_HOURS} hours — the update job may be failing.`;
+  } else {
+    el.textContent = `Updated ${when}`;
+    el.classList.remove("stale");
+    el.removeAttribute("title");
+  }
+}
+
+/**
  * Merges location config from D1 (GET /api/public/locations) onto the
  * locations loaded from data/conditions.json: shared fields by name, and
  * per-type timing fields by name + type. Only overwrites fields the

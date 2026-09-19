@@ -70,6 +70,11 @@ body {
 
 /* WillyWeather API terms: credit by name and brand logo wherever its data is
    used. Sits just right of the tabs on the wide one-row bar. */
+.updated.stale {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
 .ww-credit {
   order: 2;
   display: flex;
