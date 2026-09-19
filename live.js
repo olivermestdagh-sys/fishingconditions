@@ -185,7 +185,7 @@ function renderLiveMap(gpsPosition) {
     const { lat, lng } = variants[0];
     const types = variants.map((v) => v.type);
     const iconKind = types.includes("Kayak") && types.includes("Land based") ? "both" : types.includes("Land based") ? "landBased" : "kayak";
-    points.push({ lat, lng, label: name, iconKind, onClick: () => selectLocationAndType(name, "Kayak") });
+    points.push({ lat, lng, label: displayNameFor(variants[0]), iconKind, onClick: () => selectLocationAndType(name, "Kayak") });
   }
   if (gpsPosition) {
     points.push({
