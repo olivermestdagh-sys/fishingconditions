@@ -1,11 +1,11 @@
-﻿// Tests for the header "Updated ..." stamp's stale-data warning (charts.js).
+// Tests for the header "Updated ..." stamp's stale-data warning (js/*.js).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
+import { readSharedScripts } from "./helpers.mjs";
 
-const src = fs.readFileSync(new URL("../charts.js", import.meta.url), "utf8");
+const src = readSharedScripts();
 const m = src.match(/const STALE_DATA_HOURS[\s\S]*?\r?\nfunction setUpdatedStamp[\s\S]*?\r?\n}\r?\n/);
-assert.ok(m, "setUpdatedStamp not found in charts.js");
+assert.ok(m, "setUpdatedStamp not found in js/*.js");
 const setUpdatedStamp = new Function(m[0] + "\nreturn setUpdatedStamp;")();
 
 function fakeEl() {

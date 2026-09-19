@@ -1,13 +1,13 @@
-﻿// Tests for the tide classification logic in charts.js (a browser script, so the
+// Tests for the tide classification logic in js/*.js (browser scripts, so the
 // functions are pulled out of the source text and evaluated here).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
+import { readSharedScripts } from "./helpers.mjs";
 
-const src = fs.readFileSync(new URL("../charts.js", import.meta.url), "utf8");
+const src = readSharedScripts();
 const grab = (re) => {
   const m = src.match(re);
-  if (!m) throw new Error("could not find in charts.js: " + re);
+  if (!m) throw new Error("could not find in js/*.js: " + re);
   return m[0];
 };
 const fns = new Function(

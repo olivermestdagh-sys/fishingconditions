@@ -16,7 +16,7 @@ jobs:
       - name: Syntax-check every script
         run: |
           set -e
-          for f in *.js; do
+          for f in *.js js/*.js; do
             if [ "$f" = "user-backend.js" ]; then
               cp "$f" /tmp/user-backend.mjs   # uses ES module syntax
               node --check /tmp/user-backend.mjs
@@ -24,6 +24,10 @@ jobs:
               node --check "$f"
             fi
           done
+      - name: Check every page loads all the scripts it needs
+        run: |
+          npm install --no-audit --no-fund
+          node scripts/check-page-scripts.mjs
       - name: Run tests
         run: node --test
       - uses: actions/setup-python@v5

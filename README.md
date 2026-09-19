@@ -28,14 +28,18 @@ Live site: https://olivermestdagh-sys.github.io/fishingconditions/
                                     WillyWeather API key off the browser
 ```
 
-- **Frontend**: plain HTML/CSS/JS, no build step. `charts.js` is the shared
-  library (charts, maps, mark popups, tide logic); each page has its own script.
+- **Frontend**: plain HTML/CSS/JS, no build step. The shared code lives in `js/*.js`
+  (formerly one 9,600-line `charts.js`; older code comments that say `charts.js` mean
+  these files): chart drawing, maps, marks, tide logic, backend helpers. Each page
+  loads only the shared files it needs, then its own script (`app.js`, `live.js`,
+  `week.js`, ...). `npm run check-pages` (also run in CI) proves every page loads
+  everything it uses.
 - **Data job**: `scripts/fetch_conditions.py` reads the tracked locations from
   the worker, fetches forecasts (locations in parallel), scores them and writes
   `data/conditions.json` (compact JSON). The pages load that file for the graphs.
 - **Live configuration**: display names, groups, timings, tide offsets etc. are
   read straight from the database at page load (`/api/public/locations`, merged
-  by `mergeLiveLocationConfig` in `charts.js`), so a Settings edit shows up
+  by `mergeLiveLocationConfig` in `js/chart-render.js`), so a Settings edit shows up
   without waiting for the data job. Only WillyWeather-derived numbers and
   scores need the job.
 - **Database (Cloudflare D1, `fishingconditions-users`)**: schema in
@@ -50,7 +54,7 @@ Extreme**: HHW/LHW (higher/lower high water) or HLW/LLW (higher/lower low
 water), ranked against the other high/low of the same day. The extreme is the
 one the condition is *at* (Slack), *just left* (Start Run) or *heading to*
 (Last Run / Running). Logic: `classifyTideFromExtrema` and `rankExtremum` in
-`charts.js`; used for live quick marks, map clicks and imports.
+`js/marks-core.js`; used for live quick marks, map clicks and imports.
 
 ## Privacy model
 
