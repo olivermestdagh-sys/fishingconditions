@@ -3310,6 +3310,76 @@ into the `scripts` folder first, then upload from there — dragging a
 plain file (not the folder) at the repo root will land it in the wrong
 place with no error or warning that anything's amiss.
 
+### Confirmed root cause of the swell breakage, and two more places swell had never reached
+
+The actual root cause: WillyWeather's own account settings have a
+parent `Swell` checkbox separate from `Swell-Height`/`Swell-Period`
+underneath it — the sub-items were ticked but the parent wasn't,
+confirmed directly from a screenshot of Oliver's own WillyWeather
+account settings. An unauthorized forecast type sitting in the same
+comma-separated `forecasts=` list as the others appears to make
+WillyWeather reject that whole section rather than just omitting the
+one bad entry — matching exactly what was seen (every forecast gone,
+observational data fine) and confirming the theory from the previous
+round without needing to guess further. With the parent box now
+ticked, `fetch_conditions.py` has been put back to requesting swell
+combined in the one call, same as `wind`/`tides`/everything else — the
+separate, isolated `get_swell` request from the previous round bought
+real safety against exactly this failure mode, but with the actual
+permissions problem now fixed at the source, it wasn't needed for its
+own sake and Oliver reverted to the simpler combined call.
+
+Reported next, once real data started coming through: a saved
+location's own graph showed swell correctly, but the "What's here?"
+map-click preview for an unsaved spot didn't. Root cause: the preview
+feature runs through a completely separate Cloudflare Worker
+(`willyweather-search.js`, its own `handleWeather`), not
+`fetch_conditions.py` at all — its own hard-coded forecast type list
+had simply never had swell added to it in the first place, an entirely
+independent miss from anything above, not a symptom of it.
+`buildPreviewRows` (charts.js), the client-side mirror of
+`build_readings` that turns the preview's own raw WillyWeather response
+into the same row shape a saved location's own graph uses, also had no
+swell-extraction block of its own — the two pipelines (scheduled
+Python fetch vs. client-side preview) read from the exact same
+WillyWeather response shape but have always been two separate,
+hand-maintained implementations, and this is the second time in as
+many rounds a change landed in one without the other. Both are now
+in sync: `willyweather-search.js`'s own forecasts= list includes swell
+(combined, matching `fetch_conditions.py`'s own now-reverted choice,
+now that the actual permissions cause is understood and fixed), and
+`buildPreviewRows` extracts all four swell fields exactly the way
+`build_readings` already does.
+
+Also added: a Swell line in both of this site's tooltip
+implementations — Chart.js's own native `tooltip.callbacks.afterBody`,
+and `buildTooltipCrosshairPlugin`'s manually-drawn mirror of it (used
+instead of the native one specifically for Live/Week Ahead, where
+Chart.js's own tooltip rendering proved unreliable when driven by a
+tap rather than a genuine hover — see that plugin's own comment). Both
+already needed the identical Location/Fishing Condition lines added by
+hand for the same reason (drawn as strips, not real datasets, so
+Chart.js never picks them up on its own) — Swell follows the same
+pattern, formatted as "Swell 1.5m @ 8.4s E", sharing one new
+`formatSwellTooltipLine` helper between both tooltip implementations
+specifically so they can't quietly drift out of sync with each other
+on the exact wording, the way the two ROW-BUILDING pipelines above
+just did. No line at all for a row with no period reading, matching
+`buildSwellMarkersPlugin`'s own "nothing drawn without a period" rule —
+a tooltip line for a marker that isn't there would be confusing, not
+helpful.
+
+**Verified**: real browser test — confirmed `buildPreviewRows` extracts
+all four swell fields (height, period, raw degrees, compass text) from
+a mocked WillyWeather response, and confirmed it degrades to zero rows
+with zero errors when swell is entirely absent, same as every other
+forecast type there already does. Confirmed `formatSwellTooltipLine`
+handles the full-data case, a period-with-no-height case, and produces
+no line at all when there's no period — each checked directly against
+its actual returned string, not just success/failure. Confirmed
+`willyweather-search.js`'s own forecasts= string literally contains
+swell now. Zero JS errors throughout.
+
 ## Troubleshooting
 
 - **Page loads but says "Not updated yet"**: the scheduled job hasn't run
