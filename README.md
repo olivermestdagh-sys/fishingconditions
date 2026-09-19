@@ -493,9 +493,8 @@ this restriction — nothing extra is drawn.
   cache above)
 - `data/conditions.json` — the generated data file (starts empty; gets
   overwritten automatically by the workflow)
-- `data/marks.json` — your GPS fishing marks (catches and points of
-  interest), logged by hand while out fishing. Starts empty. See "GPS
-  fishing marks" below
+- (Marks — your GPS catches and points of interest — are no longer a file
+  in the repo: they live in the D1 database. See "GPS fishing marks" below)
 - `cloudflare-worker/willyweather-search.js` — optional, separate piece of
   infrastructure (not deployed via GitHub Pages) that powers the WillyWeather
   candidate popup on the Settings map and the Location tab's live preview —
@@ -1744,16 +1743,16 @@ type later ("Ramp", say) is a Settings edit, not a code change — though it
 defaults to showing the full Catch-level field set until it's specifically
 taught otherwise (see `MARK_TYPE_FIELD_KEYS` in `charts.js`). This is
 separate from the Locations list above (the fixed handful of spots the site
-scores tide/weather/wind conditions FOR) — marks.json is an open-ended,
+scores tide/weather/wind conditions FOR) — marks are an open-ended,
 editable personal log that grows every time you're out.
 
 **One-off migrations**: `data/personal-spots.gpx` — the site owner's
-existing catch history exported from C-MAP Embark — has been migrated into
-`data/marks.json` as real mark records (2,523 of them). The GPX file itself
+existing catch history exported from C-MAP Embark — was migrated into the
+marks database as real mark records (about 2,500 of them). The GPX file itself
 is left in the repo untouched for now, but the Location and Live tab maps no
-longer read it directly; both now render straight from `data/marks.json`
-instead. The old file is effectively retired and safe to delete once you're
-happy the migrated data looks right — nothing on the site reads it anymore.
+longer read it directly; both render marks from the database instead. The
+old file is effectively retired and safe to delete — nothing on the site
+reads it anymore.
 Separately, when the POI/Mark/Catch distinction above replaced the original
 two-value Fish/POI Mark Type, every mark that existed with type `"Fish"` was
 migrated in one pass to type `"Mark"` — a deliberately conservative rename
@@ -1764,20 +1763,11 @@ this file's own git history for that diff. `"Fish"` stays in
 doesn't vanish out from under anything already mid-edit; remove it by hand
 once nothing's likely to still pick it.
 
-**Storage**: flat JSON in `data/marks.json` — in `data/` rather than
-`config/` despite being written the same browser-to-GitHub-API way as every
-config file on this site: `config/` holds settings that configure how the
-site/pipeline behaves (which locations to track, which groups exist, API
-keys), while `data/` holds the actual content the site renders
-(`conditions.json` IS the data every page displays) — and marks are exactly
-that, real content that just happens to be authored here instead of by
-`fetch_conditions.py`. No separate database. At the scale of one person
-logging by hand (realistically low hundreds to a few thousand marks over
-years), a flat file stays only a few hundred KB and is trivial for GitHub's
-API to read and rewrite whole on every save — introducing a real database
-wouldn't earn its cost unless this became multi-user, needed fast live
-queries, or needed unattended server-side writes. Worth revisiting only if
-this file ever grows past a few MB.
+**Storage**: the `marks` table in the Cloudflare D1 database (Public's own
+rows), read by the pages through the `fishingconditions-users` worker
+(`GET /api/public/marks`) and written through `/api/marks`. This replaced
+the original flat `data/marks.json` file, which has been deleted from the
+repo (it remains in git history).
 
 **Fields on a mark**: GPS location (lat/lng), a display name, Mark Type,
 and Date/Time (when it happened — separate from when the record was saved,
@@ -1946,7 +1936,7 @@ coverage) is left exactly as it was rather than blanked out. **Delete**
 needs a genuine confirmation step before it does anything — clicking it
 just reveals an inline "delete this mark? this can't be undone" block
 with its own Yes/Cancel, rather than acting on the first click the way
-Cancel or Save do. Confirming removes the mark from `data/marks.json`
+Cancel or Save do. Confirming removes the mark from the marks database
 outright (see `deleteMarkFromGitHub`, `charts.js` — same GET-current-then-
 PUT-whole-file pattern every other write on this site uses) and takes its
 marker straight off the map, no page reload needed.
@@ -1964,7 +1954,7 @@ Lowrance device" below.
 The **Sync** tab reads a device's own waypoint export (Garmin GPX, or a
 Lowrance `.usr` format 6 file straight off the chartplotter's "export
 waypoints" menu), matches every waypoint against what's already in
-`data/marks.json`, and lets you review/edit before anything is saved —
+the marks database, and lets you review/edit before anything is saved —
 nothing is written until you actually hit Import.
 
 **Matching, in order**:
@@ -1976,7 +1966,7 @@ nothing is written until you actually hit Import.
    coordinate or description drifted slightly on the device since. Garmin
    GPX has no equivalent persistent ID, so this step never applies there.
 2. **Distance only** (both device types) — anything within 20m of a mark
-   already in `data/marks.json` is treated as already tracked and left out
+   already in the marks database is treated as already tracked and left out
    of the review list entirely — no name or species check, deliberately
    simple, per how this was designed. Only genuinely new spots are real
    import candidates; the summary line still reports how many were matched
@@ -2013,7 +2003,7 @@ pre-filled from a real historical lookup for anything Catch-level — see
 "Auto-filling Weather/Tide/Barometer/Wind on a mark" below for where that
 data comes from and its own caveats.
 
-**Export** downloads every mark in `data/marks.json` as one GPX file. A
+**Export** downloads every mark in the marks database as one GPX file. A
 **File name** field sets the base name before downloading — pre-filled with
 `fishing-marks-YYYY-MM-DD-HHMM.gpx` (date AND time, so exporting more than
 once in a day doesn't quietly overwrite an earlier download), editable to
@@ -2139,7 +2129,7 @@ show for which type" above) — the lookup itself has already run by then
 regardless, since it happens once for the whole batch right after parsing.
 
 **Scope, deliberately**: this only ever runs for a NEW mark — never a
-retroactive backfill over the marks already sitting in `data/marks.json`.
+retroactive backfill over the marks already sitting in the marks database.
 WillyWeather bills per call, so backfilling thousands of existing marks in
 one go would mean thousands of billed calls for a one-off convenience;
 only looking this up for candidates actually up for review/creation (and
