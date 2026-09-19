@@ -1,6 +1,7 @@
 [
   {
     "name": "Balnarring Beach, VIC 3926",
+    "displayName": "Balnarring Beach, VIC 3926",
     "shore": "NW",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -38,6 +39,7 @@
   },
   {
     "name": "Cape Woolamai Beach",
+    "displayName": "Cape Woolamai Beach",
     "shore": "NE",
     "tidal": true,
     "locationGroup": "South Beaches",
@@ -66,6 +68,7 @@
   },
   {
     "name": "Corinella Boat Ramp, VIC",
+    "displayName": "Corinella Boat Ramp, VIC",
     "shore": "E",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -94,6 +97,7 @@
   },
   {
     "name": "Coronet Bay, VIC 3984",
+    "displayName": "Coronet Bay, VIC 3984",
     "shore": "E",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -122,6 +126,7 @@
   },
   {
     "name": "Flinders Pier, VIC",
+    "displayName": "Flinders Pier, VIC",
     "shore": "W",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -150,6 +155,7 @@
   },
   {
     "name": "Gunnamatta Beach, VIC",
+    "displayName": "Gunnamatta Beach, VIC",
     "shore": "N",
     "tidal": true,
     "locationGroup": "South Beaches",
@@ -178,6 +184,7 @@
   },
   {
     "name": "Hastings Jetty, VIC",
+    "displayName": "Hastings Jetty, VIC",
     "shore": "W",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -206,6 +213,7 @@
   },
   {
     "name": "Kilcunda, VIC 3995",
+    "displayName": "Kilcunda, VIC 3995",
     "shore": "N",
     "tidal": true,
     "locationGroup": "South Beaches",
@@ -234,6 +242,7 @@
   },
   {
     "name": "Lang Lang Boat Ramp, VIC",
+    "displayName": "Lang Lang Boat Ramp, VIC",
     "shore": "E",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -272,6 +281,7 @@
   },
   {
     "name": "Mornington Pier, VIC",
+    "displayName": "Mornington Pier, VIC",
     "shore": "E",
     "tidal": true,
     "locationGroup": "Port Phillip",
@@ -300,6 +310,7 @@
   },
   {
     "name": "Patterson River Entrance, VIC",
+    "displayName": "Patterson River Entrance, VIC",
     "shore": "E",
     "tidal": true,
     "locationGroup": "Port Phillip",
@@ -328,6 +339,7 @@
   },
   {
     "name": "Point Leo",
+    "displayName": "Point Leo",
     "shore": "NW",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -356,6 +368,7 @@
   },
   {
     "name": "Point Leo Surf Beach",
+    "displayName": "Point Leo Surf Beach",
     "shore": "N",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -384,6 +397,7 @@
   },
   {
     "name": "Rosebud Pier, VIC",
+    "displayName": "Rosebud Pier, VIC",
     "shore": "E",
     "tidal": true,
     "locationGroup": "Port Phillip",
@@ -412,6 +426,7 @@
   },
   {
     "name": "Safety Beach Boat Ramp, VIC",
+    "displayName": "Safety Beach Boat Ramp, VIC",
     "shore": "E",
     "tidal": true,
     "locationGroup": "Port Phillip",
@@ -440,6 +455,7 @@
   },
   {
     "name": "Somers Beach",
+    "displayName": "Somers Beach",
     "shore": "N",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -468,6 +484,7 @@
   },
   {
     "name": "Sorrento Pier, VIC",
+    "displayName": "Sorrento Pier, VIC",
     "shore": "SW",
     "tidal": true,
     "locationGroup": "Port Phillip",
@@ -496,6 +513,7 @@
   },
   {
     "name": "Stony Point Boat Ramp, VIC",
+    "displayName": "Stony Point Boat Ramp, VIC",
     "shore": "W",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -524,6 +542,7 @@
   },
   {
     "name": "Warneet Boat Ramp, VIC",
+    "displayName": "Warneet Boat Ramp, VIC",
     "shore": "N",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -552,6 +571,7 @@
   },
   {
     "name": "Williamstown Beach, VIC",
+    "displayName": "Williamstown Beach, VIC",
     "shore": "N",
     "tidal": true,
     "locationGroup": "Port Phillip",
