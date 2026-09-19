@@ -147,10 +147,14 @@ function applyReportsFilters() {
 // Report 1 — catch rate by tide stage
 // ---------------------------------------------------------------------
 
-// Colours for the Tide Extreme segments stacked inside each tide-stage bar —
-// same colours as the Tide Extreme pick-list in D1 (Higher/Lower High Water
-// in purples, Higher/Lower Low Water in oranges), plus grey for catches with
-// no extreme recorded (everything logged before that field existed).
+// Which dimension forms the main columns; the other is stacked inside each.
+// Toggled by the buttons above the chart.
+let tideReportGroupBy = "condition"; // "condition" | "extreme"
+
+// Tide Extreme segments — same colours as the Tide Extreme pick-list in D1
+// (Higher/Lower High Water in purples, Higher/Lower Low Water in oranges),
+// plus grey for catches with no extreme recorded (everything logged before
+// that field existed).
 const TIDE_EXTREME_ORDER = ["HHW", "LHW", "HLW", "LLW", "(none)"];
 const TIDE_EXTREME_COLORS = {
   HHW: "#4723fb",
@@ -166,25 +170,93 @@ const TIDE_EXTREME_NAMES = {
   LLW: "Lower low water",
   "(none)": "No extreme recorded",
 };
+const TIDE_EXTREME_MEANINGS = {
+  HHW: "the higher of the day's two high tides",
+  LHW: "the lower of the day's two high tides",
+  HLW: "the higher of the day's two low tides",
+  LLW: "the lower of the day's two low tides",
+  "(none)": "logged before the extreme was recorded, or it couldn't be ranked",
+};
+
+// The 8 Tide Condition values. Slack = within 10 min of an extreme; Start Run
+// = first 2 h after leaving one; Last Run = final 2 h before reaching one;
+// Running = the middle of the tide. In = rising, Out = falling.
+const TIDE_CONDITION_ORDER = [
+  "Slack High", "Last Run In", "Running In", "Start Run In",
+  "Slack Low", "Last Run Out", "Running Out", "Start Run Out",
+  "(not recorded)",
+];
+const TIDE_CONDITION_COLORS = {
+  "Slack High": "#1e3a8a",
+  "Last Run In": "#2563eb",
+  "Running In": "#60a5fa",
+  "Start Run In": "#0e7490",
+  "Slack Low": "#7c2d12",
+  "Last Run Out": "#ea580c",
+  "Running Out": "#fbbf24",
+  "Start Run Out": "#65a30d",
+  "(not recorded)": "#9ca3af",
+};
+const TIDE_CONDITION_MEANINGS = {
+  "Slack High": "at high tide, water standing still (within 10 min of the peak)",
+  "Last Run In": "rising, final 2 h before high tide",
+  "Running In": "rising, mid-tide (more than 2 h from either extreme)",
+  "Start Run In": "rising, first 2 h after low tide",
+  "Slack Low": "at low tide, water standing still (within 10 min of the bottom)",
+  "Last Run Out": "falling, final 2 h before low tide",
+  "Running Out": "falling, mid-tide (more than 2 h from either extreme)",
+  "Start Run Out": "falling, first 2 h after high tide",
+  "(not recorded)": "no tide condition was recorded",
+};
+
+const TIDE_DIMENSIONS = {
+  condition: {
+    title: "tide condition",
+    order: TIDE_CONDITION_ORDER,
+    colors: TIDE_CONDITION_COLORS,
+    labelOf: (k) => k,
+    meaningOf: (k) => TIDE_CONDITION_MEANINGS[k],
+    keyOf: (c) => c.tideCondition || "(not recorded)",
+  },
+  extreme: {
+    title: "tide extreme",
+    order: TIDE_EXTREME_ORDER,
+    colors: TIDE_EXTREME_COLORS,
+    labelOf: (k) => (k === "(none)" ? "Not recorded" : `${k} – ${TIDE_EXTREME_NAMES[k]}`),
+    meaningOf: (k) => TIDE_EXTREME_MEANINGS[k],
+    keyOf: (c) => c.tideExtreme || "(none)",
+  },
+};
 
 function renderTideReport() {
-  const counts = new Map(); // tide condition -> total
-  const byExtreme = new Map(); // tide condition -> Map(extreme -> count)
+  const main = TIDE_DIMENSIONS[tideReportGroupBy];
+  const stack = TIDE_DIMENSIONS[tideReportGroupBy === "condition" ? "extreme" : "condition"];
+
+  document.querySelectorAll("[data-tide-group]").forEach((btn) => {
+    const on = btn.dataset.tideGroup === tideReportGroupBy;
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.className = on ? "btn-primary" : "btn-secondary";
+  });
+  const note = document.getElementById("reportTideNote");
+  if (note) note.textContent = `Columns are ${main.title}; each is stacked by ${stack.title}, biggest at the bottom.`;
+
+  const counts = new Map(); // main key -> total
+  const byStack = new Map(); // main key -> Map(stack key -> count)
   for (const c of reportsFilteredCatches) {
-    const tide = c.tideCondition || "(not recorded)";
-    const extreme = c.tideExtreme || "(none)";
-    counts.set(tide, (counts.get(tide) || 0) + 1);
-    if (!byExtreme.has(tide)) byExtreme.set(tide, new Map());
-    const m = byExtreme.get(tide);
-    m.set(extreme, (m.get(extreme) || 0) + 1);
+    const mk = main.keyOf(c);
+    const sk = stack.keyOf(c);
+    counts.set(mk, (counts.get(mk) || 0) + 1);
+    if (!byStack.has(mk)) byStack.set(mk, new Map());
+    const m = byStack.get(mk);
+    m.set(sk, (m.get(sk) || 0) + 1);
   }
   const empty = document.getElementById("reportTideEmpty");
   const canvas = document.getElementById("reportTideChart");
+  const legend = document.getElementById("reportTideLegend");
   if (counts.size === 0) {
     empty.style.display = "block";
     canvas.style.display = "none";
-    const emptyLegend = document.getElementById("reportTideLegend");
-    if (emptyLegend) emptyLegend.innerHTML = "";
+    if (legend) legend.innerHTML = "";
     if (reportTideChartInstance) {
       reportTideChartInstance.destroy();
       reportTideChartInstance = null;
@@ -194,16 +266,18 @@ function renderTideReport() {
   empty.style.display = "none";
   canvas.style.display = "block";
 
-  const labels = Array.from(counts.keys()).sort((a, b) => counts.get(b) - counts.get(a));
+  // Columns in the natural tide order (extremes: HHW..LLW; conditions: high
+  // tide, rising, low tide, falling); anything unknown goes last.
+  const rankIn = (order, k) => (order.indexOf(k) === -1 ? order.length : order.indexOf(k));
+  const labels = Array.from(counts.keys()).sort((a, b) => rankIn(main.order, a) - rankIn(main.order, b));
 
-  // Each bar is stacked by Tide Extreme, biggest segment at the bottom and
-  // the smallest on top (e.g. 3 HHW under 2 LHW). Chart.js stacks whole
-  // datasets in order, but the order differs per bar, so datasets here are
-  // "the Nth-biggest segment of each bar" and each point carries its own
-  // extreme (for colour and tooltip).
+  // Each column is stacked biggest segment at the bottom, smallest on top.
+  // Chart.js stacks whole datasets in order, but the order differs per
+  // column, so datasets here are "the Nth-biggest segment of each column"
+  // and each point carries its own stack key (for colour and tooltip).
   const segmentsPerLabel = labels.map((l) =>
-    Array.from(byExtreme.get(l).entries()).sort(
-      (a, b) => b[1] - a[1] || TIDE_EXTREME_ORDER.indexOf(a[0]) - TIDE_EXTREME_ORDER.indexOf(b[0])
+    Array.from(byStack.get(l).entries()).sort(
+      (a, b) => b[1] - a[1] || rankIn(stack.order, a[0]) - rankIn(stack.order, b[0])
     )
   );
   const layers = Math.max(...segmentsPerLabel.map((s) => s.length));
@@ -212,23 +286,22 @@ function renderTideReport() {
     datasets.push({
       label: `Segment ${k + 1}`,
       data: segmentsPerLabel.map((s) => (s[k] ? s[k][1] : 0)),
-      extremes: segmentsPerLabel.map((s) => (s[k] ? s[k][0] : null)),
-      backgroundColor: segmentsPerLabel.map((s) => (s[k] ? TIDE_EXTREME_COLORS[s[k][0]] || "#9ca3af" : "transparent")),
+      stackKeys: segmentsPerLabel.map((s) => (s[k] ? s[k][0] : null)),
+      backgroundColor: segmentsPerLabel.map((s) => (s[k] ? stack.colors[s[k][0]] || "#9ca3af" : "transparent")),
       borderColor: "#ffffff",
       borderWidth: 1,
     });
   }
 
-  // Legend: only the extremes actually present in the current filter.
-  const legend = document.getElementById("reportTideLegend");
+  // Legend: only the stacked values actually present, with their meanings.
   if (legend) {
-    const present = TIDE_EXTREME_ORDER.filter((e) => segmentsPerLabel.some((s) => s.some(([x]) => x === e)));
+    const present = stack.order.filter((e) => segmentsPerLabel.some((s) => s.some(([x]) => x === e)));
     legend.innerHTML = present
       .map(
         (e) =>
-          `<span style="display:inline-flex;align-items:center;gap:5px;margin:0 12px 4px 0;font-size:0.8rem;">` +
-          `<span style="width:12px;height:12px;border-radius:3px;background:${TIDE_EXTREME_COLORS[e]};display:inline-block;"></span>` +
-          `${e === "(none)" ? "Not recorded" : e}</span>`
+          `<div style="display:flex;align-items:flex-start;gap:6px;margin:0 0 4px;font-size:0.8rem;">` +
+          `<span style="flex:none;width:12px;height:12px;margin-top:3px;border-radius:3px;background:${stack.colors[e]};display:inline-block;"></span>` +
+          `<span><strong>${escapeHtml(stack.labelOf(e))}</strong> — ${escapeHtml(stack.meaningOf(e))}</span></div>`
       )
       .join("");
   }
@@ -245,16 +318,27 @@ function renderTideReport() {
         tooltip: {
           filter: (item) => item.raw > 0,
           callbacks: {
-            label: (item) => {
-              const ext = item.dataset.extremes[item.dataIndex];
-              return `${ext === "(none)" ? "No extreme recorded" : `${ext} (${TIDE_EXTREME_NAMES[ext] || ext})`}: ${item.raw}`;
+            title: (items) => {
+              if (!items.length) return "";
+              const l = items[0].label;
+              const name = tideReportGroupBy === "extreme" ? main.labelOf(l) : l;
+              return name;
             },
+            beforeBody: (items) => {
+              if (!items.length) return "";
+              const m = main.meaningOf(items[0].label);
+              return m ? m.charAt(0).toUpperCase() + m.slice(1) : "";
+            },
+            label: (item) => `${stack.labelOf(item.dataset.stackKeys[item.dataIndex])}: ${item.raw}`,
             footer: (items) => (items.length ? `Total: ${counts.get(items[0].label)}` : ""),
           },
         },
       },
       scales: {
-        x: { stacked: true },
+        x: {
+          stacked: true,
+          ticks: tideReportGroupBy === "extreme" ? { callback: (v, i) => labels[i] } : {},
+        },
         y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } },
       },
     },
@@ -406,6 +490,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       toggleFilters();
     }
   });
+
+  document.querySelectorAll("[data-tide-group]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      tideReportGroupBy = btn.dataset.tideGroup;
+      renderTideReport();
+    })
+  );
 
   document.getElementById("reportsApplyFiltersBtn").addEventListener("click", applyReportsFilters);
   document.getElementById("reportsResetFiltersBtn").addEventListener("click", () => {
