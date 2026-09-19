@@ -204,6 +204,12 @@ def export_locations_json(locations):
     for loc in locations:
         exportable.append({
             "name": loc.get("name"),
+            # Same fallback every other displayName call site already
+            # uses (rowToTracked/handlePipelineLocationsList in
+            # user-backend.js, formatSwellTooltipLine's own sibling
+            # displayNameFor in charts.js) — genuinely only matters for a
+            # location that predates migration-display-name.sql.
+            "displayName": loc.get("displayName") or loc.get("name"),
             "shore": loc.get("shore"),
             "tidal": loc.get("tidal", True),
             "locationGroup": loc.get("locationGroup"),
@@ -1535,6 +1541,14 @@ def main():
                 # this type's own timings/settings are spread in after.
                 output_locations.append({
                     "name": loc["name"],
+                    # Falls back to name until the one-time migration runs
+                    # (locationsadmin.js's own "Migrate now" button) or a
+                    # location is edited and saved again — every location
+                    # created going forward already gets both set to the
+                    # same value at creation time (createNewLocationAt/
+                    # onAddPreviewAsLocation), so this fallback is really
+                    # only for the pre-existing, not-yet-migrated ones.
+                    "displayName": loc.get("displayName") or loc["name"],
                     "shore": loc.get("shore"),
                     "lat": loc.get("lat"),
                     "lng": loc.get("lng"),
