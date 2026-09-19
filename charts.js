@@ -1223,6 +1223,31 @@ const TIDE_SLACK_WINDOW_MS = 10 * 60000;
 const TIDE_RUN_TRANSITION_ZONE_MS = 2 * 3600000;
 
 /**
+ * Ranks one tide extremum against the other extrema of its own type
+ * (mixed semidiurnal tides: two unequal highs and lows a day). Returns
+ * "HHW"/"LHW" for a high, "HLW"/"LLW" for a low (H = higher of the day's
+ * pair, L = lower), or null if there is no same-type peer to compare with.
+ * Peers are the other same-type extrema on the same (naive, local)
+ * calendar date; if it is the only one that day (a lunar day can skip a
+ * high or low) it is compared with the nearest same-type neighbour in the
+ * list instead — previous first, then next. A tie counts as the higher.
+ */
+function rankExtremum(extrema, ex) {
+  const sameType = extrema.filter((e) => e.type === ex.type);
+  const day = naiveDateOnlyStr(ex.t);
+  let peers = sameType.filter((e) => e !== ex && naiveDateOnlyStr(e.t) === day);
+  if (peers.length === 0) {
+    const idx = sameType.indexOf(ex);
+    const neighbour = sameType[idx - 1] || sameType[idx + 1];
+    if (!neighbour) return null;
+    peers = [neighbour];
+  }
+  const isHigher = peers.every((p) => ex.height >= p.height);
+  if (ex.type === "high") return isHigher ? "HHW" : "LHW";
+  return isHigher ? "HLW" : "LLW";
+}
+
+/**
  * The pure classification core of "our defined tide rules" — given a
  * sorted list of real tide extrema ({t, height, type}) and a target time,
  * returns one of the Tide Condition pick-list values, or null if there
@@ -1260,17 +1285,28 @@ function classifyTideConditionFromExtrema(extrema, targetMs) {
   const runningIn = prev.type === "low" && next.type === "high";
   const runningOut = prev.type === "high" && next.type === "low";
 
-  if (distToPrev <= TIDE_SLACK_WINDOW_MS) return prev.type === "high" ? "Slack High" : "Slack Low";
-  if (distToNext <= TIDE_SLACK_WINDOW_MS) return next.type === "high" ? "Slack High" : "Slack Low";
+  // Mixed semidiurnal tides: each high/low is ranked against the other one
+  // of its type that day (HHW/LHW/HLW/LLW). Every label below carries the
+  // ranked extreme when it can be determined and falls back to the plain
+  // unranked value otherwise (rank === null).
+  //   Slack X          - the extreme itself
+  //   Start Run In/Out from X - the extreme just LEFT (prev)
+  //   Last Run In/Out to X    - the extreme being APPROACHED (next)
+  //   Running In/Out to X     - mid-run, heading TO the next extreme
+  const prevRank = rankExtremum(extrema, prev);
+  const nextRank = rankExtremum(extrema, next);
+  const slack = (ex, rank) => (rank ? `Slack ${rank}` : ex.type === "high" ? "Slack High" : "Slack Low");
+  if (distToPrev <= TIDE_SLACK_WINDOW_MS) return slack(prev, prevRank);
+  if (distToNext <= TIDE_SLACK_WINDOW_MS) return slack(next, nextRank);
   if (runningIn) {
-    if (distToPrev <= TIDE_RUN_TRANSITION_ZONE_MS) return "Start Run In";
-    if (distToNext <= TIDE_RUN_TRANSITION_ZONE_MS) return "Last Run In";
-    return "Running In";
+    if (distToPrev <= TIDE_RUN_TRANSITION_ZONE_MS) return prevRank ? `Start Run In from ${prevRank}` : "Start Run In";
+    if (distToNext <= TIDE_RUN_TRANSITION_ZONE_MS) return nextRank ? `Last Run In to ${nextRank}` : "Last Run In";
+    return nextRank ? `Running In to ${nextRank}` : "Running In";
   }
   if (runningOut) {
-    if (distToPrev <= TIDE_RUN_TRANSITION_ZONE_MS) return "Start Run Out";
-    if (distToNext <= TIDE_RUN_TRANSITION_ZONE_MS) return "Last Run Out";
-    return "Running Out";
+    if (distToPrev <= TIDE_RUN_TRANSITION_ZONE_MS) return prevRank ? `Start Run Out from ${prevRank}` : "Start Run Out";
+    if (distToNext <= TIDE_RUN_TRANSITION_ZONE_MS) return nextRank ? `Last Run Out to ${nextRank}` : "Last Run Out";
+    return nextRank ? `Running Out to ${nextRank}` : "Running Out";
   }
   // Two consecutive extrema of the SAME type (two lows/two highs in a row)
   // shouldn't happen with well-formed tide data — null rather than guessed
