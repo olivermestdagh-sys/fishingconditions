@@ -264,6 +264,9 @@ export default {
       if (url.pathname === "/api/public/settings" && request.method === "GET") {
         return handlePublicSettings(env);
       }
+      if (url.pathname === "/api/public/locations" && request.method === "GET") {
+        return handlePublicLocations(env);
+      }
 
       // --- Admin-only endpoints below: not scoped by effective-user-id
       // like the rest of this file — these always act on Public's own row
@@ -1626,7 +1629,29 @@ async function handlePipelineLocationsList(request, env) {
   if (!requirePipelineToken(request, env)) {
     return jsonResponse({ error: "Invalid or missing pipeline token." }, 401, env);
   }
+  return jsonResponse(await buildLocationList(env), 200, env);
+}
 
+/**
+ * Public counterpart to handlePipelineLocationsList — same list, no token.
+ * Lets the site's pages read location config (display name, groups,
+ * timings, tide offset, ...) LIVE from D1 rather than from whatever the
+ * last data/conditions.json run baked in, so a Settings edit shows up on
+ * the next page load without waiting for the WillyWeather job. Everything
+ * here is already public via conditions.json / config/locations.json.
+ */
+async function handlePublicLocations(env) {
+  return new Response(JSON.stringify(await buildLocationList(env)), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "no-cache", // the whole point is seeing an edit immediately
+    },
+  });
+}
+
+async function buildLocationList(env) {
   // Public's locations PLUS the Admin account's own — the Admin's private
   // locations otherwise never reach data/conditions.json (the static file
   // Live/Locations read), so they only ever showed on Settings. Basic
@@ -1704,7 +1729,7 @@ async function handlePipelineLocationsList(request, env) {
     };
   });
 
-  return jsonResponse(output, 200, env);
+  return output;
 }
 
 async function handlePipelineLocationUpdate(request, env, id) {
