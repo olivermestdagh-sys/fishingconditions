@@ -36,7 +36,7 @@ body {
 /* One compact dark bar: site name on the left, the tab menu in the middle,
    "Updated ..." on the right — all on one row (see .sitebar wrapper in each
    page's HTML). .topbar itself is display:contents so its h1 and status
-   div become flex items of .sitebar directly. Below 1040px the tabs drop to
+   div become flex items of .sitebar directly. Below 1200px the tabs drop to
    their own row and the name/date share a single small line above. */
 .sitebar {
   display: flex;
@@ -61,14 +61,35 @@ body {
 }
 
 .updated {
-  order: 2;
+  order: 3;
   margin: 0 0 10px auto;
   font-size: 0.78rem;
   color: #b7c9e0;
   white-space: nowrap;
 }
 
-@media (max-width: 1040px) {
+/* WillyWeather API terms: credit by name and brand logo wherever its data is
+   used. Sits just right of the tabs on the wide one-row bar. */
+.ww-credit {
+  order: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin: 0 0 6px 4px;
+  color: #b7c9e0;
+  text-decoration: none;
+  font-size: 0.6rem;
+  line-height: 1;
+}
+
+.ww-credit img {
+  display: block;
+  height: 20px;
+  width: auto;
+}
+
+@media (max-width: 1200px) {
   .sitebar {
     align-items: baseline;
     padding: 6px 12px 0;
@@ -80,9 +101,28 @@ body {
     font-size: 0.9rem;
   }
   .updated {
-    order: 1;
+    order: 2;
     margin: 0 0 4px;
     font-size: 0.68rem;
+  }
+  .ww-credit {
+    order: 1;
+    flex-direction: row;
+    align-items: center;
+    gap: 5px;
+    margin: 0 0 4px;
+  }
+  .ww-credit img {
+    height: 15px;
+  }
+}
+
+@media (max-width: 480px) {
+  .ww-credit span {
+    display: none; /* logo alone on phones — keeps the site name on one line */
+  }
+  .ww-credit img {
+    height: 13px;
   }
 }
 
@@ -963,7 +1003,7 @@ tbody tr:nth-child(even) {
 .sitebar .tabnav {
   order: 1;
   flex: 0 1 600px;
-  margin: 0 auto;
+  margin: 0 0 0 8px; /* tabs sit right after the site name, credit right after the tabs */
   padding: 0;
   max-width: none;
 }
@@ -979,15 +1019,16 @@ tbody tr:nth-child(even) {
   color: var(--blue-900);
 }
 
-@media (min-width: 1041px) {
+@media (min-width: 1201px) {
   .sitebar .tabnav a {
     white-space: nowrap; /* one-row bar: never let a label wrap and make it taller */
   }
 }
 
-@media (max-width: 1040px) {
+@media (max-width: 1200px) {
   .sitebar .tabnav {
-    order: 2;
+    order: 3;
+    margin: 0;
     flex: 1 1 100%; /* full-width row of its own... */
     max-width: none;
     padding: 0 max(0px, calc((100% - 720px) / 2)); /* ...but tabs themselves stay centred, max 720px wide as before */
