@@ -3229,6 +3229,8 @@ async function loadAndRenderMarks(map, state) {
   state.markerLayer = L.markerClusterGroup({
     chunkedLoading: true,
     iconCreateFunction: createMarkClusterIcon,
+    maxClusterRadius: 30, // px; plugin default is 80, which grouped marks too eagerly
+    disableClusteringAtZoom: 16, // every mark shown individually from this zoom in
   });
   map.addLayer(state.markerLayer);
 
