@@ -331,6 +331,13 @@ async function previewLocationOnMap(candidate, clickLat, clickLng) {
   state.previewShore = preview.shoreGuess;
 
   populatePreviewControls(preview.tidal, preview.shoreGuess);
+  // Defaults to WillyWeather's own resolved name, same starting point
+  // createNewLocationAt (locationsadmin.js) uses for both its own name
+  // fields — freely editable here before "Add as permanent location" is
+  // ever clicked, so the saved location can start with the right display
+  // name from the very first save rather than needing a follow-up edit
+  // in Settings.
+  document.getElementById("previewDisplayNameInput").value = candidate.name || "";
   showAddPermanentButton();
   recalcPreviewCondition();
 }
@@ -460,6 +467,15 @@ async function onAddPreviewAsLocation() {
 
   const newLoc = {
     name: state.previewCandidate.name,
+    // Read straight from the input rather than a tracked state
+    // variable — same "just read the DOM element directly when it's
+    // needed" pattern state.previewShore/previewType already follow
+    // (recalcPreviewCondition), rather than needing its own dedicated
+    // change listener to keep something in sync. Both fields default to
+    // the same WillyWeather-resolved name — Oliver's own request — but
+    // this one is freely editable in the meantime, so whatever the
+    // person actually left in the field wins.
+    displayName: document.getElementById("previewDisplayNameInput").value.trim() || state.previewCandidate.name,
     shore: state.previewShore,
     types: [defaultTypeConfig(state.previewType)],
     lat: state.previewClickLat,
@@ -508,7 +524,7 @@ function renderLocation(key) {
   const loc = state.data.locations.find((l) => locationKey(l.name, l.type) === key);
   const rows = state.rowsByLocation[key] || [];
 
-  document.getElementById("hoverPanelLocationName").textContent = loc ? loc.name : "";
+  document.getElementById("hoverPanelLocationName").textContent = loc ? displayNameFor(loc) : "";
   // A real, saved location's own graph — not a preview (see
   // previewLocationOnMap) — so the preview note/badge/controls never
   // linger onto it if the panel was last showing a preview.

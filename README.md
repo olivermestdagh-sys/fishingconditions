@@ -3380,6 +3380,100 @@ its actual returned string, not just success/failure. Confirmed
 `willyweather-search.js`'s own forecasts= string literally contains
 swell now. Zero JS errors throughout.
 
+## Display name, separate from the Willyweather search name
+
+Requested directly: locations only ever had one name, used both as
+what displays everywhere on the site AND as the literal string every
+WillyWeather lookup depends on. Splitting those apart turned out to
+touch far more than the Settings page alone — locations don't actually
+live in `config/locations.json` anymore (that file is now a generated
+export — see "Locations now live in D1" note at the top of
+`fetch_conditions.py`); the real source of truth is D1, behind
+`user-backend.js`. So this needed a schema migration and Worker
+changes, not just a frontend relabel.
+
+**Migration** (`migration-display-name.sql`, run once in the D1
+console): adds the `display_name` column, then backfills it from
+`name` for every existing location in one script — satisfying "one
+time script to copy the values" directly. Safe to run twice by
+accident: `ALTER TABLE ... ADD COLUMN` fails loudly if already applied,
+and the backfill only ever touches rows still NULL. `schema-v2.sql`
+also updated to match, so a fresh setup already has the column.
+
+**`user-backend.js`**: every location-reading endpoint now selects and
+returns `displayName` (falling back to `name` until migrated), and
+both the create (POST) and update (PUT) handlers accept and persist
+it. `rowToTracked` — the one shared row-to-JSON mapper both the list
+endpoint and the single-row PUT echo already go through — is where the
+fallback actually lives, so both automatically got it from one edit.
+
+**`fetch_conditions.py`**: `displayName` now flows into both outputs —
+the real `data/conditions.json` the frontend actually reads (which is
+what the Location tab's preview graph, Week Ahead, and Live all show
+in the end), and the regenerated `config/locations.json` export
+(`export_locations_json`) that `charts.js`'s own direct client-side
+reads (Live's GPS-matching, tide-offset lookups) still depend on.
+
+**`charts.js`**: one new shared helper, `displayNameFor(loc)` —
+`loc.displayName || loc.name`, used everywhere a location's name is
+actually *shown*. Every internal matching/grouping key (marks, sun
+times, pinned/selected location lists, session-window tracking,
+`locationKey()`) deliberately keeps reading `loc.name` directly,
+completely unchanged — only what the person actually *sees* changed;
+nothing that identifies or groups a location internally did.
+
+**Where it's actually used**: Week Ahead's own row heading and its
+location-picker chips; the Location tab's hover panel (both a saved
+location and the "What's here?" preview); Live's own hover panel. The
+Settings editor now shows both fields side by side — "Display name"
+first, "Willyweather search name" second (Oliver's own requested
+order) — both freely editable, saved through the exact same per-field
+auto-save every other field on that page already uses.
+
+A brand new location — whether added via the Settings map's "click to
+add" (`createNewLocationAt`) or saved from the Location tab's own
+preview (`onAddPreviewAsLocation`, now with its own "Display name"
+input, defaulting to WillyWeather's own resolved name but freely
+editable before ever being saved) — sets both fields to the same value
+at creation, per Oliver's own request, then leaves them independently
+editable from that point on.
+
+**Two more silent gaps found and fixed along the way, the same shape
+as the ones already documented elsewhere in this README**:
+`saveNewLocationToD1` (charts.js, used by the preview's own save flow)
+and `createLocation` (locationsadmin.js, the Settings page's own
+manual "Create location" button) each build their own explicit,
+hardcoded request body — both would have silently dropped
+`displayName` on the floor even with every other layer correctly
+wired, exactly the same class of bug `schedulePlaceSave`'s missing
+field turned out to be for something else earlier. Both fixed, with
+`createLocation`'s own fallback to `name` covering a manually-added
+blank row that never had a chance to get displayName pre-filled by a
+map click the way `createNewLocationAt` already does.
+
+**Verified**: real browser tests. `displayNameFor` — confirmed it
+returns `displayName` when set, falls back to `name` when unset OR
+explicitly empty-string, and handles a `null` location safely.
+Preview-to-save flow — confirmed the actual POST payload sent to the
+backend carries a person's own edited display name correctly, and
+separately confirmed it falls back to WillyWeather's own resolved name
+when the field is left untouched; confirmed `name` (the search name)
+itself never changes regardless. Settings editor — confirmed both
+"Display name" and "Willyweather search name" labels render correctly,
+confirmed each field shows its own distinct, correct value, and
+confirmed editing the Display name field in the UI actually updates
+the underlying location object. Not independently test-verified this
+round, on judgment given the real effort isolating each page's own
+surrounding logic would need versus the low risk of the actual
+change: the equivalent substitutions in `week.js` (row heading, filter
+chips) and `live.js` (hover panel) — both trivial, mechanical swaps of
+an already-proven helper, reviewed carefully rather than harness-
+tested. The backend SQL/Worker changes couldn't be tested at all from
+here — no route to a real D1 database from this sandbox — so those are
+a careful code review, not a verified test; worth specifically
+confirming against the real site after deploying, not just trusting
+this description.
+
 ## Troubleshooting
 
 - **Page loads but says "Not updated yet"**: the scheduled job hasn't run

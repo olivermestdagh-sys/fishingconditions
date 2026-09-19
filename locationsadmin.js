@@ -1635,7 +1635,11 @@ function renderRows() {
     row.innerHTML = `
       <div class="loc-edit-top">
         <div style="flex:2;min-width:180px;">
-          <label class="loc-edit-label">Location name</label>
+          <label class="loc-edit-label">Display name</label>
+          <input type="text" data-field="displayName" data-idx="${i}" value="${(loc.displayName || "").replace(/"/g, "&quot;")}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+        </div>
+        <div style="flex:2;min-width:180px;">
+          <label class="loc-edit-label">Willyweather search name</label>
           <input type="text" data-field="name" data-idx="${i}" value="${(loc.name || "").replace(/"/g, "&quot;")}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
         </div>
         <div style="min-width:100px;">
@@ -1913,6 +1917,10 @@ function createNewLocationAt(lat, lng, candidate) {
   const newLoc = {
     _new: true,
     name: candidate ? candidate.name : "",
+    // Both set to the same value at creation — Oliver's own request. Left
+    // independently editable afterwards (neither field is derived from
+    // the other going forward), same as the name field always has been.
+    displayName: candidate ? candidate.name : "",
     shore: "N",
     types: [],
     lat,
@@ -1928,16 +1936,18 @@ function createNewLocationAt(lat, lng, candidate) {
   selectLocation(locations.length - 1);
   renderRows();
 
-  // Focus straight into the name field of the new (now the only visible,
-  // thanks to selectedLocationIdx/applyLocationFilter) card. When a
-  // candidate was picked, the name field is already pre-filled with
-  // WillyWeather's own name — still focused (and left editable, not
-  // disabled) since a custom personal label is fine too; only the cached
+  // Focus straight into the display name field of the new (now the only
+  // visible, thanks to selectedLocationIdx/applyLocationFilter) card —
+  // the one that actually matters for how this location looks everywhere
+  // else on the site, and the first field in the form now that it's
+  // listed ahead of the Willyweather search name. Both fields already
+  // start pre-filled with WillyWeather's own name when a candidate was
+  // picked, and are left fully editable, not disabled — only the cached
   // willyweatherId above actually matters for data-fetching accuracy, not
-  // whatever this field says.
+  // whatever either name field says.
   const newRow = document.querySelector(`.loc-edit-card[data-loc-row-idx="${selectedLocationIdx}"]`);
-  const nameInput = newRow && newRow.querySelector('input[data-field="name"]');
-  if (nameInput) nameInput.focus();
+  const displayNameInput = newRow && newRow.querySelector('input[data-field="displayName"]');
+  if (displayNameInput) displayNameInput.focus();
 }
 
 function jumpToLocationRow(idx) {
@@ -2270,6 +2280,10 @@ async function createLocation(idx) {
   const existingKayak = viewedTypes.find((t) => t.behavesLike === "Kayak" && t.name === "Kayak");
   const body = {
     name: loc.name,
+    // Falls back to name — a manually-added blank row (not via map
+    // click, where createNewLocationAt already pre-fills both) could
+    // reach here with displayName still empty if only Name got filled in.
+    displayName: loc.displayName || loc.name,
     lat: loc.lat,
     lng: loc.lng,
     shore: loc.shore,
