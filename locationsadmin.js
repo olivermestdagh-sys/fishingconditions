@@ -1564,6 +1564,7 @@ async function loadLocations() {
         loc = {
           _id: row.location.id,
           name: row.location.name,
+          displayName: row.location.displayName,
           shore: row.location.shore,
           tidal: row.location.tidal,
           tideOffset: row.location.tideOffset,
@@ -2398,6 +2399,13 @@ async function copyLocationToOtherAccount(idx) {
       const matchingType = targetTypes.find((tt) => tt.name === t.type);
       const body = {
         name: loc.name,
+        // Explicit rather than relying on the backend's own body.displayName
+        // ?? body.name fallback — that fallback exists for a caller with no
+        // concept of displayName at all (the pipeline's own auto-create
+        // path), not as a substitute for actually copying it: falling
+        // through to loc.name here would silently lose a custom display
+        // name that differs from the Willyweather search name on copy.
+        displayName: loc.displayName || loc.name,
         lat: loc.lat,
         lng: loc.lng,
         shore: loc.shore,
