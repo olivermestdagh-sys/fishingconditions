@@ -106,11 +106,28 @@
       body.style.width = "";
       body.style.height = "";
       body.style.top = "";
-      if (scrollWrap) scrollWrap.style.maxHeight = "";
       document.documentElement.style.removeProperty("--weeknew-mobile-row-height");
+      // Make the graph board fill the rest of the screen height (instead of
+      // the CSS fallback's 65vh cap): viewport height minus everything above
+      // it, minus the footnote below it and main's small bottom padding.
+      // Falls back to that CSS cap if there's implausibly little room.
+      if (scrollWrap) {
+        var foot = scrollWrap.nextElementSibling;
+        var footH = foot ? foot.offsetHeight + 20 : 40;
+        var avail = window.innerHeight - getOffsetTopWithinBody(scrollWrap) - footH - 8; // 8 = main's bottom padding on this page (inline style on <main>)
+        var wanted = avail > 200 ? avail + "px" : "";
+        if (scrollWrap.style.maxHeight !== wanted) scrollWrap.style.maxHeight = wanted;
+      }
     }
   }
-  document.addEventListener("DOMContentLoaded", applyForceLandscapeSizing);
+  document.addEventListener("DOMContentLoaded", function () {
+    applyForceLandscapeSizing();
+    // The filters card above the board grows/shrinks when opened, which moves
+    // the board's top edge — re-measure whenever it changes size.
+    var board = document.getElementById("weekTimelineScroll");
+    var above = board && board.parentElement && board.parentElement.previousElementSibling;
+    if (above && window.ResizeObserver) new ResizeObserver(applyForceLandscapeSizing).observe(above);
+  });
   window.addEventListener("resize", applyForceLandscapeSizing);
   window.addEventListener("orientationchange", applyForceLandscapeSizing);
 </script>
@@ -132,7 +149,7 @@
   <a href="locations.html">Settings</a>
 </nav></div>
 
-<main class="wide">
+<main class="wide" style="padding-bottom:8px;">
   <section class="summary-card gc-filters">
     <div class="filters-toggle" id="filtersToggle" role="button" tabindex="0">
       <label class="loc-edit-label" style="margin:0;">Thresholds &amp; filters</label>
