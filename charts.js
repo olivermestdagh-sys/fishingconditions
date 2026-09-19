@@ -6700,6 +6700,12 @@ async function guessShoreDirection(lat, lng) {
  * something that should block the page from rendering at all.
  */
 async function loadTideOffsets(allLocations) {
+  // UPDATE: now overlays ALL location config (display name, groups, timings,
+  // tide offset, ...) live from D1 via /api/public/locations, not just
+  // tideOffset from the static file — so a Settings edit shows on the next
+  // page load without the WillyWeather job. Falls back to the file-based
+  // behaviour below if the endpoint is unreachable.
+  if (await mergeLiveLocationConfig(allLocations)) return;
   try {
     // A cache-busting query parameter, not just {cache:"no-store"} — that
     // option only tells THIS BROWSER not to use its own local cache; it
@@ -6722,6 +6728,37 @@ async function loadTideOffsets(allLocations) {
     }
   } catch (err) {
     console.error("Could not load tide offsets from config/locations.json:", err);
+  }
+}
+
+/**
+ * Merges location config from D1 (GET /api/public/locations) onto the
+ * locations loaded from data/conditions.json: shared fields by name, and
+ * per-type timing fields by name + type. Only overwrites fields the
+ * endpoint actually returned, and never touches WillyWeather-derived
+ * rows. Returns true on success, false if the caller should fall back.
+ */
+async function mergeLiveLocationConfig(allLocations) {
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/public/locations?_=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) return false;
+    const live = await res.json();
+    if (!Array.isArray(live)) return false;
+    const byName = new Map(live.map((l) => [l.name, l]));
+    const SHARED = ["displayName", "shore", "tidal", "locationGroup", "locationGroups", "tideOffset", "tideMaxObserved", "lat", "lng"];
+    const PER_TYPE = ["driveTo", "driveBack", "setUp", "packUp", "timeToSpot", "timeFromSpot", "minTideHeight"];
+    for (const loc of allLocations) {
+      const src = byName.get(loc.name);
+      if (!src) continue;
+      for (const f of SHARED) if (src[f] !== undefined && src[f] !== null) loc[f] = src[f];
+      loc.tideOffset = src.tideOffset; // null is meaningful here (offset cleared)
+      const t = (src.types || []).find((x) => x.type === loc.type);
+      if (t) for (const f of PER_TYPE) if (t[f] !== undefined) loc[f] = t[f];
+    }
+    return true;
+  } catch (err) {
+    console.error("Could not load live location config:", err);
+    return false;
   }
 }
 
