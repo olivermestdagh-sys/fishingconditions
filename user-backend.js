@@ -1627,10 +1627,19 @@ async function handlePipelineLocationsList(request, env) {
     return jsonResponse({ error: "Invalid or missing pipeline token." }, 401, env);
   }
 
+  // Public's locations PLUS the Admin account's own — the Admin's private
+  // locations otherwise never reach data/conditions.json (the static file
+  // Live/Locations read), so they only ever showed on Settings. Basic
+  // users' locations are deliberately still excluded. NOTE: this makes the
+  // Admin's locations visible on the public site.
+  const { results: adminRows } = await env.DB.prepare("SELECT id FROM users WHERE role = 'admin'").all();
+  const ownerIds = [PUBLIC_USER_ID, ...adminRows.map((r) => r.id)];
+  const ownerPlaceholders = ownerIds.map(() => "?").join(", ");
+
   const { results: locationRows } = await env.DB.prepare(
-    "SELECT * FROM locations WHERE created_by_user_id = ? ORDER BY name ASC"
+    `SELECT * FROM locations WHERE created_by_user_id IN (${ownerPlaceholders}) ORDER BY name ASC`
   )
-    .bind(PUBLIC_USER_ID)
+    .bind(...ownerIds)
     .all();
 
   const { results: accessRows } = await env.DB.prepare(
@@ -1638,9 +1647,9 @@ async function handlePipelineLocationsList(request, env) {
             ula.min_tide_height, t.name as type_name, t.behaves_like
      FROM user_location_access ula
      JOIN user_types t ON t.id = ula.type_id
-     WHERE ula.user_id = ?`
+     WHERE ula.user_id IN (${ownerPlaceholders})`
   )
-    .bind(PUBLIC_USER_ID)
+    .bind(...ownerIds)
     .all();
   const typesByLocation = new Map();
   for (const row of accessRows) {
@@ -1662,9 +1671,9 @@ async function handlePipelineLocationsList(request, env) {
     `SELECT m.location_id, g.name as group_name
      FROM user_location_group_members m
      JOIN user_location_groups g ON g.id = m.group_id
-     WHERE m.user_id = ?`
+     WHERE m.user_id IN (${ownerPlaceholders})`
   )
-    .bind(PUBLIC_USER_ID)
+    .bind(...ownerIds)
     .all();
   const groupsByLocation = new Map();
   for (const row of memberRows) {

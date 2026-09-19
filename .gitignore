@@ -1,0 +1,6 @@
+﻿
+db/
+workers/
+.claude/
+node_modules/
+.wrangler/
