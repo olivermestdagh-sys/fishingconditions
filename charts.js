@@ -4977,6 +4977,14 @@ function getConnection() {
  * sitting on a page — signing in/out on the Account tab only takes effect
  * for THIS check on the next page load/navigation.
  */
+// Offline support (sw.js): the site opens with no signal using the last copy
+// of each file. Network-first, so it never serves stale code while online.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch((err) => console.error("Service worker not registered:", err));
+  });
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   const syncNavLink = document.querySelector('.tabnav a[href="sync.html"]');
   if (!syncNavLink) return;

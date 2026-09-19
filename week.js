@@ -1187,6 +1187,8 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
   chartWrap.className = "weeknew-row-chart";
   chartWrap.style.width = "40px"; // placeholder — see the renderChart comment further down for why
   const canvas = document.createElement("canvas");
+  canvas.setAttribute("role", "img");
+  canvas.setAttribute("aria-label", `Chart of tide, wind, pressure and fishing condition ratings for ${displayNameFor(loc)} (${loc.type})`);
   chartWrap.appendChild(canvas);
   let rowChartRef = null;
 

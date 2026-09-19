@@ -70,6 +70,19 @@ body {
 
 /* WillyWeather API terms: credit by name and brand logo wherever its data is
    used. Sits just right of the tabs on the wide one-row bar. */
+/* Keyboard users need to see where focus is: a clear outline on anything
+   focusable, but only for keyboard focus (not mouse clicks). */
+a:focus-visible,
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
+}
+
 .updated.stale {
   color: #fbbf24;
   font-weight: 600;
