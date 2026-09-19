@@ -3234,6 +3234,23 @@ async function loadAndRenderMarks(map, state) {
   });
   map.addLayer(state.markerLayer);
 
+  // Hovering a cluster lists the marks inside it. Reuses each child's own
+  // already-bound (and already-escaped) tooltip text, so it stays in step
+  // with edits — see the unbindTooltip/bindTooltip calls on mark edits.
+  const MAX_CLUSTER_TOOLTIP_ROWS = 15;
+  state.markerLayer.on("clustermouseover", (e) => {
+    const cluster = e.layer;
+    const rows = cluster.getAllChildMarkers()
+      .map((child) => child.getTooltip && child.getTooltip() && child.getTooltip().getContent())
+      .filter(Boolean)
+      .sort();
+    const shown = rows.slice(0, MAX_CLUSTER_TOOLTIP_ROWS).map((r) => `<div>${r}</div>`).join("");
+    const extra = rows.length > MAX_CLUSTER_TOOLTIP_ROWS ? `<div><em>+${rows.length - MAX_CLUSTER_TOOLTIP_ROWS} more</em></div>` : "";
+    cluster.unbindTooltip();
+    cluster.bindTooltip(shown + extra, { direction: "top", offset: [0, -14] }).openTooltip();
+  });
+  state.markerLayer.on("clustermouseout", (e) => e.layer.closeTooltip());
+
   const renderer = L.canvas({ padding: 0.5 });
   state.canvasRenderer = renderer; // reused by startNewMarkEntry below for a freshly-created mark, so every shape on this map — loaded or brand new — draws on the same Canvas renderer (see getDiamondMarkerClass/getCrossMarkerClass's own comment on why that's required)
   for (const mark of marks) {
