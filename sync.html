@@ -71,7 +71,7 @@
       <p class="footnote" style="margin:0 0 12px;text-align:left;">
         Pick a Garmin GPX or a Lowrance <code>.usr</code> (format 6) file exported from your sounder's own
         "export waypoints" option. Every waypoint is matched against what's already in
-        <code>data/marks.json</code> before anything is saved — spots the device saved more than once
+        the marks database before anything is saved — spots the device saved more than once
         (a common thing chartplotters do when you drift back over the same mark) are merged into one, and
         anything within 20m of a mark already tracked is left out of the list entirely, so nothing gets
         imported twice. Review and edit below, then import only what you actually want kept.
@@ -144,7 +144,7 @@
     <section class="summary-card">
       <div class="summary-title" style="margin-bottom:6px;">Export to a device</div>
       <p class="footnote" style="margin:0 0 12px;text-align:left;">
-        Downloads every mark currently in <code>data/marks.json</code> as a GPX file — Lowrance and Garmin
+        Downloads every mark currently in the marks database as a GPX file — Lowrance and Garmin
         each want a slightly different <code>&lt;sym&gt;</code> icon format, so export the one for whichever
         device you're loading onto (see the Mark Formats in Fishing Mark Lists, on the Settings tab, to
         control exactly what each device shows).

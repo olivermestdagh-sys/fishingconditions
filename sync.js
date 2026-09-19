@@ -29,7 +29,7 @@
 // multi-tab-juggling of several imports at once).
 // ---------------------------------------------------------------------------
 
-let existingMarks = []; // loaded once from data/marks.json — used both to
+let existingMarks = []; // loaded once from the marks database — used both to
                          // match new candidates against and (on successful
                          // import) kept in sync locally so a second import
                          // in the same session matches against what was
@@ -177,7 +177,7 @@ async function clearPersistedReviewState() {
 
 // How close two points have to be to count as "the same spot" — both for
 // collapsing repeat device saves of one spot into a single candidate, and
-// for recognising a candidate that's already tracked in marks.json. Fixed
+// for recognising a candidate that's already tracked in the marks database. Fixed
 // at 20m rather than a UI setting for now, per Oliver's own call when this
 // tab was being designed — distance alone, no name/species check, so a
 // genuinely different catch recorded a few metres from an old one will
@@ -540,7 +540,7 @@ function collapseRawWaypoints(rawList) {
 
 /**
  * Flags each collapsed group with whatever it matches in the ALREADY
- * TRACKED marks.json, if anything — two ways, checked in order:
+ * TRACKED marks database, if anything — two ways, checked in order:
  *
  *  1. Exact sourceUuid match (Lowrance only) — a re-import of the exact
  *     same device waypoint, recognised with certainty regardless of how far
@@ -606,7 +606,7 @@ function matchAgainstExisting(groups) {
 }
 
 // ---------------------------------------------------------------------------
-// GPX export — the reverse direction: turn the current data/marks.json into
+// GPX export — the reverse direction: turn the current the marks database into
 // a GPX file suitable for loading onto either a Garmin unit or Oliver's
 // Lowrance sounder directly (confirmed it accepts GPX import — no need for
 // a real binary .usr writer, which would be a much bigger, riskier lift to
@@ -949,7 +949,7 @@ async function handleExportClick(device) {
 // ---------------------------------------------------------------------------
 
 /** Only genuinely-new candidates are ever reviewable — anything already
- * matched to a mark in data/marks.json (see matchAgainstExisting) isn't a
+ * matched to a mark in the marks database (see matchAgainstExisting) isn't a
  * real import candidate at all, so it's excluded here rather than just
  * shown unchecked. This is the ONE place that distinction is applied;
  * every other function below (rendering, search, select-all) works off
@@ -1428,7 +1428,7 @@ async function handleImportClick() {
 
   const result = await saveMarksBatchToD1([...newMarks, ...sessionMarks]);
   if (result.success) {
-    statusEl.textContent = `Imported ${result.added} mark${result.added === 1 ? "" : "s"} into data/marks.json.`;
+    statusEl.textContent = `Imported ${result.added} mark${result.added === 1 ? "" : "s"} into the marks database.`;
     statusEl.style.color = "#16a34a";
     // Keep the local working copy in sync so a second import in the same
     // session (or hitting Export) reflects what was just written, without
