@@ -3230,7 +3230,8 @@ async function loadAndRenderMarks(map, state) {
     chunkedLoading: true,
     iconCreateFunction: createMarkClusterIcon,
     maxClusterRadius: 30, // px; plugin default is 80, which grouped marks too eagerly
-    disableClusteringAtZoom: 16, // every mark shown individually from this zoom in
+    // No disableClusteringAtZoom here: tried at 16 and marks vanished on zoom-in
+    // (this layer holds canvas CircleMarker/Path shapes, not plain L.Markers).
   });
   map.addLayer(state.markerLayer);
 
