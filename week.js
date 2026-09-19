@@ -45,7 +45,38 @@ const SETTINGS_URL = "https://fishingconditions-users.oliver-mestdagh.workers.de
 // leaving almost no surrounding context and forcing far more horizontal
 // scrolling per day than made sense for the smaller screen.
 const PIXELS_PER_HOUR = isMobileDevice ? 16 : 32;
-const SIDEBAR_WIDTH = 220; // px — the frozen left-hand column showing each row's location name/pin/sessions
+// px — the frozen left-hand column showing each row's location name/pin/sessions.
+// On phones (up to 700px wide, see "compare board" in style.css) that column is
+// gone: each row's name is a pill floating on its graph, so the board has no
+// sidebar width to reserve.
+const COMPACT_LAYOUT_QUERY = "(max-width: 700px)";
+function isCompactLayout() {
+  return window.matchMedia(COMPACT_LAYOUT_QUERY).matches;
+}
+function sidebarWidth() {
+  return isCompactLayout() ? 0 : 220;
+}
+
+// Crossing the phone/desktop width (rotating a tablet, resizing a window)
+// changes the layout, so rebuild the board. renderWeekView is a function
+// declaration further down, so it exists by the time this ever fires.
+window.matchMedia(COMPACT_LAYOUT_QUERY).addEventListener("change", () => {
+  if (typeof renderWeekView === "function" && document.getElementById("weekTimelineInner")) renderWeekView();
+});
+
+/** Closes any row's ⓘ details popover (phone layout), optionally keeping one open. */
+function closeRowDetails(exceptRow) {
+  document.querySelectorAll(".weeknew-row.details-open").forEach((r) => {
+    if (r === exceptRow) return;
+    r.classList.remove("details-open");
+    const b = r.querySelector(".weeknew-row-details-btn");
+    if (b) b.setAttribute("aria-expanded", "false");
+  });
+}
+// Tapping anywhere outside an open popover closes it.
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".weeknew-row-sidebar")) closeRowDetails();
+});
 
 let allRows = [];
 let allLocations = [];
@@ -225,7 +256,7 @@ function scrollToCenterSession(session, timelineStart, totalTrackWidth) {
   if (!scrollWrap) return;
   const midMs = (session.from + session.to) / 2;
   const trackPx = ((midMs - timelineStart) / 3600000) * PIXELS_PER_HOUR;
-  const visibleChartWidth = Math.max(100, scrollWrap.clientWidth - SIDEBAR_WIDTH);
+  const visibleChartWidth = Math.max(100, scrollWrap.clientWidth - sidebarWidth());
   const target = trackPx - visibleChartWidth / 2;
   scrollWrap.scrollLeft = Math.max(0, Math.min(Math.max(0, totalTrackWidth - visibleChartWidth), target));
 }
@@ -910,7 +941,7 @@ function renderWeekView() {
   const totalTrackWidth = Math.max(1, totalHours) * PIXELS_PER_HOUR;
 
   inner.innerHTML = "";
-  inner.style.width = SIDEBAR_WIDTH + totalTrackWidth + "px";
+  inner.style.width = sidebarWidth() + totalTrackWidth + "px";
 
   // Sun times aren't per-location on the shared header — pick any one
   // location's data as representative (Victorian locations are close
@@ -1173,6 +1204,21 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
   titleRow.className = "weeknew-row-title-line";
   titleRow.appendChild(star);
   titleRow.appendChild(titleWrap);
+  // Phone layout only (hidden by CSS otherwise): the ⓘ button on the name pill
+  // opens this row's session chips and planning buttons in a popover.
+  const detailsBtn = document.createElement("button");
+  detailsBtn.type = "button";
+  detailsBtn.className = "weeknew-row-details-btn";
+  detailsBtn.textContent = "ⓘ";
+  detailsBtn.setAttribute("aria-label", `Sessions and planning for ${displayNameFor(loc)}`);
+  detailsBtn.setAttribute("aria-expanded", "false");
+  detailsBtn.addEventListener("click", () => {
+    const opening = !row.classList.contains("details-open");
+    closeRowDetails(opening ? row : null);
+    row.classList.toggle("details-open", opening);
+    detailsBtn.setAttribute("aria-expanded", String(opening));
+  });
+  titleRow.appendChild(detailsBtn);
   sidebar.appendChild(titleRow);
 
   // Declared here (not down where they used to sit, right before being
@@ -1217,6 +1263,7 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
     addBtn.textContent = label;
     addBtn.addEventListener("click", () => {
       onArmScheduleClick(loc, row, addBtn, mode, () => rowChartRef, canvas);
+      closeRowDetails(); // phone layout: get the popover out of the way so the graph can be dragged
     });
     addBtnsRow.appendChild(addBtn);
   }
@@ -1259,6 +1306,7 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
       // qualifying-session chip is purely navigational.
       chip.addEventListener("click", () => {
         scrollToCenterSession(s, timelineStart, totalTrackWidth);
+        closeRowDetails(); // phone layout: close the popover to show the session on the graph
       });
       sessionsWrap.appendChild(chip);
     }

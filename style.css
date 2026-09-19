@@ -2446,121 +2446,9 @@ main.wide {
   border-radius: 0;
 }
 
-/* Week Ahead (new) — force-landscape trick, mobile only. True orientation
-   *locking* (screen.orientation.lock()) requires the page to already be in
-   fullscreen plus a user gesture on both Android and iOS, and iOS Safari
-   doesn't implement the API at all — so it can't fire the instant the page
-   loads the way this needed to. This delivers the same practical result
-   without needing any permission or gesture: whenever the device is
-   actually held in portrait AND the viewport is phone-width, the entire
-   page is rotated 90° via a CSS transform and resized so its own width and
-   height are swapped — it renders using a landscape-shaped layout exactly
-   as if the phone were already turned sideways. The instant the phone IS
-   physically turned to landscape, the real viewport itself becomes
-   landscape-shaped, the (orientation: portrait) query below stops
-   matching on its own, and this transform switches off automatically —
-   the page then displays completely normally, untouched, using its own
-   real (now-landscape) viewport rather than a simulated one.
-
-   Scoped to html.weeknew-force-landscape specifically — a class only
-   index.html's own <html> tag carries (see index.html) — so this
-   has zero effect on every other page; none of them opted into it. */
-@media screen and (max-width: 900px) and (orientation: portrait) {
-  html.weeknew-force-landscape {
-    overflow-x: hidden;
-  }
-  html.weeknew-force-landscape body {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    width: 100vh;
-    height: 100vw;
-    transform-origin: left top;
-    transform: rotate(-90deg);
-    overflow-x: hidden;
-  }
-
-  /* vw/vh CSS units always resolve against the REAL (still-portrait)
-     viewport — a rotate() transform is a paint-time visual effect, it
-     doesn't redefine what "100vw" means for anything inside it. So every
-     place elsewhere in this file that sizes something with vw/vh, assuming
-     those describe the visible landscape-shaped canvas, needs the exact
-     opposite unit here: real vh now corresponds to the *width* the
-     rotated page actually displays at, and real vw to its *height*. Only
-     two rules on this page depend on vw/vh sizing (below) — everything
-     else is already in px or %, which transforms correctly on their own. */
-  html.weeknew-force-landscape .week-full-bleed {
-    width: 100vh;
-    max-width: 100vh;
-    margin-left: calc(50% - 50vh);
-    margin-right: calc(50% - 50vh);
-  }
-  html.weeknew-force-landscape .week-timeline-scroll {
-    max-height: 65vw; /* fallback only — index.html's inline script overrides this with a precisely measured pixel value once it runs */
-  }
-
-  /* The chrome above the timeline board (title bar, nav tabs, filters
-     toggle) eats a disproportionate share of the very limited vertical
-     budget available in this rotated layout — the whole "landscape
-     height" here is just the phone's own physical width (e.g. ~360px on
-     a Samsung S21), nothing close to a real landscape screen's height.
-     Trimmed down specifically here so more of that budget goes to the
-     actual graphs, which is what a mobile visitor is on this page for —
-     with zero effect on any other page, since none of them carry the
-     weeknew-force-landscape class this is scoped to. */
-  html.weeknew-force-landscape .sitebar {
-    padding: 4px 8px 0;
-  }
-  html.weeknew-force-landscape .topbar h1 {
-    font-size: 0.85rem;
-    padding-bottom: 3px;
-  }
-  html.weeknew-force-landscape .updated {
-    font-size: 0.65rem;
-    margin-bottom: 3px;
-  }
-  html.weeknew-force-landscape .tabnav {
-    gap: 3px;
-  }
-  html.weeknew-force-landscape .sitebar .tabnav a {
-    padding: 4px 4px;
-    font-size: 0.72rem;
-  }
-  html.weeknew-force-landscape main {
-    padding: 6px 6px 20px;
-  }
-  html.weeknew-force-landscape .gc-filters.summary-card {
-    padding: 8px 10px;
-    margin-bottom: 6px;
-  }
-}
-
-/* Double-tap-to-fullscreen (see week.js's setupFullscreenToggle) —
-   toggles real browser fullscreen on #weekTimelineScroll itself, rather
-   than relying purely on the CSS rotation trick above. Fullscreen
-   elements render in the browser's own "top layer", explicitly exempt
-   from any ancestor's CSS transform per spec — so once this element IS
-   the fullscreen element, body's own rotate(-90deg) (see
-   html.weeknew-force-landscape above) no longer applies to it at all,
-   good or bad depending on what actually happens next:
-     - If screen.orientation.lock('landscape') succeeds — only possible at
-       all inside a genuine fullscreen + user-gesture context, which a
-       double-tap now provides — the device is genuinely landscape and
-       this displays correctly on its own, no rotation trick needed.
-     - If lock isn't available (unsupported browser, or it simply fails)
-       and the phone is still physically portrait, the exact same rotation
-       trick is re-applied here, directly to the fullscreen element this
-       time, so it still displays correctly either way.
-   The two states are mutually exclusive by construction: once truly
-   landscape (lock succeeded, or the person just physically turned the
-   phone), (orientation: portrait) below stops matching on its own and
-   this block does nothing — same self-adjusting behavior as the base
-   force-landscape trick.
-   !important on max-height overrides the small inline pixel value
-   index.html's sizing script sets for the NON-fullscreen layout
-   (computed to fit alongside the header/nav/filters chrome) — that
-   number has nothing to do with fullscreen, where this element is the
-   only thing on screen. */
+/* Double-tap-to-fullscreen (setupFullscreenToggle, js/week-tools.js): real browser fullscreen on
+   the board, with a best-effort landscape lock on phones. max-height !important overrides
+   the inline pixel height index.html's sizing script sets for the normal layout. */
 #weekTimelineScroll:fullscreen,
 #weekTimelineScroll:-webkit-full-screen {
   width: 100vw;
@@ -2568,33 +2456,14 @@ main.wide {
   max-height: 100vh !important;
   background: var(--white);
 }
-@media screen and (max-width: 900px) and (orientation: portrait) {
-  #weekTimelineScroll:fullscreen,
-  #weekTimelineScroll:-webkit-full-screen {
-    width: 100vh;
-    height: 100vw;
-    max-height: 100vw !important;
-    transform-origin: left top;
-    transform: rotate(-90deg);
-    position: fixed;
-    top: 100%;
-    left: 0;
-  }
-}
 
-/* Desktop click-and-drag-to-pan (week.js's setupDragToScroll) — grab
-   cursor invites the drag; grabbing cursor (added/removed by JS while a
-   drag is actually in progress) confirms it's happening. Both are inert
-   on touch devices (no cursor to show), so no separate mobile/desktop
-   scoping needed there — but scoped to html.weeknew-force-landscape
-   (present unconditionally on index.html, regardless of screen size —
-   only the rotation behavior itself is gated by screen size) so the OLD
-   Week Ahead page, which shares this same .week-timeline-scroll class but
-   has no drag-to-scroll JS at all, doesn't show a misleading grab cursor. */
-html.weeknew-force-landscape .week-timeline-scroll {
+/* Desktop click-and-drag-to-pan (week.js's setupDragToScroll) — grab cursor invites the drag,
+   grabbing while one is in progress. Inert on touch devices. Scoped to html.weeknew-page
+   (only index.html) so the other pages sharing .week-timeline-scroll don't show it. */
+.weeknew-page .week-timeline-scroll {
   cursor: grab;
 }
-html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
+.weeknew-page .week-timeline-scroll.weeknew-dragging {
   cursor: grabbing;
 }
 
@@ -3280,4 +3149,118 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
 }
 .sync-pill-visits {
   background: var(--blue-700);
+}
+
+/* ---------------------------------------------------------------------
+   Week Ahead on phones (screens up to 700px wide, either orientation):
+   the "compare board". The graphs are the point — you scan them by eye and
+   only then look at which location it is — so instead of a 220px name panel
+   beside every graph (which leaves a phone almost no room for the graph),
+   each row's name becomes a small pill floating on the graph's top-left
+   corner. It is sticky, so it stays in view while you scroll sideways
+   through the week, and every row shares the one sideways scroll and the
+   sticky day header, so all the graphs line up for comparison. The details
+   button (ⓘ) on the pill opens the row's session chips and planning
+   buttons in a popover. (js/week-tools.js / week.js: sidebarWidth(),
+   the details button in buildLocationRowElement.)
+   --------------------------------------------------------------------- */
+.weeknew-row-details-btn {
+  display: none; /* phones only, below */
+}
+
+@media (max-width: 700px) {
+  .weeknew-page .week-timeline-scroll {
+    /* Height of each row's graph on a phone (incl. the two condition strips):
+       short enough that 2-3 locations fit on screen at once. */
+    --weeknew-mobile-row-height: 210px;
+  }
+  .weeknew-page .week-timeline-scroll + .footnote {
+    display: none; /* the gesture hints text costs a lot of height on a phone */
+  }
+  .weeknew-header-spacer {
+    display: none;
+  }
+  .weeknew-row {
+    position: relative;
+  }
+  .weeknew-row-sidebar {
+    flex: 0 0 0;
+    width: 0;
+    padding: 0;
+    gap: 0;
+    border: 0;
+    max-height: none;
+    overflow: visible;
+    background-image: none !important; /* the per-row photo is set inline in week.js */
+    background: transparent;
+  }
+  .weeknew-row-title-line {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    max-width: calc(100vw - 20px);
+    padding: 2px 4px 2px 2px;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 999px;
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
+  }
+  .weeknew-row-title-line .weeknew-row-title {
+    min-width: 0;
+  }
+  .weeknew-row-title .window-loc {
+    font-size: 0.72rem;
+    line-height: 1.15;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 55vw;
+  }
+  .weeknew-row-title .window-sub {
+    font-size: 0.6rem;
+    line-height: 1.1;
+  }
+  .weeknew-row-details-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 50%;
+    background: var(--blue-100, #eaf2fb);
+    color: var(--blue-900);
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .weeknew-row.details-open .weeknew-row-details-btn {
+    background: var(--blue-900);
+    color: var(--white);
+  }
+  /* Sessions and planning buttons: hidden until the ⓘ button is tapped. */
+  .weeknew-row-sessions {
+    display: none;
+  }
+  .weeknew-row.details-open .weeknew-row-sidebar {
+    z-index: 5; /* above later rows' sidebars, below the sticky day header (6-7) */
+  }
+  .weeknew-row.details-open .weeknew-row-sessions {
+    display: flex;
+    position: absolute;
+    top: 42px;
+    left: 6px;
+    width: min(300px, calc(100vw - 24px));
+    max-height: 60vh;
+    overflow-y: auto;
+    padding: 8px;
+    background: var(--white);
+    border-radius: 12px;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+    z-index: 4;
+  }
 }

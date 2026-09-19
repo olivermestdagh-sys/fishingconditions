@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="weeknew-force-landscape">
+<html lang="en" class="weeknew-page">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,33 +11,13 @@
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="stylesheet" href="style.css" />
 <script>
-  // Belt-and-suspenders companion to the CSS rotate-for-landscape trick in
-  // style.css (search for "weeknew-force-landscape" there for the full
-  // explanation of why this exists instead of screen.orientation.lock()).
-  // The CSS alone uses 100vh/100vw, which is where this technique most
-  // often breaks on REAL phones: mobile Safari and mobile Chrome both
-  // resize the visible viewport as their address bar shows/hides while
-  // scrolling, and `vh`/`vw` have a long, inconsistent history across
-  // browsers/versions of referring to the *largest possible* viewport
-  // (bar hidden) rather than the *currently visible* one (bar shown) —
-  // so a size computed from them can end up taller/wider than what's
-  // actually on screen, which reads as "nothing happened" rather than a
-  // clean rotation. window.innerWidth/innerHeight don't have that
-  // ambiguity — they always reflect the actual current viewport — so this
-  // runs immediately (before any data fetch, before charts.js/week.js
-  // even load) and sets the rotated size in real pixels instead, then
-  // redoes it on resize/orientationchange so it keeps tracking correctly
-  // as the address bar shows/hides or the phone is actually turned.
-  // offsetTop is only relative to an element's nearest POSITIONED
-  // ancestor, not the page as a whole — and there's a position:relative
-  // section between #weekTimelineScroll and <body> here (the summary-card
-  // wrapping it), so reading scrollWrap.offsetTop directly gives its
-  // offset within THAT section, not the true distance down from the top
-  // of the (rotated) page. Walking the whole offsetParent chain up to
-  // body and summing each segment's own offsetTop gives the real
-  // cumulative distance, regardless of how many positioned ancestors sit
-  // in between.
+  // Sizes the graph board (#weekTimelineScroll) to fill whatever height is left
+  // on screen below the header and filters, so the graphs use the full window
+  // on desktop, tablets and phones alike. Measured in real pixels (not vh, which
+  // is unreliable on phones whose address bar shows/hides) and re-measured when
+  // the window resizes or the filters card above it changes size.
   function getOffsetTopWithinBody(el) {
+    // offsetTop is only relative to the nearest positioned ancestor, so walk up.
     var top = 0;
     var node = el;
     while (node && node !== document.body) {
@@ -47,94 +27,24 @@
     return top;
   }
 
-  function applyForceLandscapeSizing() {
-    var isPhoneWidth = window.matchMedia("(max-width: 900px)").matches;
-    var isPortrait = window.matchMedia("(orientation: portrait)").matches;
-    var body = document.body;
-    if (!body) return;
+  function applyBoardSizing() {
     var scrollWrap = document.getElementById("weekTimelineScroll");
-    if (isPhoneWidth && isPortrait) {
-      body.style.width = window.innerHeight + "px";
-      body.style.height = window.innerWidth + "px";
-      body.style.top = window.innerHeight + "px";
-
-      // Also size the timeline board — and each location row inside it —
-      // to the ACTUAL space available in the rotated layout, instead of
-      // approximating with another vw/vh guess (the previous 65vw board
-      // cap left less room than a single row's own graph needs, forcing a
-      // second, awkward scroll just to see that row's own top/bottom).
-      // offsetTop/offsetHeight reflect an element's position in its own
-      // normal, PRE-rotation document flow — exactly the axis that still
-      // means "top to bottom" here, since the whole body (including this
-      // measurement) rotates as one rigid unit; only how it's painted on
-      // screen changes, not the relative layout within it.
-      if (scrollWrap) {
-        var available = window.innerWidth - getOffsetTopWithinBody(scrollWrap) - 40; // ~40px for the footer line below the board
-        if (available > 60) {
-          scrollWrap.style.maxHeight = available + "px";
-          // Each row's graph gets nearly that same height, so ONE row
-          // fills the visible board — scrolling moves cleanly to the next
-          // location instead of first needing to scroll around inside a
-          // single row just to see all of it. Read by .weeknew-row-chart
-          // in style.css, with a 328px fallback for anything that
-          // doesn't set this (desktop, or JS disabled).
-          //
-          // The extra "- 22" (beyond the existing "- 20") reserves room
-          // for buildConditionStripsPlugin's two condition-strip rows
-          // (charts.js's renderConditionsChart, layout.padding.bottom) —
-          // unlike the OTHER two chart frames that needed this same
-          // reservation (.location-hover-panel-chart-frame,
-          // .live-chart-frame, both in style.css), there's no spare
-          // screen space to just GROW into here: `available` is already
-          // the full visible board, by design, so adding height on top
-          // would force exactly the "second scroll just to see this
-          // row's own top/bottom" bug this whole calculation exists to
-          // avoid. Trimming height instead of growing it is the only
-          // option that keeps "one row fills the board" true while still
-          // giving the strips their own space — the graph itself just
-          // ends up a little shorter. 22, not 28 (the OTHER two frames'
-          // number) — this branch only ever runs on an actual mobile
-          // device (phone-portrait), where buildConditionStripsPlugin's
-          // own stripHeight is genuinely smaller, so the exact reserved
-          // amount is smaller too; using the desktop number here would
-          // reserve 6px more than the strips actually need, recreating
-          // the same "dead space below the strips" bug on mobile that
-          // switching from a flat 39 to an exact, isMobile-aware number
-          // was specifically meant to close everywhere.
-          document.documentElement.style.setProperty("--weeknew-mobile-row-height", (available - 20 - 22) + "px");
-        }
-      }
-    } else {
-      // Not phone-portrait (already landscape, or a wide/desktop window) —
-      // clear every inline override so the normal (untransformed) CSS
-      // layout applies, exactly as it would with no JS at all.
-      body.style.width = "";
-      body.style.height = "";
-      body.style.top = "";
-      document.documentElement.style.removeProperty("--weeknew-mobile-row-height");
-      // Make the graph board fill the rest of the screen height (instead of
-      // the CSS fallback's 65vh cap): viewport height minus everything above
-      // it, minus the footnote below it and main's small bottom padding.
-      // Falls back to that CSS cap if there's implausibly little room.
-      if (scrollWrap) {
-        var foot = scrollWrap.nextElementSibling;
-        var footH = foot ? foot.offsetHeight + 20 : 40;
-        var avail = window.innerHeight - getOffsetTopWithinBody(scrollWrap) - footH - 8; // 8 = main's bottom padding on this page (inline style on <main>)
-        var wanted = avail > 200 ? avail + "px" : "";
-        if (scrollWrap.style.maxHeight !== wanted) scrollWrap.style.maxHeight = wanted;
-      }
-    }
+    if (!scrollWrap) return;
+    var foot = scrollWrap.nextElementSibling;
+    var footH = foot ? foot.offsetHeight + 20 : 40;
+    var avail = window.innerHeight - getOffsetTopWithinBody(scrollWrap) - footH - 8; // 8 = main's bottom padding here (inline style on <main>)
+    var wanted = avail > 200 ? avail + "px" : ""; // implausibly little room: fall back to the CSS cap
+    if (scrollWrap.style.maxHeight !== wanted) scrollWrap.style.maxHeight = wanted;
   }
+
   document.addEventListener("DOMContentLoaded", function () {
-    applyForceLandscapeSizing();
-    // The filters card above the board grows/shrinks when opened, which moves
-    // the board's top edge — re-measure whenever it changes size.
+    applyBoardSizing();
     var board = document.getElementById("weekTimelineScroll");
     var above = board && board.parentElement && board.parentElement.previousElementSibling;
-    if (above && window.ResizeObserver) new ResizeObserver(applyForceLandscapeSizing).observe(above);
+    if (above && window.ResizeObserver) new ResizeObserver(applyBoardSizing).observe(above);
   });
-  window.addEventListener("resize", applyForceLandscapeSizing);
-  window.addEventListener("orientationchange", applyForceLandscapeSizing);
+  window.addEventListener("resize", applyBoardSizing);
+  window.addEventListener("orientationchange", applyBoardSizing);
 </script>
 </head>
 <body>
