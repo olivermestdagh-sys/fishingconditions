@@ -1465,7 +1465,7 @@ async function handleMarkItem(request, url, env, id) {
     const merged = mergeMarkFields(existing, body);
     await env.DB.prepare(
       `UPDATE marks SET lat=?, lng=?, name=?, type=?, date_time=?, source=?, source_uuid=?, species=?, bait=?, rig=?,
-                        rod=?, berley=?, notes=?, size=?, released=?, weather_condition=?, tide_condition=?, water_condition=?,
+                        rod=?, berley=?, notes=?, size=?, released=?, weather_condition=?, tide_condition=?, tide_extreme=?, water_condition=?,
                         water_depth=?, water_temperature=?, temperature=?, barometer=?, wind_direction=?, wind_speed=?,
                         session_role=?, session_group_id=?
        WHERE id = ? AND user_id = ?`
@@ -1473,7 +1473,7 @@ async function handleMarkItem(request, url, env, id) {
       .bind(
         merged.lat, merged.lng, merged.name, merged.type, merged.dateTime, merged.source, merged.sourceUuid,
         merged.species, merged.bait, merged.rig, merged.rod, merged.berley, merged.notes, merged.size, merged.released,
-        merged.weatherCondition, merged.tideCondition, merged.waterCondition, merged.waterDepth,
+        merged.weatherCondition, merged.tideCondition, merged.tideExtreme, merged.waterCondition, merged.waterDepth,
         merged.waterTemperature, merged.temperature, merged.barometer, merged.windDirection, merged.windSpeed,
         merged.sessionRole, merged.sessionGroupId,
         id, uid
@@ -1494,15 +1494,15 @@ async function handleMarkItem(request, url, env, id) {
 async function insertOrUpdateMark(env, id, uid, body, now) {
   await env.DB.prepare(
     `INSERT INTO marks (id, user_id, lat, lng, name, type, date_time, source, source_uuid, species, bait, rig, rod,
-                         berley, notes, size, released, weather_condition, tide_condition, water_condition, water_depth,
+                         berley, notes, size, released, weather_condition, tide_condition, tide_extreme, water_condition, water_depth,
                          water_temperature, temperature, barometer, wind_direction, wind_speed,
                          session_role, session_group_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       id, uid, body.lat, body.lng, body.name ?? null, body.type, body.dateTime, body.source ?? "manual",
       body.sourceUuid ?? null, body.species ?? null, body.bait ?? null, body.rig ?? null, body.rod ?? null,
-      body.berley ?? null, body.notes ?? null, body.size ?? null, body.released ? 1 : 0, body.weatherCondition ?? null, body.tideCondition ?? null,
+      body.berley ?? null, body.notes ?? null, body.size ?? null, body.released ? 1 : 0, body.weatherCondition ?? null, body.tideCondition ?? null, body.tideExtreme ?? null,
       body.waterCondition ?? null, body.waterDepth ?? null, body.waterTemperature ?? null, body.temperature ?? null,
       body.barometer ?? null, body.windDirection ?? null, body.windSpeed ?? null,
       body.sessionRole ?? null, body.sessionGroupId ?? null, now
@@ -1529,6 +1529,7 @@ function mergeMarkFields(existing, body) {
     released: body.released !== undefined ? (body.released ? 1 : 0) : existing.released,
     weatherCondition: body.weatherCondition !== undefined ? body.weatherCondition : existing.weather_condition,
     tideCondition: body.tideCondition !== undefined ? body.tideCondition : existing.tide_condition,
+    tideExtreme: body.tideExtreme !== undefined ? body.tideExtreme : existing.tide_extreme,
     waterCondition: body.waterCondition !== undefined ? body.waterCondition : existing.water_condition,
     waterDepth: body.waterDepth !== undefined ? body.waterDepth : existing.water_depth,
     waterTemperature: body.waterTemperature !== undefined ? body.waterTemperature : existing.water_temperature,
@@ -1561,6 +1562,7 @@ function rowToMark(row) {
     released: !!row.released,
     weatherCondition: row.weather_condition,
     tideCondition: row.tide_condition,
+    tideExtreme: row.tide_extreme,
     waterCondition: row.water_condition,
     waterDepth: row.water_depth,
     waterTemperature: row.water_temperature,

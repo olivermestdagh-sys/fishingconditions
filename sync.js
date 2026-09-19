@@ -1353,6 +1353,7 @@ function collectCheckedSessionMarks() {
           if (berley) mark.berley = berley;
           if (cand.weatherCondition) mark.weatherCondition = cand.weatherCondition;
           if (cand.tideCondition) mark.tideCondition = cand.tideCondition;
+          if (cand.tideExtreme) mark.tideExtreme = cand.tideExtreme;
           if (cand.barometer != null) mark.barometer = cand.barometer;
           if (cand.temperature != null) mark.temperature = cand.temperature;
           if (cand.waterTemperature != null) mark.waterTemperature = cand.waterTemperature;
@@ -1418,6 +1419,7 @@ async function handleImportClick() {
     if (applicable.includes("waterDepth") && c.waterDepth != null) mark.waterDepth = c.waterDepth;
     if (applicable.includes("weatherCondition") && c.weatherCondition) mark.weatherCondition = c.weatherCondition;
     if (applicable.includes("tideCondition") && c.tideCondition) mark.tideCondition = c.tideCondition;
+    if (applicable.includes("tideExtreme") && c.tideExtreme) mark.tideExtreme = c.tideExtreme;
     if (applicable.includes("barometer") && c.barometer != null) mark.barometer = c.barometer;
     if (applicable.includes("temperature") && c.temperature != null) mark.temperature = c.temperature;
     if (applicable.includes("waterTemperature") && c.waterTemperature != null) mark.waterTemperature = c.waterTemperature;
@@ -1612,6 +1614,7 @@ async function handleFileInputChange(e) {
       // shown) for anything the lookup didn't resolve.
       weatherCondition: undefined,
       tideCondition: undefined,
+      tideExtreme: undefined,
       barometer: undefined,
       temperature: undefined,
       waterTemperature: undefined,
@@ -1950,6 +1953,7 @@ function buildTrackCandidatePopupHtml(candidate, point, markLists) {
   const weatherFieldsHtml = [
     { key: "weatherCondition", label: "Weather", list: "Weather Condition" },
     { key: "tideCondition", label: "Tide", list: "Tide Condition" },
+    { key: "tideExtreme", label: "Tide extreme", list: "Tide Extreme" },
   ]
     .map(
       (f) => `<label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">${f.label}
@@ -2058,7 +2062,7 @@ async function openTrackCandidatePopup(trackIdx, dayIdx, segIdx, candIdx) {
     candidate.rigsExplicit = candidate.rigs.length > 0;
     candidate.rodsExplicit = candidate.rods.length > 0;
     candidate.berleysExplicit = candidate.berleys.length > 0;
-    for (const key of ["weatherCondition", "tideCondition"]) {
+    for (const key of ["weatherCondition", "tideCondition", "tideExtreme"]) {
       candidate[key] = val(key) || undefined;
     }
     for (const key of ["barometer", "temperature", "waterTemperature", "windSpeed"]) {

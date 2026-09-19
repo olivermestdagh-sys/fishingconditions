@@ -249,6 +249,7 @@ CREATE TABLE IF NOT EXISTS marks (
   released INTEGER,                  -- 0/1
   weather_condition TEXT,
   tide_condition TEXT,
+  tide_extreme TEXT, -- HHW/LHW/HLW/LLW modifier for tide_condition (added later via ALTER TABLE)
   water_condition TEXT,
   water_depth REAL,
   water_temperature REAL,

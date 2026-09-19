@@ -1113,6 +1113,7 @@ const MARK_POPUP_OPTIONAL_FIELDS = [
   { key: "species", listLabel: "Species", displayLabel: "Species" },
   { key: "weatherCondition", listLabel: "Weather Condition", displayLabel: "Weather" },
   { key: "tideCondition", listLabel: "Tide Condition", displayLabel: "Tide" },
+  { key: "tideExtreme", listLabel: "Tide Extreme", displayLabel: "Tide extreme" },
   { key: "waterCondition", listLabel: "Water Condition", displayLabel: "Water" },
   { key: "bait", listLabel: "Bait", displayLabel: "Bait" },
   { key: "rig", listLabel: "Rig", displayLabel: "Rig" },
@@ -1146,7 +1147,7 @@ const MARK_TYPE_FIELD_KEYS = {
   POI: [],
   Mark: ["species"],
   Catch: [
-    "species", "weatherCondition", "tideCondition", "waterCondition", "bait", "rig", "rod", "berley",
+    "species", "weatherCondition", "tideCondition", "tideExtreme", "waterCondition", "bait", "rig", "rod", "berley",
     "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed", "notes", "released",
   ],
 };
@@ -1198,7 +1199,7 @@ function saveLastMarkFieldValues(mark) {
     const current = getLastMarkFieldValues();
     if (mark.type) current.type = mark.type;
     for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
-      if (f.key === "weatherCondition" || f.key === "tideCondition") continue; // tideCondition has its own real-data defaulting (computeQuickMarkDefaults); weatherCondition deliberately gets no default at all, of either kind — see that same function's comment
+      if (f.key === "weatherCondition" || f.key === "tideCondition" || f.key === "tideExtreme") continue; // tideCondition (and its tideExtreme modifier) has its own real-data defaulting (computeQuickMarkDefaults); weatherCondition deliberately gets no default at all, of either kind — see that same function's comment
       if (mark[f.key]) current[f.key] = mark[f.key];
     }
     localStorage.setItem(MARK_LAST_VALUES_STORAGE_KEY, JSON.stringify(current));
@@ -1270,6 +1271,20 @@ function rankExtremum(extrema, ex) {
  * surrounding extremes) the plain "Running In"/"Running Out".
  */
 function classifyTideConditionFromExtrema(extrema, targetMs) {
+  const r = classifyTideFromExtrema(extrema, targetMs);
+  return r ? r.condition : null;
+}
+
+/**
+ * Same rules as above, but returns BOTH parts as { condition, extreme }:
+ * `condition` is one of the 8 plain Tide Condition values, `extreme` the
+ * ranked Tide Extreme modifier ("HHW"/"LHW"/"HLW"/"LLW") or null when no
+ * rank could be worked out. Which extreme is "in play" follows the
+ * condition: Slack = the one it is at, Start Run = the one just LEFT,
+ * Last Run / Running = the one being APPROACHED (so the direction — at,
+ * from, to — is implied by the condition itself and isn't stored).
+ */
+function classifyTideFromExtrema(extrema, targetMs) {
   let prev = null, next = null;
   for (const ex of extrema) {
     if (ex.t <= targetMs) prev = ex;
@@ -1286,27 +1301,20 @@ function classifyTideConditionFromExtrema(extrema, targetMs) {
   const runningOut = prev.type === "high" && next.type === "low";
 
   // Mixed semidiurnal tides: each high/low is ranked against the other one
-  // of its type that day (HHW/LHW/HLW/LLW). Every label below carries the
-  // ranked extreme when it can be determined and falls back to the plain
-  // unranked value otherwise (rank === null).
-  //   Slack X          - the extreme itself
-  //   Start Run In/Out from X - the extreme just LEFT (prev)
-  //   Last Run In/Out to X    - the extreme being APPROACHED (next)
-  //   Running In/Out to X     - mid-run, heading TO the next extreme
+  // of its type that day (HHW/LHW/HLW/LLW) — see rankExtremum.
   const prevRank = rankExtremum(extrema, prev);
   const nextRank = rankExtremum(extrema, next);
-  const slack = (ex, rank) => (rank ? `Slack ${rank}` : ex.type === "high" ? "Slack High" : "Slack Low");
-  if (distToPrev <= TIDE_SLACK_WINDOW_MS) return slack(prev, prevRank);
-  if (distToNext <= TIDE_SLACK_WINDOW_MS) return slack(next, nextRank);
+  if (distToPrev <= TIDE_SLACK_WINDOW_MS) return { condition: prev.type === "high" ? "Slack High" : "Slack Low", extreme: prevRank };
+  if (distToNext <= TIDE_SLACK_WINDOW_MS) return { condition: next.type === "high" ? "Slack High" : "Slack Low", extreme: nextRank };
   if (runningIn) {
-    if (distToPrev <= TIDE_RUN_TRANSITION_ZONE_MS) return prevRank ? `Start Run In from ${prevRank}` : "Start Run In";
-    if (distToNext <= TIDE_RUN_TRANSITION_ZONE_MS) return nextRank ? `Last Run In to ${nextRank}` : "Last Run In";
-    return nextRank ? `Running In to ${nextRank}` : "Running In";
+    if (distToPrev <= TIDE_RUN_TRANSITION_ZONE_MS) return { condition: "Start Run In", extreme: prevRank };
+    if (distToNext <= TIDE_RUN_TRANSITION_ZONE_MS) return { condition: "Last Run In", extreme: nextRank };
+    return { condition: "Running In", extreme: nextRank };
   }
   if (runningOut) {
-    if (distToPrev <= TIDE_RUN_TRANSITION_ZONE_MS) return prevRank ? `Start Run Out from ${prevRank}` : "Start Run Out";
-    if (distToNext <= TIDE_RUN_TRANSITION_ZONE_MS) return nextRank ? `Last Run Out to ${nextRank}` : "Last Run Out";
-    return nextRank ? `Running Out to ${nextRank}` : "Running Out";
+    if (distToPrev <= TIDE_RUN_TRANSITION_ZONE_MS) return { condition: "Start Run Out", extreme: prevRank };
+    if (distToNext <= TIDE_RUN_TRANSITION_ZONE_MS) return { condition: "Last Run Out", extreme: nextRank };
+    return { condition: "Running Out", extreme: nextRank };
   }
   // Two consecutive extrema of the SAME type (two lows/two highs in a row)
   // shouldn't happen with well-formed tide data — null rather than guessed
@@ -1342,8 +1350,11 @@ function computeQuickMarkDefaults(rows) {
   const defaults = {};
   const nowMs = nowInNaiveEncoding();
   const extrema = findTideExtrema(rows);
-  const tideCondition = classifyTideConditionFromExtrema(extrema, nowMs);
-  if (tideCondition) defaults.tideCondition = tideCondition;
+  const tide = classifyTideFromExtrema(extrema, nowMs);
+  if (tide) {
+    defaults.tideCondition = tide.condition;
+    if (tide.extreme) defaults.tideExtreme = tide.extreme;
+  }
   return defaults;
 }
 
@@ -4736,7 +4747,7 @@ function startCopiedMarkEntry(map, sourceMark, state) {
   };
   const applicable = fieldKeysForMarkType(draft.type);
   const COPYABLE_KEYS = [
-    "species", "weatherCondition", "tideCondition", "waterCondition", "bait", "rig", "rod", "berley",
+    "species", "weatherCondition", "tideCondition", "tideExtreme", "waterCondition", "bait", "rig", "rod", "berley",
     "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed",
     "notes", "released",
   ];
@@ -4796,6 +4807,7 @@ async function fillMarkFormFromHistoricalLookup(popupEl, lat, lng, dateTimeNaive
   };
   fillIfBlank("weatherCondition", result.weatherCondition);
   fillIfBlank("tideCondition", result.tideCondition);
+  fillIfBlank("tideExtreme", result.tideExtreme);
   fillIfBlank("barometer", result.barometer);
   fillIfBlank("temperature", result.temperature);
   fillIfBlank("waterTemperature", result.waterTemperature);
@@ -4848,6 +4860,13 @@ async function refreshMarkFormConditionsForNewTime(formEl, lat, lng, dateTimeNai
   };
   overwriteIfResolved("weatherCondition", result.weatherCondition);
   overwriteIfResolved("tideCondition", result.tideCondition);
+  overwriteIfResolved("tideExtreme", result.tideExtreme);
+  if (result.tideCondition && !result.tideExtreme) {
+    // The tide state was re-resolved for the new time but no extreme could be
+    // ranked — clear the old one rather than leave it describing the wrong tide.
+    const extremeEl = formEl.querySelector('[name="tideExtreme"]');
+    if (extremeEl) extremeEl.value = "";
+  }
   overwriteIfResolved("barometer", result.barometer);
   overwriteIfResolved("temperature", result.temperature);
   overwriteIfResolved("waterTemperature", result.waterTemperature);
@@ -5390,6 +5409,7 @@ const MARK_LIST_FIELDS = [
   { key: "species", label: "Species" },
   { key: "weatherCondition", label: "Weather Condition" },
   { key: "tideCondition", label: "Tide Condition" },
+  { key: "tideExtreme", label: "Tide Extreme" },
   { key: "waterCondition", label: "Water Condition" },
   { key: "bait", label: "Bait" },
   { key: "rig", label: "Rig" },
@@ -6580,7 +6600,7 @@ async function lookupTideConditionAt(lat, lng, targetMs) {
       return null;
     }
 
-    return classifyTideConditionFromExtrema(extrema, targetMs);
+    return classifyTideFromExtrema(extrema, targetMs); // { condition, extreme } or null
   } catch (err) {
     console.error("Historical tide lookup failed:", err);
     return null;
@@ -6604,13 +6624,16 @@ async function lookupHistoricalMarkConditions(lat, lng, dateTimeNaive) {
   const dateStr = dateTimeNaive.slice(0, 10);
   const hourKey = dateTimeNaive.slice(0, 13);
 
-  const [tideCondition, hourly, marineHourly] = await Promise.all([
+  const [tide, hourly, marineHourly] = await Promise.all([
     lookupTideConditionAt(lat, lng, targetMs),
     fetchOpenMeteoHistoricalHourly(lat, lng, dateStr),
     fetchOpenMeteoHistoricalMarineHourly(lat, lng, dateStr),
   ]);
 
-  if (tideCondition) result.tideCondition = tideCondition;
+  if (tide) {
+    result.tideCondition = tide.condition;
+    if (tide.extreme) result.tideExtreme = tide.extreme;
+  }
 
   if (hourly && Array.isArray(hourly.time)) {
     const speed = openMeteoHourlyLookup(hourly.time, hourly.windspeed_10m)[hourKey];
