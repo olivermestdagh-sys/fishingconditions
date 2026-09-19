@@ -3243,7 +3243,7 @@ async function loadAndRenderMarks(map, state) {
 
   let marks;
   try {
-    const res = await fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" });
+    const res = await fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store", credentials: "include" });
     if (!res.ok) return; // nothing to show yet, not an error
     marks = await res.json(); // bare array — see handlePublicMarks, user-backend.js
   } catch (err) {
