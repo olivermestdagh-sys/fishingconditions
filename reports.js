@@ -383,7 +383,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   gateEl.style.display = "none";
   mainEl.style.display = "block";
 
-  const [marksRes] = await Promise.all([fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" })]);
+  const [marksRes] = await Promise.all([fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store", credentials: "include" })]);
   reportsAllMarks = marksRes.ok ? await marksRes.json() : [];
   reportsTrackedLocations = await loadTrackedLocationsForLookup();
 

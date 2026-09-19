@@ -555,7 +555,7 @@ async function init() {
   // gracefully unavailable (see computeScheduleFromDragRangeMs's
   // driveTimeUnavailable handling). Same pattern as week.js's own init().
   try {
-    const settingsRes = await fetch(SETTINGS_URL, { cache: "no-store" });
+    const settingsRes = await fetch(SETTINGS_URL, { cache: "no-store", credentials: "include" });
     if (settingsRes.ok) {
       const settings = await settingsRes.json();
       googleRoutesApiKey = settings.googleRoutesApiKey || null;

@@ -493,7 +493,7 @@ async function init() {
   // — a missing/malformed settings file shouldn't break the rest of the
   // page, just leave the drive-time feature gracefully unavailable.
   try {
-    const settingsRes = await fetch(SETTINGS_URL, { cache: "no-store" });
+    const settingsRes = await fetch(SETTINGS_URL, { cache: "no-store", credentials: "include" });
     if (settingsRes.ok) {
       const settings = await settingsRes.json();
       googleRoutesApiKey = settings.googleRoutesApiKey || null;

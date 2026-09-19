@@ -279,10 +279,10 @@ export default {
         return handlePublicMarkLists(env);
       }
       if (url.pathname === "/api/public/marks" && request.method === "GET") {
-        return handlePublicMarks(env);
+        return handlePublicMarks(request, env);
       }
       if (url.pathname === "/api/public/settings" && request.method === "GET") {
-        return handlePublicSettings(env);
+        return handlePublicSettings(request, env);
       }
       if (url.pathname === "/api/public/locations" && request.method === "GET") {
         return handlePublicLocations(env);
@@ -1837,20 +1837,37 @@ async function handlePublicMarkLists(env) {
  * endpoint (and the map's own display of them) has one consistent owner
  * to read, matching every other public-facing dataset's convention.
  */
-async function handlePublicMarks(env) {
+/**
+ * PRIVACY CHANGE: this used to be readable by anyone with no sign-in (every
+ * mark, exact position and notes). It now needs a signed-in session and
+ * returns only the CALLER'S OWN marks — see ownerScopeId. The URL keeps its
+ * "public" name only so existing callers didn't need re-pointing; they now
+ * send credentials (charts.js, reports.js, sync.js).
+ */
+async function handlePublicMarks(request, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
   const { results } = await env.DB.prepare(
     "SELECT * FROM marks WHERE user_id = ? ORDER BY date_time DESC"
   )
-    .bind(PUBLIC_USER_ID)
+    .bind(ownerScopeId(user))
     .all();
   return new Response(JSON.stringify(results.map(rowToMark)), {
     status: 200,
     headers: {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-      "Cache-Control": "public, max-age=60",
+      "Cache-Control": "private, no-store",
+      ...corsHeaders(env),
     },
   });
+}
+
+/** Whose rows a signed-in caller sees on the formerly-public endpoints: the
+ * Admin's own data lives under the shared "public" account (the site's
+ * original single-owner dataset was migrated there), so Admin maps to it;
+ * every other user sees only rows stored under their own id. */
+function ownerScopeId(user) {
+  return user.role === "admin" ? PUBLIC_USER_ID : user.id;
 }
 
 /**
@@ -1864,10 +1881,17 @@ async function handlePublicMarks(env) {
  * serving it back out through an open endpoint changes nothing about its
  * actual security. Read-only; there is no public write path.
  */
-async function handlePublicSettings(env) {
-  const row = await env.DB.prepare("SELECT home_lat, home_lng, google_routes_api_key FROM users WHERE id = ?")
-    .bind(PUBLIC_USER_ID)
-    .first();
+async function handlePublicSettings(request, env) {
+  // PRIVACY CHANGE: the home coordinates and Routes API key are now only
+  // returned to the signed-in user they belong to (see ownerScopeId).
+  // Anonymous visitors get 200 with all nulls, so the pages still load and
+  // simply skip home-based drive times.
+  const user = await requireUser(request, env);
+  const row = user
+    ? await env.DB.prepare("SELECT home_lat, home_lng, google_routes_api_key FROM users WHERE id = ?")
+        .bind(ownerScopeId(user))
+        .first()
+    : null;
   return new Response(
     JSON.stringify({
       homeLat: row ? row.home_lat : null,
@@ -1878,8 +1902,8 @@ async function handlePublicSettings(env) {
       status: 200,
       headers: {
         "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "public, max-age=60",
+        "Cache-Control": "private, no-store",
+        ...corsHeaders(env),
       },
     }
   );

@@ -907,7 +907,7 @@ async function handleExportClick(device) {
     // another device) since this page loaded. Cache-busted for the same
     // reason loadAndRenderMarks is (charts.js) — the endpoint's own 60s
     // Cache-Control could otherwise serve a just-edited mark's old value.
-    const res = await fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" });
+    const res = await fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store", credentials: "include" });
     if (!res.ok) throw new Error(`Could not load marks (${res.status})`);
     const marks = await res.json(); // bare array — see handlePublicMarks, user-backend.js
     if (!Array.isArray(marks) || marks.length === 0) {
@@ -2607,7 +2607,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // identical fetch pair.
   let existingMarksRes = { ok: false };
   try {
-    existingMarksRes = await fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store" });
+    existingMarksRes = await fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store", credentials: "include" });
   } catch (err) {
     console.error("Could not reach the marks endpoint:", err);
   }

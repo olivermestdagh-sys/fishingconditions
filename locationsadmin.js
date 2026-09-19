@@ -773,7 +773,7 @@ function setTiersStatus(text, isError) {
  */
 async function loadHomeLocation() {
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/public/settings`, { cache: "no-store" });
+    const res = await fetch(`${USER_BACKEND_URL}/api/public/settings`, { cache: "no-store", credentials: "include" });
     const settings = res.ok ? await res.json() : {};
     homeLat = settings.homeLat ?? null;
     homeLng = settings.homeLng ?? null;
