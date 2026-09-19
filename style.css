@@ -33,21 +33,57 @@ body {
   color: #111827;
 }
 
-.topbar {
+/* One compact dark bar: site name on the left, the tab menu in the middle,
+   "Updated ..." on the right — all on one row (see .sitebar wrapper in each
+   page's HTML). .topbar itself is display:contents so its h1 and status
+   div become flex items of .sitebar directly. Below 1040px the tabs drop to
+   their own row and the name/date share a single small line above. */
+.sitebar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 2px 16px;
   background: var(--blue-900);
   color: var(--white);
-  padding: 16px 16px 12px;
+  padding: 8px 16px 0;
+}
+
+.topbar {
+  display: contents;
 }
 
 .topbar h1 {
+  order: 0;
   margin: 0;
-  font-size: 1.3rem;
+  padding-bottom: 10px;
+  font-size: 1.05rem;
+  line-height: 1.2;
 }
 
 .updated {
-  font-size: 0.8rem;
+  order: 2;
+  margin: 0 0 10px auto;
+  font-size: 0.78rem;
   color: #b7c9e0;
-  margin-top: 4px;
+  white-space: nowrap;
+}
+
+@media (max-width: 1040px) {
+  .sitebar {
+    align-items: baseline;
+    padding: 6px 12px 0;
+  }
+  .topbar h1 {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-bottom: 4px;
+    font-size: 0.9rem;
+  }
+  .updated {
+    order: 1;
+    margin: 0 0 4px;
+    font-size: 0.68rem;
+  }
 }
 
 main {
@@ -71,8 +107,7 @@ main {
   overflow: hidden;
 }
 
-.map-fullpage-body .topbar,
-.map-fullpage-body .tabnav {
+.map-fullpage-body .sitebar {
   flex: none;
 }
 
@@ -921,6 +956,48 @@ tbody tr:nth-child(even) {
 .tabnav a.active {
   background: var(--white);
   color: var(--blue-900);
+}
+
+/* Tabs living inside the dark .sitebar: sit on its bottom edge, tinted for
+   the dark background, centred between the title and the updated stamp. */
+.sitebar .tabnav {
+  order: 1;
+  flex: 0 1 600px;
+  margin: 0 auto;
+  padding: 0;
+  max-width: none;
+}
+
+.sitebar .tabnav a {
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #cfe0f5;
+}
+
+.sitebar .tabnav a.active {
+  background: var(--white);
+  color: var(--blue-900);
+}
+
+@media (min-width: 1041px) {
+  .sitebar .tabnav a {
+    white-space: nowrap; /* one-row bar: never let a label wrap and make it taller */
+  }
+}
+
+@media (max-width: 1040px) {
+  .sitebar .tabnav {
+    order: 2;
+    flex: 1 1 100%; /* full-width row of its own... */
+    max-width: none;
+    padding: 0 max(0px, calc((100% - 720px) / 2)); /* ...but tabs themselves stay centred, max 720px wide as before */
+  }
+}
+
+@media (max-width: 480px) {
+  .sitebar .tabnav a {
+    padding: 7px 2px;
+  }
 }
 
 .filter-row {
@@ -2372,22 +2449,22 @@ main.wide {
      actual graphs, which is what a mobile visitor is on this page for —
      with zero effect on any other page, since none of them carry the
      weeknew-force-landscape class this is scoped to. */
-  html.weeknew-force-landscape .topbar {
-    padding: 6px 10px 4px;
+  html.weeknew-force-landscape .sitebar {
+    padding: 4px 8px 0;
   }
   html.weeknew-force-landscape .topbar h1 {
-    font-size: 0.95rem;
+    font-size: 0.85rem;
+    padding-bottom: 3px;
   }
   html.weeknew-force-landscape .updated {
-    font-size: 0.68rem;
-    margin-top: 2px;
+    font-size: 0.65rem;
+    margin-bottom: 3px;
   }
   html.weeknew-force-landscape .tabnav {
-    padding: 4px 8px 0;
     gap: 3px;
   }
-  html.weeknew-force-landscape .tabnav a {
-    padding: 5px 4px;
+  html.weeknew-force-landscape .sitebar .tabnav a {
+    padding: 4px 4px;
     font-size: 0.72rem;
   }
   html.weeknew-force-landscape main {
