@@ -1,0 +1,33 @@
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Syntax-check every script
+        run: |
+          set -e
+          for f in *.js; do
+            if [ "$f" = "user-backend.js" ]; then
+              cp "$f" /tmp/user-backend.mjs   # uses ES module syntax
+              node --check /tmp/user-backend.mjs
+            else
+              node --check "$f"
+            fi
+          done
+      - name: Run tests
+        run: node --test
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile-check the data pipeline script
+        run: python -m py_compile scripts/fetch_conditions.py

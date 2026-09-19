@@ -576,7 +576,7 @@ async function init() {
     moonPhasesData = data.moonPhases || {};
     if (data.generatedAt) {
       const dt = new Date(data.generatedAt);
-      document.getElementById("updated").textContent = `Updated ${dt.toLocaleString([], { dateStyle: "medium", timeStyle: "short", hour12: false })}`;
+      setUpdatedStamp(document.getElementById("updated"), dt);
     }
     // Awaited — small, fast, local file (not the slow WillyWeather
     // pipeline), so negligible delay; avoids a race where the very first
