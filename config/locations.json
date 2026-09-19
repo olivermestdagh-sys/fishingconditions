@@ -38,6 +38,35 @@
     ]
   },
   {
+    "name": "Betka Beach VIC",
+    "displayName": "Betka Beach VIC",
+    "shore": "N",
+    "tidal": true,
+    "locationGroup": "Mallacoota",
+    "locationGroups": [
+      "Mallacoota"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 18288,
+    "willyweatherName": "Betka Beach",
+    "willyweatherRegion": "East Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -37.5775,
+    "lng": 149.7536,
+    "tideMaxObserved": 1.14,
+    "types": [
+      {
+        "type": "Land based",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:20",
+        "packUp": "00:20",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
+      }
+    ]
+  },
+  {
     "name": "Cape Woolamai Beach",
     "displayName": "Cape Woolamai Beach",
     "shore": "NE",
@@ -119,35 +148,6 @@
         "driveBack": "00:00",
         "setUp": "00:30",
         "packUp": "00:30",
-        "timeToSpot": "00:20",
-        "timeFromSpot": "00:20"
-      }
-    ]
-  },
-  {
-    "name": "Flinders Pier, VIC",
-    "displayName": "Flinders",
-    "shore": "W",
-    "tidal": true,
-    "locationGroup": "Western Port",
-    "locationGroups": [
-      "Western Port"
-    ],
-    "tideOffset": null,
-    "willyweatherId": 27168,
-    "willyweatherName": "Flinders Pier",
-    "willyweatherRegion": "Mornington Peninsula",
-    "willyweatherState": "VIC",
-    "lat": -38.4758,
-    "lng": 145.0286,
-    "tideMaxObserved": 2.5,
-    "types": [
-      {
-        "type": "Kayak",
-        "driveTo": "00:00",
-        "driveBack": "00:00",
-        "setUp": "00:30",
-        "packUp": "00:40",
         "timeToSpot": "00:20",
         "timeFromSpot": "00:20"
       }
@@ -241,6 +241,35 @@
     ]
   },
   {
+    "name": "Lakes Entrance Beach VIC",
+    "displayName": "Lakes Entrance Beach VIC",
+    "shore": "NE",
+    "tidal": true,
+    "locationGroup": "Lakes Entrance",
+    "locationGroups": [
+      "Lakes Entrance"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 18294,
+    "willyweatherName": "Lakes Entrance Beach",
+    "willyweatherRegion": "East Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -37.8859,
+    "lng": 147.9875,
+    "tideMaxObserved": 1.15,
+    "types": [
+      {
+        "type": "Land based",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:20",
+        "packUp": "00:20",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
+      }
+    ]
+  },
+  {
     "name": "Lang Lang Boat Ramp, VIC",
     "displayName": "Lang Lang Boat Ramp, VIC",
     "shore": "E",
@@ -276,6 +305,64 @@
         "packUp": "00:15",
         "timeToSpot": "00:00",
         "timeFromSpot": "00:00"
+      }
+    ]
+  },
+  {
+    "name": "Mallacoota",
+    "displayName": "Mallacoota",
+    "shore": "S",
+    "tidal": true,
+    "locationGroup": "Mallacoota",
+    "locationGroups": [
+      "Mallacoota"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 12642,
+    "willyweatherName": "Mallacoota",
+    "willyweatherRegion": "East Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -37.55435935391175,
+    "lng": 149.7561085224152,
+    "tideMaxObserved": null,
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
+  },
+  {
+    "name": "Metung, VIC 3904",
+    "displayName": "Metung, VIC 3904",
+    "shore": "W",
+    "tidal": false,
+    "locationGroup": "Lakes Entrance",
+    "locationGroups": [
+      "Lakes Entrance"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 12704,
+    "willyweatherName": "Metung",
+    "willyweatherRegion": "East Gippsland",
+    "willyweatherState": "VIC",
+    "lat": -37.8835,
+    "lng": 147.8508,
+    "tideMaxObserved": null,
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:20",
+        "packUp": "00:20",
+        "timeToSpot": "00:10",
+        "timeFromSpot": "00:10"
       }
     ]
   },
@@ -541,6 +628,33 @@
     ]
   },
   {
+    "name": "Terranora Creek - Kennedy Drive Boat Ramp",
+    "displayName": "Terranora Creek - Kennedy Drive Boat Ramp",
+    "shore": "NE",
+    "tidal": true,
+    "locationGroup": null,
+    "locationGroups": [],
+    "tideOffset": null,
+    "willyweatherId": 30385,
+    "willyweatherName": "Terranora Creek - Kennedy Drive Boat Ramp",
+    "willyweatherRegion": "Far North Coast",
+    "willyweatherState": "NSW",
+    "lat": -28.18676843321961,
+    "lng": 153.53226184844974,
+    "tideMaxObserved": 1.53,
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:20",
+        "packUp": "00:20",
+        "timeToSpot": "00:05",
+        "timeFromSpot": "00:05"
+      }
+    ]
+  },
+  {
     "name": "Warneet Boat Ramp, VIC",
     "displayName": "Warneet Boat Ramp, VIC",
     "shore": "N",
@@ -566,6 +680,35 @@
         "packUp": "00:30",
         "timeToSpot": "01:00",
         "timeFromSpot": "01:00"
+      }
+    ]
+  },
+  {
+    "name": "West Head",
+    "displayName": "Flinders",
+    "shore": "W",
+    "tidal": true,
+    "locationGroup": "Western Port",
+    "locationGroups": [
+      "Western Port"
+    ],
+    "tideOffset": null,
+    "willyweatherId": 31753,
+    "willyweatherName": "West Head",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.485105682696734,
+    "lng": 145.03154754638675,
+    "tideMaxObserved": 2.5,
+    "types": [
+      {
+        "type": "Kayak",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:30",
+        "packUp": "00:40",
+        "timeToSpot": "00:20",
+        "timeFromSpot": "00:20"
       }
     ]
   },
