@@ -97,7 +97,7 @@
   },
   {
     "name": "Corinella Boat Ramp, VIC",
-    "displayName": "Corinella Boat Ramp, VIC",
+    "displayName": "Corinella Boat Ramp",
     "shore": "E",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -126,7 +126,7 @@
   },
   {
     "name": "Coronet Bay, VIC 3984",
-    "displayName": "Coronet Bay, VIC 3984",
+    "displayName": "Coronet Bay",
     "shore": "E",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -155,7 +155,7 @@
   },
   {
     "name": "Gunnamatta Beach, VIC",
-    "displayName": "Gunnamatta Beach, VIC",
+    "displayName": "Gunnamatta Beach",
     "shore": "N",
     "tidal": true,
     "locationGroup": "South Beaches",
@@ -184,7 +184,7 @@
   },
   {
     "name": "Hastings Jetty, VIC",
-    "displayName": "Hastings Jetty, VIC",
+    "displayName": "Hastings Jetty",
     "shore": "W",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -213,7 +213,7 @@
   },
   {
     "name": "Kilcunda, VIC 3995",
-    "displayName": "Kilcunda, VIC 3995",
+    "displayName": "Kilcunda",
     "shore": "N",
     "tidal": true,
     "locationGroup": "South Beaches",
@@ -242,7 +242,7 @@
   },
   {
     "name": "Lakes Entrance Beach VIC",
-    "displayName": "Lakes Entrance Beach VIC",
+    "displayName": "Lakes Entrance Beach",
     "shore": "NE",
     "tidal": true,
     "locationGroup": "Lakes Entrance",
@@ -271,7 +271,7 @@
   },
   {
     "name": "Lang Lang Boat Ramp, VIC",
-    "displayName": "Lang Lang Boat Ramp, VIC",
+    "displayName": "Lang Lang Boat Ramp",
     "shore": "E",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -339,7 +339,7 @@
   },
   {
     "name": "Metung, VIC 3904",
-    "displayName": "Metung, VIC 3904",
+    "displayName": "Metung",
     "shore": "W",
     "tidal": false,
     "locationGroup": "Lakes Entrance",
@@ -368,7 +368,7 @@
   },
   {
     "name": "Mornington Pier, VIC",
-    "displayName": "Mornington Pier, VIC",
+    "displayName": "Mornington Pier",
     "shore": "E",
     "tidal": true,
     "locationGroup": "Port Phillip",
@@ -397,7 +397,7 @@
   },
   {
     "name": "Patterson River Entrance, VIC",
-    "displayName": "Patterson River Entrance, VIC",
+    "displayName": "Patterson River Entrance",
     "shore": "E",
     "tidal": true,
     "locationGroup": "Port Phillip",
@@ -484,7 +484,7 @@
   },
   {
     "name": "Rosebud Pier, VIC",
-    "displayName": "Rosebud Pier, VIC",
+    "displayName": "Rosebud Pier",
     "shore": "E",
     "tidal": true,
     "locationGroup": "Port Phillip",
@@ -513,7 +513,7 @@
   },
   {
     "name": "Safety Beach Boat Ramp, VIC",
-    "displayName": "Safety Beach Boat Ramp, VIC",
+    "displayName": "Safety Beach Boat Ramp",
     "shore": "E",
     "tidal": true,
     "locationGroup": "Port Phillip",
@@ -571,7 +571,7 @@
   },
   {
     "name": "Sorrento Pier, VIC",
-    "displayName": "Sorrento Pier, VIC",
+    "displayName": "Sorrento Pier",
     "shore": "SW",
     "tidal": true,
     "locationGroup": "Port Phillip",
@@ -600,7 +600,7 @@
   },
   {
     "name": "Stony Point Boat Ramp, VIC",
-    "displayName": "Stony Point Boat Ramp, VIC",
+    "displayName": "Stony Point Boat Ramp",
     "shore": "W",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -656,7 +656,7 @@
   },
   {
     "name": "Warneet Boat Ramp, VIC",
-    "displayName": "Warneet Boat Ramp, VIC",
+    "displayName": "Warneet Boat Ramp",
     "shore": "N",
     "tidal": true,
     "locationGroup": "Western Port",
@@ -714,7 +714,7 @@
   },
   {
     "name": "Williamstown Beach, VIC",
-    "displayName": "Williamstown Beach, VIC",
+    "displayName": "Williamstown Beach",
     "shore": "N",
     "tidal": true,
     "locationGroup": "Port Phillip",
