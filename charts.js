@@ -4981,6 +4981,7 @@ async function saveNewLocationToD1(newLoc) {
 
     const body = {
       name: newLoc.name,
+      displayName: newLoc.displayName,
       lat: newLoc.lat,
       lng: newLoc.lng,
       shore: newLoc.shore,
@@ -5424,6 +5425,25 @@ async function fetchWillyWeatherCandidates(lat, lng) {
 
 function escapeHtml(str) {
   return String(str || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/**
+ * What the person actually sees as a location's own name, everywhere on
+ * the site — Oliver's own request, a new displayName field distinct from
+ * loc.name (relabeled "Willyweather search name" in the Settings editor,
+ * unchanged in the data itself — still the string every WillyWeather
+ * lookup, and every internal matching/grouping key across marks, sun
+ * times, pinned/selected location lists, session-window computation etc,
+ * continues to use exactly as before). Falls back to loc.name whenever
+ * displayName isn't set yet — every pre-existing location until the
+ * one-time migration runs (locationsadmin.js's own "Migrate now" button),
+ * and defensively forever after for any location that somehow still
+ * lacks one. Never itself used as a lookup/matching key anywhere — call
+ * sites that need to identify or group a location keep reading loc.name
+ * directly, exactly as they did before this existed.
+ */
+function displayNameFor(loc) {
+  return (loc && (loc.displayName || loc.name)) || "";
 }
 
 /**

@@ -766,7 +766,7 @@ function renderLocationChipsWithPins() {
     const star = document.createElement("button");
     star.type = "button";
     star.className = "weeknew-pin-btn" + (pinnedOrder.includes(loc.name) ? " pinned" : "");
-    star.setAttribute("aria-label", pinnedOrder.includes(loc.name) ? `Unpin ${loc.name}` : `Pin ${loc.name} to top`);
+    star.setAttribute("aria-label", pinnedOrder.includes(loc.name) ? `Unpin ${displayNameFor(loc)}` : `Pin ${displayNameFor(loc)} to top`);
     star.textContent = pinnedOrder.includes(loc.name) ? "★" : "☆";
     star.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -777,7 +777,7 @@ function renderLocationChipsWithPins() {
     const label = document.createElement("button");
     label.type = "button";
     label.className = "weeknew-chip-label";
-    label.textContent = loc.name;
+    label.textContent = displayNameFor(loc);
     label.addEventListener("click", () => {
       if (selectedLocations.has(loc.name)) {
         selectedLocations.delete(loc.name);
@@ -1158,14 +1158,14 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
   const star = document.createElement("button");
   star.type = "button";
   star.className = "weeknew-pin-btn" + (isPinned ? " pinned" : "");
-  star.setAttribute("aria-label", isPinned ? `Unpin ${loc.name}` : `Pin ${loc.name} to top`);
+  star.setAttribute("aria-label", isPinned ? `Unpin ${displayNameFor(loc)}` : `Pin ${displayNameFor(loc)} to top`);
   star.textContent = isPinned ? "★" : "☆";
   star.addEventListener("click", () => togglePin(loc.name));
 
   const titleWrap = document.createElement("div");
   titleWrap.className = "weeknew-row-title";
   titleWrap.innerHTML = `
-    <div class="window-loc">${loc.name}</div>
+    <div class="window-loc">${escapeHtml(displayNameFor(loc))}</div>
     <div class="window-sub">${loc.type} · shore ${loc.shore || "–"}</div>
   `;
 

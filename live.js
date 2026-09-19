@@ -334,7 +334,7 @@ function selectLocationAndType(name, preferredType) {
   if (isNewLocation) hasCenteredLiveChartOnNow = false; // a genuinely new location is worth re-centering on "now" again; switching type on the SAME spot isn't
   setTimingsStatus("");
 
-  document.getElementById("liveHoverPanelLocationName").textContent = loc.name;
+  document.getElementById("liveHoverPanelLocationName").textContent = displayNameFor(loc);
   updateDistanceDisplay(loc);
   showLiveHoverPanel();
 

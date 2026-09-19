@@ -810,7 +810,7 @@ async function handleTrackedCollection(request, url, env) {
     const { results } = await env.DB.prepare(
       `SELECT ula.id as access_id, ula.drive_to, ula.drive_back, ula.set_up, ula.pack_up,
               ula.time_to_spot, ula.time_from_spot, ula.min_tide_height,
-              l.id as location_id, l.name, l.lat, l.lng, l.willyweather_id, l.willyweather_name,
+              l.id as location_id, l.name, l.display_name, l.lat, l.lng, l.willyweather_id, l.willyweather_name,
               l.willyweather_region, l.willyweather_state, l.shore, l.tide_offset, l.tide_max_observed,
               l.tidal, l.created_by_user_id,
               t.id as type_id, t.name as type_name, t.behaves_like
@@ -902,14 +902,21 @@ async function handleTrackedCollection(request, url, env) {
       }
       locationId = crypto.randomUUID();
       await env.DB.prepare(
-        `INSERT INTO locations (id, created_by_user_id, name, lat, lng, willyweather_id, willyweather_name,
+        `INSERT INTO locations (id, created_by_user_id, name, display_name, lat, lng, willyweather_id, willyweather_name,
                                  willyweather_region, willyweather_state, shore, tide_offset, tide_max_observed, tidal, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           locationId,
           uid,
           body.name,
+          // Falls back to name when a caller doesn't send its own
+          // displayName — e.g. the pipeline endpoint's own inline
+          // auto-create path (handlePipelineLocationsList below) has no
+          // concept of a separate display name at all, so it's never
+          // going to send one; a location created that way should still
+          // end up with a sensible displayName rather than null.
+          body.displayName ?? body.name,
           body.lat,
           body.lng,
           body.willyweatherId ?? null,
@@ -1011,7 +1018,7 @@ async function handleTrackedItem(request, url, env, accessId) {
     // allowed for whoever created it — tracking a location (having an
     // access row) is not the same as owning its base record. An admin
     // reaches this by passing ?userId=<the owner>, same as everywhere else.
-    const placeFields = ["name", "lat", "lng", "willyweatherId", "willyweatherName", "willyweatherRegion", "willyweatherState", "shore", "tideOffset", "tideMaxObserved", "tidal"];
+    const placeFields = ["name", "displayName", "lat", "lng", "willyweatherId", "willyweatherName", "willyweatherRegion", "willyweatherState", "shore", "tideOffset", "tideMaxObserved", "tidal"];
     const wantsPlaceEdit = placeFields.some((f) => body[f] !== undefined);
     if (wantsPlaceEdit) {
       if (existing.location_owner !== uid) {
@@ -1020,6 +1027,7 @@ async function handleTrackedItem(request, url, env, accessId) {
       const place = await env.DB.prepare("SELECT * FROM locations WHERE id = ?").bind(existing.location_id).first();
       const merged = {
         name: body.name ?? place.name,
+        displayName: body.displayName ?? place.display_name,
         lat: body.lat ?? place.lat,
         lng: body.lng ?? place.lng,
         willyweatherId: body.willyweatherId !== undefined ? body.willyweatherId : place.willyweather_id,
@@ -1032,12 +1040,13 @@ async function handleTrackedItem(request, url, env, accessId) {
         tidal: body.tidal !== undefined ? (body.tidal ? 1 : 0) : place.tidal,
       };
       await env.DB.prepare(
-        `UPDATE locations SET name=?, lat=?, lng=?, willyweather_id=?, willyweather_name=?, willyweather_region=?,
+        `UPDATE locations SET name=?, display_name=?, lat=?, lng=?, willyweather_id=?, willyweather_name=?, willyweather_region=?,
                                willyweather_state=?, shore=?, tide_offset=?, tide_max_observed=?, tidal=?
          WHERE id = ?`
       )
         .bind(
           merged.name,
+          merged.displayName,
           merged.lat,
           merged.lng,
           merged.willyweatherId,
@@ -1092,7 +1101,7 @@ async function fetchOneTracked(env, accessId) {
   const row = await env.DB.prepare(
     `SELECT ula.id as access_id, ula.drive_to, ula.drive_back, ula.set_up, ula.pack_up,
             ula.time_to_spot, ula.time_from_spot, ula.min_tide_height,
-            l.id as location_id, l.name, l.lat, l.lng, l.willyweather_id, l.willyweather_name,
+            l.id as location_id, l.name, l.display_name, l.lat, l.lng, l.willyweather_id, l.willyweather_name,
             l.willyweather_region, l.willyweather_state, l.shore, l.tide_offset, l.tide_max_observed,
             l.tidal, l.created_by_user_id,
             t.id as type_id, t.name as type_name, t.behaves_like
@@ -1114,6 +1123,13 @@ function rowToTracked(row, groups) {
     location: {
       id: row.location_id,
       name: row.name,
+      // Falls back to name until the one-time migration SQL runs (see
+      // migration-display-name.sql) — every location created going
+      // forward already gets both set at creation time (createLocation
+      // below, and the pipeline's own auto-create path), so this
+      // fallback only really matters for the pre-existing rows in the
+      // window before that migration is run.
+      displayName: row.display_name || row.name,
       lat: row.lat,
       lng: row.lng,
       willyweatherId: row.willyweather_id,
@@ -1661,6 +1677,7 @@ async function handlePipelineLocationsList(request, env) {
     return {
       id: loc.id,
       name: loc.name,
+      displayName: loc.display_name || loc.name, // same fallback rowToTracked uses, above — see this file's other location handlers for why
       shore: loc.shore,
       tidal: !!loc.tidal, // real column now (schema-v2.sql) — confirmed against live
                           // data (Metung, VIC) rather than assumed true for everyone

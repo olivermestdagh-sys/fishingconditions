@@ -94,7 +94,8 @@ CREATE TABLE IF NOT EXISTS locations (
                                      -- original curated set gets attributed
                                      -- to 'public' on migration) but left
                                      -- nullable for defensiveness
-  name TEXT NOT NULL,
+  name TEXT NOT NULL, -- the Willyweather search name every lookup/resolution actually depends on
+  display_name TEXT,  -- what actually shows up everywhere on the site — see migration-display-name.sql
   lat REAL NOT NULL,
   lng REAL NOT NULL,
   willyweather_id INTEGER,
