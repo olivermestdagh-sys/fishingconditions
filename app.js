@@ -179,15 +179,15 @@ function renderLocationMap() {
     const iconKind = types.includes("Kayak") && types.includes("Land based") ? "both" : types.includes("Land based") ? "landBased" : "kayak";
     if (variants.length === 1) {
       const key = locationKey(variants[0].name, variants[0].type);
-      points.push({ lat, lng, label: name, iconKind, onClick: () => selectLocationByKey(key) });
+      points.push({ lat, lng, label: displayNameFor(variants[0]), iconKind, onClick: () => selectLocationByKey(key) });
     } else {
       const popupHtml = `
-        <div style="font-weight:600;margin-bottom:6px;">${name}</div>
+        <div style="font-weight:600;margin-bottom:6px;">${displayNameFor(variants[0])}</div>
         ${variants
           .map((v) => `<button type="button" class="map-popup-type-btn" data-map-key="${locationKey(v.name, v.type)}">${v.type}</button>`)
           .join("")}
       `;
-      points.push({ lat, lng, label: name, iconKind, popupHtml });
+      points.push({ lat, lng, label: displayNameFor(variants[0]), iconKind, popupHtml });
     }
   }
 

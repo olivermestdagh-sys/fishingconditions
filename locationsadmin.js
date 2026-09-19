@@ -1732,7 +1732,7 @@ function renderSettingsLocationMap() {
     return {
       lat: coords.lat,
       lng: coords.lng,
-      label: loc.name || "(unnamed)",
+      label: displayNameFor(loc) || "(unnamed)",
       iconKind,
       onClick: () => jumpToLocationRow(i),
     };
