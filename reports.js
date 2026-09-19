@@ -326,7 +326,7 @@ function nearestLocationNameBulk(mark) {
       best = loc;
     }
   }
-  return best ? best.name : "(unknown)";
+  return best ? displayNameFor(best) : "(unknown)";
 }
 
 function renderLocationReport() {
