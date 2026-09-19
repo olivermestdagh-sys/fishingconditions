@@ -59,10 +59,6 @@
  *   GET  /auth/callback           -> completes login, 302 to the frontend
  *   POST /auth/logout             -> clears the session, 204
  *   GET  /auth/me                 -> { id, email, name } or 401
- *   GET  /api/locations           -> this user's saved locations
- *   POST /api/locations           -> create one
- *   PUT  /api/locations/:id       -> update one (must belong to caller)
- *   DELETE /api/locations/:id     -> delete one (must belong to caller)
  *   GET  /api/settings            -> this user's check-frequency settings
  *                                    (creates a default row on first read)
  *   PUT  /api/settings            -> update check-frequency settings
@@ -145,7 +141,6 @@ const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 const STATE_MAX_AGE_SECONDS = 60 * 10; // 10 minutes — just needs to outlive the Google consent screen
 const MIN_CHECK_FREQUENCY_MINUTES = 15; // floor only, not tier-aware yet — see NOT YET BUILT above
 const MAX_CHECK_FREQUENCY_MINUTES = 1440; // one check a day, the loosest end
-const VALID_LOCATION_TYPES = new Set(["Kayak", "Land based"]);
 
 // --- v2 (schema-v2.sql) constants ---
 const PUBLIC_USER_ID = "public";
@@ -200,13 +195,6 @@ export default {
       }
       if (url.pathname === "/auth/me" && request.method === "GET") {
         return handleMe(request, env);
-      }
-      if (url.pathname === "/api/locations") {
-        return handleLocationsCollection(request, env);
-      }
-      const locationMatch = url.pathname.match(/^\/api\/locations\/([^/]+)$/);
-      if (locationMatch) {
-        return handleLocationItem(request, env, locationMatch[1]);
       }
       if (url.pathname === "/api/settings") {
         return handleSettings(request, url, env);
@@ -477,151 +465,6 @@ async function handleMe(request, env) {
   // frontend needs this to decide whether to show any "edit Public's
   // defaults" affordance at all.
   return jsonResponse({ id: user.id, email: user.email, name: user.name, role: user.role }, 200, env);
-}
-
-// ---------------------------------------------------------------------
-// v1 Locations CRUD (user_locations table) — DEPRECATED, superseded by
-// the v2 /api/tracked-locations endpoints below (the single Locations
-// editor on the merged Settings page now uses this for every signed-in
-// user, not just Admin — see "Settings and Account merged" further down).
-// Kept functional (still scoped correctly, still safe) rather than
-// deleted outright — nothing currently calls it, but removing working
-// code purely for tidiness isn't worth the risk/diff for a dead path
-// that costs nothing left running. Safe to delete in a future round once
-// confirmed nothing else depends on it.
-// ---------------------------------------------------------------------
-
-async function handleLocationsCollection(request, env) {
-  const user = await requireUser(request, env);
-  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
-
-  if (request.method === "GET") {
-    const { results } = await env.DB.prepare(
-      "SELECT * FROM user_locations WHERE user_id = ? ORDER BY created_at ASC"
-    )
-      .bind(user.id)
-      .all();
-    return jsonResponse(results.map(rowToLocation), 200, env);
-  }
-
-  if (request.method === "POST") {
-    const body = await readJsonBody(request);
-    const validationError = validateLocationInput(body, { partial: false });
-    if (validationError) return jsonResponse({ error: validationError }, 400, env);
-
-    const id = crypto.randomUUID();
-    const now = Date.now();
-    await env.DB.prepare(
-      `INSERT INTO user_locations (id, user_id, name, lat, lng, willyweather_id, type, tidal, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
-        id,
-        user.id,
-        body.name,
-        body.lat,
-        body.lng,
-        body.willyweatherId ?? null,
-        body.type ?? "Kayak",
-        body.tidal === false ? 0 : 1,
-        now
-      )
-      .run();
-
-    const created = await env.DB.prepare("SELECT * FROM user_locations WHERE id = ?").bind(id).first();
-    return jsonResponse(rowToLocation(created), 201, env);
-  }
-
-  return jsonResponse({ error: "Method not allowed." }, 405, env);
-}
-
-async function handleLocationItem(request, env, id) {
-  const user = await requireUser(request, env);
-  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
-
-  const existing = await env.DB.prepare("SELECT * FROM user_locations WHERE id = ? AND user_id = ?")
-    .bind(id, user.id)
-    .first();
-  if (!existing) {
-    // Same response whether the id genuinely doesn't exist or belongs to
-    // someone else — a caller has no legitimate reason to distinguish
-    // "not yours" from "not found", and confirming existence of another
-    // user's row id would be an information leak either way.
-    return jsonResponse({ error: "Location not found." }, 404, env);
-  }
-
-  if (request.method === "PUT") {
-    const body = await readJsonBody(request);
-    const validationError = validateLocationInput(body, { partial: true });
-    if (validationError) return jsonResponse({ error: validationError }, 400, env);
-
-    const merged = {
-      name: body.name ?? existing.name,
-      lat: body.lat ?? existing.lat,
-      lng: body.lng ?? existing.lng,
-      willyweatherId: body.willyweatherId !== undefined ? body.willyweatherId : existing.willyweather_id,
-      type: body.type ?? existing.type,
-      tidal: body.tidal !== undefined ? (body.tidal ? 1 : 0) : existing.tidal,
-    };
-    await env.DB.prepare(
-      `UPDATE user_locations SET name = ?, lat = ?, lng = ?, willyweather_id = ?, type = ?, tidal = ?
-       WHERE id = ? AND user_id = ?`
-    )
-      .bind(merged.name, merged.lat, merged.lng, merged.willyweatherId, merged.type, merged.tidal, id, user.id)
-      .run();
-
-    const updated = await env.DB.prepare("SELECT * FROM user_locations WHERE id = ?").bind(id).first();
-    return jsonResponse(rowToLocation(updated), 200, env);
-  }
-
-  if (request.method === "DELETE") {
-    // Explicit cleanup of the dependent schedule_state row rather than
-    // relying on the schema's ON DELETE CASCADE alone — D1's handling of
-    // SQLite foreign-key pragmas wasn't verified against a real deploy, so
-    // this doesn't assume it actually cascades.
-    await env.DB.prepare("DELETE FROM schedule_state WHERE user_location_id = ?").bind(id).run();
-    await env.DB.prepare("DELETE FROM user_locations WHERE id = ? AND user_id = ?").bind(id, user.id).run();
-    return new Response(null, { status: 204, headers: corsHeaders(env) });
-  }
-
-  return jsonResponse({ error: "Method not allowed." }, 405, env);
-}
-
-function rowToLocation(row) {
-  return {
-    id: row.id,
-    name: row.name,
-    lat: row.lat,
-    lng: row.lng,
-    willyweatherId: row.willyweather_id,
-    type: row.type,
-    tidal: !!row.tidal,
-    createdAt: row.created_at,
-  };
-}
-
-function validateLocationInput(body, { partial }) {
-  if (!body || typeof body !== "object") return "Request body must be a JSON object.";
-  if (!partial || body.name !== undefined) {
-    if (typeof body.name !== "string" || !body.name.trim()) return "name is required.";
-  }
-  if (!partial || body.lat !== undefined) {
-    if (typeof body.lat !== "number" || !Number.isFinite(body.lat) || body.lat < -90 || body.lat > 90) {
-      return "lat must be a number between -90 and 90.";
-    }
-  }
-  if (!partial || body.lng !== undefined) {
-    if (typeof body.lng !== "number" || !Number.isFinite(body.lng) || body.lng < -180 || body.lng > 180) {
-      return "lng must be a number between -180 and 180.";
-    }
-  }
-  if (body.type !== undefined && !VALID_LOCATION_TYPES.has(body.type)) {
-    return `type must be one of: ${[...VALID_LOCATION_TYPES].join(", ")}.`;
-  }
-  if (body.willyweatherId !== undefined && body.willyweatherId !== null && !Number.isInteger(body.willyweatherId)) {
-    return "willyweatherId must be an integer or null.";
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------
