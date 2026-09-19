@@ -24,11 +24,13 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 API_KEY = os.environ.get("WILLYWEATHER_API_KEY")
 FORECAST_DAYS = int(os.environ.get("FORECAST_DAYS", "6"))
+FETCH_WORKERS = 5  # concurrent locations in main()
 BASE_URL = "https://api.willyweather.com.au/v2"
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 OPEN_METEO_MARINE_URL = "https://marine-api.open-meteo.com/v1/marine"
@@ -145,21 +147,29 @@ def load_locations():
     return data
 
 
-def write_location_cache(locations):
+def _cache_fields(loc):
+    """The fields write_location_cache() persists, as a comparable dict."""
+    return {
+        "willyweatherId": loc.get("willyweatherId"),
+        "willyweatherName": loc.get("willyweatherName"),
+        "willyweatherRegion": loc.get("willyweatherRegion"),
+        "willyweatherState": loc.get("willyweatherState"),
+        "lat": loc.get("lat"),
+        "lng": loc.get("lng"),
+        "tideMaxObserved": loc.get("tideMaxObserved"),
+    }
+
+
+def write_location_cache(locations, original_cache=None):
     """Replaces the old 'write the whole locations list back to
     config/locations.json' step — persists each location's newly-resolved
     willyweatherId/willyweatherName/willyweatherRegion/willyweatherState/
     lat/lng/tideMaxObserved (see the resolution tiers in process_location())
     back to its own D1 row, one PUT per location.
 
-    DELIBERATE BEHAVIOUR CHANGE from the old file-based version: this
-    always sends a PUT for every location on every run, rather than only
-    committing when the file's content genuinely changed. D1 writes at
-    this volume (a few dozen locations, once every few hours) are cheap
-    enough that this isn't worth the extra round-trip a real
-    changed-since-last-time comparison would need — but it IS a real
-    behaviour change from the git-commit version worth knowing about if
-    D1 write volume/cost ever becomes a concern."""
+    Only sends a PUT for locations whose cached fields differ from what
+    load_locations() returned at the start of the run (original_cache);
+    with no original_cache given, sends one for every location."""
     if not PIPELINE_WORKER_URL or not PIPELINE_API_TOKEN:
         return  # already exited in load_locations() if these were ever missing; defensive only
     sent = 0
@@ -167,15 +177,12 @@ def write_location_cache(locations):
         loc_id = loc.get("id")
         if not loc_id:
             continue
-        body = {
-            "willyweatherId": loc.get("willyweatherId"),
-            "willyweatherName": loc.get("willyweatherName"),
-            "willyweatherRegion": loc.get("willyweatherRegion"),
-            "willyweatherState": loc.get("willyweatherState"),
-            "lat": loc.get("lat"),
-            "lng": loc.get("lng"),
-            "tideMaxObserved": loc.get("tideMaxObserved"),
-        }
+        body = _cache_fields(loc)
+        # Skip the round trip when nothing was newly resolved this run
+        # (the steady state) — see original_cache in main().
+        if original_cache is not None and original_cache.get(loc_id) == body:
+            sent += 1
+            continue
         result = http_put_json(
             f"{PIPELINE_WORKER_URL}/api/pipeline/locations/{loc_id}",
             body,
@@ -1450,6 +1457,7 @@ def main():
         sys.exit(1)
 
     locations = load_locations()
+    original_cache = {loc.get("id"): _cache_fields(loc) for loc in locations}
 
     previous_output = load_previous_output()
     previous_rows_by_key = {}
@@ -1485,13 +1493,30 @@ def main():
         except Exception as e:  # noqa: BLE001 - moon phase is a nice-to-have, not core data
             print(f"WARNING: failed to fetch moon phases: {e}", file=sys.stderr)
 
+    # Fetch every location concurrently — the run is almost entirely
+    # network-bound (3 sequential HTTP calls per location), so a small
+    # thread pool cuts wall-clock time several-fold. Request COUNT (and so
+    # WillyWeather billing) is unchanged. map() preserves input order, so
+    # output ordering is identical to the old sequential loop; the
+    # history-merging below stays sequential.
+    def _fetch(loc):
+        print(f"Fetching {loc['name']}...")
+        try:
+            return process_location(loc)
+        except Exception as e:  # noqa: BLE001 - re-raised per location below, same handling as before
+            return e
+
+    with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
+        fetched = list(pool.map(_fetch, locations))
+
     all_rows = []
     output_locations = []
     sun_times_by_location = {}
-    for loc in locations:
-        print(f"Fetching {loc['name']}...")
+    for loc, result in zip(locations, fetched):
         try:
-            rows_by_type, sun_times = process_location(loc)
+            if isinstance(result, Exception):
+                raise result
+            rows_by_type, sun_times = result
             sun_times_by_location[loc["name"]] = sun_times
 
             for type_config in loc.get("types") or []:
@@ -1581,7 +1606,7 @@ def main():
     # place by process_location() with whatever it newly resolved. See
     # write_location_cache()'s own docstring for how this differs from the
     # old git-commit-if-changed behaviour.
-    write_location_cache(locations)
+    write_location_cache(locations, original_cache)
 
     # Regenerates config/locations.json for charts.js's own direct,
     # client-side reads — see export_locations_json()'s own docstring.
