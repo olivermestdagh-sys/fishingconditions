@@ -15,7 +15,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3884,
     "lng": 145.1245,
-    "tideMaxObserved": 2.86,
+    "tideMaxObserved": 2.76,
     "types": [
       {
         "type": "Kayak",
@@ -53,7 +53,7 @@
     "willyweatherState": "VIC",
     "lat": -37.5775,
     "lng": 149.7536,
-    "tideMaxObserved": 1.14,
+    "tideMaxObserved": 1.13,
     "types": [
       {
         "type": "Land based",
@@ -82,7 +82,7 @@
     "willyweatherState": "VIC",
     "lat": -38.54427195995182,
     "lng": 145.34040927886966,
-    "tideMaxObserved": 2.5,
+    "tideMaxObserved": 2.38,
     "types": [
       {
         "type": "Land based",
@@ -111,7 +111,7 @@
     "willyweatherState": "VIC",
     "lat": -38.4079,
     "lng": 145.4234,
-    "tideMaxObserved": 2.68,
+    "tideMaxObserved": 2.58,
     "types": [
       {
         "type": "Kayak",
@@ -140,7 +140,7 @@
     "willyweatherState": "VIC",
     "lat": -38.4348,
     "lng": 145.4426,
-    "tideMaxObserved": 2.68,
+    "tideMaxObserved": 2.58,
     "types": [
       {
         "type": "Kayak",
@@ -169,7 +169,7 @@
     "willyweatherState": "VIC",
     "lat": -38.457,
     "lng": 144.8687,
-    "tideMaxObserved": 1.54,
+    "tideMaxObserved": 1.47,
     "types": [
       {
         "type": "Land based",
@@ -198,7 +198,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3082,
     "lng": 145.1991,
-    "tideMaxObserved": 2.86,
+    "tideMaxObserved": 2.76,
     "types": [
       {
         "type": "Kayak",
@@ -227,7 +227,7 @@
     "willyweatherState": "VIC",
     "lat": -38.5492,
     "lng": 145.4754,
-    "tideMaxObserved": 2.5,
+    "tideMaxObserved": 2.38,
     "types": [
       {
         "type": "Land based",
@@ -285,7 +285,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3052,
     "lng": 145.5214,
-    "tideMaxObserved": 3.04,
+    "tideMaxObserved": 2.92,
     "types": [
       {
         "type": "Kayak",
@@ -382,7 +382,7 @@
     "willyweatherState": "VIC",
     "lat": -38.2117,
     "lng": 145.0349,
-    "tideMaxObserved": 0.82,
+    "tideMaxObserved": 0.78,
     "types": [
       {
         "type": "Kayak",
@@ -411,7 +411,7 @@
     "willyweatherState": "VIC",
     "lat": -38.0734,
     "lng": 145.1197,
-    "tideMaxObserved": 0.81,
+    "tideMaxObserved": 0.77,
     "types": [
       {
         "type": "Kayak",
@@ -440,7 +440,7 @@
     "willyweatherState": "VIC",
     "lat": -38.417619693844,
     "lng": 145.07783174514773,
-    "tideMaxObserved": 2.86,
+    "tideMaxObserved": 2.76,
     "types": [
       {
         "type": "Land based",
@@ -469,10 +469,37 @@
     "willyweatherState": "VIC",
     "lat": -38.42521838040787,
     "lng": 145.0703859329224,
-    "tideMaxObserved": 2.86,
+    "tideMaxObserved": 2.76,
     "types": [
       {
         "type": "Land based",
+        "driveTo": "00:00",
+        "driveBack": "00:00",
+        "setUp": "00:00",
+        "packUp": "00:00",
+        "timeToSpot": "00:00",
+        "timeFromSpot": "00:00"
+      }
+    ]
+  },
+  {
+    "name": "Quail Island",
+    "displayName": "Warneet (Quail Island)",
+    "shore": "NNE",
+    "tidal": true,
+    "locationGroup": null,
+    "locationGroups": [],
+    "tideOffset": null,
+    "willyweatherId": 27177,
+    "willyweatherName": "Quail Island",
+    "willyweatherRegion": "Mornington Peninsula",
+    "willyweatherState": "VIC",
+    "lat": -38.24917381062087,
+    "lng": 145.29616355896,
+    "tideMaxObserved": 2.76,
+    "types": [
+      {
+        "type": "Kayak",
         "driveTo": "00:00",
         "driveBack": "00:00",
         "setUp": "00:00",
@@ -498,7 +525,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3503,
     "lng": 144.9073,
-    "tideMaxObserved": 0.8,
+    "tideMaxObserved": 0.77,
     "types": [
       {
         "type": "Kayak",
@@ -527,7 +554,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3131,
     "lng": 144.9911,
-    "tideMaxObserved": 0.8,
+    "tideMaxObserved": 0.77,
     "types": [
       {
         "type": "Kayak",
@@ -556,7 +583,7 @@
     "willyweatherState": "VIC",
     "lat": -38.39426386067292,
     "lng": 145.1585125923157,
-    "tideMaxObserved": 2.86,
+    "tideMaxObserved": 2.76,
     "types": [
       {
         "type": "Land based",
@@ -585,7 +612,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3357,
     "lng": 144.7459,
-    "tideMaxObserved": 1.54,
+    "tideMaxObserved": 1.47,
     "types": [
       {
         "type": "Kayak",
@@ -614,7 +641,7 @@
     "willyweatherState": "VIC",
     "lat": -38.3744,
     "lng": 145.2224,
-    "tideMaxObserved": 2.86,
+    "tideMaxObserved": 2.76,
     "types": [
       {
         "type": "Kayak",
@@ -641,7 +668,7 @@
     "willyweatherState": "NSW",
     "lat": -28.18676843321961,
     "lng": 153.53226184844974,
-    "tideMaxObserved": 1.53,
+    "tideMaxObserved": 1.55,
     "types": [
       {
         "type": "Kayak",
@@ -670,7 +697,7 @@
     "willyweatherState": "VIC",
     "lat": -38.2275,
     "lng": 145.3066,
-    "tideMaxObserved": 2.86,
+    "tideMaxObserved": 2.76,
     "types": [
       {
         "type": "Kayak",
@@ -699,7 +726,7 @@
     "willyweatherState": "VIC",
     "lat": -38.485105682696734,
     "lng": 145.03154754638675,
-    "tideMaxObserved": 2.5,
+    "tideMaxObserved": 2.38,
     "types": [
       {
         "type": "Kayak",
@@ -728,7 +755,7 @@
     "willyweatherState": "VIC",
     "lat": -37.8674,
     "lng": 144.8916,
-    "tideMaxObserved": 0.93,
+    "tideMaxObserved": 0.9,
     "types": [
       {
         "type": "Kayak",
