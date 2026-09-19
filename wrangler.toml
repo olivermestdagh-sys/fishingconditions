@@ -1,0 +1,26 @@
+﻿name = "fishingconditions-users"
+main = "user-backend.js"
+compatibility_date = "2026-09-12"
+workers_dev = true
+preview_urls = false
+
+[observability]
+enabled = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fishingconditions-users"
+database_id = "bf81bd8d-85ba-4532-a00e-c2ba3d480619"
+
+[vars]
+ALLOWED_ORIGIN = "https://olivermestdagh-sys.github.io"
+FRONTEND_ACCOUNT_URL = "https://olivermestdagh-sys.github.io/fishingconditions/account.html"
+GH_REPO_NAME = "fishingconditions"
+GH_REPO_OWNER = "olivermestdagh-sys"
+GH_WORKFLOW_FILE = "update.yml"
+GOOGLE_CLIENT_ID = "980249471001-mspp2fvr1ovomu1068u9o2nvvr6tam3e.apps.googleusercontent.com"
+GOOGLE_REDIRECT_URI = "https://fishingconditions-users.oliver-mestdagh.workers.dev/auth/callback"
+
+# Secrets (not stored here; already set on the deployed worker, kept on deploy):
+#   GH_ACTIONS_TOKEN, GOOGLE_CLIENT_SECRET, PIPELINE_API_TOKEN
+
