@@ -4,8 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Olie's Kayak and Surf Fishing Conditions – Sync</title>
+<meta name="description" content="Import and export fishing marks from Lowrance and Garmin chartplotters." />
+<meta name="theme-color" content="#0b2a4a" />
+<link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+<link rel="apple-touch-icon" href="images/apple-touch-icon.png" />
+<link rel="manifest" href="manifest.webmanifest" />
 <link rel="stylesheet" href="style.css" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous" />
 <style>
   .sync-review-layout { display: flex; gap: 12px; align-items: stretch; }
   .sync-review-map-panel { flex: 1 1 auto; min-width: 0; }
@@ -50,7 +55,7 @@
   <a href="index.html">Week Ahead</a>
   <a href="conditions.html">Location</a>
   <a href="live.html">Live</a>
-  <a href="sync.html" class="active">Sync</a>
+  <a href="sync.html" class="active" aria-current="page">Sync</a>
   <a href="reports.html">Reports</a>
   <a href="locations.html">Settings</a>
 </nav></div>
@@ -161,7 +166,7 @@
   </div>
 </main>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
 <script src="charts.js"></script>
 <script src="sync.js"></script>
 </body>
