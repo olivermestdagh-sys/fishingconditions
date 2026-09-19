@@ -1595,7 +1595,10 @@ def main():
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2, default=str)
+        # Compact (no indentation/spaces): this file is only ever read by
+        # machines, every page downloads it, and it is committed every run —
+        # pretty-printing made it ~35% bigger for no benefit.
+        json.dump(output, f, separators=(",", ":"), ensure_ascii=False, default=str)
 
     print(f"Wrote {len(all_rows)} rows to {OUTPUT_PATH}")
 
