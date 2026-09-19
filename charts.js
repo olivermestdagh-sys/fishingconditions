@@ -6490,6 +6490,21 @@ let _trackedLocationsForLookupCache = null;
  * conditions.json at all. */
 async function loadTrackedLocationsForLookup() {
   if (_trackedLocationsForLookupCache) return _trackedLocationsForLookupCache;
+  // Prefer the live list from D1 (same fields — name, displayName, lat, lng,
+  // willyweatherId, tideOffset — and always current, unlike the exported
+  // file, which only updates when the data job runs).
+  try {
+    const live = await fetch(`${USER_BACKEND_URL}/api/public/locations?_=${Date.now()}`, { cache: "no-store" });
+    if (live.ok) {
+      const list = await live.json();
+      if (Array.isArray(list) && list.length > 0) {
+        _trackedLocationsForLookupCache = list;
+        return list;
+      }
+    }
+  } catch (err) {
+    console.error("Live locations unavailable, falling back to config/locations.json:", err);
+  }
   try {
     const res = await fetch(`config/locations.json?_=${Date.now()}`, { cache: "no-store" });
     _trackedLocationsForLookupCache = res.ok ? await res.json() : [];

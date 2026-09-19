@@ -168,6 +168,26 @@ export default {
       return new Response(null, { headers: corsHeaders(env) });
     }
 
+    // CSRF guard. The session cookie is SameSite=None (the site and this
+    // Worker are on different origins), so a browser would attach it to a
+    // cross-site POST from ANY page — including a "simple" text/plain one that
+    // needs no CORS preflight — and readJsonBody parses whatever body it gets.
+    // Browsers always send an Origin header on cross-site POST/PUT/DELETE, so
+    // requiring it to be exactly our own site for every state-changing request
+    // closes that. Exempt: /api/pipeline/* (server-to-server from GitHub
+    // Actions, authenticated by a shared-secret header, no cookie, no Origin).
+    if (
+      request.method !== "GET" &&
+      request.method !== "HEAD" &&
+      !url.pathname.startsWith("/api/pipeline/") &&
+      request.headers.get("Origin") !== env.ALLOWED_ORIGIN
+    ) {
+      return new Response(JSON.stringify({ error: "Cross-origin request blocked." }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     try {
       if (url.pathname === "/auth/login" && request.method === "GET") {
         return handleLogin(env);
