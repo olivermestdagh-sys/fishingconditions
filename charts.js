@@ -5786,6 +5786,21 @@ function buildPreviewRows(weather, pressureByHour, marine, shoreGuess) {
       setField(entry.dateTime, "Wind Forecast Dir", entry.directionText || entry.direction);
     }
   }
+  // Mirrors build_readings's own swell block (fetch_conditions.py) exactly
+  // — same four fields, same reasoning for keeping raw degrees separate
+  // from the compass-letter text (the chart needs a real number to point
+  // an arrow by; the text is for display/tooltip use only). Naturally
+  // produces nothing at all for a location with no swell data, the same
+  // way every other forecast type here already does — no extra handling
+  // needed for "where it exists" on the preview path specifically.
+  for (const day of (forecasts.swell || {}).days || []) {
+    for (const entry of day.entries || []) {
+      setField(entry.dateTime, "Swell Height (m)", entry.height);
+      setField(entry.dateTime, "Swell Period (s)", entry.period);
+      setField(entry.dateTime, "Swell Dir", entry.direction);
+      setField(entry.dateTime, "Swell Dir Text", entry.directionText);
+    }
+  }
   for (const day of (forecasts.rainfallprobability || {}).days || []) {
     for (const entry of day.entries || []) {
       setField(entry.dateTime, "Rainfall Probability (%)", entry.probability);
@@ -6823,6 +6838,33 @@ function buildTideExtremaPlugin(rows) {
  * at most directions, defeating the point of a number that's meant to
  * be read at a glance.
  */
+/** One shared line-formatter for a row's own Swell reading, used by both
+ * tooltip implementations below (Chart.js's own native afterBody, and
+ * buildTooltipCrosshairPlugin's manually-drawn mirror of it, for the same
+ * disableBuiltinEvents callers Condition/Fishing Condition already need
+ * duplicated across both) — kept as one function specifically so the two
+ * tooltips can't quietly drift out of sync with each other on the exact
+ * wording later. Null whenever there's no period reading for this row,
+ * matching buildSwellMarkersPlugin's own "nothing drawn without a period"
+ * rule — a tooltip line for a row with no swell marker drawn on it at all
+ * would be confusing, not helpful. Height and direction are each allowed
+ * to be individually absent without suppressing the rest of the line —
+ * WillyWeather can return a period with no paired height or direction
+ * depending on the model, matching the same real-not-hypothetical
+ * reasoning build_readings (fetch_conditions.py) already documents for
+ * direction specifically. */
+function formatSwellTooltipLine(row) {
+  const period = row["Swell Period (s)"];
+  if (period == null) return null;
+  const height = row["Swell Height (m)"];
+  const dirText = row["Swell Dir Text"];
+  let text = "Swell ";
+  if (height != null) text += `${height.toFixed(1)}m @ `;
+  text += `${period.toFixed(1)}s`;
+  if (dirText) text += ` ${dirText}`;
+  return text;
+}
+
 function buildSwellMarkersPlugin(rows) {
   return {
     id: "swellMarkers",
@@ -6999,6 +7041,8 @@ function buildTooltipCrosshairPlugin(rows) {
           if (row["Fishing Condition"] != null) {
             lines.push({ text: `Fishing ${row["Fishing Condition"].toFixed(1)}/5 — ${row["Fishing Condition Reason"] || ""}` });
           }
+          const swellLine = formatSwellTooltipLine(row);
+          if (swellLine) lines.push({ text: swellLine });
         }
         drawTooltipBox(ctx, chartArea, x, lines);
       }
@@ -8237,6 +8281,8 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
               if (row["Fishing Condition"] != null) {
                 lines.push(`Fishing ${row["Fishing Condition"].toFixed(1)}/5 — ${row["Fishing Condition Reason"] || ""}`);
               }
+              const swellLine = formatSwellTooltipLine(row);
+              if (swellLine) lines.push(swellLine);
               return lines;
             },
           },

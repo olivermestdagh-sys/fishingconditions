@@ -274,7 +274,21 @@ async function handleWeather(url, env) {
     return jsonResponse({ error: "startDate must be YYYY-MM-DD." }, 400, env);
   }
 
-  const forecasts = startDate ? "tides" : "temperature,wind,rainfallprobability,tides,sunrisesunset";
+  // swell added on request, matching fetch_conditions.py's own combined
+  // request — the scheduled fetch and this preview endpoint had drifted
+  // into two independent, hand-maintained forecast type lists (confirmed
+  // directly: this Worker's own list never had swell added at all when
+  // fetch_conditions.py first got it, which is exactly why a saved
+  // location's own graph started showing swell while previewing an
+  // unsaved spot on the map still didn't). Combined into the SAME list
+  // rather than a separate request the way fetch_conditions.py's own
+  // get_swell briefly was — that isolation existed only because swell
+  // hadn't been authorized yet on the API key at the time (a real,
+  // confirmed WillyWeather-side permissions issue, not a "combining
+  // forecast types is inherently unsafe" one) and Oliver has since
+  // enabled it and confirmed the combined call works correctly now that
+  // it is.
+  const forecasts = startDate ? "tides" : "temperature,wind,swell,rainfallprobability,tides,sunrisesunset";
   const observationalParam = startDate ? "" : "&observationalGraphs=temperature,wind";
   const startDateParam = startDate ? `&startDate=${startDate}` : "";
 
