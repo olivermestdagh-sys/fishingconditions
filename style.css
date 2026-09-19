@@ -2948,22 +2948,33 @@ html.weeknew-force-landscape .week-timeline-scroll.weeknew-dragging {
 
 /* Floating "colour by" + Filters control bar over the Location/Live maps
    (see initMarkControls, charts.js) — starts hidden (display:none, set in
-   HTML) until marks actually load. top:56px rather than 10px specifically
-   to sit BELOW the Live tab's own .live-gps-status pill (which is
-   horizontally centered and can run fairly wide with a real location name
-   in it) without needing any JS coordination between the two to avoid
-   overlapping — vertical separation alone guarantees no collision
-   regardless of how wide either one's content happens to be. Same
-   position on the Location tab too (no gps-status pill there to avoid) for
-   one consistent, predictable spot across both tabs.
+   HTML) until marks actually load. Top-aligned with Leaflet's zoom
+   buttons (see below). It used to sit lower (56px) to stay clear of the
+   Live tab's own .live-gps-status pill (horizontally centered, can run
+   fairly wide with a real location name in it); that lower position is now
+   kept only for narrow Live screens — see the media query just below.
    max-width: calc(100vw - 20px), not a flat 220px — a flat px cap can
    still be wider than what's actually left on a narrow phone once the
    10px right-inset is accounted for; tying it to the viewport guarantees
    the box itself never claims more width than genuinely fits, on any
    screen. */
+/* Live tab only (the bar follows .live-gps-status in the DOM): on screens
+   narrower than 900px the GPS pill can stretch across the top and would sit
+   on top of the bar, so there the bar keeps its old lower position, below
+   the pill. Wider screens have plenty of room beside it, so the bar lines up
+   with the zoom buttons there like on the Location tab. */
+@media (max-width: 900px) {
+  .live-gps-status ~ .mark-controls-bar {
+    top: 56px;
+  }
+}
+
 .mark-controls-bar {
   position: absolute;
-  top: 56px;
+  /* 12px, not 10: Leaflet's zoom box sits at top:10px but has a 2px
+     translucent border, so its visible white top edge is at 12px — this
+     makes the top of this bar line up with the top of the +/- buttons. */
+  top: 12px;
   /* Left, not right — the side panel (see .map-with-panel-layout below)
      now permanently occupies the map's own right edge whenever a mark's
      popup is open, and this bar used to sit right on top of it there.
