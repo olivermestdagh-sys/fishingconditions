@@ -2212,6 +2212,7 @@ function schedulePlaceSave(idx) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             name: loc.name,
+            displayName: loc.displayName,
             shore: loc.shore,
             tideOffset: loc.tideOffset,
             tidal: loc.tidal !== false,
