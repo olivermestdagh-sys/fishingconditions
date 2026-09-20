@@ -3440,3 +3440,18 @@ body {
     padding-bottom: max(env(safe-area-inset-bottom, 0px), 24px);
   }
 }
+
+/* Week Ahead on touch devices: no spare padding under the graph board (the sizing
+   script in index.html fills the screen down to the bottom edge), and in landscape
+   the rows are half their usual height so more locations fit on the short screen
+   (a phone in landscape otherwise gets the 328px desktop row height). */
+@media (hover: none) {
+  .weeknew-page main {
+    padding-bottom: 0 !important; /* overrides the inline padding on <main> */
+  }
+}
+@media (orientation: landscape) and (max-height: 600px) and (hover: none) {
+  .weeknew-page .week-timeline-scroll {
+    --weeknew-mobile-row-height: 164px; /* 50% of 328px */
+  }
+}

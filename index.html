@@ -31,9 +31,18 @@
     var scrollWrap = document.getElementById("weekTimelineScroll");
     if (!scrollWrap) return;
     var foot = scrollWrap.nextElementSibling;
-    var footH = foot ? foot.offsetHeight + 20 : 40;
-    var avail = window.innerHeight - getOffsetTopWithinBody(scrollWrap) - footH - 8; // 8 = main's bottom padding here (inline style on <main>)
-    var wanted = avail > 200 ? avail + "px" : ""; // implausibly little room: fall back to the CSS cap
+    // A footnote hidden by CSS (phones, landscape) has offsetHeight 0 and takes no room.
+    var footH = foot && foot.offsetHeight ? foot.offsetHeight + 20 : 0;
+    // Whatever padding/margin/border sits below the board (its card, <main>, <body>),
+    // measured rather than assumed so the board reaches the bottom edge exactly.
+    var below = 0;
+    for (var node = scrollWrap.parentElement; node; node = node.parentElement) {
+      var cs = getComputedStyle(node);
+      below += (parseFloat(cs.paddingBottom) || 0) + (parseFloat(cs.marginBottom) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+      if (node === document.body) break;
+    }
+    var avail = window.innerHeight - getOffsetTopWithinBody(scrollWrap) - footH - below;
+    var wanted = avail > 100 ? avail + "px" : ""; // implausibly little room: fall back to the CSS cap
     if (scrollWrap.style.maxHeight !== wanted) scrollWrap.style.maxHeight = wanted;
   }
 
