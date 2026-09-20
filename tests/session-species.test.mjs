@@ -17,7 +17,9 @@ const fns = new Function(
     grab(/function fieldKeysForMarkType[\s\S]*?\r?\n}\r?\n/),
     grab(/function typeRequiresSpecies[\s\S]*?\r?\n}\r?\n/),
     grab(/function typeAllowsMultipleSpecies[\s\S]*?\r?\n}\r?\n/),
-    "return { fieldKeysForMarkType, typeRequiresSpecies, typeAllowsMultipleSpecies };",
+    grab(/const SESSION_MULTI_VALUE_FIELDS = [^\n]*\r?\n/),
+    grab(/function typeAllowsMultipleValues[\s\S]*?\r?\n}\r?\n/),
+    "return { fieldKeysForMarkType, typeRequiresSpecies, typeAllowsMultipleSpecies, typeAllowsMultipleValues };",
   ].join("\n")
 )();
 
@@ -35,4 +37,21 @@ test("Catch and Mark still require a species; POI has none", () => {
 test("only a Session allows multiple species", () => {
   assert.equal(fns.typeAllowsMultipleSpecies("Session"), true);
   for (const t of ["Catch", "Mark", "POI", "Fish"]) assert.equal(fns.typeAllowsMultipleSpecies(t), false);
+});
+
+test("Session allows several baits, rigs and rods (and berley), other types do not", () => {
+  for (const k of ["bait", "rig", "rod", "berley", "species"]) {
+    assert.equal(fns.typeAllowsMultipleValues("Session", k), true, k);
+    assert.equal(fns.typeAllowsMultipleValues("Catch", k), false, k);
+  }
+  assert.equal(fns.typeAllowsMultipleValues("Session", "weatherCondition"), false);
+});
+
+test("Session has no Size or Released; Catch still does", () => {
+  const session = fns.fieldKeysForMarkType("Session");
+  assert.ok(!session.includes("size"));
+  assert.ok(!session.includes("released"));
+  for (const k of ["species", "bait", "rig", "rod", "notes"]) assert.ok(session.includes(k), k);
+  const c = fns.fieldKeysForMarkType("Catch");
+  assert.ok(c.includes("size") && c.includes("released"));
 });
