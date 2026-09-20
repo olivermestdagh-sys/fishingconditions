@@ -3411,3 +3411,17 @@ main.wide {
 .loc-tile-heading { font-size: 0.8rem; font-weight: 700; margin: 0 0 4px; }
 .loc-tile-sessions { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; }
 .loc-tile { max-height: 70vh; overflow-y: auto; }
+
+
+/* Installed-app (PWA) layout: keep content clear of the phone's system bars.
+   env() is 0 wherever there is no inset, so browsers/desktop are unaffected.
+   Needs viewport-fit=cover in each page's viewport meta. */
+body {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.map-fullpage-body {
+  box-sizing: border-box; /* the padding above comes out of the 100dvh, not on top of it */
+}
+.sitebar {
+  border-top: env(safe-area-inset-top, 0px) solid var(--blue-900);
+}
