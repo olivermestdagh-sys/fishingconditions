@@ -42,6 +42,13 @@
       if (node === document.body) break;
     }
     var avail = window.innerHeight - getOffsetTopWithinBody(scrollWrap) - footH - below;
+    // On touch devices <main>'s spare bottom padding goes too (set inline here, not in
+    // CSS, so it doesn't depend on any media query matching): the board runs to the edge.
+    var mainEl = document.querySelector("main");
+    if (navigator.maxTouchPoints > 0 && mainEl && mainEl.style.paddingBottom !== "0px") {
+      mainEl.style.paddingBottom = "0px";
+      return applyBoardSizing(); // re-measure without that padding
+    }
     var wanted = avail > 100 ? avail + "px" : ""; // implausibly little room: fall back to the CSS cap
     if (scrollWrap.style.maxHeight !== wanted) scrollWrap.style.maxHeight = wanted;
   }
@@ -53,7 +60,19 @@
     if (above && window.ResizeObserver) new ResizeObserver(applyBoardSizing).observe(above);
   });
   window.addEventListener("resize", applyBoardSizing);
-  window.addEventListener("orientationchange", applyBoardSizing);
+  // After a rotation the browser reports the new window height a moment late (and the
+  // landscape layout changes what sits above the board), so measure again shortly after
+  // as well as immediately — otherwise the board keeps the previous orientation's height.
+  function remeasureAfterRotation() {
+    applyBoardSizing();
+    [100, 300, 700].forEach(function (ms) { setTimeout(applyBoardSizing, ms); });
+  }
+  window.addEventListener("orientationchange", remeasureAfterRotation);
+  window.addEventListener("resize", function () { setTimeout(applyBoardSizing, 150); });
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", applyBoardSizing);
+  document.addEventListener("DOMContentLoaded", function () {
+    if (window.ResizeObserver) new ResizeObserver(applyBoardSizing).observe(document.documentElement);
+  });
 </script>
 </head>
 <body>

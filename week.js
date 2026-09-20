@@ -44,7 +44,7 @@ const SETTINGS_URL = "https://fishingconditions-users.oliver-mestdagh.workers.de
 // width, a single day took up nearly the entire visible width on its own,
 // leaving almost no surrounding context and forcing far more horizontal
 // scrolling per day than made sense for the smaller screen.
-const PIXELS_PER_HOUR = isMobileDevice ? 16 : 32;
+let PIXELS_PER_HOUR = isMobileDevice ? 16 : 32; // see applyLandscapeScale for the landscape-phone shrink
 // px — the frozen left-hand column showing each row's location name/pin/sessions.
 // On phones (up to 700px wide, see "compare board" in style.css) that column is
 // gone: each row's name is a pill floating on its graph, so the board has no
@@ -56,6 +56,34 @@ function isCompactLayout() {
 function sidebarWidth() {
   return isCompactLayout() ? 0 : 220;
 }
+
+// A phone held sideways shows the graphs at 75% of their normal size — both
+// row height and hours-per-pixel — so more of the week and more locations fit
+// on the short screen. Set from JS (not a media query) so it follows the same
+// landscape-phone detection as the rest of the site and re-renders on rotation.
+const LANDSCAPE_SCALE = 0.75;
+let appliedViewScale = null;
+function applyLandscapeScale() {
+  const scale = isLandscapePhone() ? LANDSCAPE_SCALE : 1;
+  if (scale === appliedViewScale) return false;
+  appliedViewScale = scale;
+  PIXELS_PER_HOUR = (isMobileDevice ? 16 : 32) * scale;
+  const board = document.getElementById("weekTimelineScroll");
+  if (board) {
+    const baseRowHeight = window.innerWidth <= 700 ? 210 : 328; // the two row heights style.css uses
+    if (scale < 1) board.style.setProperty("--weeknew-mobile-row-height", Math.round(baseRowHeight * scale) + "px");
+    else board.style.removeProperty("--weeknew-mobile-row-height");
+  }
+  return true;
+}
+applyLandscapeScale();
+function onViewScaleMaybeChanged() {
+  if (applyLandscapeScale() && typeof renderWeekView === "function" && document.getElementById("weekTimelineInner") && allRows.length) {
+    renderWeekView();
+  }
+}
+window.addEventListener("resize", onViewScaleMaybeChanged);
+window.addEventListener("orientationchange", () => setTimeout(onViewScaleMaybeChanged, 200));
 
 // Crossing the phone/desktop width (rotating a tablet, resizing a window)
 // changes the layout, so rebuild the board. renderWeekView is a function

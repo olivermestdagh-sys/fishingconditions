@@ -1055,6 +1055,15 @@ function wireHoldToShowTooltip(getChart, canvas, opts = {}) {
  * the browser's own native double-tap-to-zoom so it doesn't fire at the
  * same time as — or instead of — this.
  */
+/** A touch phone held sideways (also used by week.js to shrink the graphs in landscape). */
+function isLandscapePhone() {
+  const touch = navigator.maxTouchPoints > 0;
+  // 900 matches the site's own "is a phone" cut-off (isMobileDevice);
+  // the short-viewport check keeps landscape tablets out.
+  const phoneSized = Math.min(screen.width, screen.height) <= 900;
+  return touch && phoneSized && window.innerWidth > window.innerHeight && window.innerHeight <= 600;
+}
+
 function setupFullscreenToggle(targetId) {
   const target = document.getElementById(targetId);
   if (!target) return;
@@ -1166,11 +1175,7 @@ function setupFullscreenToggle(targetId) {
   // device whose shorter physical side is phone-sized, held wider than tall.
   const landscapePhone = {
     get matches() {
-      const touch = navigator.maxTouchPoints > 0;
-      // 900 matches the site's own "is a phone" cut-off (isMobileDevice);
-      // the short-viewport check keeps landscape tablets out.
-      const phoneSized = Math.min(screen.width, screen.height) <= 900;
-      return touch && phoneSized && window.innerWidth > window.innerHeight && window.innerHeight <= 600;
+      return isLandscapePhone();
     },
   };
   let lastLandscape = null;

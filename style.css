@@ -3450,8 +3450,3 @@ body {
     padding-bottom: 0 !important; /* overrides the inline padding on <main> */
   }
 }
-@media (orientation: landscape) and (max-height: 600px) and (hover: none) {
-  .weeknew-page .week-timeline-scroll {
-    --weeknew-mobile-row-height: 164px; /* 50% of 328px */
-  }
-}
