@@ -3450,3 +3450,16 @@ body {
     padding-bottom: 0 !important; /* overrides the inline padding on <main> */
   }
 }
+
+/* Week Ahead name pills: pinned just under the sticky day header while their
+   row is on screen, leaving with the row when it scrolls away. The wrapper is
+   sticky inside the (zero-width) sidebar, which is as tall as the row, so it
+   can never leave the row; 38px covers the pill (6px offset + ~30px tall). */
+.weeknew-row-sticky {
+  position: sticky;
+  top: var(--weeknew-header-h, 0px);
+  flex: 0 0 38px;
+  height: 38px;
+  width: 0;
+  z-index: 3;
+}

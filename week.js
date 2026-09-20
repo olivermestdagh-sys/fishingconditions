@@ -1100,6 +1100,8 @@ function renderWeekView() {
   // location currently being looked at" should mean here.
   const rowBuilds = locationRows.map((entry) => buildLocationRowElement(entry, timelineStart, timelineEnd, totalTrackWidth));
   for (const { row } of rowBuilds) inner.appendChild(row);
+  // The pills stick just below the sticky day header while their row is on screen.
+  scrollWrap.style.setProperty("--weeknew-header-h", headerRow.offsetHeight + "px");
 
   const builtBySidebar = new Map(rowBuilds.map(({ sidebar, chartWrap, renderChart }) => [sidebar, { chartWrap, renderChart, rendered: false }]));
 
@@ -1233,7 +1235,12 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
     detailsBtn.setAttribute("aria-expanded", String(opening));
   });
   titleRow.appendChild(detailsBtn);
-  sidebar.appendChild(titleRow);
+  // The pill (and its ⓘ popover) ride in a zero-width sticky wrapper so they stay pinned
+  // under the day header while the row is scrolled past, then leave with the row.
+  const stickyWrap = document.createElement("div");
+  stickyWrap.className = "weeknew-row-sticky";
+  stickyWrap.appendChild(titleRow);
+  sidebar.appendChild(stickyWrap);
 
   // Declared here (not down where they used to sit, right before being
   // appended) so the session-chip click handlers just below — created
@@ -1313,7 +1320,7 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
     sessionsWrap.appendChild(buildComputedSessionChip(record));
   }
 
-  sidebar.appendChild(sessionsWrap);
+  stickyWrap.appendChild(sessionsWrap);
   row.appendChild(sidebar);
   row.appendChild(chartWrap);
 
