@@ -25,6 +25,8 @@
   table.report-table th, table.report-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grey-200, #e5e5e5); }
   table.report-table th { font-weight: 600; white-space: nowrap; }
   table.report-table tbody tr:hover { background: var(--blue-100, #eaf2fb); }
+  .ribbon-seg { position: absolute; background: var(--white); }
+  .ribbon-seg canvas { position: absolute; left: 0; top: 0; width: 100% !important; height: 100% !important; display: block; }
   .report-empty { font-size: 0.85rem; color: var(--grey-500, #888); padding: 12px 0; }
 </style>
 </head>
@@ -98,20 +100,19 @@
     </section>
     <section class="summary-card report-block" id="reportRibbonBlock">
       <h3>Session ribbon</h3>
-      <p class="footnote">A continuous calendar of your fishing sessions, three days at a time — scroll sideways for the rest of the date range set in the filters above. Each session shows its own location's tide, the wind (coloured by how good it is for the craft), the light, the session bar and a dot for every catch. Hover or tap for the conditions at any moment.</p>
+      <p class="footnote">A continuous calendar of your fishing sessions, three days at a time — scroll sideways for the rest of the date range set in the filters above, or step with Previous / Next session. Each session shows its own location's conditions graph (the same one as the other pages), the session bar and a dot for every catch in that species' mark colour. Hover or tap a dot or the graph for the conditions at that moment.</p>
       <div id="ribbonEmpty" class="report-empty" style="display:none;"></div>
       <div id="ribbonBody">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px;">
-          <button type="button" data-ribbon-page="-1" class="btn-secondary" aria-label="Previous three days">◀ 3 days</button>
-          <button type="button" data-ribbon-page="1" class="btn-secondary" aria-label="Next three days">3 days ▶</button>
-          <span class="footnote" style="margin:0 0 0 8px;">Wind scored for:</span>
+          <button type="button" data-ribbon-page="-1" class="btn-secondary" aria-label="Previous session">◀ Previous session</button>
+          <button type="button" data-ribbon-page="1" class="btn-secondary" aria-label="Next session">Next session ▶</button>
+          <span class="footnote" style="margin:0 0 0 8px;">Condition scored for:</span>
           <button type="button" data-ribbon-craft="Kayak" class="btn-primary" aria-pressed="true">Kayak</button>
           <button type="button" data-ribbon-craft="Land based" class="btn-secondary" aria-pressed="false">Land based</button>
         </div>
         <p class="footnote" id="ribbonSummary" style="margin:0 0 6px;text-align:left;"></p>
         <div id="ribbonLegend" style="margin:4px 0 8px;"></div>
         <div id="ribbonWrap" style="position:relative;width:100%;">
-          <div id="ribbonAxis" style="display:none;position:absolute;left:0;top:0;z-index:3;background:var(--white);pointer-events:none;"></div>
           <div id="ribbonScroll" style="overflow-x:auto;width:100%;">
             <div id="ribbonHost" style="position:relative;"></div>
           </div>

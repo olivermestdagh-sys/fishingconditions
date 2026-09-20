@@ -20,14 +20,9 @@ const fns = new Function(
     grab(/const RIBBON_MAX_DAYS[^\n]*\r?\n/),
     fn("parseNaive"),
     fn("naiveDateOnlyStr"),
-    "const previewDegreesToCompass = (d) => ['N','NE','E','SE','S','SW','W','NW'][Math.round(d / 45) % 8];",
     fn("ribbonBuildSessions"),
     fn("ribbonCarryForward"),
     fn("ribbonMarkConditionsAt"),
-    fn("ribbonTideAt"),
-    fn("ribbonTideCurve"),
-    fn("ribbonWindCellsFromHourly"),
-    fn("ribbonWindCellsFromMarks"),
     fn("ribbonLayoutDots"),
     fn("ribbonLocalWallMs"),
     fn("ribbonSolarEvent"),
@@ -35,7 +30,7 @@ const fns = new Function(
     fn("ribbonDayFloor"),
     fn("ribbonRange"),
     fn("ribbonSegmentBounds"),
-    "return { ribbonBuildSessions, ribbonCarryForward, ribbonMarkConditionsAt, ribbonTideAt, ribbonTideCurve, ribbonWindCellsFromHourly, ribbonWindCellsFromMarks, ribbonLayoutDots, ribbonSunTimes, parseNaive, ribbonDayFloor, ribbonRange, ribbonSegmentBounds };",
+    "return { ribbonBuildSessions, ribbonCarryForward, ribbonMarkConditionsAt, ribbonLayoutDots, ribbonSunTimes, parseNaive, ribbonDayFloor, ribbonRange, ribbonSegmentBounds };",
   ].join("\n")
 )();
 const T = (s) => fns.parseNaive(s);
@@ -77,38 +72,9 @@ test("a session missing its end mark ends at its last catch", () => {
   assert.equal(s.end, T("2026-09-20T12:00:00")); // last catch within 12 h of the start
 });
 
-test("tide is interpolated between highs and lows, and null outside the events", () => {
-  const extrema = [
-    { t: T("2026-09-20T06:00:00"), height: 0.2, type: "low" },
-    { t: T("2026-09-20T12:00:00"), height: 1.8, type: "high" },
-  ];
-  const mid = fns.ribbonTideAt(extrema, T("2026-09-20T09:00:00"));
-  assert.ok(Math.abs(mid.height - 1.0) < 1e-9);
-  assert.equal(mid.rising, true);
-  assert.equal(fns.ribbonTideAt(extrema, T("2026-09-20T13:00:00")), null);
-  const curve = fns.ribbonTideCurve(extrema, T("2026-09-20T06:00:00"), T("2026-09-20T12:00:00"), 3600000);
-  assert.equal(curve.length, 7);
-});
-
 test("catches close together stack instead of hiding each other", () => {
   const dots = fns.ribbonLayoutDots([{ x: 100, r: 6 }, { x: 104, r: 6 }, { x: 106, r: 6 }, { x: 200, r: 6 }]);
   assert.deepEqual(dots.map((d) => d.level), [0, 1, 2, 0]);
-});
-
-test("hourly wind becomes one-hour cells clipped to the window", () => {
-  const hourly = { time: ["2026-09-20T06:00", "2026-09-20T07:00"], windspeed_10m: [10, 20], winddirection_10m: [0, 90] };
-  const cells = fns.ribbonWindCellsFromHourly(hourly, T("2026-09-20T06:15:00"), T("2026-09-20T07:15:00"));
-  assert.equal(cells.length, 2);
-  assert.equal(cells[0].t0, T("2026-09-20T06:15:00"));
-  assert.equal(cells[1].dir, "E");
-});
-
-test("wind recorded on marks holds until the next recorded wind", () => {
-  const [s] = fns.ribbonBuildSessions(marks);
-  const cells = fns.ribbonWindCellsFromMarks(s.marks, s.start, s.end);
-  assert.deepEqual(cells.map((c) => c.speed), [10, 18]);
-  assert.equal(cells[0].t1, T("2026-09-20T07:15:00"));
-  assert.equal(cells[1].t1, s.end);
 });
 
 test("calculated light times match the stored sun times for a known day", () => {
