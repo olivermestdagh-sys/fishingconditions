@@ -316,7 +316,6 @@ function ribbonChunkSegments(segs, pxPerMs, maxCssPx) {
 const RIBBON_HEADER_H = 40;
 const RIBBON_BAR_Y = 6; // top of the session bar, below the top of the plot
 const RIBBON_BAR_H = 12;
-const RIBBON_SESSION_GREEN = "#16a34a"; // the site's session/good-condition green (see buildSessionSpanPlugin)
 
 function ribbonSpeciesColor(species) {
   const style = markStyleFor({ species, type: "Catch" }, { groupByKey: "species", markLists: ribbonMarkLists });
@@ -411,17 +410,7 @@ function buildRibbonSessionsPlugin(states, onHover) {
         const x0 = px(session.start);
         const x1 = px(session.end);
         const y0 = chartArea.top + RIBBON_BAR_Y;
-        ctx.save();
-        ctx.strokeStyle = RIBBON_SESSION_GREEN;
-        ctx.lineWidth = 2;
-        ctx.setLineDash([3, 3]);
-        for (const x of [x0, x1]) {
-          ctx.beginPath();
-          ctx.moveTo(x, chartArea.top);
-          ctx.lineTo(x, chartArea.bottom);
-          ctx.stroke();
-        }
-        ctx.setLineDash([]);
+        ctx.save(); // the green tint (drawn before the lines) marks the session's extent — no edge lines
         const w = Math.max(3, x1 - x0);
         ctx.fillStyle = "rgba(31, 78, 120, 0.92)";
         ctx.beginPath();
