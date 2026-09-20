@@ -45,8 +45,10 @@
     // On touch devices <main>'s spare bottom padding goes too (set inline here, not in
     // CSS, so it doesn't depend on any media query matching): the board runs to the edge.
     var mainEl = document.querySelector("main");
-    if (navigator.maxTouchPoints > 0 && mainEl && mainEl.style.paddingBottom !== "0px") {
+    var cardEl = scrollWrap.parentElement; // the board's card also has a bottom margin
+    if (navigator.maxTouchPoints > 0 && mainEl && (mainEl.style.paddingBottom !== "0px" || cardEl.style.marginBottom !== "0px")) {
       mainEl.style.paddingBottom = "0px";
+      cardEl.style.marginBottom = "0px";
       return applyBoardSizing(); // re-measure without that padding
     }
     var wanted = avail > 100 ? avail + "px" : ""; // implausibly little room: fall back to the CSS cap

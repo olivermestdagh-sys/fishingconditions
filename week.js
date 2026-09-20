@@ -57,11 +57,11 @@ function sidebarWidth() {
   return isCompactLayout() ? 0 : 220;
 }
 
-// A phone held sideways shows the graphs at 75% of their normal size — both
+// A phone held sideways shows the graphs at half their normal size — both
 // row height and hours-per-pixel — so more of the week and more locations fit
 // on the short screen. Set from JS (not a media query) so it follows the same
 // landscape-phone detection as the rest of the site and re-renders on rotation.
-const LANDSCAPE_SCALE = 0.75;
+const LANDSCAPE_SCALE = 0.5;
 let appliedViewScale = null;
 function applyLandscapeScale() {
   const scale = isLandscapePhone() ? LANDSCAPE_SCALE : 1;
