@@ -179,13 +179,24 @@ async function clearPersistedReviewState() {
 // collapsing repeat device saves of one spot into a single candidate, and
 // for recognising a candidate that's already tracked in the marks database. Fixed
 // at 20m rather than a UI setting for now, per Oliver's own call when this
-// tab was being designed — distance alone, no name/species check, so a
-// genuinely different catch recorded a few metres from an old one will
-// still get folded in as "already tracked" and left out of the review list
-// entirely (see reviewableCandidates) — only genuinely new spots are real
-// import candidates, so there's nothing for an already-tracked one to do
+// tab was being designed. "The same" means the same GPS spot on the same
+// calendar DATE — names and species never come into it (a renamed or
+// re-guessed waypoint is still the same waypoint). Something at that spot on a
+// different date is a different visit and IS offered for import; only a
+// spot+date that is already saved is left out of the review list (see
+// reviewableCandidates), so there's nothing for an already-tracked one to do
 // there, even unchecked.
 const SYNC_MATCH_RADIUS_M = 20;
+
+/** "YYYY-MM-DD" of a naive local date-time string ("2026-09-11 11:14:25" or "…T…"), "" if there isn't one. */
+function syncDateKey(naive) {
+  return String(naive || "").slice(0, 10);
+}
+
+/** The calendar date of a device waypoint's timestamp (naive ms), "" when the file gave none. */
+function syncDateKeyFromMs(ms) {
+  return ms == null ? "" : syncDateKey(previewEpochToNaiveString(ms / 1000));
+}
 
 // Grid cell size for the spatial index below, in degrees — deliberately
 // much wider than SYNC_MATCH_RADIUS_M (roughly 1km at Victorian latitudes,
@@ -472,11 +483,10 @@ function neighbourhoodCellKeys(lat, lng) {
  * records for what's genuinely one spot (Oliver's own export: 517 of 2,664
  * waypoints share a coordinate with at least one other). Two raw waypoints
  * are folded together when they're within SYNC_MATCH_RADIUS_M of each other
- * AND resolve to the same guessed species — species is checked here (unlike
- * the existing-marks match below) because this is squarely "the same
- * physical waypoint, saved again", not "a different catch that happens to
- * be nearby", and collapsing across species would wrongly erase a real
- * Squid mark sitting a few metres from an old Snapper one.
+ * AND were saved on the same calendar date — GPS spot and date only, the
+ * waypoint's name/species is not compared (the group takes the name of its
+ * most recent record). The same spot on another day stays a separate
+ * candidate, since that is a different visit.
  *
  * A grid index (see gridCellKey/neighbourhoodCellKeys) keeps this close to
  * linear in the number of waypoints rather than the O(n²) a naive
@@ -496,13 +506,14 @@ function collapseRawWaypoints(rawList) {
 
   for (const raw of rawList) {
     const species = guessSpeciesFromRawName(raw.rawName);
+    const dateKey = syncDateKeyFromMs(raw.createdAtMs);
     let matched = null;
     for (const key of neighbourhoodCellKeys(raw.lat, raw.lng)) {
       const indices = cellIndex.get(key);
       if (!indices) continue;
       for (const gi of indices) {
         const g = groups[gi];
-        if (g.species !== species) continue;
+        if (g.dateKey !== dateKey) continue;
         if (syncDistanceMeters(g.lat, g.lng, raw.lat, raw.lng) <= SYNC_MATCH_RADIUS_M) {
           matched = g;
           break;
@@ -520,6 +531,8 @@ function collapseRawWaypoints(rawList) {
       if (raw.createdAtMs != null && (matched.latestMs == null || raw.createdAtMs > matched.latestMs)) {
         matched.latestMs = raw.createdAtMs;
         matched.notes = raw.notes || matched.notes;
+        matched.species = species;
+        matched.rawName = raw.rawName;
       }
     } else {
       groups.push({
@@ -529,6 +542,7 @@ function collapseRawWaypoints(rawList) {
         rawName: raw.rawName,
         notes: raw.notes || "",
         latestMs: raw.createdAtMs,
+        dateKey,
         visitCount: 1,
         uuids: raw.uuid ? [raw.uuid] : [],
       });
@@ -549,11 +563,13 @@ function collapseRawWaypoints(rawList) {
  *     survive re-export unchanged; it doesn't change the matching Oliver
  *     asked for below, it just catches a case plain distance matching can't
  *     (a waypoint edited/moved on the device between exports).
- *  2. Distance-only fallback (both file types) — nearest existing mark
- *     within SYNC_MATCH_RADIUS_M, no species/name check at all, per
- *     Oliver's own call on how this should work. This is what a Garmin GPX
- *     import always falls back to, since Garmin waypoints carry no
- *     persistent ID this site can key on.
+ *  2. Location + date fallback (both file types) — nearest existing mark
+ *     within SYNC_MATCH_RADIUS_M that was made on the same calendar date, no
+ *     species/name check at all, per Oliver's own call on how this should
+ *     work. A mark at the same spot on a different date is NOT a match, so a
+ *     new visit is offered. This is what a Garmin GPX import always falls
+ *     back to, since Garmin waypoints carry no persistent ID this site can
+ *     key on.
  *
  * A matched candidate is kept on the `candidates` array (see
  * handleFileInputChange) so renderSummary can still report an honest total
@@ -561,9 +577,9 @@ function collapseRawWaypoints(rawList) {
  * the actual review list — per Oliver's own call, only genuinely-new spots
  * are real import candidates at all, so there's nothing useful for a
  * matched one to do in that list even unchecked. The trade-off is real:
- * a genuinely different catch recorded a few metres from an old mark would
- * also match here and quietly not appear. Given the 20m radius that's judged
- * an acceptable, deliberate cost — see SYNC_MATCH_RADIUS_M's own comment.
+ * a genuinely different catch recorded within 20m of an old mark on the SAME
+ * day would also match here and quietly not appear — judged an acceptable,
+ * deliberate cost, see SYNC_MATCH_RADIUS_M's own comment.
  */
 function matchAgainstExisting(groups) {
   const uuidToMark = new Map();
@@ -595,6 +611,7 @@ function matchAgainstExisting(groups) {
       if (!indices) continue;
       for (const idx of indices) {
         const m = existingMarks[idx];
+        if (g.dateKey && syncDateKey(m.dateTime) !== g.dateKey) continue; // a different day is a different visit
         const d = syncDistanceMeters(g.lat, g.lng, m.lat, m.lng);
         if (d <= SYNC_MATCH_RADIUS_M && (!best || d < best.distanceM)) {
           best = { id: m.id, name: m.name, species: m.species, distanceM: d, exact: false };
@@ -1314,7 +1331,41 @@ async function runWithConcurrencyLimit(items, limit, worker, onProgress) {
  * a deliberate, acceptable compromise rather than a schema change
  * affecting every mark on the site.
  */
+/**
+ * Whether a session Start/End point is already saved: an existing Session mark
+ * of the same role (start/end) on the same calendar date within
+ * SYNC_MATCH_RADIUS_M of it — location and date only, the mark's name never
+ * matters. Such a candidate is not offered for import.
+ */
+function sessionCandidateAlreadySaved(point, kind) {
+  const date = syncDateKey(point.timeNaive);
+  return existingMarks.some(
+    (m) =>
+      m.type === "Session" &&
+      m.sessionRole === kind &&
+      syncDateKey(m.dateTime) === date &&
+      typeof m.lat === "number" &&
+      typeof m.lng === "number" &&
+      syncDistanceMeters(point.lat, point.lon, m.lat, m.lng) <= SYNC_MATCH_RADIUS_M
+  );
+}
+
+/** Flags every session candidate that is already saved and takes it out of the import (it can't be ticked). Re-run whenever the tree changes, since moving a Start/End changes what it matches. */
+function refreshSavedSessionFlags() {
+  trackData.forEach((track) =>
+    track.dayGroups.forEach((day) =>
+      day.segments.forEach((seg) =>
+        seg.candidates.forEach((cand) => {
+          cand.saved = sessionCandidateAlreadySaved(day.points[cand.pointIdx], cand.kind);
+          if (cand.saved) cand.importChecked = false;
+        })
+      )
+    )
+  );
+}
+
 function collectCheckedSessionMarks() {
+  refreshSavedSessionFlags();
   const nowStr = nowAsNaiveString();
   const marks = [];
   trackData.forEach((track) => {
@@ -1471,11 +1522,10 @@ async function handleImportClick() {
  * Builds the full display tree from parseGpxTracks' output — Track ->
  * Day-group -> Segment -> (for a "fishing" segment only) Start/End
  * candidate points. Everything defaults to checked (both Import and
- * View) — there's no "already imported?" dedup against past Sessions
- * yet, since nothing about Sessions is actually SAVED anywhere yet (see
- * this feature's own phased build plan); once save/storage exists,
- * this default should change to "unchecked if this day looks like one
- * already saved", matching how marks import already behaves.
+ * View) — except a Start/End that is already saved (same role, same date,
+ * same GPS spot — see sessionCandidateAlreadySaved), which is left
+ * unticked and can't be ticked, so re-importing a file only offers what's
+ * new, matching how marks import behaves.
  *
  * Condition-change checkpoints (weather/tide/barometer shifting
  * mid-session) and linking a Catch mark into whichever segment its
@@ -2148,6 +2198,7 @@ function applyTriState(checkboxEl, state) {
 function renderTracksTree() {
   const container = document.getElementById("tracksTree");
   if (!container) return;
+  refreshSavedSessionFlags();
   schedulePersistReviewState(); // see renderReviewList's own comment — same reasoning applies here
 
   let html = "";
@@ -2214,13 +2265,13 @@ function renderTracksTree() {
             ? `<span class="candidate-step-btn" data-role="step-candidate" data-dir="1" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">+</span>`
             : `<span class="candidate-step-btn" style="visibility:hidden;">+</span>`;
           html += `<div class="tracks-tree-node${isSelected ? " tracks-tree-node-selected" : ""}" data-level="candidate" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">
-            <span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}" /></span>
+            <span class="tree-checkbox-col"><input type="checkbox" data-role="import" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}"${cand.saved ? " disabled" : ""} /></span>
             <span class="tree-checkbox-col"><input type="checkbox" data-role="view" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}" /></span>
             <span class="tree-node-label" style="padding-left:42px;">
               <span class="caret" style="visibility:hidden;">▾</span>
               ${minusBtn}
               <span data-role="select-candidate" data-track="${trackIdx}" data-day="${dayIdx}" data-seg="${segIdx}" data-cand="${candIdx}">${candLabel}</span>
-              ${plusBtn}
+              ${plusBtn}${cand.saved ? ` <span class="footnote" style="margin:0;">(already saved)</span>` : ""}
             </span>
           </div>`;
         });
