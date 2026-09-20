@@ -785,6 +785,7 @@ function buildGpxDocument(marks, device) {
       // plus any notes.
       const descParts = [];
       if (m.name && m.name !== m.species) descParts.push(m.name);
+      if (m.type === "Session" && m.species) descParts.push(`Target: ${m.species}`);
       if (m.notes) descParts.push(m.notes);
       const desc = descParts.join(" — ");
       const timeTag = m.dateTime ? `<time>${escapeXml(naiveToGpxTime(m.dateTime))}</time>` : "";
@@ -797,7 +798,8 @@ function buildGpxDocument(marks, device) {
       // split, MARK_TYPE_FIELD_KEYS in charts.js) — its own name IS the
       // point, so it always wins there regardless of anything a stray
       // legacy `species` value on an old record might still hold.
-      const nameTag = escapeXml(m.type === "POI" ? (m.name || "Mark") : (m.species || m.name || "Mark"));
+      // A Session's species are its multiple target species, not its name — its own name wins, like a POI.
+      const nameTag = escapeXml(m.type === "POI" || m.type === "Session" ? (m.name || "Mark") : (m.species || m.name || "Mark"));
       const symTag = `<sym>${escapeXml(gpxSymForMark(m, device))}</sym>`;
       return (
         `  <wpt lat="${m.lat}" lon="${m.lng}">\n` +

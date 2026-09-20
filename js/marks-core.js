@@ -167,6 +167,11 @@ const MARK_TYPE_FIELD_KEYS = {
   ],
 };
 MARK_TYPE_FIELD_KEYS.Fish = MARK_TYPE_FIELD_KEYS.Catch;
+// A Session (imported fishing trip, see sync.js) has always carried the full
+// Catch-level field set (it fell through to the fallback below); listed
+// explicitly now so that is deliberate. Its Species is different from a
+// Catch's in two ways — see typeRequiresSpecies / typeAllowsMultipleSpecies.
+MARK_TYPE_FIELD_KEYS.Session = MARK_TYPE_FIELD_KEYS.Catch;
 
 /** MARK_TYPE_FIELD_KEYS[type], falling back to the full Catch-level field
  * set for anything not explicitly listed there (including "Fish" via the
@@ -175,6 +180,19 @@ MARK_TYPE_FIELD_KEYS.Fish = MARK_TYPE_FIELD_KEYS.Catch;
  * the safer default than over-hiding. */
 function fieldKeysForMarkType(type) {
   return MARK_TYPE_FIELD_KEYS[type] || MARK_TYPE_FIELD_KEYS.Catch;
+}
+
+/** Catch/Mark/Fish must have a species; a Session need not (its species are
+ * optional targets), and it never gates the rest of the form. */
+function typeRequiresSpecies(type) {
+  return type !== "Session" && fieldKeysForMarkType(type).includes("species");
+}
+
+/** A Session's species are the TARGETS for the session, so several can be set
+ * (stored comma-joined in `species`, the same convention as bait/rig/rod).
+ * Every other type holds a single species. */
+function typeAllowsMultipleSpecies(type) {
+  return type === "Session";
 }
 
 // --- Mark quick-entry defaults ("You are here" click, Live tab only) -------
@@ -215,6 +233,7 @@ function saveLastMarkFieldValues(mark) {
     if (mark.type) current.type = mark.type;
     for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
       if (f.key === "weatherCondition" || f.key === "tideCondition" || f.key === "tideExtreme") continue; // tideCondition (and its tideExtreme modifier) has its own real-data defaulting (computeQuickMarkDefaults); weatherCondition deliberately gets no default at all, of either kind — see that same function's comment
+      if (f.key === "species" && mark.type === "Session") continue; // a Session's multi-species target list isn't a default for the next catch
       if (mark[f.key]) current[f.key] = mark[f.key];
     }
     localStorage.setItem(MARK_LAST_VALUES_STORAGE_KEY, JSON.stringify(current));
@@ -407,6 +426,20 @@ function markListOptionsHtml(markLists, listLabel, currentValue) {
   return `<option value="">—</option>${opts.join("")}`;
 }
 
+/** The Species pick-list as checkboxes (a Session's multiple target species);
+ * `current` is the stored comma-joined value, any entry not on the list is kept. */
+function speciesCheckboxesHtml(markLists, current) {
+  const chosen = String(current || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const values = markLists.filter((r) => r.field === "Species").map((r) => r.value);
+  for (const c of chosen) if (!values.includes(c)) values.unshift(c);
+  return values
+    .map(
+      (v) =>
+        `<label style="display:flex;align-items:center;gap:6px;font-size:0.8rem;font-weight:400;margin:2px 0;"><input type="checkbox" data-species-check value="${escapeHtml(v)}"${chosen.includes(v) ? " checked" : ""} />${escapeHtml(v)}</label>`
+    )
+    .join("");
+}
+
 /**
  * Read-only popup content shown on first clicking a mark — every populated
  * field as a plain label/value row (empty/undefined fields simply omitted,
@@ -593,9 +626,15 @@ function buildMarkPopupEditHtml(mark, markLists) {
         </label>
         <div data-species-first-prompt style="display:none;margin:6px 0;padding:6px 8px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:0.8rem;color:#854d0e;">Choose a species first — the rest of the form unlocks once it's set.</div>
         <div data-field-group="${speciesField.key}">
-          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">${escapeHtml(speciesField.displayLabel)}
-            <select name="${speciesField.key}" style="${MARK_POPUP_INPUT_STYLE}">${markListOptionsHtml(markLists, speciesField.listLabel, mark[speciesField.key])}</select>
-          </label>
+          <div data-species-single>
+            <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">${escapeHtml(speciesField.displayLabel)}
+              <select name="${speciesField.key}" style="${MARK_POPUP_INPUT_STYLE}">${markListOptionsHtml(markLists, speciesField.listLabel, String(mark.species || "").includes(",") ? "" : mark.species)}</select>
+            </label>
+          </div>
+          <div data-species-multi style="display:none;">
+            <div style="font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Target species</div>
+            <div style="max-height:120px;overflow-y:auto;border:1px solid var(--grey-200);border-radius:6px;padding:4px 6px;">${speciesCheckboxesHtml(markLists, mark.species)}</div>
+          </div>
         </div>
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Name
           <input type="text" name="name" value="${escapeHtml(mark.name || "")}" style="${MARK_POPUP_INPUT_STYLE}" />
@@ -689,6 +728,30 @@ function applyMarkFieldVisibility(formEl, type) {
 }
 
 /**
+ * Shows the multi-select species checklist for a Session and the single
+ * Species dropdown for everything else, carrying the choice across when the
+ * Type is switched (single -> ticked box, first ticked box -> single).
+ */
+function applySpeciesControlMode(formEl, type) {
+  const single = formEl.querySelector("[data-species-single]");
+  const multi = formEl.querySelector("[data-species-multi]");
+  const select = formEl.querySelector('[name="species"]');
+  if (!single || !multi || !select) return;
+  const wantMulti = typeAllowsMultipleSpecies(type);
+  const wasMulti = multi.dataset.active === "1";
+  if (wantMulti && !wasMulti && select.value) {
+    const box = Array.from(multi.querySelectorAll("[data-species-check]")).find((el) => el.value === select.value);
+    if (box) box.checked = true;
+  } else if (!wantMulti && wasMulti && !select.value) {
+    const first = multi.querySelector("[data-species-check]:checked");
+    if (first && Array.from(select.options).some((o) => o.value === first.value)) select.value = first.value;
+  }
+  multi.dataset.active = wantMulti ? "1" : "0";
+  single.style.display = wantMulti ? "none" : "";
+  multi.style.display = wantMulti ? "" : "none";
+}
+
+/**
  * Oliver's own request: when creating or editing a Catch/Mark, Species
  * has to be set before anything else in the form is usable — not just
  * another field somewhere in the list. Locks every field except Type
@@ -707,7 +770,7 @@ function applyMarkFieldVisibility(formEl, type) {
  * legal states.
  */
 function applySpeciesGate(formEl, type, species) {
-  const needsGate = fieldKeysForMarkType(type).includes("species") && !species;
+  const needsGate = typeRequiresSpecies(type) && !species;
   const promptEl = formEl.querySelector("[data-species-first-prompt]");
   if (promptEl) promptEl.style.display = needsGate ? "block" : "none";
   formEl.querySelectorAll("input, select, textarea").forEach((el) => {
@@ -757,7 +820,10 @@ function collectMarkFormValues(form, originalMark) {
   if (originalMark.source) updated.source = originalMark.source;
   for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
     if (!applicable.includes(f.key)) continue;
-    const v = val(f.key);
+    let v = val(f.key);
+    if (f.key === "species" && typeAllowsMultipleSpecies(type)) {
+      v = Array.from(form.querySelectorAll("[data-species-check]:checked")).map((el) => el.value).join(", ");
+    }
     if (v) updated[f.key] = v;
   }
   if (applicable.includes("size")) {
@@ -1065,9 +1131,13 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
     const speciesSelect = form.querySelector('[name="species"]');
     if (typeSelect) {
       applyMarkFieldVisibility(form, typeSelect.value);
+      applySpeciesControlMode(form, typeSelect.value);
       if (speciesSelect) applySpeciesGate(form, typeSelect.value, speciesSelect.value);
       typeSelect.addEventListener("change", () => {
         applyMarkFieldVisibility(form, typeSelect.value);
+        applySpeciesControlMode(form, typeSelect.value);
+        const syncBlockOnType = form.querySelector("[data-species-name-sync-confirm]");
+        if (syncBlockOnType) syncBlockOnType.style.display = "none";
         if (speciesSelect) applySpeciesGate(form, typeSelect.value, speciesSelect.value);
       });
     }
@@ -1087,6 +1157,8 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         if (typeSelect) applySpeciesGate(form, typeSelect.value, speciesSelect.value);
         const species = speciesSelect.value;
         if (syncBlock) syncBlock.style.display = "none";
+        // A Session's Name is never driven by its species (they are its targets).
+        if (typeSelect && typeSelect.value === "Session") return;
         if (!species || !nameInput) return;
         const currentName = nameInput.value.trim();
         if (!currentName) {
@@ -1280,7 +1352,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       // Second, independent check alongside the disabled-button gate
       // itself (applySpeciesGate) — not just trusting the UI state, the
       // same reasoning handleBulkEditSave's own re-check follows.
-      if (fieldKeysForMarkType(updated.type).includes("species") && !updated.species) {
+      if (typeRequiresSpecies(updated.type) && !updated.species) {
         statusEl.textContent = "Choose a species first.";
         statusEl.style.color = "#dc2626";
         return;
