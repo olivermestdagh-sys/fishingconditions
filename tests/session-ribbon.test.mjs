@@ -113,17 +113,34 @@ test("the calendar is always at least the three visible days, and null with no s
   assert.equal(fns.ribbonRange([], "", ""), null);
 });
 
-test("two sessions on one day get non-overlapping condition windows that still contain each session", () => {
-  const a = mk("a", "2026-09-10T06:00:00", "2026-09-10T08:00:00");
-  const b = mk("b", "2026-09-10T15:00:00", "2026-09-10T17:00:00");
-  const [sa, sb] = fns.ribbonSegmentBounds([b, a]);
-  assert.equal(sa.session.groupId, "a");
-  assert.equal(sa.from, T("2026-09-10T00:00:00"));
-  assert.equal(sa.to, sb.from);
-  assert.equal(sb.to, T("2026-09-11T00:00:00"));
-  assert.ok(sa.from <= a.start && sa.to >= a.end && sb.from <= b.start && sb.to >= b.end);
+test("sessions on the same day at the same place share one graph block, not one each", () => {
+  const a = mk("a", "2026-09-10T06:00:00", "2026-09-10T08:00:00", { locationKey: "Flinders" });
+  const b = mk("b", "2026-09-10T15:00:00", "2026-09-10T17:00:00", { locationKey: "Flinders" });
+  const blocks = fns.ribbonSegmentBounds([b, a]);
+  assert.equal(blocks.length, 1);
+  assert.deepEqual(blocks[0].sessions.map((s) => s.groupId), ["a", "b"]);
+  assert.equal(blocks[0].from, T("2026-09-10T00:00:00"));
+  assert.equal(blocks[0].to, T("2026-09-11T00:00:00"));
 });
 
+test("two places on one day get two blocks split between the sessions, each containing its own", () => {
+  const a = mk("a", "2026-09-10T06:00:00", "2026-09-10T08:00:00", { locationKey: "Flinders" });
+  const b = mk("b", "2026-09-10T15:00:00", "2026-09-10T17:00:00", { locationKey: "Rye" });
+  const [ba, bb] = fns.ribbonSegmentBounds([a, b]);
+  assert.equal(ba.from, T("2026-09-10T00:00:00"));
+  assert.equal(ba.to, bb.from);
+  assert.equal(bb.to, T("2026-09-11T00:00:00"));
+  assert.ok(ba.from <= a.start && ba.to >= a.end && bb.from <= b.start && bb.to >= b.end);
+});
+
+test("different days are different blocks even at the same place", () => {
+  const a = mk("a", "2026-09-10T06:00:00", "2026-09-10T08:00:00", { locationKey: "Flinders" });
+  const b = mk("b", "2026-09-11T06:00:00", "2026-09-11T08:00:00", { locationKey: "Flinders" });
+  const blocks = fns.ribbonSegmentBounds([a, b]);
+  assert.equal(blocks.length, 2);
+  assert.equal(blocks[0].to, T("2026-09-11T00:00:00"));
+  assert.equal(blocks[1].from, T("2026-09-11T00:00:00"));
+});
 test("a session that runs past midnight covers both days", () => {
   const a = mk("a", "2026-09-10T22:00:00", "2026-09-11T02:00:00");
   const [s] = fns.ribbonSegmentBounds([a]);

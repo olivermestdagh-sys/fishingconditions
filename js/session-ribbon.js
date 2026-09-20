@@ -167,15 +167,35 @@ function ribbonRange(sessions, dateFrom, dateTo) {
   return { from, to, sessions: sessions.filter((s) => s.start >= from && s.start < to).sort((a, b) => a.start - b.start) };
 }
 
-/** The window each session's condition layers cover: the day(s) it spans, trimmed so neighbouring sessions (possibly at other locations) never overlap. Always contains the session itself. */
+/**
+ * The graph blocks: one per day AND place. Sessions on the same day at the same place (`locationKey`)
+ * share one continuous block — they are just shaded inside it, the graph isn't cut at a session's
+ * start or end. A different day or a different place starts a new block, so consecutive days (usually
+ * different places) never link up. A block covers the day(s) its sessions span; two blocks on one day
+ * (different places) are split midway between the last session of one and the first of the next.
+ */
 function ribbonSegmentBounds(sessions) {
   const sorted = [...sessions].sort((a, b) => a.start - b.start);
-  return sorted.map((s, i) => {
-    let from = ribbonDayFloor(s.start);
-    let to = ribbonDayFloor(s.end) + RIBBON_DAY_MS;
-    if (i > 0) from = Math.max(from, (sorted[i - 1].end + s.start) / 2);
-    if (i < sorted.length - 1) to = Math.min(to, (s.end + sorted[i + 1].start) / 2);
-    return { session: s, from: Math.min(from, s.start), to: Math.max(to, s.end) };
+  const groups = [];
+  for (const s of sorted) {
+    const last = groups[groups.length - 1];
+    const dayTo = ribbonDayFloor(s.end) + RIBBON_DAY_MS;
+    if (last && s.start < last.dayTo && (s.locationKey || null) === last.locationKey) {
+      last.sessions.push(s);
+      last.dayTo = Math.max(last.dayTo, dayTo);
+    } else {
+      groups.push({ sessions: [s], dayFrom: ribbonDayFloor(s.start), dayTo, locationKey: s.locationKey || null });
+    }
+  }
+  const startOf = (g) => Math.min(...g.sessions.map((s) => s.start));
+  const endOf = (g) => Math.max(...g.sessions.map((s) => s.end));
+  return groups.map((g, i) => {
+    let from = g.dayFrom;
+    let to = g.dayTo;
+    // only blocks that share a day need splitting; different days already meet at midnight
+    if (i > 0 && groups[i - 1].dayTo > g.dayFrom) from = Math.max(from, (endOf(groups[i - 1]) + startOf(g)) / 2);
+    if (i < groups.length - 1 && groups[i + 1].dayFrom < g.dayTo) to = Math.min(to, (endOf(g) + startOf(groups[i + 1])) / 2);
+    return { key: g.sessions.map((s) => s.groupId).join("+"), sessions: g.sessions, from: Math.min(from, startOf(g)), to: Math.max(to, endOf(g)) };
   });
 }
 // ---------------------------------------------------------------------
@@ -331,7 +351,7 @@ function ribbonFmtDay(ms, withYear) {
 }
 
 /** The site's own row values at time t (once loaded) plus what was recorded on the marks — for tooltips. */
-function ribbonConditionLines(state, t) {
+function ribbonConditionLines(state, session, t) {
   const lines = [];
   const row = state.rows ? ribbonNearestRow(state.rows, t) : null;
   if (row) {
@@ -340,7 +360,7 @@ function ribbonConditionLines(state, t) {
     if (row["Condition"] != null) lines.push(`Location condition ${row["Condition"]}/5 (${state.craft})`);
     if (row["Fishing Condition"] != null) lines.push(`Fishing condition ${Number(row["Fishing Condition"]).toFixed(1)}/5`);
   }
-  const rec = ribbonMarkConditionsAt(state.session.marks, t);
+  const rec = ribbonMarkConditionsAt(session.marks, t);
   if (rec.tideCondition) lines.push(`Tide (recorded): ${rec.tideCondition}${rec.tideExtreme ? " · " + rec.tideExtreme : ""}`);
   if (!row || row["Wind Forecast (km/h)"] == null) {
     if (rec.windSpeed != null) lines.push(`Wind (recorded): ${rec.windSpeed} km/h${rec.windDirection ? " " + rec.windDirection : ""}`);
@@ -354,18 +374,18 @@ function ribbonConditionLines(state, t) {
   return lines;
 }
 
-function ribbonSessionTooltipHtml(state) {
-  const s = state.session;
+function ribbonSessionTooltipHtml(item) {
+  const s = item.session;
   const n = s.catches.length;
   return `<div><strong>${escapeHtml(s.name)}</strong> · ${ribbonFmtDay(s.start)} ${ribbonFmtTime(s.start)}–${ribbonFmtTime(s.end)}</div>` +
-    (state.locationName ? `<div style="color:var(--grey-700);">${escapeHtml(state.locationName)}</div>` : "") +
+    (item.state.locationName ? `<div style="color:var(--grey-700);">${escapeHtml(item.state.locationName)}</div>` : "") +
     `<div style="color:var(--grey-700);">${n} catch${n === 1 ? "" : "es"}</div>`;
 }
 
-function ribbonDotTooltipHtml(state, dot) {
+function ribbonDotTooltipHtml(dot) {
   const c = dot.c;
   const head = `<strong>${escapeHtml(c.species || c.name || "Catch")}</strong> · ${ribbonFmtDay(c._t)} ${ribbonFmtTime(c._t)}${c.size != null ? ` · ${c.size} cm` : ""}`;
-  return `<div>${head}</div>` + ribbonConditionLines(state, c._t).map((l) => `<div style="color:var(--grey-700);">${escapeHtml(l)}</div>`).join("");
+  return `<div>${head}</div>` + ribbonConditionLines(dot.state, dot.session, c._t).map((l) => `<div style="color:var(--grey-700);">${escapeHtml(l)}</div>`).join("");
 }
 
 /**
@@ -376,7 +396,7 @@ function ribbonDotTooltipHtml(state, dot) {
  * page what is under a canvas point — a catch dot, else a shaded session — so
  * their tooltips can always be shown (see ribbonWireHover).
  */
-function buildRibbonSessionsPlugin(states, onHover) {
+function buildRibbonSessionsPlugin(items, states) {
   let dots = [];
   let lastChart = null;
   const hitAt = (x, y) => {
@@ -384,8 +404,8 @@ function buildRibbonSessionsPlugin(states, onHover) {
     if (dot) return { dot };
     if (lastChart && lastChart.chartArea && y >= lastChart.chartArea.top && y <= lastChart.chartArea.bottom) {
       const t = lastChart.scales.x.getValueForPixel(x);
-      const state = states.find((s) => t >= s.session.start && t <= s.session.end);
-      if (state) return { session: state };
+      const item = items.find((it) => t >= it.session.start && t <= it.session.end);
+      if (item) return { session: item };
     }
     return null;
   };
@@ -397,7 +417,7 @@ function buildRibbonSessionsPlugin(states, onHover) {
       if (!chartArea || !scales.x) return;
       ctx.save();
       ctx.fillStyle = "rgba(22, 163, 74, 0.14)";
-      for (const { session } of states) {
+      for (const { session } of items) {
         const from = Math.max(session.start, scales.x.min);
         const to = Math.min(session.end, scales.x.max);
         if (to <= from) continue;
@@ -412,14 +432,14 @@ function buildRibbonSessionsPlugin(states, onHover) {
       lastChart = chart;
       const px = (t) => scales.x.getPixelForValue(t);
       const next = [];
-      for (const state of states) {
-        const sizes = state.session.catches.map((c) => c.size).filter((v) => v != null);
+      for (const item of items) {
+        const sizes = item.session.catches.map((c) => c.size).filter((v) => v != null);
         const sMin = Math.min(...sizes);
         const sMax = Math.max(...sizes);
         const radiusFor = (c) => (c.size != null && sMax > sMin ? RIBBON_DOT_R_MIN + ((c.size - sMin) / (sMax - sMin)) * (RIBBON_DOT_R_MAX - RIBBON_DOT_R_MIN) : RIBBON_DOT_R);
-        const items = state.session.catches.map((c) => ({ c, state, x: px(c._t), r: radiusFor(c) }));
-        ribbonLayoutDots(items);
-        for (const d of items) {
+        const sessionDots = item.session.catches.map((c) => ({ c, session: item.session, state: item.state, x: px(c._t), r: radiusFor(c) }));
+        ribbonLayoutDots(sessionDots);
+        for (const d of sessionDots) {
           d.y = chartArea.top + RIBBON_DOT_TOP + d.level * (2 * RIBBON_DOT_R_MAX + 2);
           ctx.save();
           ctx.beginPath();
@@ -435,7 +455,7 @@ function buildRibbonSessionsPlugin(states, onHover) {
       }
       dots = next;
 
-      // A black line wherever one day/location's graph meets the next one, top of the plot down through the condition strips.
+      // A black line wherever one day/place's graph meets the next one (never between sessions inside a block), top of the plot down through the condition strips.
       const blocks = states.map((s) => s.seg).sort((a, b) => a.from - b.from);
       ctx.save();
       ctx.strokeStyle = "#000000";
@@ -454,7 +474,7 @@ function buildRibbonSessionsPlugin(states, onHover) {
   };
 }
 
-/** Draws (or redraws) one chart — the shared renderConditionsChart, with the same options Week Ahead uses for a row — for a run of session segments. */
+/** Draws (or redraws) one chart — the shared renderConditionsChart, with the same options Week Ahead uses for a row — for a run of day/place blocks. */
 function ribbonRenderChunk(chunk) {
   const box = chunk.box;
   if (!box) return;
@@ -466,13 +486,13 @@ function ribbonRenderChunk(chunk) {
   const states = chunk.segs.map((seg) => seg.state);
   const blocks = states.map((s) => {
     s.craft = ribbonCraft;
-    s.sunTimes = ribbonSunTimesForRange(s.seg.from, s.seg.to, s.session.lat, s.session.lng);
+    s.sunTimes = ribbonSunTimesForRange(s.seg.from, s.seg.to, s.sessions[0].lat, s.sessions[0].lng);
     s.rows = ribbonBuildRows(s.raw, s.seg.from, s.seg.to, ribbonCraft, s.shore, s.sunTimes);
     return s.rows;
   });
   const rows = ribbonJoinRowBlocks(blocks);
   const sunTimes = states.flatMap((s) => s.sunTimes);
-  const plugin = buildRibbonSessionsPlugin(states);
+  const plugin = buildRibbonSessionsPlugin(states.flatMap((s) => s.sessions.map((session) => ({ session, state: s }))), states);
   const tideHeights = states.flatMap((s) => (s.raw && s.raw.tide ? s.raw.tide.extrema.map((e) => e.height) : []));
   chunk.chart = renderConditionsChart({
     canvas: box.querySelector("canvas"),
@@ -505,7 +525,7 @@ function ribbonShowTip(chunk, hit, e) {
     tip.style.display = "none";
     return;
   }
-  tip.innerHTML = hit.dot ? ribbonDotTooltipHtml(hit.dot.state, hit.dot) : ribbonSessionTooltipHtml(hit.session);
+  tip.innerHTML = hit.dot ? ribbonDotTooltipHtml(hit.dot) : ribbonSessionTooltipHtml(hit.session);
   tip.style.display = "block";
   const x = chunk.left + e.x;
   const visLeft = scroll.scrollLeft + 4;
@@ -534,8 +554,8 @@ let ribbonSessions = [];
 let ribbonCraft = "Kayak";
 let ribbonMarkLists = [];
 let ribbonLocations = [];
-let ribbonModel = null; // { range, states, chunks, x, pxPerMs, dayPx, width, rowH }
-const ribbonStates = new Map(); // groupId -> { session, seg, raw, rows, sunTimes, craft, shore, locationName }
+let ribbonModel = null; // { range, states, items, chunks, x, pxPerMs, dayPx, width, rowH }
+const ribbonStates = new Map(); // block key -> { key, sessions, seg, raw, rows, sunTimes, craft, shore, locationName }
 const ribbonLoading = new Set();
 let ribbonReady = false;
 let ribbonWantInitialScroll = true;
@@ -565,24 +585,25 @@ function ribbonUpdateChrome() {
   const model = ribbonModel;
   if (!model) return;
   const states = model.states;
-  const catches = states.reduce((n, s) => n + s.session.catches.length, 0);
+  const sessions = model.items.map((i) => i.session);
+  const catches = sessions.reduce((n, s) => n + s.catches.length, 0);
   const noTide = states.filter((s) => s.raw && !s.raw.tide).length;
   const loading = states.filter((s) => !s.raw).length;
   const notes = [];
-  if (loading) notes.push(`loading conditions for ${loading} session${loading === 1 ? "" : "s"}…`);
-  if (noTide) notes.push(`no tide data for ${noTide} session${noTide === 1 ? "" : "s"}, so their tide layer is left out`);
+  if (loading) notes.push(`loading conditions for ${loading} day${loading === 1 ? "" : "s"}…`);
+  if (noTide) notes.push(`no tide data for ${noTide} day${noTide === 1 ? "" : "s"}, so their tide layer is left out`);
   notes.push("light times are calculated from each location");
   document.getElementById("ribbonSummary").textContent =
-    `${states.length} session${states.length === 1 ? "" : "s"}, ${catches} catch${catches === 1 ? "" : "es"} · ${ribbonFmtDay(model.range.from, true)} – ${ribbonFmtDay(model.range.to - 1, true)} (${notes.join("; ")})`;
+    `${sessions.length} session${sessions.length === 1 ? "" : "s"}, ${catches} catch${catches === 1 ? "" : "es"} · ${ribbonFmtDay(model.range.from, true)} – ${ribbonFmtDay(model.range.to - 1, true)} (${notes.join("; ")})`;
 
-  const species = Array.from(new Set(states.flatMap((s) => s.session.catches.map((k) => k.species)).filter(Boolean)));
+  const species = Array.from(new Set(sessions.flatMap((s) => s.catches.map((k) => k.species)).filter(Boolean)));
   document.getElementById("ribbonLegend").innerHTML = species.map((sp) => ribbonChip(ribbonSpeciesColor(sp), sp)).join("");
 
   const rows = [];
-  for (const s of states) {
-    for (const c of s.session.catches) {
+  for (const { session, state: s } of model.items) {
+    for (const c of session.catches) {
       const row = s.rows ? ribbonNearestRow(s.rows, c._t) : null;
-      const rec = ribbonMarkConditionsAt(s.session.marks, c._t);
+      const rec = ribbonMarkConditionsAt(session.marks, c._t);
       const wind = row && row["Wind Forecast (km/h)"] != null ? `${Math.round(row["Wind Forecast (km/h)"])} km/h ${row["Wind Forecast Dir"] || ""}` : rec.windSpeed != null ? `${rec.windSpeed} km/h ${rec.windDirection || ""}` : "–";
       const tide = row && row["Tide Height (m)"] != null ? `${row["Tide Height (m)"].toFixed(2)} m ${(row["Tide Status"] || "").toLowerCase()}` : rec.tideCondition || "–";
       rows.push(`<tr><td>${ribbonFmtDay(c._t)}</td><td>${ribbonFmtTime(c._t)}</td><td>${escapeHtml(c.species || "–")}</td><td>${c.size != null ? c.size + " cm" : "–"}</td><td>${escapeHtml(tide)}</td><td>${escapeHtml(wind)}</td><td>${escapeHtml(rec.weatherCondition || "–")}</td></tr>`);
@@ -611,7 +632,7 @@ function ribbonHeaderSvg(model) {
   for (let d = range.from; d < range.to; d += RIBBON_DAY_MS) {
     svg += `<line x1="${x(d)}" x2="${x(d)}" y1="0" y2="${RIBBON_HEADER_H}" style="stroke:var(--grey-300, #cbd5e1)" stroke-width="1"/>`;
     // the day, then the location(s) fished that day on the same line (clipped to the day's width so it can't run into the next day)
-    const places = ribbonDayLocations(model.states, d);
+    const places = ribbonDayLocations(model.items, d);
     svg += `<svg x="${x(d) + 5}" y="0" width="${Math.max(10, dayPx - 8)}" height="20"><text x="0" y="14" font-size="11" font-weight="600" style="fill:var(--grey-700)">${ribbonFmtDay(d)}${places ? `<tspan dx="12" font-weight="400" style="fill:var(--grey-500)">${escapeHtml(places)}</tspan>` : ""}</text></svg>`;
     for (let h = 0; h < 24; h += labelHours) {
       svg += `<text x="${x(d + h * 3600000) + (h === 0 ? 5 : 0)}" y="32" ${h === 0 ? "" : 'text-anchor="middle"'} font-size="10" style="fill:var(--grey-500)">${String(h).padStart(2, "0")}</text>`;
@@ -654,25 +675,32 @@ function ribbonDraw() {
   const width = Math.ceil(totalDays * dayPx);
   const rowH = viewportW <= 700 ? 210 : 328; // Week Ahead's row heights
 
+  // each session's place (the nearest tracked location) decides which sessions share a graph block
+  for (const s of range.sessions) {
+    s.spot = ribbonLocations.length ? ribbonShoreFor(ribbonLocations, s.lat, s.lng, ribbonCraft) : { name: null, shore: null };
+    s.locationKey = s.spot.name;
+  }
   const segs = ribbonSegmentBounds(range.sessions).map((seg) => {
-    let st = ribbonStates.get(seg.session.groupId);
+    let st = ribbonStates.get(seg.key);
     if (!st) {
-      st = { session: seg.session, raw: null, rows: null };
-      ribbonStates.set(seg.session.groupId, st);
+      st = { key: seg.key, raw: null, rows: null };
+      ribbonStates.set(seg.key, st);
     }
-    // new bounds (different filters) mean the fetched window may no longer cover the segment
+    // new bounds (different filters) mean the fetched window may no longer cover the block
     if (st.raw && (st.raw.window.from > seg.from || st.raw.window.to < seg.to)) st.raw = null;
     st.seg = seg;
-    const spot = ribbonLocations.length ? ribbonShoreFor(ribbonLocations, seg.session.lat, seg.session.lng, ribbonCraft) : { name: null, shore: null };
-    st.shore = spot.shore;
-    st.locationName = spot.name;
+    st.sessions = seg.sessions;
+    st.shore = seg.sessions[0].spot.shore;
+    st.locationName = seg.sessions[0].spot.name;
     return { ...seg, state: st };
   });
   const maxCssPx = Math.floor(16000 / (window.devicePixelRatio || 1));
   const chunks = ribbonChunkSegments(segs, pxPerMs, maxCssPx).map((c) => ({ ...c, left: x(c.from), width: (c.to - c.from) * pxPerMs, chart: null, box: null }));
 
   const previousLeft = scroll.scrollLeft;
-  const model = { range, states: segs.map((s) => s.state), chunks, x, pxPerMs, dayPx, width, rowH, viewportW };
+  const states = segs.map((s) => s.state);
+  const items = states.flatMap((st) => st.sessions.map((session) => ({ session, state: st, locationName: st.locationName })));
+  const model = { range, states, items, chunks, x, pxPerMs, dayPx, width, rowH, viewportW };
   host.style.width = width + "px";
   host.style.height = RIBBON_HEADER_H + rowH + "px";
   host.innerHTML = ribbonHeaderSvg(model) +
@@ -709,7 +737,7 @@ function ribbonNeighbour(dir) {
   const scroll = document.getElementById("ribbonScroll");
   if (!scroll || !ribbonModel) return null;
   const centre = ribbonModel.range.from + (scroll.scrollLeft + scroll.clientWidth / 2) / ribbonModel.pxPerMs;
-  const sessions = ribbonModel.states.map((s) => s.session);
+  const sessions = ribbonModel.items.map((i) => i.session);
   const slack = 60000;
   if (dir > 0) return sessions.find((s) => (s.start + s.end) / 2 > centre + slack) || null;
   return [...sessions].reverse().find((s) => (s.start + s.end) / 2 < centre - slack) || null;
@@ -729,20 +757,21 @@ async function ribbonLoadVisible() {
   ribbonUpdateJumpButtons();
   const leftT = model.range.from + scroll.scrollLeft / model.pxPerMs - RIBBON_DAY_MS;
   const rightT = model.range.from + (scroll.scrollLeft + scroll.clientWidth) / model.pxPerMs + RIBBON_DAY_MS;
-  const todo = model.states.filter((s) => !s.raw && !ribbonLoading.has(s.session.groupId) && s.session.end >= leftT && s.session.start <= rightT);
+  const todo = model.states.filter((s) => !s.raw && !ribbonLoading.has(s.key) && s.seg.to >= leftT && s.seg.from <= rightT);
   if (todo.length === 0) return;
   const redraw = new Set();
   await Promise.all(
     todo.map(async (state) => {
-      const { session, seg } = state;
-      ribbonLoading.add(session.groupId);
+      const { seg } = state;
+      const { lat, lng } = state.sessions[0];
+      ribbonLoading.add(state.key);
       try {
         const days = [];
         for (let d = ribbonDayFloor(seg.from); d < seg.to; d += RIBBON_DAY_MS) days.push(naiveDateOnlyStr(d));
         const [hourlies, marines, tide] = await Promise.all([
-          Promise.all(days.map((d) => fetchOpenMeteoHistoricalHourly(session.lat, session.lng, d))),
-          Promise.all(days.map((d) => fetchOpenMeteoHistoricalMarineHourly(session.lat, session.lng, d))),
-          fetchTideExtremaForRange(session.lat, session.lng, seg.from, seg.to),
+          Promise.all(days.map((d) => fetchOpenMeteoHistoricalHourly(lat, lng, d))),
+          Promise.all(days.map((d) => fetchOpenMeteoHistoricalMarineHourly(lat, lng, d))),
+          fetchTideExtremaForRange(lat, lng, seg.from, seg.to),
         ]);
         const merge = (list, fields) => {
           const good = list.filter(Boolean);
@@ -759,7 +788,7 @@ async function ribbonLoadVisible() {
         };
         redraw.add(state);
       } finally {
-        ribbonLoading.delete(session.groupId);
+        ribbonLoading.delete(state.key);
       }
     })
   );
