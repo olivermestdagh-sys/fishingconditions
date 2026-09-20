@@ -3177,6 +3177,19 @@ main.wide {
   .weeknew-page .week-timeline-scroll + .footnote {
     display: none; /* the gesture hints text costs a lot of height on a phone */
   }
+}
+
+/* The compare board below applies at every width (phones AND desktop): only
+   the row height and the hints footnote above are phone-specific. */
+@media (min-width: 701px) {
+  .weeknew-row-title-line .window-loc {
+    font-size: 0.85rem;
+  }
+  .weeknew-row-title-line .window-sub {
+    font-size: 0.7rem;
+  }
+}
+@media all {
   .weeknew-header-spacer {
     display: none;
   }
@@ -3366,3 +3379,14 @@ main.wide {
 .loc-tile .type-photo-row {
   margin: 0;
 }
+
+/* Landscape phone (see setupFullscreenToggle): fullscreen-like extra room
+   even when the browser won't enter real fullscreen. */
+.landscape-immersive .sitebar,
+.landscape-immersive.weeknew-page main > .gc-filters,
+.landscape-immersive.weeknew-page .week-timeline-scroll + .footnote {
+  display: none;
+}
+
+.loc-tile-info { font-size: 0.85rem; margin: 0 0 8px; }
+.loc-tile-type { font-weight: 700; }

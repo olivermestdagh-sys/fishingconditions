@@ -1100,8 +1100,17 @@ function setupFullscreenToggle(targetId) {
   function rotationTarget() {
     return target.getClientRects().length > 0 ? target : document.documentElement;
   }
+  // Real fullscreen often can't start from a rotation (see above), so
+  // landscape ALSO applies a CSS "immersive" mode that hides the site bar
+  // (and, on Week Ahead, the filters card) — the same extra room fullscreen
+  // gives, on every browser including iPhone Safari.
+  function applyImmersive() {
+    document.documentElement.classList.toggle("landscape-immersive", landscapePhone.matches);
+    window.dispatchEvent(new Event("resize")); // Week Ahead re-sizes its board to the space left
+  }
   async function onRotate() {
     disarmTap();
+    applyImmersive();
     if (landscapePhone.matches) {
       if (anyFullscreenElement()) return;
       const el = rotationTarget();
@@ -1117,6 +1126,7 @@ function setupFullscreenToggle(targetId) {
   }
   if (landscapePhone.addEventListener) landscapePhone.addEventListener("change", onRotate);
   else if (landscapePhone.addListener) landscapePhone.addListener(onRotate);
+  if (landscapePhone.matches) applyImmersive(); // page opened while already sideways
 }
 
 /**

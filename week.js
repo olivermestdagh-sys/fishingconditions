@@ -49,7 +49,7 @@ const PIXELS_PER_HOUR = isMobileDevice ? 16 : 32;
 // On phones (up to 700px wide, see "compare board" in style.css) that column is
 // gone: each row's name is a pill floating on its graph, so the board has no
 // sidebar width to reserve.
-const COMPACT_LAYOUT_QUERY = "(max-width: 700px)";
+const COMPACT_LAYOUT_QUERY = "all"; // the compare board (name pills) now applies at every width, desktop included
 function isCompactLayout() {
   return window.matchMedia(COMPACT_LAYOUT_QUERY).matches;
 }

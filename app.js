@@ -90,7 +90,10 @@ async function init() {
   // moves the tooltip to wherever you tap next.
   wireHoldToShowTooltip(() => state.chart, document.getElementById("conditionsChart"));
   setupFullscreenToggle("locationChartFrame");
-  mountLocationPill("locationChartFrame", { nameId: "hoverPanelLocationName" });
+  locationPill = mountLocationPill("locationChartFrame", {
+    nameId: "hoverPanelLocationName",
+    tileIds: ["hoverPanelTileInfo", "hoverPanelHint"],
+  });
   setupDragToScroll(document.getElementById("locationChartScroll"));
 
   // Restores and shows whichever location was last viewed, rather than
@@ -521,11 +524,17 @@ function renderUpdatedBanner() {
   setUpdatedStamp(document.getElementById("updated"), dt);
 }
 
+let locationPill = null; // floating name pill + details tile on the graph (mountLocationPill, js/week-tools.js)
+
 function renderLocation(key) {
   const loc = state.data.locations.find((l) => locationKey(l.name, l.type) === key);
   const rows = state.rowsByLocation[key] || [];
 
   document.getElementById("hoverPanelLocationName").textContent = loc ? displayNameFor(loc) : "";
+  document.getElementById("hoverPanelTileInfo").innerHTML = loc
+    ? `<div class="loc-tile-type">${escapeHtml(loc.type)}</div><div>Shore ${escapeHtml(loc.shore || "–")}</div>`
+    : "";
+  if (loc && locationPill) locationPill.setPhoto(loc.type);
   // A real, saved location's own graph — not a preview (see
   // previewLocationOnMap) — so the preview note/badge/controls never
   // linger onto it if the panel was last showing a preview.
