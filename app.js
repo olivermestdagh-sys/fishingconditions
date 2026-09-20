@@ -524,6 +524,19 @@ function renderUpdatedBanner() {
   setUpdatedStamp(document.getElementById("updated"), dt);
 }
 
+// The pill tile's "Good sessions" list — same sessions, same saved
+// thresholds (Week Ahead's Thresholds & filters) as the Week Ahead tab.
+function renderTileSessions(rows) {
+  const box = document.getElementById("hoverPanelSessions");
+  const sessions = computeQualifyingSessions(rows);
+  box.innerHTML = `<div class="loc-tile-heading">Good sessions</div>`;
+  if (sessions.length === 0) {
+    box.insertAdjacentHTML("beforeend", `<p class="footnote" style="margin:0;text-align:left;">No qualifying session in this period.</p>`);
+    return;
+  }
+  for (const s of sessions) box.appendChild(buildSessionChipElement(s));
+}
+
 let locationPill = null; // floating name pill + details tile on the graph (mountLocationPill, js/week-tools.js)
 
 function renderLocation(key) {
@@ -535,6 +548,7 @@ function renderLocation(key) {
     ? `<div class="loc-tile-type">${escapeHtml(loc.type)}</div><div>Shore ${escapeHtml(loc.shore || "–")}</div>`
     : "";
   if (loc && locationPill) locationPill.setPhoto(loc.type);
+  renderTileSessions(rows);
   // A real, saved location's own graph — not a preview (see
   // previewLocationOnMap) — so the preview note/badge/controls never
   // linger onto it if the panel was last showing a preview.

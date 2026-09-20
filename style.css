@@ -3383,10 +3383,18 @@ main.wide {
 /* Landscape phone (see setupFullscreenToggle): fullscreen-like extra room
    even when the browser won't enter real fullscreen. */
 .landscape-immersive .sitebar,
-.landscape-immersive.weeknew-page main > .gc-filters,
+.landscape-immersive.weeknew-page main > :not(.week-full-bleed),
 .landscape-immersive.weeknew-page .week-timeline-scroll + .footnote {
   display: none;
+}
+.landscape-immersive.weeknew-page main {
+  padding: 0;
+  margin: 0;
 }
 
 .loc-tile-info { font-size: 0.85rem; margin: 0 0 8px; }
 .loc-tile-type { font-weight: 700; }
+
+.loc-tile-heading { font-size: 0.8rem; font-weight: 700; margin: 0 0 4px; }
+.loc-tile-sessions { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; }
+.loc-tile { max-height: 70vh; overflow-y: auto; }

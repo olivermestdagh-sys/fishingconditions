@@ -852,7 +852,6 @@ function sortLocationsForDisplay(locationEntries) {
  * location lands on that location's single row.
  */
 function computeLocationRows() {
-  const nowLocal = new Date();
   const minCondition = Number(document.getElementById("minCondition").value) || 1;
   const minHours = Number(document.getElementById("minHours").value) || 1;
 
@@ -867,23 +866,7 @@ function computeLocationRows() {
 
   return ordered.map((loc) => {
     const locRows = allRows.filter((r) => r["Location Name"] === loc.name && r["Type"] === loc.type);
-    const windows = computeWindowsForLocation(locRows, minCondition, minHours);
-    const seenSpans = new Set();
-    const sessions = [];
-    for (const w of windows) {
-      if (naiveMsToLocalDate(w.to) < nowLocal) continue; // already finished
-      const spanKey = `${w.from}::${w.to}`;
-      if (seenSpans.has(spanKey)) continue; // same session, different day-anchor duplicate
-      seenSpans.add(spanKey);
-      sessions.push({
-        ...w,
-        avgCondition: average(locRows, "Condition", w.from, w.to),
-        avgFishingCondition: average(locRows, "Fishing Condition", w.from, w.to),
-        tempRange: rangeOf(locRows, "Temp Forecast (C)", w.from, w.to),
-        windRange: rangeOf(locRows, "Wind Forecast (km/h)", w.from, w.to),
-        maxRain: maxOf(locRows, "Rainfall Probability (%)", w.from, w.to),
-      });
-    }
+    const sessions = computeQualifyingSessions(locRows, minCondition, minHours);
     return { loc, locRows, sessions };
   });
 }
@@ -1276,34 +1259,7 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
     sessionsWrap.insertAdjacentHTML("beforeend", `<p class="footnote weeknew-no-session">No qualifying session in this period.</p>`);
   } else {
     for (const s of sessions) {
-      const timeLabel = `${fmtNaive(s.from, { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(s.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
-      const chip = document.createElement("div");
-      chip.className = "weeknew-session-chip";
-      chip.innerHTML = `
-        <div class="weeknew-session-time">${timeLabel} · ${s.hoursLabel}h</div>
-        <div class="badge-stack">
-          <div class="badge-item">
-            <div class="condition-badge" style="background:${conditionColor(s.avgCondition)}">${s.avgCondition != null ? s.avgCondition.toFixed(1) : "–"}</div>
-            <div class="badge-label">Loc</div>
-          </div>
-          <div class="badge-item">
-            <div class="condition-badge" style="background:${conditionColor(s.avgFishingCondition)}">${s.avgFishingCondition != null ? s.avgFishingCondition.toFixed(1) : "–"}</div>
-            <div class="badge-label">Fish</div>
-          </div>
-          <div class="badge-item">
-            <div class="condition-badge weeknew-range-badge" style="background:#ea580c">${s.tempRange ? `${Math.round(s.tempRange.min)}–${Math.round(s.tempRange.max)}°` : "–"}</div>
-            <div class="badge-label">Temp</div>
-          </div>
-          <div class="badge-item">
-            <div class="condition-badge weeknew-range-badge" style="background:#0ea5e9">${s.windRange ? `${Math.round(s.windRange.min)}–${Math.round(s.windRange.max)}` : "–"}</div>
-            <div class="badge-label">Wind</div>
-          </div>
-          <div class="badge-item">
-            <div class="condition-badge weeknew-range-badge" style="background:#64748b">${s.maxRain != null ? `${Math.round(s.maxRain)}%` : "–"}</div>
-            <div class="badge-label">Rain</div>
-          </div>
-        </div>
-      `;
+      const chip = buildSessionChipElement(s);
       // Just scrolls the board to center this session now — arming moved
       // to the dedicated "+ Fishing times" button above, so tapping a
       // qualifying-session chip is purely navigational.

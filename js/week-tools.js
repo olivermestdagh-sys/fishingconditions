@@ -237,6 +237,76 @@ function maxOf(rows, field, from, to) {
   return Math.max(...vals);
 }
 
+/**
+ * The qualifying ("good") sessions for one location's rows, from now on —
+ * same rules Week Ahead uses (computeWindowsForLocation with the saved
+ * min-condition / min-hours thresholds, defaulting to 3 and 3), each with its
+ * averages/ranges. Shared so the Location tab's pill tile lists exactly what
+ * Week Ahead does.
+ */
+function computeQualifyingSessions(locRows, minCondition, minHours) {
+  if (minCondition == null || minHours == null) {
+    let saved = null;
+    try {
+      saved = JSON.parse(localStorage.getItem(THRESHOLDS_STORAGE_KEY) || "null");
+    } catch {
+      saved = null;
+    }
+    if (minCondition == null) minCondition = Number(saved && saved.minCondition) || 3;
+    if (minHours == null) minHours = Number(saved && saved.minHours) || 3;
+  }
+  const nowLocal = new Date();
+  const seenSpans = new Set();
+  const sessions = [];
+  for (const w of computeWindowsForLocation(locRows, minCondition, minHours)) {
+    if (naiveMsToLocalDate(w.to) < nowLocal) continue; // already finished
+    const spanKey = `${w.from}::${w.to}`;
+    if (seenSpans.has(spanKey)) continue; // same session, different day-anchor duplicate
+    seenSpans.add(spanKey);
+    sessions.push({
+      ...w,
+      avgCondition: average(locRows, "Condition", w.from, w.to),
+      avgFishingCondition: average(locRows, "Fishing Condition", w.from, w.to),
+      tempRange: rangeOf(locRows, "Temp Forecast (C)", w.from, w.to),
+      windRange: rangeOf(locRows, "Wind Forecast (km/h)", w.from, w.to),
+      maxRain: maxOf(locRows, "Rainfall Probability (%)", w.from, w.to),
+    });
+  }
+  return sessions;
+}
+
+/** One session chip (time, hours, Loc/Fish/Temp/Wind/Rain badges). Callers add their own click handler. */
+function buildSessionChipElement(s) {
+  const timeLabel = `${fmtNaive(s.from, { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })}–${fmtNaive(s.to, { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+  const chip = document.createElement("div");
+  chip.className = "weeknew-session-chip";
+  chip.innerHTML = `
+    <div class="weeknew-session-time">${timeLabel} · ${s.hoursLabel}h</div>
+    <div class="badge-stack">
+      <div class="badge-item">
+        <div class="condition-badge" style="background:${conditionColor(s.avgCondition)}">${s.avgCondition != null ? s.avgCondition.toFixed(1) : "–"}</div>
+        <div class="badge-label">Loc</div>
+      </div>
+      <div class="badge-item">
+        <div class="condition-badge" style="background:${conditionColor(s.avgFishingCondition)}">${s.avgFishingCondition != null ? s.avgFishingCondition.toFixed(1) : "–"}</div>
+        <div class="badge-label">Fish</div>
+      </div>
+      <div class="badge-item">
+        <div class="condition-badge weeknew-range-badge" style="background:#ea580c">${s.tempRange ? `${Math.round(s.tempRange.min)}–${Math.round(s.tempRange.max)}°` : "–"}</div>
+        <div class="badge-label">Temp</div>
+      </div>
+      <div class="badge-item">
+        <div class="condition-badge weeknew-range-badge" style="background:#0ea5e9">${s.windRange ? `${Math.round(s.windRange.min)}–${Math.round(s.windRange.max)}` : "–"}</div>
+        <div class="badge-label">Wind</div>
+      </div>
+      <div class="badge-item">
+        <div class="condition-badge weeknew-range-badge" style="background:#64748b">${s.maxRain != null ? `${Math.round(s.maxRain)}%` : "–"}</div>
+        <div class="badge-label">Rain</div>
+      </div>
+    </div>
+  `;
+  return chip;
+}
 const DAY_COLORS = [
   { bg: "#eaf2fb", accent: "#1f4e78", photoTint: "rgba(234,242,251,0.86)" }, // blue
   { bg: "#fef3e0", accent: "#b45309", photoTint: "rgba(254,243,224,0.86)" }, // amber
@@ -1091,7 +1161,17 @@ function setupFullscreenToggle(targetId) {
   // the gesture instead. iPhone Safari has no element fullscreen at all, so
   // nothing happens there. Landscape phone = coarse pointer + short viewport
   // (tablets and desktop windows are left alone).
-  const landscapePhone = window.matchMedia("(orientation: landscape) and (max-height: 500px) and (pointer: coarse)");
+  // Detected in JS rather than with a media query so it doesn't depend on
+  // `pointer: coarse` / height cut-offs some phones don't match: a touch
+  // device whose shorter physical side is phone-sized, held wider than tall.
+  const landscapePhone = {
+    get matches() {
+      const touch = navigator.maxTouchPoints > 0;
+      const phoneSized = Math.min(screen.width, screen.height) <= 600;
+      return touch && phoneSized && window.innerWidth > window.innerHeight;
+    },
+  };
+  let lastLandscape = null;
   let armedTap = null;
   function disarmTap() {
     if (armedTap) document.removeEventListener("pointerup", armedTap, true);
@@ -1109,6 +1189,9 @@ function setupFullscreenToggle(targetId) {
     window.dispatchEvent(new Event("resize")); // Week Ahead re-sizes its board to the space left
   }
   async function onRotate() {
+    const now = landscapePhone.matches;
+    if (now === lastLandscape) return; // resize fires constantly; only act on a real rotation
+    lastLandscape = now;
     disarmTap();
     applyImmersive();
     if (landscapePhone.matches) {
@@ -1124,9 +1207,10 @@ function setupFullscreenToggle(targetId) {
       exitFullscreen();
     }
   }
-  if (landscapePhone.addEventListener) landscapePhone.addEventListener("change", onRotate);
-  else if (landscapePhone.addListener) landscapePhone.addListener(onRotate);
-  if (landscapePhone.matches) applyImmersive(); // page opened while already sideways
+  window.addEventListener("resize", onRotate);
+  window.addEventListener("orientationchange", () => setTimeout(onRotate, 150)); // innerWidth/Height settle just after the event
+  lastLandscape = landscapePhone.matches;
+  if (lastLandscape) applyImmersive(); // page opened while already sideways
 }
 
 /**
