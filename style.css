@@ -3425,3 +3425,18 @@ body {
 .sitebar {
   border-top: env(safe-area-inset-top, 0px) solid var(--blue-900);
 }
+
+/* Samsung (S21) and some other phones report no safe-area inset even in the
+   installed app, so the map pages also keep a fixed gap for the system nav bar:
+   ~48px covers a 3-button bar, and is only applied when running as an
+   installed app (browser tabs already stop above the system bars). */
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  .map-fullpage-body {
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 48px);
+  }
+}
+@media ((display-mode: standalone), (display-mode: fullscreen)) and (orientation: landscape) {
+  .map-fullpage-body {
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 24px);
+  }
+}
