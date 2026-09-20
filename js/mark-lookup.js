@@ -293,6 +293,59 @@ async function lookupTideConditionAt(lat, lng, targetMs) {
 }
 
 /**
+ * Real tide high/low events covering [startMs, endMs] (naive ms) for the
+ * tracked location nearest (lat, lng), shifted by that location's own
+ * tideOffset exactly as lookupTideConditionAt does — for the Reports tab's
+ * Session Ribbon tide curve. Returns { location, extrema } (extrema sorted,
+ * {t, height, type}) or null when there's no tide data (no nearby location
+ * with a WillyWeather id, request failed, or the events don't cover the
+ * window). One WillyWeather call is billed per uncached request, so results
+ * are cached in localStorage per (station, start date, days) — reopening the
+ * same session never bills again.
+ */
+async function fetchTideExtremaForRange(lat, lng, startMs, endMs) {
+  if (!WILLYWEATHER_SEARCH_WORKER_URL) return null;
+  const nearest = await findNearestTrackedLocation(lat, lng);
+  if (!nearest) return null;
+
+  const startDateStr = naiveDateOnlyStr(startMs - 86400000);
+  const days = Math.min(7, Math.ceil((endMs - startMs) / 86400000) + 3);
+  const cacheKey = `ribbonTide:${nearest.willyweatherId}:${startDateStr}:${days}`;
+  let rawEntries = null;
+  try {
+    rawEntries = JSON.parse(localStorage.getItem(cacheKey) || "null");
+  } catch {
+    rawEntries = null;
+  }
+  if (!Array.isArray(rawEntries)) {
+    try {
+      const res = await fetch(`${WILLYWEATHER_SEARCH_WORKER_URL}/weather?id=${encodeURIComponent(nearest.willyweatherId)}&startDate=${startDateStr}&days=${days}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      rawEntries = [];
+      for (const day of ((data.forecasts || {}).tides || {}).days || []) {
+        for (const entry of day.entries || []) rawEntries.push(entry);
+      }
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(rawEntries));
+      } catch {
+        /* storage full/blocked — just refetch next time */
+      }
+    } catch (err) {
+      console.error("Tide range lookup failed:", err);
+      return null;
+    }
+  }
+  const offsetMs = (nearest.tideOffset || 0) * 60000;
+  const extrema = rawEntries
+    .map((e) => ({ t: parseNaive(e.dateTime) + offsetMs, height: e.height, type: e.type }))
+    .filter((e) => Number.isFinite(e.t) && (e.type === "high" || e.type === "low"))
+    .sort((a, b) => a.t - b.t);
+  if (extrema.length < 2 || extrema[0].t > startMs || extrema[extrema.length - 1].t < endMs) return null;
+  return { location: nearest, extrema };
+}
+
+/**
  * The single entry point for this whole section — looks up best-effort
  * weatherCondition/tideCondition/barometer/windDirection/windSpeed for a
  * mark at (lat, lng, dateTimeNaive). Returns a plain object with whichever

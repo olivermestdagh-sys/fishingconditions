@@ -1,0 +1,116 @@
+// Session ribbon: the pure logic (session grouping, carried-forward conditions,
+// tide curve, dot layout, wind cells, calculated light times).
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readSharedScripts } from "./helpers.mjs";
+
+const src = readSharedScripts();
+const grab = (re) => {
+  const m = src.match(re);
+  if (!m) throw new Error("could not find in js/*.js: " + re);
+  return m[0];
+};
+const fn = (name) => grab(new RegExp(`function ${name}\\b[\\s\\S]*?\\r?\\n}\\r?\\n`));
+const fns = new Function(
+  [
+    grab(/const RIBBON_PAD_MS[^\n]*\r?\n/),
+    grab(/const RIBBON_TIME_ZONE[^\n]*\r?\n/),
+    fn("parseNaive"),
+    fn("naiveDateOnlyStr"),
+    "const previewDegreesToCompass = (d) => ['N','NE','E','SE','S','SW','W','NW'][Math.round(d / 45) % 8];",
+    fn("ribbonBuildSessions"),
+    fn("ribbonCarryForward"),
+    fn("ribbonMarkConditionsAt"),
+    fn("ribbonTideAt"),
+    fn("ribbonTideCurve"),
+    fn("ribbonWindCellsFromHourly"),
+    fn("ribbonWindCellsFromMarks"),
+    fn("ribbonLayoutDots"),
+    fn("ribbonLocalWallMs"),
+    fn("ribbonSolarEvent"),
+    fn("ribbonSunTimes"),
+    "return { ribbonBuildSessions, ribbonCarryForward, ribbonMarkConditionsAt, ribbonTideAt, ribbonTideCurve, ribbonWindCellsFromHourly, ribbonWindCellsFromMarks, ribbonLayoutDots, ribbonSunTimes, parseNaive };",
+  ].join("\n")
+)();
+const T = (s) => fns.parseNaive(s);
+
+const marks = [
+  { id: "s1", type: "Session", sessionRole: "start", sessionGroupId: "g1", name: "Session 1 start", dateTime: "2026-09-20T06:00:00", lat: -38.4, lng: 145.1, windSpeed: 10, windDirection: "N", tideCondition: "Running In" },
+  { id: "s2", type: "Session", sessionRole: "end", sessionGroupId: "g1", name: "Session 1 end", dateTime: "2026-09-20T10:00:00", lat: -38.4, lng: 145.1 },
+  { id: "c1", type: "Catch", species: "Whiting", dateTime: "2026-09-20T07:15:00", size: 30, windSpeed: 18, windDirection: "S" },
+  { id: "c2", type: "Catch", species: "Snapper", dateTime: "2026-09-20T09:00:00" },
+  { id: "c3", type: "Catch", species: "Whiting", dateTime: "2026-09-20T12:00:00" }, // after the session
+  { id: "c4", type: "Catch", species: "Whiting", dateTime: "2026-09-19T07:00:00" }, // another day
+];
+
+test("a session gathers only the catches between its start and end", () => {
+  const [s] = fns.ribbonBuildSessions(marks);
+  assert.equal(s.name, "Session 1");
+  assert.deepEqual(s.catches.map((c) => c.id), ["c1", "c2"]);
+  assert.equal(s.missingStart || s.missingEnd, false);
+});
+
+test("a session with no catches is still a valid session", () => {
+  const [s] = fns.ribbonBuildSessions(marks.filter((m) => m.type === "Session"));
+  assert.equal(s.catches.length, 0);
+  assert.equal(s.end - s.start, 4 * 3600000);
+});
+
+test("conditions on a mark stay in force until a later mark changes them", () => {
+  const [s] = fns.ribbonBuildSessions(marks);
+  assert.equal(fns.ribbonCarryForward(s.marks, T("2026-09-20T06:30:00"), "windSpeed"), 10);
+  assert.equal(fns.ribbonCarryForward(s.marks, T("2026-09-20T08:00:00"), "windSpeed"), 18); // changed by the catch at 07:15
+  assert.equal(fns.ribbonCarryForward(s.marks, T("2026-09-20T09:30:00"), "windDirection"), "S");
+  assert.equal(fns.ribbonMarkConditionsAt(s.marks, T("2026-09-20T09:30:00")).tideCondition, "Running In"); // never changed
+  assert.equal(fns.ribbonCarryForward(s.marks, T("2026-09-20T05:00:00"), "windSpeed"), null); // before any mark
+});
+
+test("a session missing its end mark ends at its last catch", () => {
+  const [s] = fns.ribbonBuildSessions(marks.filter((m) => m.id !== "s2"));
+  assert.equal(s.missingEnd, true);
+  assert.equal(s.end, T("2026-09-20T12:00:00")); // last catch within 12 h of the start
+});
+
+test("tide is interpolated between highs and lows, and null outside the events", () => {
+  const extrema = [
+    { t: T("2026-09-20T06:00:00"), height: 0.2, type: "low" },
+    { t: T("2026-09-20T12:00:00"), height: 1.8, type: "high" },
+  ];
+  const mid = fns.ribbonTideAt(extrema, T("2026-09-20T09:00:00"));
+  assert.ok(Math.abs(mid.height - 1.0) < 1e-9);
+  assert.equal(mid.rising, true);
+  assert.equal(fns.ribbonTideAt(extrema, T("2026-09-20T13:00:00")), null);
+  const curve = fns.ribbonTideCurve(extrema, T("2026-09-20T06:00:00"), T("2026-09-20T12:00:00"), 3600000);
+  assert.equal(curve.length, 7);
+});
+
+test("catches close together stack instead of hiding each other", () => {
+  const dots = fns.ribbonLayoutDots([{ x: 100, r: 6 }, { x: 104, r: 6 }, { x: 106, r: 6 }, { x: 200, r: 6 }]);
+  assert.deepEqual(dots.map((d) => d.level), [0, 1, 2, 0]);
+});
+
+test("hourly wind becomes one-hour cells clipped to the window", () => {
+  const hourly = { time: ["2026-09-20T06:00", "2026-09-20T07:00"], windspeed_10m: [10, 20], winddirection_10m: [0, 90] };
+  const cells = fns.ribbonWindCellsFromHourly(hourly, T("2026-09-20T06:15:00"), T("2026-09-20T07:15:00"));
+  assert.equal(cells.length, 2);
+  assert.equal(cells[0].t0, T("2026-09-20T06:15:00"));
+  assert.equal(cells[1].dir, "E");
+});
+
+test("wind recorded on marks holds until the next recorded wind", () => {
+  const [s] = fns.ribbonBuildSessions(marks);
+  const cells = fns.ribbonWindCellsFromMarks(s.marks, s.start, s.end);
+  assert.deepEqual(cells.map((c) => c.speed), [10, 18]);
+  assert.equal(cells[0].t1, T("2026-09-20T07:15:00"));
+  assert.equal(cells[1].t1, s.end);
+});
+
+test("calculated light times match the stored sun times for a known day", () => {
+  // conditions.json, Balnarring Beach, 2026-09-20: first light 05:46, sunrise 06:12, sunset 18:13, last light 18:40
+  const sun = fns.ribbonSunTimes("2026-09-20", -38.3884, 145.1245);
+  const within = (got, want) => Math.abs(got - T(`2026-09-20T${want}:00`)) <= 3 * 60000;
+  assert.ok(within(sun.firstLight, "05:46"), "first light");
+  assert.ok(within(sun.sunrise, "06:12"), "sunrise");
+  assert.ok(within(sun.sunset, "18:13"), "sunset");
+  assert.ok(within(sun.lastLight, "18:40"), "last light");
+});

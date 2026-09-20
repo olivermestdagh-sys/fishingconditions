@@ -96,6 +96,31 @@
       <div id="reportLocationTableWrap"></div>
       <div id="reportLocationEmpty" class="report-empty" style="display:none;">No catches match the current filters.</div>
     </section>
+    <section class="summary-card report-block" id="reportRibbonBlock">
+      <h3>Session ribbon</h3>
+      <p class="footnote">One logged session on a single time axis: the session bar, a dot for each catch, the tide behind it, the wind (coloured by how good it is for the location and craft) and the light. Hover or tap for the conditions at any moment.</p>
+      <div id="ribbonEmpty" class="report-empty" style="display:none;">No fishing sessions logged yet. Sessions come from the Sync tab's trail import.</div>
+      <div id="ribbonBody">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px;">
+          <select id="ribbonSessionSelect" aria-label="Choose a session" style="flex:1 1 260px;min-width:0;max-width:100%;"></select>
+          <span class="footnote" style="margin:0;">Wind scored for:</span>
+          <button type="button" data-ribbon-craft="Kayak" class="btn-primary" aria-pressed="true">Kayak</button>
+          <button type="button" data-ribbon-craft="Land based" class="btn-secondary" aria-pressed="false">Land based</button>
+        </div>
+        <p class="footnote" id="ribbonSummary" style="margin:0 0 6px;text-align:left;"></p>
+        <div id="ribbonLegend" style="margin:4px 0 8px;"></div>
+        <div id="ribbonHost" style="position:relative;width:100%;"></div>
+        <details style="margin-top:8px;">
+          <summary class="footnote" style="cursor:pointer;">Table view</summary>
+          <div style="overflow-x:auto;">
+            <table class="report-table">
+              <thead><tr><th>Time</th><th>Species</th><th>Length</th><th>Tide</th><th>Wind</th><th>Weather</th></tr></thead>
+              <tbody id="ribbonTableBody"></tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </section>
   </section>
 </main>
 
@@ -109,5 +134,6 @@
 <script src="js/mark-lookup.js"></script>
 <script src="js/chart-render.js"></script>
 <script src="js/week-tools.js"></script>
+<script src="js/session-ribbon.js"></script>
 <script src="reports.js"></script>
 </body></html>

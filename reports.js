@@ -475,6 +475,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   resetReportsFilters();
   reportsFilteredCatches = reportsAllMarks.filter((m) => m.type === "Catch");
   renderAllReports();
+  initSessionRibbon(reportsAllMarks); // the session ribbon isn't affected by the catch filters above
 
   const toggle = document.getElementById("reportsFiltersToggle");
   const content = document.getElementById("reportsFiltersContent");
