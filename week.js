@@ -546,7 +546,7 @@ function loadPinnedOrder() {
 }
 
 function persistPinnedOrder() {
-  localStorage.setItem(PINNED_LOCATIONS_STORAGE_KEY, JSON.stringify(pinnedOrder));
+  Prefs.set(PINNED_LOCATIONS_STORAGE_KEY, JSON.stringify(pinnedOrder));
 }
 
 /**
@@ -608,6 +608,10 @@ function wireThresholdStepper(id, step, min, max, colorFn) {
 }
 
 async function init() {
+  // A signed-in user's saved filters, favourites and plans (js/prefs.js) are pulled into localStorage first, so everything
+  // below reads them as usual; signed out or offline this returns straight away and the device's own values are used.
+  await Prefs.load();
+
   // Loaded separately from the main data fetch, with its own error handling
   // — a missing/malformed settings file shouldn't break the rest of the
   // page, just leave the drive-time-dependent half of a computed session

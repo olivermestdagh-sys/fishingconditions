@@ -337,3 +337,17 @@ CREATE TABLE IF NOT EXISTS tide_events (
   height_m REAL NOT NULL,
   PRIMARY KEY (location_name, event_time, type)
 ) WITHOUT ROWID;
+
+
+-- ---------------------------------------------------------------------
+-- Per-user saved preferences (user-backend.js, "Per-user saved preferences"):
+-- filters, favourites and plans that follow a signed-in user across devices.
+-- Additive: safe to run against the live database (IF NOT EXISTS).
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_prefs (
+  user_id TEXT NOT NULL,
+  key TEXT NOT NULL,               -- one of SYNCED_PREF_KEYS (allowlisted in the Worker)
+  value TEXT NOT NULL,             -- exactly what the client sent, usually JSON
+  updated_at INTEGER NOT NULL,     -- ms since the epoch
+  PRIMARY KEY (user_id, key)
+) WITHOUT ROWID;

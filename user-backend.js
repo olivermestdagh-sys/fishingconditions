@@ -199,6 +199,9 @@ export default {
       if (url.pathname === "/api/settings") {
         return handleSettings(request, url, env);
       }
+      if (url.pathname === "/api/prefs") {
+        return handlePrefs(request, env);
+      }
 
       // --- v2 endpoints below: the unified locations/types/groups/mark-lists/
       // marks model (schema-v2.sql). /api/locations and /api/settings (v1)
@@ -1638,6 +1641,77 @@ async function handlePipelineLocationUpdate(request, env, id) {
     .run();
 
   return jsonResponse({ id, ...merged }, 200, env);
+}
+
+// ---------------------------------------------------------------------
+// Per-user saved preferences (table `user_prefs`, schema-v2.sql): the
+// filters, favourites and plans the site otherwise keeps only in the
+// browser's localStorage (js/prefs.js on the client). One row per user per
+// setting; the value is stored exactly as the client sent it (a string —
+// usually JSON). Always the REAL signed-in user, never the admin "acts as
+// Public" account, so everyone's favourites are their own.
+// ---------------------------------------------------------------------
+
+// Must match SYNCED_PREF_KEYS in js/prefs.js. An allowlist, so the table can't be used as free-form storage.
+const SYNCED_PREF_KEYS = new Set([
+  "goodConditionsSelectedLocations",
+  "goodConditionsSelectedTypes",
+  "goodConditionsSelectedGroups",
+  "goodConditionsSelectedDirections",
+  "goodConditionsThresholds",
+  "goodConditionsPinnedLocationsNew",
+  "goodConditionsComputedSessions",
+  "liveHomeTimings",
+  "selectedLocation",
+  "markViewSettings",
+  "markLastFieldValues",
+]);
+const PREF_MAX_VALUE_LENGTH = 64 * 1024;
+
+function prefsResponse(body, status, env) {
+  const res = jsonResponse(body, status, env);
+  res.headers.set("Cache-Control", "private, no-store");
+  return res;
+}
+
+async function handlePrefs(request, env) {
+  const user = await requireUser(request, env);
+  if (!user) return prefsResponse({ error: "Not signed in." }, 401, env);
+
+  if (request.method === "GET") {
+    const { results } = await env.DB.prepare("SELECT key, value, updated_at FROM user_prefs WHERE user_id = ?").bind(user.id).all();
+    const prefs = {};
+    for (const r of results) if (SYNCED_PREF_KEYS.has(r.key)) prefs[r.key] = { value: r.value, updatedAt: r.updated_at };
+    return prefsResponse({ userId: user.id, prefs }, 200, env);
+  }
+
+  if (request.method === "PUT") {
+    const body = await readJsonBody(request);
+    const changes = body && typeof body.changes === "object" && body.changes !== null && !Array.isArray(body.changes) ? body.changes : null;
+    if (!changes) return prefsResponse({ error: "changes must be an object of key: value | null." }, 400, env);
+    const entries = Object.entries(changes);
+    if (entries.length === 0 || entries.length > SYNCED_PREF_KEYS.size) return prefsResponse({ error: "Wrong number of changes." }, 400, env);
+    for (const [key, value] of entries) {
+      if (!SYNCED_PREF_KEYS.has(key)) return prefsResponse({ error: `Unknown setting: ${key}` }, 400, env);
+      if (value !== null && (typeof value !== "string" || value.length > PREF_MAX_VALUE_LENGTH)) {
+        return prefsResponse({ error: `${key} must be text up to ${PREF_MAX_VALUE_LENGTH} characters, or null to remove it.` }, 400, env);
+      }
+    }
+    const now = Date.now();
+    await env.DB.batch(
+      entries.map(([key, value]) =>
+        value === null
+          ? env.DB.prepare("DELETE FROM user_prefs WHERE user_id = ? AND key = ?").bind(user.id, key)
+          : env.DB.prepare(
+              `INSERT INTO user_prefs (user_id, key, value, updated_at) VALUES (?, ?, ?, ?)
+               ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+            ).bind(user.id, key, value, now)
+      )
+    );
+    return prefsResponse({ saved: entries.length }, 200, env);
+  }
+
+  return prefsResponse({ error: "Method not allowed." }, 405, env);
 }
 
 // ---------------------------------------------------------------------

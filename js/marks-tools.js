@@ -48,7 +48,7 @@ function saveMarkViewSettings(state) {
     for (const [key, f] of Object.entries(state.filters)) {
       filters[key] = { include: [...(f.include || [])], exclude: [...(f.exclude || [])] };
     }
-    localStorage.setItem(MARK_VIEW_STORAGE_KEY, JSON.stringify({ groupByKey: state.groupByKey, filters }));
+    Prefs.set(MARK_VIEW_STORAGE_KEY, JSON.stringify({ groupByKey: state.groupByKey, filters }));
   } catch {
     // Same reasoning as saveLastMarkFieldValues' own try/catch above — a
     // localStorage failure here just means this session's filter tweak

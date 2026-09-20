@@ -332,25 +332,25 @@ function conditionColor(avgValue) {
 }
 
 function persistSelectedLocations(selectedLocations) {
-  localStorage.setItem(LOC_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedLocations)));
+  Prefs.set(LOC_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedLocations)));
 }
 
 function persistSelectedTypes(selectedTypes) {
-  localStorage.setItem(TYPE_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedTypes)));
+  Prefs.set(TYPE_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedTypes)));
 }
 
 function persistSelectedGroups(selectedGroups) {
-  localStorage.setItem(GROUP_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedGroups)));
+  Prefs.set(GROUP_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedGroups)));
 }
 
 function persistSelectedDirections(selectedDirections) {
-  localStorage.setItem(DIRECTION_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedDirections)));
+  Prefs.set(DIRECTION_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedDirections)));
 }
 
 function persistThresholds() {
   const minCondition = document.getElementById("minCondition").value;
   const minHours = document.getElementById("minHours").value;
-  localStorage.setItem(THRESHOLDS_STORAGE_KEY, JSON.stringify({ minCondition, minHours }));
+  Prefs.set(THRESHOLDS_STORAGE_KEY, JSON.stringify({ minCondition, minHours }));
 }
 
 // onChange is called after the toggle (with no arguments) so each caller
@@ -819,7 +819,7 @@ function loadComputedSessions() {
 }
 
 function persistComputedSessions(list) {
-  localStorage.setItem(COMPUTED_SESSIONS_STORAGE_KEY, JSON.stringify(list));
+  Prefs.set(COMPUTED_SESSIONS_STORAGE_KEY, JSON.stringify(list));
 }
 
 

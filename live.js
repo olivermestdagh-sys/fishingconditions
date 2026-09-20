@@ -82,7 +82,7 @@ async function updateTimings() {
     return;
   }
 
-  localStorage.setItem(TIMINGS_STORAGE_KEY, JSON.stringify({ homeByStr }));
+  Prefs.set(TIMINGS_STORAGE_KEY, JSON.stringify({ homeByStr }));
   setTimingsStatus("Calculating…");
 
   // A fresh GPS read, not the cached currentGpsPosition from page load —
@@ -489,6 +489,8 @@ function setGpsStatus(html) {
 }
 
 async function init() {
+  await Prefs.load(); // a signed-in user's saved settings (js/prefs.js); the device's own values when signed out or offline
+
   // Loaded separately from the main data fetch, with its own error handling
   // — a missing/malformed settings file shouldn't break the rest of the
   // page, just leave the drive-time feature gracefully unavailable.

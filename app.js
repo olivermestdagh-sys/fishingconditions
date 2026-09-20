@@ -42,6 +42,7 @@ function locationKey(name, type) {
 }
 
 async function init() {
+  await Prefs.load(); // a signed-in user's saved settings (js/prefs.js); the device's own values when signed out or offline
   try {
     const res = await fetch(DATA_URL, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -119,7 +120,7 @@ async function init() {
 // the map-fills-the-page redesign) — the map IS the only way to pick a
 // location now, so this is the map's marker-click handler in all but name.
 function selectLocationByKey(key) {
-  localStorage.setItem("selectedLocation", key);
+  Prefs.set("selectedLocation", key);
   // Show the panel FIRST, then render — a canvas inside a display:none
   // ancestor measures as zero width/height, and Chart.js reads that
   // measurement at construction time (new Chart(canvas, ...), inside
@@ -158,7 +159,7 @@ function hideLocationHoverPanel() {
   // closing the panel are two separate actions and only the first one was
   // ever being remembered. Clearing it here makes "nothing open" a real,
   // rememberable state of its own, not just an unsaved transient one.
-  localStorage.removeItem("selectedLocation");
+  Prefs.remove("selectedLocation");
 }
 
 /**

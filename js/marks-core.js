@@ -245,7 +245,7 @@ function saveLastMarkFieldValues(mark) {
       if (mark.type === "Session" && typeAllowsMultipleValues("Session", f.key)) continue; // a Session's multi-value lists (targets, gear) aren't defaults for the next catch
       if (mark[f.key]) current[f.key] = mark[f.key];
     }
-    localStorage.setItem(MARK_LAST_VALUES_STORAGE_KEY, JSON.stringify(current));
+    Prefs.set(MARK_LAST_VALUES_STORAGE_KEY, JSON.stringify(current));
   } catch {
     // localStorage can throw in rare cases (private browsing quirks, storage
     // disabled) — worth degrading quietly here, same as elsewhere on this
