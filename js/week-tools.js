@@ -1000,26 +1000,36 @@ function setupFullscreenToggle(targetId) {
     return document.fullscreenElement === target || document.webkitFullscreenElement === target;
   }
 
-  async function enterFullscreen() {
+  function anyFullscreenElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+
+  // `el` defaults to the graph frame; rotation may pick the whole page
+  // instead (see onRotate below). `lockOrientation` is off for rotation-
+  // triggered fullscreen — the person is already holding the phone
+  // sideways, and a landscape lock would stop them rotating back to
+  // portrait to leave fullscreen again. Resolves true if fullscreen began.
+  async function enterFullscreen(el = target, lockOrientation = true) {
     try {
-      if (target.requestFullscreen) await target.requestFullscreen();
-      else if (target.webkitRequestFullscreen) target.webkitRequestFullscreen();
-      else return;
+      if (el.requestFullscreen) await el.requestFullscreen();
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      else return false;
     } catch (err) {
-      return; // fullscreen refused/unsupported — nothing further to do
+      return false; // fullscreen refused/unsupported — nothing further to do
     }
     // Best-effort only — genuinely works now (inside fullscreen + a user
     // gesture) on browsers that support it, but plenty don't (notably iOS
     // Safari never does) — silently ignored on failure, since the
     // fullscreen view itself is still a real win even without a true
     // orientation lock.
-    if (screen.orientation && screen.orientation.lock) {
+    if (lockOrientation && screen.orientation && screen.orientation.lock) {
       try {
         await screen.orientation.lock("landscape");
       } catch (err) {
         /* expected on unsupported browsers */
       }
     }
+    return true;
   }
 
   function exitFullscreen() {
@@ -1039,7 +1049,7 @@ function setupFullscreenToggle(targetId) {
     // Ignore taps that landed on an actual control (buttons, steppers) —
     // someone double-tapping a button wants to activate the button twice,
     // not also toggle fullscreen underneath it.
-    if (e.target.closest("button")) return;
+    if (e.target.closest("button, .loc-pill, .loc-tile")) return;
 
     const now = Date.now();
     const dx = e.clientX - lastTapX;
@@ -1072,6 +1082,116 @@ function setupFullscreenToggle(targetId) {
   };
   document.addEventListener("fullscreenchange", onFullscreenChange);
   document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+
+  // Rotating a phone to landscape goes fullscreen (as if the graph had been
+  // double-tapped); rotating back to portrait leaves it again. Browsers only
+  // allow fullscreen from a user gesture, and a rotation isn't one — Chrome
+  // still accepts it if the person touched the screen in the last few
+  // seconds, otherwise the request is refused, so the next tap is used as
+  // the gesture instead. iPhone Safari has no element fullscreen at all, so
+  // nothing happens there. Landscape phone = coarse pointer + short viewport
+  // (tablets and desktop windows are left alone).
+  const landscapePhone = window.matchMedia("(orientation: landscape) and (max-height: 500px) and (pointer: coarse)");
+  let armedTap = null;
+  function disarmTap() {
+    if (armedTap) document.removeEventListener("pointerup", armedTap, true);
+    armedTap = null;
+  }
+  function rotationTarget() {
+    return target.getClientRects().length > 0 ? target : document.documentElement;
+  }
+  async function onRotate() {
+    disarmTap();
+    if (landscapePhone.matches) {
+      if (anyFullscreenElement()) return;
+      const el = rotationTarget();
+      if (await enterFullscreen(el, false)) return;
+      armedTap = () => {
+        disarmTap();
+        if (landscapePhone.matches && !anyFullscreenElement()) enterFullscreen(rotationTarget(), false);
+      };
+      document.addEventListener("pointerup", armedTap, true);
+    } else if (anyFullscreenElement()) {
+      exitFullscreen();
+    }
+  }
+  if (landscapePhone.addEventListener) landscapePhone.addEventListener("change", onRotate);
+  else if (landscapePhone.addListener) landscapePhone.addListener(onRotate);
+}
+
+/**
+ * Floating location "pill" on a graph frame (the Week Ahead phone layout's
+ * name pill, made available to every graph on the site). Mirrors the text of
+ * existing name/sub-line elements (so the pages' own code that sets those
+ * doesn't change) and, if `tileIds` are given, moves those elements into a
+ * tile that the pill's ⓘ button opens. The tile's background is the
+ * Kayak/Land based photo — set with the returned setPhoto(type). The pill
+ * lives inside the frame, so it stays visible in fullscreen too.
+ */
+function locationPhotoUrl(type) {
+  return type === "Kayak" ? "images/type-kayak.jpg" : "images/type-landbased.jpg";
+}
+
+function mountLocationPill(frameId, { nameId, subId, tileIds = [] }) {
+  const frame = document.getElementById(frameId);
+  const nameSrc = document.getElementById(nameId);
+  if (!frame || !nameSrc) return null;
+  const subSrc = subId ? document.getElementById(subId) : null;
+
+  const pill = document.createElement("div");
+  pill.className = "loc-pill";
+  pill.hidden = true;
+  const text = document.createElement("div");
+  const nameEl = document.createElement("div");
+  nameEl.className = "loc-pill-name";
+  const subEl = document.createElement("div");
+  subEl.className = "loc-pill-sub";
+  text.append(nameEl, subEl);
+  pill.appendChild(text);
+  frame.appendChild(pill);
+
+  let tile = null;
+  if (tileIds.length) {
+    tile = document.createElement("div");
+    tile.className = "loc-tile";
+    tile.hidden = true;
+    for (const id of tileIds) {
+      const node = document.getElementById(id);
+      if (node) tile.appendChild(node);
+    }
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "loc-pill-details-btn";
+    btn.textContent = "ⓘ";
+    btn.setAttribute("aria-expanded", "false");
+    btn.setAttribute("aria-label", "Location details");
+    btn.addEventListener("click", () => {
+      tile.hidden = !tile.hidden;
+      btn.setAttribute("aria-expanded", String(!tile.hidden));
+      pill.classList.toggle("open", !tile.hidden);
+    });
+    pill.appendChild(btn);
+    frame.appendChild(tile);
+  }
+
+  const sync = () => {
+    const name = nameSrc.textContent.replace(/ /g, " ").trim();
+    nameEl.textContent = name;
+    subEl.textContent = subSrc ? subSrc.textContent.trim() : "";
+    subEl.hidden = !subEl.textContent;
+    pill.hidden = !name;
+  };
+  const observer = new MutationObserver(sync);
+  const opts = { childList: true, characterData: true, subtree: true };
+  observer.observe(nameSrc, opts);
+  if (subSrc) observer.observe(subSrc, opts);
+  sync();
+
+  return {
+    setPhoto(type) {
+      if (tile) tile.style.setProperty("--tile-photo", `url(${locationPhotoUrl(type)})`);
+    },
+  };
 }
 
 /**

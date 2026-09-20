@@ -1184,6 +1184,9 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
   // that a heavier wash looked too washed-out.
   const photoUrl = loc.type === "Kayak" ? "images/type-kayak.jpg" : "images/type-landbased.jpg";
   sidebar.style.backgroundImage = `linear-gradient(rgba(255,255,255,0.65), rgba(255,255,255,0.65)), url(${photoUrl})`;
+  // Phone layout: the sidebar photo is switched off, but the expanded ⓘ tile
+  // (sessions and planning buttons) uses the same photo as its background.
+  row.style.setProperty("--tile-photo", `url(${photoUrl})`);
 
   const isPinned = pinnedOrder.includes(loc.name);
   const star = document.createElement("button");

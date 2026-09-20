@@ -22,6 +22,7 @@ let liveChart = null;
 let currentLocationName = null;
 let currentType = null;
 let currentLoc = null;
+let liveLocPill = null; // floating name pill + details tile on the chart (mountLocationPill, js/week-tools.js)
 let stopFishingTime = null;
 // googleRoutesApiKey, currentGpsPosition, requestGpsPosition all come from
 // charts.js (loaded before this file).
@@ -323,6 +324,7 @@ function selectLocationAndType(name, preferredType) {
   currentType = type;
 
   renderTypePicker(availableTypes, type, (newType) => selectLocationAndType(name, newType));
+  if (liveLocPill) liveLocPill.setPhoto(type);
 
   const loc = variants.find((v) => v.type === type);
   currentLoc = loc;
@@ -525,6 +527,11 @@ async function init() {
   // across those re-renders without needing to be re-wired.
   wireHoldToShowTooltip(() => liveChart, document.getElementById("liveChart"));
   setupFullscreenToggle("liveChartFrame");
+  liveLocPill = mountLocationPill("liveChartFrame", {
+    nameId: "liveHoverPanelLocationName",
+    subId: "liveHoverPanelDistance",
+    tileIds: ["liveHeadingRow", "typePickerSection"],
+  });
 
   try {
     const res = await fetch(DATA_URL, { cache: "no-store" });

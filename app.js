@@ -90,6 +90,7 @@ async function init() {
   // moves the tooltip to wherever you tap next.
   wireHoldToShowTooltip(() => state.chart, document.getElementById("conditionsChart"));
   setupFullscreenToggle("locationChartFrame");
+  mountLocationPill("locationChartFrame", { nameId: "hoverPanelLocationName" });
   setupDragToScroll(document.getElementById("locationChartScroll"));
 
   // Restores and shows whichever location was last viewed, rather than
