@@ -292,6 +292,54 @@ async function lookupTideConditionAt(lat, lng, targetMs) {
   }
 }
 
+/** A naive-ms timestamp as "YYYY-MM-DD HH:MM:SS" (the archive's format). */
+function archiveTimeString(ms) {
+  return new Date(ms).toISOString().slice(0, 19).replace("T", " ");
+}
+
+/** Hourly observed conditions for a tracked location from the pipeline's archive (Worker: /api/public/observations), oldest first; [] when there are none or the call fails. */
+async function fetchStoredObservations(locationName, fromMs, toMs) {
+  try {
+    const res = await fetch(
+      `${USER_BACKEND_URL}/api/public/observations?location=${encodeURIComponent(locationName)}&from=${encodeURIComponent(archiveTimeString(fromMs))}&to=${encodeURIComponent(archiveTimeString(toMs))}`
+    );
+    if (!res.ok) return [];
+    const rows = await res.json();
+    return Array.isArray(rows) ? rows : [];
+  } catch (err) {
+    console.error("Stored observations unavailable:", err);
+    return [];
+  }
+}
+
+/**
+ * The stored tide events (raw from the station, like WillyWeather's) for a tracked location around
+ * [startMs, endMs], shifted by the location's own tideOffset exactly as the live lookup does. Null unless
+ * the events bracket the whole window — a curve needs an event at or before the start and at or after the
+ * end — so callers fall back to the live lookup for anything the archive doesn't fully cover.
+ */
+async function fetchStoredTideExtrema(location, startMs, endMs) {
+  try {
+    const res = await fetch(
+      `${USER_BACKEND_URL}/api/public/tide-events?location=${encodeURIComponent(location.name)}` +
+        `&from=${encodeURIComponent(archiveTimeString(startMs - 86400000))}&to=${encodeURIComponent(archiveTimeString(endMs + 86400000))}`
+    );
+    if (!res.ok) return null;
+    const events = await res.json();
+    if (!Array.isArray(events)) return null;
+    const offsetMs = (location.tideOffset || 0) * 60000;
+    const extrema = events
+      .map((e) => ({ t: parseNaive(e.time) + offsetMs, height: e.heightM, type: e.type }))
+      .filter((e) => Number.isFinite(e.t) && (e.type === "high" || e.type === "low"))
+      .sort((a, b) => a.t - b.t);
+    if (extrema.length < 2 || extrema[0].t > startMs || extrema[extrema.length - 1].t < endMs) return null;
+    return extrema;
+  } catch (err) {
+    console.error("Stored tide events unavailable:", err);
+    return null;
+  }
+}
+
 /**
  * Real tide high/low events covering [startMs, endMs] (naive ms) for the
  * tracked location nearest (lat, lng), shifted by that location's own
@@ -307,6 +355,11 @@ async function fetchTideExtremaForRange(lat, lng, startMs, endMs) {
   if (!WILLYWEATHER_SEARCH_WORKER_URL) return null;
   const nearest = await findNearestTrackedLocation(lat, lng);
   if (!nearest) return null;
+
+  // The pipeline's archive keeps the tide events (see fetchStoredTideExtrema): when they cover the window
+  // there is no need for a billed WillyWeather call. Anything else falls through to the live lookup below.
+  const stored = await fetchStoredTideExtrema(nearest, startMs, endMs);
+  if (stored) return { location: nearest, extrema: stored };
 
   const startDateStr = naiveDateOnlyStr(startMs - 86400000);
   const days = Math.min(7, Math.ceil((endMs - startMs) / 86400000) + 3);

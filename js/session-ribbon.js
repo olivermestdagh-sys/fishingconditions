@@ -251,6 +251,9 @@ function ribbonBuildRows(raw, from, to, craft, shore, sunTimes) {
   const temp = lookup(raw.hourly, "temperature_2m");
   const pressure = lookup(raw.hourly, "pressure_msl");
   const sst = lookup(raw.marine, "sea_surface_temperature");
+  const currentKmh = lookup(raw.marine, "ocean_current_velocity"); // only the archive stores these
+  const currentDir = lookup(raw.marine, "ocean_current_direction");
+  const hasTide = !!(raw.tide && raw.tide.extrema.length);
   for (const row of byT.values()) {
     const key = row.dateTime.slice(0, 13).replace("T", " ");
     if (speed[key] != null) row["Wind Forecast (km/h)"] = Math.round(speed[key] * 10) / 10;
@@ -258,6 +261,9 @@ function ribbonBuildRows(raw, from, to, craft, shore, sunTimes) {
     if (temp[key] != null) row["Temp Forecast (C)"] = temp[key];
     if (pressure[key] != null) row["Pressure (hPa)"] = Math.round(pressure[key] * 10) / 10;
     if (sst[key] != null) row["Water Temp (C)"] = sst[key];
+    // read by attachConditionScores for the Kayak wind-against-current penalty (tidal locations only, as in the pipeline)
+    if (hasTide && currentKmh[key] != null) row._currentVelocity = currentKmh[key];
+    if (hasTide && currentDir[key] != null) row._currentDirection = currentDir[key];
   }
 
   const tidal = !!(raw.tide && raw.tide.extrema.length);
@@ -283,6 +289,48 @@ function ribbonBuildRows(raw, from, to, craft, shore, sunTimes) {
   return rows;
 }
 
+/** Fraction (0 to 1) of the whole hours in [from, to) that have a stored station wind reading. */
+function ribbonStoredCoverage(rows, from, to) {
+  const total = Math.floor((to - from) / 3600000);
+  if (total <= 0) return 0;
+  const have = rows.filter((r) => {
+    const t = parseNaive(`${r.hour}:00`);
+    return r.windKmh != null && t != null && t >= from && t < to;
+  }).length;
+  return Math.min(1, have / total);
+}
+
+/** Open-Meteo-shaped {hourly, marine} arrays (what ribbonBuildRows reads) from stored observation rows; null when there are none. */
+function ribbonStoredToArrays(rows) {
+  if (!rows.length) return null;
+  const time = rows.map((r) => r.hour.replace(" ", "T"));
+  const compass = (d) => (d && COMPASS_DEGREES[d] != null ? COMPASS_DEGREES[d] : null);
+  return {
+    hourly: {
+      time,
+      windspeed_10m: rows.map((r) => r.windKmh),
+      winddirection_10m: rows.map((r) => compass(r.windDir)),
+      temperature_2m: rows.map((r) => r.tempC),
+      pressure_msl: rows.map((r) => r.pressureHpa),
+    },
+    marine: {
+      time,
+      sea_surface_temperature: rows.map((r) => r.waterTempC),
+      ocean_current_velocity: rows.map((r) => r.currentKmh),
+      ocean_current_direction: rows.map((r) => r.currentDir),
+    },
+  };
+}
+
+/** Live Open-Meteo arrays with the stored ones laid over them: a stored hour wins where it has a value, live fills the rest (empty stored values never override). Either side may be null. */
+function ribbonLayerStored(live, stored, fields) {
+  if (!stored) return live;
+  if (!live) return stored;
+  const out = { time: [...live.time, ...stored.time] };
+  for (const f of fields) out[f] = [...(live[f] || live.time.map(() => null)), ...(stored[f] || stored.time.map(() => null))];
+  return out;
+}
+
 /** The row closest in time to t. */
 function ribbonNearestRow(rows, t) {
   let best = null;
@@ -299,6 +347,9 @@ const RIBBON_DOT_R = 6; // a catch with no recorded length
 const RIBBON_DOT_R_MIN = 4.5; // dot radius runs from here (shortest fish in the view) ...
 const RIBBON_DOT_R_MAX = 8.5; // ... to here (longest)
 const RIBBON_DOT_TOP = 12; // centre of the first row of dots, below the top of the plot
+const RIBBON_STORED_ENOUGH = 0.8; // when the archive has a wind reading for at least this share of the window's hours, live Open-Meteo isn't fetched
+const RIBBON_HOURLY_FIELDS = ["windspeed_10m", "winddirection_10m", "temperature_2m", "pressure_msl"];
+const RIBBON_MARINE_FIELDS = ["sea_surface_temperature", "ocean_current_velocity", "ocean_current_direction"];
 
 function ribbonSpeciesColor(species) {
   const style = markStyleFor({ species, type: "Catch" }, { groupByKey: "species", markLists: ribbonMarkLists });
@@ -465,7 +516,10 @@ function ribbonUpdateChrome() {
   const when = `${ribbonFmtDay(start, true)} ${ribbonFmtTime(start)}–${ribbonDayFloor(end) === ribbonDayFloor(start) ? "" : ribbonFmtDay(end) + " "}${ribbonFmtTime(end)}`;
   const notes = [];
   if (!block.raw) notes.push("loading conditions…");
-  else if (!block.raw.tide) notes.push("no tide data for this location, so the tide layer is left out");
+  else {
+    if (!block.raw.tide) notes.push("no tide data for this location, so the tide layer is left out");
+    if (block.raw.storedHours) notes.push("using stored station readings");
+  }
   notes.push("light times are calculated from the location");
   document.getElementById("ribbonSummary").textContent =
     `${block.locationName || "Unknown location"} · ${when} · ${sessions.length} session${sessions.length === 1 ? "" : "s"}, ${catches} catch${catches === 1 ? "" : "es"} · ${ribbonIndex + 1} of ${ribbonBlocks.length} (${notes.join("; ")})`;
@@ -650,13 +704,14 @@ async function ribbonLoadCurrent() {
   const { lat, lng } = block.sessions[0];
   ribbonLoading.add(block.key);
   try {
-    const days = [];
-    for (let d = ribbonDayFloor(block.from); d < block.to; d += RIBBON_DAY_MS) days.push(naiveDateOnlyStr(d));
-    const [hourlies, marines, tide] = await Promise.all([
-      Promise.all(days.map((d) => fetchOpenMeteoHistoricalHourly(lat, lng, d))),
-      Promise.all(days.map((d) => fetchOpenMeteoHistoricalMarineHourly(lat, lng, d))),
-      fetchTideExtremaForRange(lat, lng, block.from, block.to),
-    ]);
+    // The pipeline's archive first: real station readings, and the tide events (fetchTideExtremaForRange looks there
+    // itself before making a billed WillyWeather call). Live Open-Meteo is only fetched for what the archive lacks.
+    const nearest = await findNearestTrackedLocation(lat, lng);
+    const storedRows = nearest ? await fetchStoredObservations(nearest.name, block.from, block.to) : [];
+    const stored = ribbonStoredToArrays(storedRows);
+    const enough = ribbonStoredCoverage(storedRows, block.from, block.to) >= RIBBON_STORED_ENOUGH;
+    let liveHourly = null;
+    let liveMarine = null;
     const merge = (list, fields) => {
       const good = list.filter(Boolean);
       if (!good.length) return null;
@@ -664,10 +719,20 @@ async function ribbonLoadCurrent() {
       for (const f of fields) out[f] = good.flatMap((h) => h[f] || []);
       return out;
     };
+    const days = [];
+    for (let d = ribbonDayFloor(block.from); d < block.to; d += RIBBON_DAY_MS) days.push(naiveDateOnlyStr(d));
+    const [hourlies, marines, tide] = await Promise.all([
+      enough ? [] : Promise.all(days.map((d) => fetchOpenMeteoHistoricalHourly(lat, lng, d))),
+      enough ? [] : Promise.all(days.map((d) => fetchOpenMeteoHistoricalMarineHourly(lat, lng, d))),
+      fetchTideExtremaForRange(lat, lng, block.from, block.to),
+    ]);
+    liveHourly = merge(hourlies, RIBBON_HOURLY_FIELDS);
+    liveMarine = merge(marines, RIBBON_MARINE_FIELDS);
     block.raw = {
-      hourly: merge(hourlies, ["windspeed_10m", "winddirection_10m", "temperature_2m", "pressure_msl"]),
-      marine: merge(marines, ["sea_surface_temperature"]),
+      hourly: ribbonLayerStored(liveHourly, stored && stored.hourly, RIBBON_HOURLY_FIELDS),
+      marine: ribbonLayerStored(liveMarine, stored && stored.marine, RIBBON_MARINE_FIELDS),
       tide,
+      storedHours: storedRows.length,
       window: { from: block.from, to: block.to },
     };
   } finally {

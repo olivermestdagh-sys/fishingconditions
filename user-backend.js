@@ -258,6 +258,12 @@ export default {
       if (pipelineLocMatch && request.method === "PUT") {
         return handlePipelineLocationUpdate(request, env, pipelineLocMatch[1]);
       }
+      if (url.pathname === "/api/pipeline/observations" && request.method === "POST") {
+        return handlePipelineObservations(request, env);
+      }
+      if (url.pathname === "/api/pipeline/observations/prune" && request.method === "POST") {
+        return handlePipelineObservationsPrune(request, env);
+      }
 
       // --- Public (anonymous) reads below: no session, no token — genuinely
       // open, matching that this is the exact same data anyone could
@@ -274,6 +280,12 @@ export default {
       }
       if (url.pathname === "/api/public/locations" && request.method === "GET") {
         return handlePublicLocations(env);
+      }
+      if (url.pathname === "/api/public/observations" && request.method === "GET") {
+        return handlePublicObservations(url, env);
+      }
+      if (url.pathname === "/api/public/tide-events" && request.method === "GET") {
+        return handlePublicTideEvents(url, env);
       }
 
       // --- Admin-only endpoints below: not scoped by effective-user-id
@@ -1626,6 +1638,213 @@ async function handlePipelineLocationUpdate(request, env, id) {
     .run();
 
   return jsonResponse({ id, ...merged }, 200, env);
+}
+
+// ---------------------------------------------------------------------
+// Observed-conditions archive (tables `observations` and `tide_events`,
+// schema-v2.sql). Written by the GitHub Actions pipeline every run, read by
+// the Reports tab's Session Ribbon so a past session can show the real
+// station readings and the tide without a billed WillyWeather call.
+//
+//   observations: one row per location per COMPLETED hour — station temp/wind
+//     (observed), plus Open-Meteo pressure, sea temperature and ocean current.
+//     Forecasts and the derived Condition scores are deliberately not stored.
+//   tide_events: the high/low tide events, raw from the station (the
+//     location's own tideOffset is applied when read). Holds the latest
+//     prediction for each event; once an event has passed its value is frozen.
+//
+// Everything is naive local time ("YYYY-MM-DD HH:00" / "YYYY-MM-DD HH:MM:SS"),
+// like the rest of the site. Retention: everything is kept for a month, then
+// only rows within N hours (12) of a Session mark survive — see prune below.
+// ---------------------------------------------------------------------
+
+const OBS_HOUR_RE = /^\d{4}-\d{2}-\d{2} \d{2}:00$/;
+const OBS_TIME_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+const OBS_MAX_ITEMS = 400; // per request — a location's run sends a few dozen
+const OBS_MAX_READ_ROWS = 2000;
+
+function obsNumber(v, min, max) {
+  return typeof v === "number" && Number.isFinite(v) && v >= min && v <= max ? v : null;
+}
+
+/** A validated observation, or null. `asOfHour` is the current (still incomplete) hour: only earlier hours are stored. */
+function cleanObservation(o, asOfHour) {
+  if (!o || typeof o.hour !== "string" || !OBS_HOUR_RE.test(o.hour) || o.hour >= asOfHour) return null;
+  const clean = {
+    hour: o.hour,
+    tempC: obsNumber(o.tempC, -60, 70),
+    windKmh: obsNumber(o.windKmh, 0, 400),
+    windDir: typeof o.windDir === "string" && /^[NESW]{1,3}$/.test(o.windDir) ? o.windDir : null,
+    pressureHpa: obsNumber(o.pressureHpa, 850, 1100),
+    waterTempC: obsNumber(o.waterTempC, -5, 50),
+    currentKmh: obsNumber(o.currentKmh, 0, 50),
+    currentDir: obsNumber(o.currentDir, 0, 360),
+  };
+  // an hour with nothing in it isn't worth a row
+  return Object.entries(clean).some(([k, v]) => k !== "hour" && v != null) ? clean : null;
+}
+
+function cleanTideEvent(e) {
+  if (!e || typeof e.time !== "string" || !OBS_TIME_RE.test(e.time)) return null;
+  if (e.type !== "high" && e.type !== "low") return null;
+  const heightM = obsNumber(e.heightM, -15, 25);
+  return heightM == null ? null : { time: e.time, type: e.type, heightM };
+}
+
+async function handlePipelineObservations(request, env) {
+  if (!requirePipelineToken(request, env)) {
+    return jsonResponse({ error: "Invalid or missing pipeline token." }, 401, env);
+  }
+  const body = await readJsonBody(request);
+  const location = typeof body.location === "string" ? body.location.trim() : "";
+  if (!location || location.length > 200) return jsonResponse({ error: "location is required." }, 400, env);
+  if (typeof body.asOf !== "string" || !OBS_TIME_RE.test(body.asOf)) {
+    return jsonResponse({ error: "asOf must be 'YYYY-MM-DD HH:MM:SS' (local time)." }, 400, env);
+  }
+  const asOfHour = body.asOf.slice(0, 13) + ":00";
+  const rawObs = Array.isArray(body.observations) ? body.observations.slice(0, OBS_MAX_ITEMS) : [];
+  const rawTide = Array.isArray(body.tideEvents) ? body.tideEvents.slice(0, OBS_MAX_ITEMS) : [];
+  const observations = rawObs.map((o) => cleanObservation(o, asOfHour)).filter(Boolean);
+  const tideEvents = rawTide.map(cleanTideEvent).filter(Boolean);
+
+  // An hour that already exists is only ever filled in where a column is still empty (Open-Meteo values can arrive
+  // after the station's), never overwritten. `WHERE` keeps an unchanged re-send from counting as a write.
+  const fill = (col) => `${col} = COALESCE(observations.${col}, excluded.${col})`;
+  const gap = (col) => `(observations.${col} IS NULL AND excluded.${col} IS NOT NULL)`;
+  const cols = ["temp_c", "wind_kmh", "wind_dir", "pressure_hpa", "water_temp_c", "current_kmh", "current_dir"];
+  const obsSql =
+    `INSERT INTO observations (location_name, hour, ${cols.join(", ")}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(location_name, hour) DO UPDATE SET ${cols.map(fill).join(", ")}
+     WHERE ${cols.map(gap).join(" OR ")}`;
+  const tideSql =
+    `INSERT INTO tide_events (location_name, event_time, type, height_m) VALUES (?, ?, ?, ?)
+     ON CONFLICT(location_name, event_time, type) DO UPDATE SET height_m = excluded.height_m
+     WHERE tide_events.event_time > ? AND tide_events.height_m IS NOT excluded.height_m`;
+
+  const statements = [
+    ...observations.map((o) =>
+      env.DB.prepare(obsSql).bind(location, o.hour, o.tempC, o.windKmh, o.windDir, o.pressureHpa, o.waterTempC, o.currentKmh, o.currentDir)
+    ),
+    ...tideEvents.map((e) => env.DB.prepare(tideSql).bind(location, e.time, e.type, e.heightM, body.asOf)),
+  ];
+  let observationsWritten = 0;
+  let tideEventsWritten = 0;
+  if (statements.length > 0) {
+    const results = await env.DB.batch(statements); // one round trip per location keeps a free-plan request within its query allowance
+    results.forEach((r, i) => {
+      const changes = (r && r.meta && r.meta.changes) || 0;
+      if (i < observations.length) observationsWritten += changes;
+      else tideEventsWritten += changes;
+    });
+  }
+  return jsonResponse(
+    {
+      location,
+      observationsWritten,
+      tideEventsWritten,
+      skipped: rawObs.length - observations.length + (rawTide.length - tideEvents.length),
+    },
+    200,
+    env
+  );
+}
+
+/**
+ * Retention: rows older than `keepDays` (30) are deleted unless they lie within
+ * `windowHours` (12) of a Session mark (any session's start or end, any
+ * location) — the window the Session Ribbon shows. mode "dry" only counts what
+ * would go; "run" deletes. Called once per pipeline run, after the writes.
+ */
+async function handlePipelineObservationsPrune(request, env) {
+  if (!requirePipelineToken(request, env)) {
+    return jsonResponse({ error: "Invalid or missing pipeline token." }, 401, env);
+  }
+  const body = await readJsonBody(request);
+  if (typeof body.asOf !== "string" || !OBS_TIME_RE.test(body.asOf)) {
+    return jsonResponse({ error: "asOf must be 'YYYY-MM-DD HH:MM:SS' (local time)." }, 400, env);
+  }
+  const mode = body.mode === "run" ? "run" : "dry";
+  const keepDays = Number.isInteger(body.keepDays) && body.keepDays >= 7 && body.keepDays <= 365 ? body.keepDays : 30;
+  const windowHours = Number.isInteger(body.windowHours) && body.windowHours >= 12 && body.windowHours <= 72 ? body.windowHours : 12;
+
+  const cutoffMod = `-${keepDays} days`;
+  const before = `-${windowHours} hours`;
+  const after = `+${windowHours} hours`;
+  const doomed = (table, timeCol) =>
+    `FROM ${table} WHERE datetime(${timeCol}) < datetime(?, ?)
+       AND NOT EXISTS (
+         SELECT 1 FROM marks m
+         WHERE m.type = 'Session' AND datetime(m.date_time) BETWEEN datetime(${table}.${timeCol}, ?) AND datetime(${table}.${timeCol}, ?)
+       )`;
+  const args = [body.asOf, cutoffMod, before, after];
+
+  const obsCount = await env.DB.prepare(`SELECT COUNT(*) AS n ${doomed("observations", "hour")}`).bind(...args).first();
+  const tideCount = await env.DB.prepare(`SELECT COUNT(*) AS n ${doomed("tide_events", "event_time")}`).bind(...args).first();
+  const result = { mode, keepDays, windowHours, observations: obsCount ? obsCount.n : 0, tideEvents: tideCount ? tideCount.n : 0 };
+  if (mode === "run") {
+    await env.DB.batch([
+      env.DB.prepare(`DELETE ${doomed("observations", "hour")}`).bind(...args),
+      env.DB.prepare(`DELETE ${doomed("tide_events", "event_time")}`).bind(...args),
+    ]);
+  }
+  return jsonResponse(result, 200, env);
+}
+
+function publicArchiveResponse(rows) {
+  return new Response(JSON.stringify(rows), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*", // same data the public site already shows; read-only
+      "Cache-Control": "public, max-age=300",
+    },
+  });
+}
+
+function archiveQuery(url) {
+  const location = (url.searchParams.get("location") || "").trim();
+  const norm = (v) => String(v || "").trim().replace("T", " ");
+  return { location, from: norm(url.searchParams.get("from")), to: norm(url.searchParams.get("to")) };
+}
+
+async function handlePublicObservations(url, env) {
+  const { location, from, to } = archiveQuery(url);
+  if (!location || location.length > 200 || !/^\d{4}-\d{2}-\d{2}/.test(from) || !/^\d{4}-\d{2}-\d{2}/.test(to)) {
+    return new Response(JSON.stringify({ error: "location, from and to are required." }), { status: 400, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
+  }
+  const { results } = await env.DB.prepare(
+    `SELECT hour, temp_c, wind_kmh, wind_dir, pressure_hpa, water_temp_c, current_kmh, current_dir
+     FROM observations WHERE location_name = ? AND hour >= ? AND hour <= ? ORDER BY hour ASC LIMIT ${OBS_MAX_READ_ROWS}`
+  )
+    .bind(location, from.slice(0, 13) + ":00", to.slice(0, 13) + ":00")
+    .all();
+  return publicArchiveResponse(
+    results.map((r) => ({
+      hour: r.hour,
+      tempC: r.temp_c,
+      windKmh: r.wind_kmh,
+      windDir: r.wind_dir,
+      pressureHpa: r.pressure_hpa,
+      waterTempC: r.water_temp_c,
+      currentKmh: r.current_kmh,
+      currentDir: r.current_dir,
+    }))
+  );
+}
+
+async function handlePublicTideEvents(url, env) {
+  const { location, from, to } = archiveQuery(url);
+  if (!location || location.length > 200 || !/^\d{4}-\d{2}-\d{2}/.test(from) || !/^\d{4}-\d{2}-\d{2}/.test(to)) {
+    return new Response(JSON.stringify({ error: "location, from and to are required." }), { status: 400, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
+  }
+  const full = (v) => (v.length === 10 ? v + " 00:00:00" : v.slice(0, 19));
+  const { results } = await env.DB.prepare(
+    `SELECT event_time, type, height_m FROM tide_events
+     WHERE location_name = ? AND event_time >= ? AND event_time <= ? ORDER BY event_time ASC LIMIT ${OBS_MAX_READ_ROWS}`
+  )
+    .bind(location, full(from), full(to))
+    .all();
+  return publicArchiveResponse(results.map((r) => ({ time: r.event_time, type: r.type, heightM: r.height_m })));
 }
 
 /**

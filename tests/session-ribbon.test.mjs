@@ -29,8 +29,12 @@ const fns = new Function(
     fn("ribbonSegmentBounds"),
     fn("ribbonSessionsInRange"),
     fn("ribbonViewWindow"),
+    "const COMPASS_DEGREES = { N: 0, NE: 45, E: 90, SE: 135, S: 180, SW: 225, W: 270, NW: 315 };",
+    fn("ribbonStoredCoverage"),
+    fn("ribbonStoredToArrays"),
+    fn("ribbonLayerStored"),
     fn("ribbonRowTimes"),
-    "return { ribbonBuildSessions, ribbonCarryForward, ribbonMarkConditionsAt, ribbonLayoutDots, ribbonSunTimes, parseNaive, ribbonDayFloor, ribbonSegmentBounds, ribbonSessionsInRange, ribbonViewWindow, ribbonRowTimes };",
+    "return { ribbonBuildSessions, ribbonCarryForward, ribbonMarkConditionsAt, ribbonLayoutDots, ribbonSunTimes, parseNaive, ribbonDayFloor, ribbonSegmentBounds, ribbonSessionsInRange, ribbonViewWindow, ribbonRowTimes, ribbonStoredCoverage, ribbonStoredToArrays, ribbonLayerStored };",
   ].join("\n")
 )();
 const T = (s) => fns.parseNaive(s);
@@ -151,4 +155,40 @@ test("the view runs 12 hours before the first session started to 12 hours after 
   assert.equal(w.to, T("2026-09-11T21:13:00")); // 12 h after the 09:13 finish
   const single = fns.ribbonViewWindow([a]);
   assert.equal(single.to, T("2026-09-11T19:57:00"));
+});
+
+const stored = (hour, extra = {}) => ({ hour, tempC: 12, windKmh: 10, windDir: "SW", pressureHpa: 1012, waterTempC: 14, currentKmh: 1.1, currentDir: 90, ...extra });
+
+test("the archive covers a window when most of its hours have a stored station wind reading", () => {
+  const from = T("2026-09-11T00:00:00");
+  const to = T("2026-09-11T10:00:00"); // ten hours: 00:00 .. 09:00
+  const rows = ["00", "01", "02", "03", "04", "05", "06", "07"].map((h) => stored(`2026-09-11 ${h}:00`));
+  assert.equal(fns.ribbonStoredCoverage(rows, from, to), 0.8);
+  rows.push(stored("2026-09-11 08:00", { windKmh: null })); // no wind: doesn't count
+  rows.push(stored("2026-09-12 08:00")); // outside the window: doesn't count
+  assert.equal(fns.ribbonStoredCoverage(rows, from, to), 0.8);
+  assert.equal(fns.ribbonStoredCoverage([], from, to), 0);
+});
+
+test("stored rows become the Open-Meteo-shaped arrays the graph builder reads", () => {
+  assert.equal(fns.ribbonStoredToArrays([]), null);
+  const a = fns.ribbonStoredToArrays([stored("2026-09-11 06:00"), stored("2026-09-11 07:00", { windDir: null, currentKmh: null })]);
+  assert.deepEqual(a.hourly.time, ["2026-09-11T06:00", "2026-09-11T07:00"]);
+  assert.deepEqual(a.hourly.windspeed_10m, [10, 10]);
+  assert.deepEqual(a.hourly.winddirection_10m, [225, null]); // compass text -> degrees
+  assert.deepEqual(a.marine.ocean_current_velocity, [1.1, null]);
+  assert.deepEqual(a.marine.ocean_current_direction, [90, 90]);
+});
+
+test("stored values are laid over live ones; live fills what the archive lacks", () => {
+  const fields = ["windspeed_10m", "pressure_msl"];
+  const live = { time: ["2026-09-11T06:00", "2026-09-11T07:00"], windspeed_10m: [5, 6], pressure_msl: [1000, 1001] };
+  const st = { time: ["2026-09-11T06:00"], windspeed_10m: [12], pressure_msl: [null] };
+  const merged = fns.ribbonLayerStored(live, st, fields);
+  // later entries win when a lookup is built, and a null never overrides: 06:00 wind comes from the archive, its pressure stays live
+  assert.deepEqual(merged.time, ["2026-09-11T06:00", "2026-09-11T07:00", "2026-09-11T06:00"]);
+  assert.deepEqual(merged.windspeed_10m, [5, 6, 12]);
+  assert.deepEqual(merged.pressure_msl, [1000, 1001, null]);
+  assert.equal(fns.ribbonLayerStored(null, st, fields), st);
+  assert.equal(fns.ribbonLayerStored(live, null, fields), live);
 });

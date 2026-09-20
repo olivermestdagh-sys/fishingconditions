@@ -28,6 +28,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+import observation_archive  # sits next to this script; builds what is sent to the Worker's observed-conditions archive
+
 API_KEY = os.environ.get("WILLYWEATHER_API_KEY")
 FORECAST_DAYS = int(os.environ.get("FORECAST_DAYS", "6"))
 FETCH_WORKERS = 5  # concurrent locations in main()
@@ -52,6 +54,16 @@ LOCATIONS_EXPORT_PATH = os.path.join(os.path.dirname(__file__), "..", "config", 
 # Worker secret and a GitHub Actions secret.
 PIPELINE_WORKER_URL = os.environ.get("PIPELINE_WORKER_URL", "").rstrip("/")
 PIPELINE_API_TOKEN = os.environ.get("PIPELINE_API_TOKEN", "")
+# Observed-conditions archive (see observation_archive.py and user-backend.js): what this run's
+# process_location() calls collected per location, keyed by location name, and the current local time
+# they were collected at (only hours before it are "complete"). Kept out of the location dicts on
+# purpose — those are exported to config/locations.json.
+ARCHIVE_BY_LOCATION = {}
+RUN_AS_OF = None
+# What to do about old archive rows at the end of a run: "off" (nothing), "dry" (the Worker only reports how
+# many rows it WOULD delete — the default), or "run" (delete rows older than 30 days that aren't within 12 hours
+# of a Session mark). Set OBS_PRUNE in the workflow to change it.
+OBS_PRUNE = os.environ.get("OBS_PRUNE", "dry").strip().lower()
 # WillyWeather's coordinate search rejects the request without an explicit
 # search radius — see search_location_by_coords for how that was actually
 # pinned down. Same 25km default as the live-preview Cloudflare Worker
@@ -122,6 +134,78 @@ def http_put_json(url, body, retries=3, backoff=2.0, extra_headers=None):
                 time.sleep(backoff * (attempt + 1))
     print(f"WARNING: request failed after {retries} attempts: {url}\n  {last_err}", file=sys.stderr)
     return None
+
+
+def http_post_json(url, body, retries=3, backoff=2.0, extra_headers=None):
+    """POST a JSON body and parse the JSON response — the same shape as
+    http_put_json above. Used only by post_observation_archive() below; a
+    failure just means this run's archive rows aren't stored (the next run
+    sends them again, so a brief outage costs nothing)."""
+    last_err = None
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "fishingconditions-pipeline/1.0 (+https://github.com/olivermestdagh-sys/fishingconditions)",
+    }
+    if extra_headers:
+        headers.update(extra_headers)
+    data = json.dumps(body).encode("utf-8")
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:  # noqa: BLE001 - see docstring
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(backoff * (attempt + 1))
+    print(f"WARNING: request failed after {retries} attempts: {url}\n  {last_err}", file=sys.stderr)
+    return None
+
+
+def post_observation_archive(as_of):
+    """Sends each location's completed observed hours and tide events to the Worker
+    (POST /api/pipeline/observations, one request per location), then asks it to prune old rows
+    according to OBS_PRUNE. Everything here is best-effort: the archive is an extra, so any failure is
+    reported and skipped and never stops the main data file from being written. Re-sending an hour or
+    an event the Worker already has changes nothing, so every run can send everything it collected."""
+    if not PIPELINE_WORKER_URL or not PIPELINE_API_TOKEN or not ARCHIVE_BY_LOCATION:
+        return
+    headers = {"X-Pipeline-Token": PIPELINE_API_TOKEN}
+    stamp = as_of.strftime("%Y-%m-%d %H:%M:%S")
+    hours_written = 0
+    events_written = 0
+    failed = 0
+    for name, archive in ARCHIVE_BY_LOCATION.items():
+        if not archive.get("observations") and not archive.get("tideEvents"):
+            continue
+        result = http_post_json(
+            f"{PIPELINE_WORKER_URL}/api/pipeline/observations",
+            {"location": name, "asOf": stamp, "observations": archive.get("observations", []), "tideEvents": archive.get("tideEvents", [])},
+            extra_headers=headers,
+            retries=2,
+        )
+        if result is None:
+            failed += 1
+            continue
+        hours_written += result.get("observationsWritten", 0)
+        events_written += result.get("tideEventsWritten", 0)
+    print(f"Observation archive: {hours_written} new hours and {events_written} tide events stored ({failed} locations failed)")
+
+    if OBS_PRUNE in ("dry", "run"):
+        pruned = http_post_json(
+            f"{PIPELINE_WORKER_URL}/api/pipeline/observations/prune",
+            {"mode": OBS_PRUNE, "asOf": stamp, "keepDays": 30, "windowHours": 12},
+            extra_headers=headers,
+            retries=2,
+        )
+        if pruned is not None:
+            verb = "deleted" if OBS_PRUNE == "run" else "would delete"
+            print(
+                f"Observation archive prune ({OBS_PRUNE}): {verb} {pruned.get('observations', 0)} hourly rows and "
+                f"{pruned.get('tideEvents', 0)} tide events older than {pruned.get('keepDays', 30)} days "
+                f"and not within {pruned.get('windowHours', 12)} hours of a session"
+            )
 
 
 def load_locations():
@@ -1244,6 +1328,20 @@ def process_location(loc):
     # tide height needing to be filled before Fishing Condition reads it.
     fill_wind_gaps(base_rows)
 
+    # Observed-conditions archive: capture this location's completed hours of station/Open-Meteo readings
+    # and its tide events NOW, before the loops below add derived fields and remove "Tide Type". Kept aside
+    # in ARCHIVE_BY_LOCATION (not on `loc`, which is exported to config/locations.json) and sent to the
+    # Worker at the end of the run. Can never break the main fetch: any problem is reported and skipped.
+    try:
+        ARCHIVE_BY_LOCATION[name] = {
+            "observations": observation_archive.build_observation_hours(
+                base_rows, pressure_by_hour, sst_by_hour, velocity_by_hour, direction_by_hour, RUN_AS_OF or datetime.now()
+            ),
+            "tideEvents": observation_archive.build_tide_events(base_rows),
+        }
+    except Exception as e:  # noqa: BLE001 - the archive is an extra, never worth failing a run over
+        print(f"WARNING: could not prepare the observation archive for {name!r}: {e}", file=sys.stderr)
+
     # Tide Status: Low/High from the tide event's own type; everything else is
     # Incoming/Outgoing based on the nearest known tide event before/after it.
     # Shared across types — the physical tide doesn't care what you're doing.
@@ -1456,6 +1554,9 @@ def main():
         print("ERROR: WILLYWEATHER_API_KEY environment variable is not set.", file=sys.stderr)
         sys.exit(1)
 
+    global RUN_AS_OF
+    RUN_AS_OF = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None)  # "now" for the observation archive (naive local, like every timestamp here)
+
     locations = load_locations()
     original_cache = {loc.get("id"): _cache_fields(loc) for loc in locations}
 
@@ -1614,6 +1715,12 @@ def main():
     # Regenerates config/locations.json for charts.js's own direct,
     # client-side reads — see export_locations_json()'s own docstring.
     export_locations_json(locations)
+
+    # Last, and best-effort: the observed-conditions archive (see post_observation_archive()).
+    try:
+        post_observation_archive(RUN_AS_OF)
+    except Exception as e:  # noqa: BLE001 - the main data is already written; never fail the run over the archive
+        print(f"WARNING: observation archive step failed: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -35,6 +35,10 @@ jobs:
           PIPELINE_WORKER_URL: ${{ secrets.PIPELINE_WORKER_URL }}
           PIPELINE_API_TOKEN: ${{ secrets.PIPELINE_API_TOKEN }}
           FORECAST_DAYS: "6"
+          # Observed-conditions archive retention (see scripts/observation_archive.py): "dry" only reports
+          # how many old rows would be deleted; change to "run" to actually delete rows older than 30 days
+          # that aren't within 12 hours of a session; "off" skips the step.
+          OBS_PRUNE: "dry"
         run: python3 scripts/fetch_conditions.py
 
       - name: Commit updated data file

@@ -304,3 +304,36 @@ CREATE TABLE IF NOT EXISTS schedule_state (
   next_check_due_at INTEGER,
   last_result_json TEXT
 );
+
+
+-- ---------------------------------------------------------------------
+-- Observed-conditions archive (user-backend.js, "Observed-conditions archive").
+-- Written every pipeline run, read by the Reports tab's Session Ribbon.
+-- Additive: safe to run against the live database (IF NOT EXISTS).
+-- ---------------------------------------------------------------------
+
+-- One row per tracked location (its `name`, as in conditions.json) per COMPLETED hour.
+-- Station temp/wind are observed; pressure, sea temperature and ocean current are Open-Meteo.
+-- No forecasts and no Condition scores are stored (scores are recomputed when read).
+CREATE TABLE IF NOT EXISTS observations (
+  location_name TEXT NOT NULL,
+  hour TEXT NOT NULL,            -- 'YYYY-MM-DD HH:00', naive local time
+  temp_c REAL,
+  wind_kmh REAL,
+  wind_dir TEXT,                 -- compass text, e.g. 'SSW'
+  pressure_hpa REAL,
+  water_temp_c REAL,
+  current_kmh REAL,
+  current_dir REAL,              -- degrees
+  PRIMARY KEY (location_name, hour)
+) WITHOUT ROWID;
+
+-- High/low tide events, raw from the station (the location's tide_offset is applied when read).
+-- Holds the latest prediction for each event; an event that has passed is frozen.
+CREATE TABLE IF NOT EXISTS tide_events (
+  location_name TEXT NOT NULL,
+  event_time TEXT NOT NULL,      -- 'YYYY-MM-DD HH:MM:SS', naive local time
+  type TEXT NOT NULL CHECK (type IN ('high', 'low')),
+  height_m REAL NOT NULL,
+  PRIMARY KEY (location_name, event_time, type)
+) WITHOUT ROWID;
