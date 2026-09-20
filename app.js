@@ -92,7 +92,7 @@ async function init() {
   setupFullscreenToggle("locationChartFrame");
   locationPill = mountLocationPill("locationChartFrame", {
     nameId: "hoverPanelLocationName",
-    tileIds: ["hoverPanelTileInfo", "hoverPanelHint"],
+    tileIds: ["hoverPanelTileInfo", "hoverPanelSessions", "hoverPanelHint"],
   });
   setupDragToScroll(document.getElementById("locationChartScroll"));
 
@@ -638,6 +638,8 @@ function renderCharts(rows, loc, sunTimesOverride) {
     // skipping buildAxisUnitLabelsPlugin) is already independently covered
     // by hideValueAxes below, so this has no other effect here.
     compact: true,
+    // Shades the good sessions on the graph, same as Week Ahead does.
+    sessionSpan: computeQualifyingSessions(rows).map((s) => ({ from: s.from, to: s.to })),
     tideOffsetMinutes: loc ? loc.tideOffset : null,
     // The floating panel is a quick-glance view — the °C/km/h axis numbers
     // aren't very readable at this size anyway, and hiding them frees up

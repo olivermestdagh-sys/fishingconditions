@@ -1167,8 +1167,10 @@ function setupFullscreenToggle(targetId) {
   const landscapePhone = {
     get matches() {
       const touch = navigator.maxTouchPoints > 0;
-      const phoneSized = Math.min(screen.width, screen.height) <= 600;
-      return touch && phoneSized && window.innerWidth > window.innerHeight;
+      // 900 matches the site's own "is a phone" cut-off (isMobileDevice);
+      // the short-viewport check keeps landscape tablets out.
+      const phoneSized = Math.min(screen.width, screen.height) <= 900;
+      return touch && phoneSized && window.innerWidth > window.innerHeight && window.innerHeight <= 600;
     },
   };
   let lastLandscape = null;

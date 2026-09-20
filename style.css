@@ -3391,6 +3391,19 @@ main.wide {
   padding: 0;
   margin: 0;
 }
+/* Same thing in pure CSS (no JS involved), so it applies on any touch phone
+   held sideways even if the script-based detection misses. */
+@media (orientation: landscape) and (max-height: 600px) and (hover: none) {
+  .sitebar,
+  .weeknew-page main > :not(.week-full-bleed),
+  .weeknew-page .week-timeline-scroll + .footnote {
+    display: none;
+  }
+  .weeknew-page main {
+    padding: 0;
+    margin: 0;
+  }
+}
 
 .loc-tile-info { font-size: 0.85rem; margin: 0 0 8px; }
 .loc-tile-type { font-weight: 700; }
