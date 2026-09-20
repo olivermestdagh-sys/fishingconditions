@@ -396,10 +396,17 @@ async function renderTideClockReport() {
 
   const okIds = new Set(reportsFilteredCatches.map((c) => c.id));
   const agg = tideClockAggregate(sessions, (s) => tideClockExtremaCache.get(s.groupId) || null, (c) => okIds.has(c.id));
+  const avg = tideClockAverageCycle(agg.cycles);
+  const segments = avg ? tideClockSegments(avg) : [];
+  const orderNote = avg
+    ? avg.lowerHighFirst * 2 >= avg.n
+      ? `; ${avg.lowerHighFirst} of ${avg.n} tide cycles run LLW, LHW, HLW, HHW`
+      : `; on average the higher high comes first here (${avg.n - avg.lowerHighFirst} of ${avg.n} cycles), so the marks read LLW, HHW, HLW, LHW`
+    : "";
   note.textContent =
     `${agg.used} of ${sessions.length} session${sessions.length === 1 ? "" : "s"} used` +
     (agg.skipped ? ` (${agg.skipped} left out — no stored tide times for them)` : "") +
-    `; ${agg.catches} catch${agg.catches === 1 ? "" : "es"} placed on the tide.`;
+    `; ${agg.catches} catch${agg.catches === 1 ? "" : "es"} placed on the tide${orderNote}.`;
   if (agg.used === 0) {
     clear("None of these sessions have stored tide times yet.");
     return;
@@ -414,6 +421,24 @@ async function renderTideClockReport() {
 
   const labels = agg.bins.map((_, i) => i * TIDE_CLOCK_BIN_H);
   const datasets = [
+    ...(avg
+      ? [
+          {
+            type: "line",
+            label: "Typical tide (simulated)",
+            data: tideClockCurve(avg),
+            yAxisID: "yTide",
+            borderColor: "rgba(41,121,255,0.55)",
+            backgroundColor: "rgba(41,121,255,0.10)",
+            borderWidth: 2,
+            pointRadius: 0,
+            pointHoverRadius: 0,
+            fill: true,
+            tension: 0.35,
+            order: 4,
+          },
+        ]
+      : []),
     {
       type: "bar",
       label: "Effort (hours fished)",
@@ -457,11 +482,41 @@ async function renderTideClockReport() {
     const chip = (color, text) =>
       `<span style="display:inline-flex;align-items:center;gap:5px;margin:0 12px 4px 0;font-size:0.78rem;"><span style="width:11px;height:11px;border-radius:3px;background:${color};display:inline-block;"></span>${escapeHtml(text)}</span>`;
     legend.innerHTML =
-      chip("rgba(120,120,120,0.4)", "Hours fished") + speciesList.map((sp) => chip(colorOf(sp), sp)).join("") + chip("#c62828", "Catches per hour");
+      chip("rgba(120,120,120,0.4)", "Hours fished") +
+      speciesList.map((sp) => chip(colorOf(sp), sp)).join("") +
+      chip("#c62828", "Catches per hour") +
+      (avg ? chip("rgba(41,121,255,0.4)", "Typical tide (simulated)") : "");
   }
+
+  // Dashed lines with a label at the average LLW / high / low / high / LLW of the cycle.
+  const segmentMarks = {
+    id: "tideClockSegments",
+    afterDatasetsDraw(chart) {
+      if (!segments.length) return;
+      const { ctx, chartArea, scales } = chart;
+      const slot = (chartArea.right - chartArea.left) / labels.length;
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = "rgba(41,121,255,0.6)";
+      ctx.fillStyle = "#1a4fb3";
+      ctx.font = "600 11px sans-serif";
+      ctx.textBaseline = "top";
+      for (const seg of segments) {
+        const x = scales.x.left + (seg.h / TIDE_CLOCK_BIN_H) * slot;
+        ctx.beginPath();
+        ctx.moveTo(x, chartArea.top);
+        ctx.lineTo(x, chartArea.bottom);
+        ctx.stroke();
+        ctx.textAlign = x > chartArea.right - 24 ? "right" : x < chartArea.left + 24 ? "left" : "center";
+        ctx.fillText(seg.label, x, chartArea.top + 2);
+      }
+      ctx.restore();
+    },
+  };
 
   if (reportTideClockChartInstance) reportTideClockChartInstance.destroy();
   reportTideClockChartInstance = new Chart(canvas.getContext("2d"), {
+    plugins: [segmentMarks],
     data: { labels, datasets },
     options: {
       responsive: true,
@@ -475,9 +530,10 @@ async function renderTideClockReport() {
             title: (items) => {
               if (!items.length) return "";
               const h = Number(items[0].label);
-              return `${h}–${h + TIDE_CLOCK_BIN_H} hours after low tide`;
+              return `${h}–${h + TIDE_CLOCK_BIN_H} hours after LLW`;
             },
             label: (item) => {
+              if (item.dataset.yAxisID === "yTide") return `Typical tide: about ${item.raw.toFixed(2)} m`;
               if (item.dataset.yAxisID === "yEffort") return `Fished: ${item.raw.toFixed(1)} h`;
               if (item.dataset.yAxisID === "yRate") return `Rate: ${item.raw.toFixed(2)} catches/h`;
               return `${item.dataset.label}: ${item.raw}`;
@@ -488,12 +544,13 @@ async function renderTideClockReport() {
       scales: {
         x: {
           stacked: true,
-          title: { display: true, text: "Hours since low tide" },
-          ticks: { callback: (v, i) => (labels[i] % 1 === 0 ? labels[i] : ""), maxRotation: 0, autoSkip: false },
+          title: { display: true, text: "Hours since the lower low water (LLW)" },
+          ticks: { callback: (v, i) => (labels[i] % 2 === 0 ? labels[i] : ""), maxRotation: 0, autoSkip: false },
           grid: { display: false },
         },
         y: { stacked: true, beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: "Catches" } },
         yEffort: { display: false, beginAtZero: true, position: "right", grid: { display: false } },
+        yTide: { display: false, position: "right", grid: { display: false } },
         yRate: { beginAtZero: true, position: "right", grid: { display: false }, title: { display: true, text: "Catches/hour" } },
       },
     },
