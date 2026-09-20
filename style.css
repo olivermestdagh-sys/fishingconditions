@@ -3510,3 +3510,11 @@ body {
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
   z-index: 20000;
 }
+
+
+/* A button that can't be used right now (e.g. Previous session on the oldest one). */
+.btn-primary:disabled,
+.btn-secondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

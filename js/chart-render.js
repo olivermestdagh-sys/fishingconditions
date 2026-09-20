@@ -950,12 +950,7 @@ function bucketRowsHourly(rows) {
   if (!rows || rows.length <= 1) return rows;
 
   const buckets = new Map();
-  const breaks = []; // rows marked `_break` (the Reports session ribbon's block-end markers) stay exactly as they are
   for (const r of rows) {
-    if (r._break) {
-      breaks.push(r);
-      continue;
-    }
     const hourKey = Math.floor(r._t / 3600000) * 3600000;
     if (!buckets.has(hourKey)) buckets.set(hourKey, []);
     buckets.get(hourKey).push(r);
@@ -980,7 +975,7 @@ function bucketRowsHourly(rows) {
     result.push(merged);
   }
 
-  return result.concat(breaks).sort((a, b) => a._t - b._t);
+  return result.sort((a, b) => a._t - b._t);
 }
 
 // Session-span highlight — Week Ahead specific (sessionFrom/sessionTo are
@@ -1250,7 +1245,7 @@ function buildSessionSpanPlugin(spans) {
   };
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, computedSessionMarkers, dragPreviewState, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes, hideValueAxes = false, overlayHeading = false, extraPlugins = [], spanGaps = true }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, computedSessionMarkers, dragPreviewState, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes, hideValueAxes = false, overlayHeading = false, extraPlugins = [] }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -1474,7 +1469,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       // measured box instead, which is what every container on this site
       // already assumes is happening.
       maintainAspectRatio: false,
-      spanGaps, // true for every page; the session ribbon passes false so lines break between separate sessions
+      spanGaps: true,
       // Extra top padding reserves space for two stacked elements above the
       // plot area: the moon phase glyph and the day heading text (see
       // buildDayBandPlugin). Shrunk when both are suppressed (showDayHeading:

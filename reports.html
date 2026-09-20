@@ -73,7 +73,7 @@
 
     <section class="summary-card report-block" id="reportRibbonBlock">
       <h3>Session ribbon</h3>
-      <p class="footnote">A continuous calendar of your fishing sessions, three days at a time — scroll sideways for the rest of the date range set in the filters above, or step with Previous / Next session. Each session shows its own location's conditions graph (the same one as the other pages), the session shaded in green and a dot for every catch in that species' mark colour. Hover or tap a catch dot or the shaded session for its details; press and hold the graph for 2 seconds to switch its own hover tip on or off (off by default).</p>
+      <p class="footnote">One fishing session at a time, newest first — step back and forward with Previous / Next session (within the date range set in the filters above). The graph runs from 12 hours before the session started to 12 hours after it finished and is the same conditions graph as the other pages, with the session shaded in green and a dot for every catch in that species' mark colour. Hover or tap a catch dot or the shaded session for its details; press and hold the graph for 2 seconds to switch its own hover tip on or off (off by default).</p>
       <div id="ribbonEmpty" class="report-empty" style="display:none;"></div>
       <div id="ribbonBody">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px;">
@@ -86,8 +86,8 @@
         <p class="footnote" id="ribbonSummary" style="margin:0 0 6px;text-align:left;"></p>
         <div id="ribbonLegend" style="margin:4px 0 8px;"></div>
         <div id="ribbonWrap" style="position:relative;width:100%;">
-          <div id="ribbonScroll" style="overflow-x:auto;width:100%;">
-            <div id="ribbonHost" style="position:relative;"></div>
+          <div id="ribbonScroll" style="width:100%;">
+            <div id="ribbonHost" style="position:relative;width:100%;"></div>
           </div>
         </div>
         <details style="margin-top:8px;">
