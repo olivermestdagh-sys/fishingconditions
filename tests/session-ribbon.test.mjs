@@ -33,7 +33,8 @@ const fns = new Function(
     fn("ribbonRowTimes"),
     fn("ribbonJoinRowBlocks"),
     fn("ribbonChunkSegments"),
-    "return { ribbonBuildSessions, ribbonCarryForward, ribbonMarkConditionsAt, ribbonLayoutDots, ribbonSunTimes, parseNaive, ribbonDayFloor, ribbonRange, ribbonSegmentBounds, ribbonRowTimes, ribbonJoinRowBlocks, ribbonChunkSegments };",
+    fn("ribbonDayLocations"),
+    "return { ribbonBuildSessions, ribbonCarryForward, ribbonMarkConditionsAt, ribbonLayoutDots, ribbonSunTimes, parseNaive, ribbonDayFloor, ribbonRange, ribbonSegmentBounds, ribbonRowTimes, ribbonJoinRowBlocks, ribbonChunkSegments, ribbonDayLocations };",
   ].join("\n")
 )();
 const T = (s) => fns.parseNaive(s);
@@ -172,4 +173,25 @@ test("blocks on consecutive days run straight on with no break between them", ()
   const joined = fns.ribbonJoinRowBlocks([a, b]);
   assert.equal(joined.filter((r) => r._break).length, 1); // only after the last block
   assert.equal(joined.length, 5);
+});
+test("a day's header lists the locations fished that day, in order, once each in a row", () => {
+  const st = (start, end, locationName) => ({ session: { start: T(start), end: T(end) }, locationName });
+  const states = [
+    st("2026-09-11T15:00:00", "2026-09-11T17:00:00", "Rye"), // later on the day
+    st("2026-09-11T06:00:00", "2026-09-11T08:00:00", "Flinders"),
+    st("2026-09-11T09:00:00", "2026-09-11T10:00:00", "Flinders"), // same place straight after: not repeated
+    st("2026-09-12T06:00:00", "2026-09-12T08:00:00", "Cowes"),
+    st("2026-09-13T06:00:00", "2026-09-13T08:00:00", null), // location unknown
+  ];
+  const day = (d) => fns.ribbonDayLocations(states, T(`${d}T00:00:00`));
+  assert.equal(day("2026-09-11"), "Flinders, Rye");
+  assert.equal(day("2026-09-12"), "Cowes");
+  assert.equal(day("2026-09-13"), "");
+  assert.equal(day("2026-09-14"), "");
+});
+
+test("a session running past midnight names its place on both days", () => {
+  const states = [{ session: { start: T("2026-09-11T22:00:00"), end: T("2026-09-12T02:00:00") }, locationName: "Flinders" }];
+  assert.equal(fns.ribbonDayLocations(states, T("2026-09-11T00:00:00")), "Flinders");
+  assert.equal(fns.ribbonDayLocations(states, T("2026-09-12T00:00:00")), "Flinders");
 });

@@ -577,6 +577,17 @@ function ribbonUpdateChrome() {
   ribbonUpdateJumpButtons();
 }
 
+/** The locations of the sessions on the day starting at dayStart, in the order the sessions happened (a repeat of the same place in a row is listed once), as one string. */
+function ribbonDayLocations(states, dayStart) {
+  const dayEnd = dayStart + RIBBON_DAY_MS;
+  const names = [];
+  for (const s of [...states].sort((a, b) => a.session.start - b.session.start)) {
+    if (s.session.start >= dayEnd || s.session.end < dayStart || !s.locationName) continue;
+    if (names[names.length - 1] !== s.locationName) names.push(s.locationName);
+  }
+  return names.join(", ");
+}
+
 /** The date/hour header shared by the whole calendar (like Week Ahead's), plus faint day lines running down through the chart area. */
 function ribbonHeaderSvg(model) {
   const { range, x, width, rowH, dayPx } = model;
@@ -584,7 +595,9 @@ function ribbonHeaderSvg(model) {
   let svg = `<svg width="${width}" height="${RIBBON_HEADER_H + rowH}" style="position:absolute;left:0;top:0;pointer-events:none;" aria-hidden="true">`;
   for (let d = range.from; d < range.to; d += RIBBON_DAY_MS) {
     svg += `<line x1="${x(d)}" x2="${x(d)}" y1="0" y2="${RIBBON_HEADER_H}" style="stroke:var(--grey-300, #cbd5e1)" stroke-width="1"/>`;
-    svg += `<text x="${x(d) + 5}" y="14" font-size="11" font-weight="600" style="fill:var(--grey-700)">${ribbonFmtDay(d)}</text>`;
+    // the day, then the location(s) fished that day on the same line (clipped to the day's width so it can't run into the next day)
+    const places = ribbonDayLocations(model.states, d);
+    svg += `<svg x="${x(d) + 5}" y="0" width="${Math.max(10, dayPx - 8)}" height="20"><text x="0" y="14" font-size="11" font-weight="600" style="fill:var(--grey-700)">${ribbonFmtDay(d)}${places ? `<tspan dx="12" font-weight="400" style="fill:var(--grey-500)">${escapeHtml(places)}</tspan>` : ""}</text></svg>`;
     for (let h = 0; h < 24; h += labelHours) {
       svg += `<text x="${x(d + h * 3600000) + (h === 0 ? 5 : 0)}" y="32" ${h === 0 ? "" : 'text-anchor="middle"'} font-size="10" style="fill:var(--grey-500)">${String(h).padStart(2, "0")}</text>`;
       if (h > 0) svg += `<line x1="${x(d + h * 3600000)}" x2="${x(d + h * 3600000)}" y1="${RIBBON_HEADER_H - 6}" y2="${RIBBON_HEADER_H}" style="stroke:var(--grey-300, #cbd5e1)"/>`;
