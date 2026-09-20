@@ -3463,3 +3463,50 @@ body {
   width: 0;
   z-index: 3;
 }
+
+
+/* "Install app" button in the header bar (js/install-app.js). Hidden unless the browser can install the site and it isn't installed already. */
+.install-btn {
+  order: 4;
+  margin: 0 0 8px 8px;
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--white);
+  background: transparent;
+  border: 1px solid #b7c9e0;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.install-btn[hidden] {
+  display: none;
+}
+.install-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+@media (max-width: 1200px) {
+  .install-btn {
+    order: 3;
+    margin: 0 0 4px 6px;
+    padding: 2px 8px;
+    font-size: 0.66rem;
+  }
+}
+/* iPhone/iPad have no install dialog — this note explains the Share menu route. */
+.install-note {
+  position: fixed;
+  top: calc(56px + env(safe-area-inset-top, 0px));
+  left: 8px;
+  right: 8px;
+  max-width: 320px;
+  margin-left: auto;
+  padding: 10px 12px;
+  background: var(--white);
+  color: var(--grey-700);
+  font-size: 0.85rem;
+  line-height: 1.35;
+  border-radius: 10px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+  z-index: 20000;
+}

@@ -1,7 +1,8 @@
-﻿{
+{
   "name": "Olie's Kayak and Surf Fishing Conditions",
   "short_name": "Olie's Fishing",
   "description": "Kayak and surf fishing conditions, live tide and weather, and a catch log.",
+  "id": "index.html",
   "start_url": "index.html",
   "scope": "./",
   "display": "standalone",
