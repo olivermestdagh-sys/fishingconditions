@@ -265,19 +265,17 @@ function ribbonBuildRows(raw, from, to, craft, shore, sunTimes) {
 /**
  * One continuous row list from several sessions' row lists (each already a
  * day-aligned block): concatenated in time order, with an empty row just
- * after each block so the lines and condition strips stop at the block's edge
- * instead of stretching across the days with no session (blocks on consecutive
- * days run straight on, no marker between them).
+ * after EVERY block so the lines and condition strips stop at the block's edge
+ * — each day/location's graph ends on its own, never running into the next
+ * one's data (consecutive days are usually different places).
  */
 function ribbonJoinRowBlocks(blocks) {
   const rows = [];
   const sorted = blocks.filter((b) => b.length).sort((a, b) => a[0]._t - b[0]._t);
-  sorted.forEach((block, i) => {
+  sorted.forEach((block) => {
     rows.push(...block);
-    const last = block[block.length - 1]._t;
-    const next = sorted[i + 1] ? sorted[i + 1][0]._t : null;
-    const gapAt = last + 60000;
-    if (next == null || next - last > 2 * 3600000) rows.push({ dateTime: new Date(gapAt).toISOString().slice(0, 19), _t: gapAt, _break: true }); // _break: renderConditionsChart leaves it out of its hourly bucketing
+    const gapAt = block[block.length - 1]._t + 60000;
+    rows.push({ dateTime: new Date(gapAt).toISOString().slice(0, 19), _t: gapAt, _break: true }); // _break: renderConditionsChart leaves it out of its hourly bucketing
   });
   return rows;
 }
@@ -435,7 +433,24 @@ function buildRibbonSessionsPlugin(states, onHover) {
           next.push(d);
         }
       }
-      dots = next;    },
+      dots = next;
+
+      // A black line wherever one day/location's graph meets the next one, top of the plot down through the condition strips.
+      const blocks = states.map((s) => s.seg).sort((a, b) => a.from - b.from);
+      ctx.save();
+      ctx.strokeStyle = "#000000";
+      ctx.lineWidth = 1.5;
+      for (let i = 1; i < blocks.length; i++) {
+        if (blocks[i].from - blocks[i - 1].to > 2 * 3600000) continue; // a real gap between them is already blank
+        const x = px((blocks[i - 1].to + blocks[i].from) / 2);
+        if (x < chartArea.left || x > chartArea.right) continue;
+        ctx.beginPath();
+        ctx.moveTo(x, chartArea.top);
+        ctx.lineTo(x, chart.height);
+        ctx.stroke();
+      }
+      ctx.restore();
+    },
   };
 }
 

@@ -166,15 +166,16 @@ test("sessions share one chart unless a canvas would be too wide", () => {
   assert.equal(split.length, 2);
   assert.deepEqual(split.map((c) => c.segs.length), [2, 1]);
 });
-test("blocks on consecutive days run straight on with no break between them", () => {
+test("consecutive days are separate graphs: each block ends with its own break, none links to the next", () => {
   const row = (iso) => ({ dateTime: iso, _t: T(iso) });
   const a = [row("2026-09-10T00:00:00"), row("2026-09-10T23:58:00")];
   const b = [row("2026-09-11T00:00:00"), row("2026-09-11T23:58:00")];
   const joined = fns.ribbonJoinRowBlocks([a, b]);
-  assert.equal(joined.filter((r) => r._break).length, 1); // only after the last block
-  assert.equal(joined.length, 5);
-});
-test("a day's header lists the locations fished that day, in order, once each in a row", () => {
+  assert.equal(joined.filter((r) => r._break).length, 2);
+  assert.equal(joined.length, 6);
+  assert.equal(joined[2]._break, true); // straight after day one's last row, before day two starts
+  assert.equal(joined[3]._t, T("2026-09-11T00:00:00"));
+});test("a day's header lists the locations fished that day, in order, once each in a row", () => {
   const st = (start, end, locationName) => ({ session: { start: T(start), end: T(end) }, locationName });
   const states = [
     st("2026-09-11T15:00:00", "2026-09-11T17:00:00", "Rye"), // later on the day
