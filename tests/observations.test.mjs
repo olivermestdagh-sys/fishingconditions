@@ -236,3 +236,60 @@ test("stored observations and tide events are readable by anyone, by location an
   assert.deepEqual(other, []);
   assert.equal((await call(env, "GET", "/api/public/observations?location=Flinders", { token: null })).status, 400);
 });
+
+// --- the admin's Session Ribbon saving what it looked up live (POST /api/archive/lookups) ---
+const SITE = "https://site.example";
+function withUsers(env, sqlite) {
+  sqlite.exec("CREATE TABLE users (id TEXT PRIMARY KEY, role TEXT, email TEXT); CREATE TABLE sessions (id TEXT PRIMARY KEY, user_id TEXT, expires_at INTEGER);");
+  const future = Date.now() + 3600000;
+  sqlite.prepare("INSERT INTO users VALUES ('u1', 'basic', 'a@x'), ('admin1', 'admin', 'o@x')").run();
+  sqlite.prepare("INSERT INTO sessions VALUES ('s-u1', 'u1', ?), ('s-admin', 'admin1', ?)").run(future, future);
+  return env;
+}
+const lookup = (env, session, body, origin = SITE) =>
+  worker.fetch(
+    new Request("https://worker.example/api/archive/lookups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: origin, ...(session ? { Cookie: `session=${session}` } : {}) },
+      body: JSON.stringify(body),
+    }),
+    env
+  );
+const oldHours = [{ hour: "2026-08-01 08:00", tempC: 11, windKmh: 12, windDir: "SW" }];
+
+test("only a signed-in admin can save ribbon lookups; the pipeline token is not accepted there", async () => {
+  const { env, sqlite } = makeDb();
+  withUsers(env, sqlite);
+  const body = { location: "Flinders", observations: oldHours };
+  assert.equal((await lookup(env, null, body)).status, 401);
+  assert.equal((await lookup(env, "s-u1", body)).status, 403);
+  assert.equal((await lookup(env, "s-admin", body, "https://evil.example")).status, 403); // cross-site
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM observations").get().n, 0);
+  const ok = await lookup(env, "s-admin", body);
+  assert.equal(ok.status, 200);
+  assert.equal((await ok.json()).observationsWritten, 1);
+});
+
+test("saved lookups are readable through the public archive, never overwrite, and follow the same rules as the pipeline", async () => {
+  const { env, sqlite } = makeDb();
+  withUsers(env, sqlite);
+  sqlite.prepare("INSERT INTO observations (location_name, hour, wind_kmh) VALUES ('Flinders', '2026-08-01 08:00', 30)").run();
+  const future = new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 13).replace("T", " ") + ":00";
+  const r = await (
+    await lookup(env, "s-admin", {
+      location: "Flinders",
+      observations: [...oldHours, { hour: future, tempC: 20 }], // an hour that hasn't happened: refused
+      tideEvents: [{ time: "2026-08-01 05:10:00", type: "high", heightM: 1.9 }],
+    })
+  ).json();
+  assert.equal(r.observationsWritten, 1); // the empty temp/dir columns filled in ...
+  assert.equal(sqlite.prepare("SELECT wind_kmh, temp_c, wind_dir FROM observations WHERE hour = '2026-08-01 08:00'").get().wind_kmh, 30); // ... the existing wind not replaced
+  assert.equal(sqlite.prepare("SELECT temp_c FROM observations WHERE hour = '2026-08-01 08:00'").get().temp_c, 11);
+  assert.equal(r.skipped, 1);
+  assert.equal(r.tideEventsWritten, 1);
+  const pub = await (await worker.fetch(new Request("https://worker.example/api/public/tide-events?location=Flinders&from=2026-08-01%2000:00:00&to=2026-08-02%2000:00:00"), env)).json();
+  assert.equal(JSON.stringify(pub).includes("1.9"), true);
+  // sending the same lookup again changes nothing
+  const again = await (await lookup(env, "s-admin", { location: "Flinders", observations: oldHours, tideEvents: [{ time: "2026-08-01 05:10:00", type: "high", heightM: 1.9 }] })).json();
+  assert.equal(again.observationsWritten + again.tideEventsWritten, 0);
+});

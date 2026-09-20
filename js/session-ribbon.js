@@ -322,6 +322,52 @@ function ribbonStoredToArrays(rows) {
   };
 }
 
+/** The archive rows ("YYYY-MM-DD HH:00", the observations table's shape) for the hours of the window [from, to) in live Open-Meteo arrays; hours with no value at all are left out. */
+function ribbonLookupRows(hourly, marine, from, to) {
+  const byHour = new Map();
+  const at = (list) => {
+    const out = [];
+    (list && list.time ? list.time : []).forEach((iso, i) => {
+      const t = parseNaive(String(iso).replace("T", " ") + ":00");
+      if (t != null && t >= from && t < to) out.push({ i, hour: String(iso).replace("T", " ").slice(0, 13) + ":00" });
+    });
+    return out;
+  };
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const compass = (deg) => (num(deg) == null ? null : SHORE_OPTIONS[Math.round((((deg % 360) + 360) % 360) / 22.5) % 16]);
+  const row = (hour) => {
+    if (!byHour.has(hour)) byHour.set(hour, { hour, tempC: null, windKmh: null, windDir: null, pressureHpa: null, waterTempC: null, currentKmh: null, currentDir: null });
+    return byHour.get(hour);
+  };
+  for (const { i, hour } of at(hourly)) {
+    const r = row(hour);
+    r.windKmh = num(hourly.windspeed_10m && hourly.windspeed_10m[i]);
+    r.windDir = compass(hourly.winddirection_10m && hourly.winddirection_10m[i]);
+    r.tempC = num(hourly.temperature_2m && hourly.temperature_2m[i]);
+    r.pressureHpa = num(hourly.pressure_msl && hourly.pressure_msl[i]);
+  }
+  for (const { i, hour } of at(marine)) {
+    const r = row(hour);
+    r.waterTempC = num(marine.sea_surface_temperature && marine.sea_surface_temperature[i]);
+    r.currentKmh = num(marine.ocean_current_velocity && marine.ocean_current_velocity[i]);
+    r.currentDir = num(marine.ocean_current_direction && marine.ocean_current_direction[i]);
+  }
+  return [...byHour.values()]
+    .filter((r) => Object.entries(r).some(([k, v]) => k !== "hour" && v != null))
+    .sort((a, b) => (a.hour < b.hour ? -1 : 1));
+}
+
+/** Saves what the ribbon had to look up live into the archive (admin only, fire-and-forget: a failure just means it is looked up again next time). */
+function ribbonSaveLookups(locationName, observations, tideEvents) {
+  if (!locationName || (!observations.length && !tideEvents.length)) return;
+  fetch(`${USER_BACKEND_URL}/api/archive/lookups`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ location: locationName, observations, tideEvents }),
+  }).catch(() => {});
+}
+
 /** Live Open-Meteo arrays with the stored ones laid over them: a stored hour wins where it has a value, live fills the rest (empty stored values never override). Either side may be null. */
 function ribbonLayerStored(live, stored, fields) {
   if (!stored) return live;
@@ -728,6 +774,11 @@ async function ribbonLoadCurrent() {
     ]);
     liveHourly = merge(hourlies, RIBBON_HOURLY_FIELDS);
     liveMarine = merge(marines, RIBBON_MARINE_FIELDS);
+    if (nearest && !enough) {
+      ribbonSaveLookups(nearest.name, ribbonLookupRows(liveHourly, liveMarine, block.from, block.to), (tide && tide.live) || []);
+    } else if (nearest && tide && tide.live) {
+      ribbonSaveLookups(nearest.name, [], tide.live);
+    }
     block.raw = {
       hourly: ribbonLayerStored(liveHourly, stored && stored.hourly, RIBBON_HOURLY_FIELDS),
       marine: ribbonLayerStored(liveMarine, stored && stored.marine, RIBBON_MARINE_FIELDS),

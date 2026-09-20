@@ -284,6 +284,9 @@ export default {
       if (url.pathname === "/api/public/locations" && request.method === "GET") {
         return handlePublicLocations(env);
       }
+      if (url.pathname === "/api/archive/lookups" && request.method === "POST") {
+        return handleArchiveLookups(request, env);
+      }
       if (url.pathname === "/api/public/observations" && request.method === "GET") {
         return handlePublicObservations(url, env);
       }
@@ -1765,19 +1768,14 @@ function cleanTideEvent(e) {
   return heightM == null ? null : { time: e.time, type: e.type, heightM };
 }
 
-async function handlePipelineObservations(request, env) {
-  if (!requirePipelineToken(request, env)) {
-    return jsonResponse({ error: "Invalid or missing pipeline token." }, 401, env);
-  }
-  const body = await readJsonBody(request);
-  const location = typeof body.location === "string" ? body.location.trim() : "";
-  if (!location || location.length > 200) return jsonResponse({ error: "location is required." }, 400, env);
-  if (typeof body.asOf !== "string" || !OBS_TIME_RE.test(body.asOf)) {
-    return jsonResponse({ error: "asOf must be 'YYYY-MM-DD HH:MM:SS' (local time)." }, 400, env);
-  }
-  const asOfHour = body.asOf.slice(0, 13) + ":00";
-  const rawObs = Array.isArray(body.observations) ? body.observations.slice(0, OBS_MAX_ITEMS) : [];
-  const rawTide = Array.isArray(body.tideEvents) ? body.tideEvents.slice(0, OBS_MAX_ITEMS) : [];
+/**
+ * Writes one location's observations and tide events into the archive tables (shared by the pipeline and the admin's
+ * ribbon lookups, so the rules can't drift apart). `asOf` is the caller-trusted "now" ('YYYY-MM-DD HH:MM:SS' local).
+ */
+async function writeArchive(env, location, asOf, rawObs, rawTide) {
+  const asOfHour = asOf.slice(0, 13) + ":00";
+  rawObs = Array.isArray(rawObs) ? rawObs.slice(0, OBS_MAX_ITEMS) : [];
+  rawTide = Array.isArray(rawTide) ? rawTide.slice(0, OBS_MAX_ITEMS) : [];
   const observations = rawObs.map((o) => cleanObservation(o, asOfHour)).filter(Boolean);
   const tideEvents = rawTide.map(cleanTideEvent).filter(Boolean);
 
@@ -1799,7 +1797,7 @@ async function handlePipelineObservations(request, env) {
     ...observations.map((o) =>
       env.DB.prepare(obsSql).bind(location, o.hour, o.tempC, o.windKmh, o.windDir, o.pressureHpa, o.waterTempC, o.currentKmh, o.currentDir)
     ),
-    ...tideEvents.map((e) => env.DB.prepare(tideSql).bind(location, e.time, e.type, e.heightM, body.asOf)),
+    ...tideEvents.map((e) => env.DB.prepare(tideSql).bind(location, e.time, e.type, e.heightM, asOf)),
   ];
   let observationsWritten = 0;
   let tideEventsWritten = 0;
@@ -1811,16 +1809,59 @@ async function handlePipelineObservations(request, env) {
       else tideEventsWritten += changes;
     });
   }
-  return jsonResponse(
-    {
-      location,
-      observationsWritten,
-      tideEventsWritten,
-      skipped: rawObs.length - observations.length + (rawTide.length - tideEvents.length),
-    },
-    200,
-    env
+  return {
+    location,
+    observationsWritten,
+    tideEventsWritten,
+    skipped: rawObs.length - observations.length + (rawTide.length - tideEvents.length),
+  };
+}
+
+async function handlePipelineObservations(request, env) {
+  if (!requirePipelineToken(request, env)) {
+    return jsonResponse({ error: "Invalid or missing pipeline token." }, 401, env);
+  }
+  const body = await readJsonBody(request);
+  const location = typeof body.location === "string" ? body.location.trim() : "";
+  if (!location || location.length > 200) return jsonResponse({ error: "location is required." }, 400, env);
+  if (typeof body.asOf !== "string" || !OBS_TIME_RE.test(body.asOf)) {
+    return jsonResponse({ error: "asOf must be 'YYYY-MM-DD HH:MM:SS' (local time)." }, 400, env);
+  }
+  return jsonResponse(await writeArchive(env, location, body.asOf, body.observations, body.tideEvents), 200, env);
+}
+
+/** Melbourne wall-clock time now, 'YYYY-MM-DD HH:MM:SS' (the archive's naive local time). */
+function melbourneNowString() {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Australia/Melbourne",
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+      .formatToParts(new Date())
+      .map((p) => [p.type, p.value])
   );
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+/**
+ * The admin's Session Ribbon saves what it had to look up live (Open-Meteo hours, WillyWeather tide events) so the next
+ * view finds it in the archive. Same tables and rules as the pipeline, but the caller is a signed-in admin (never the
+ * pipeline token) and "now" comes from the server clock, not the client's.
+ */
+async function handleArchiveLookups(request, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
+  const body = await readJsonBody(request);
+  const location = typeof body.location === "string" ? body.location.trim() : "";
+  if (!location || location.length > 200) return jsonResponse({ error: "location is required." }, 400, env);
+  return jsonResponse(await writeArchive(env, location, melbourneNowString(), body.observations, body.tideEvents), 200, env);
 }
 
 /**

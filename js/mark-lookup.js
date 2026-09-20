@@ -359,7 +359,7 @@ async function fetchTideExtremaForRange(lat, lng, startMs, endMs) {
   // The pipeline's archive keeps the tide events (see fetchStoredTideExtrema): when they cover the window
   // there is no need for a billed WillyWeather call. Anything else falls through to the live lookup below.
   const stored = await fetchStoredTideExtrema(nearest, startMs, endMs);
-  if (stored) return { location: nearest, extrema: stored };
+  if (stored) return { location: nearest, extrema: stored, live: null };
 
   const startDateStr = naiveDateOnlyStr(startMs - 86400000);
   const days = Math.min(7, Math.ceil((endMs - startMs) / 86400000) + 3);
@@ -395,7 +395,11 @@ async function fetchTideExtremaForRange(lat, lng, startMs, endMs) {
     .filter((e) => Number.isFinite(e.t) && (e.type === "high" || e.type === "low"))
     .sort((a, b) => a.t - b.t);
   if (extrema.length < 2 || extrema[0].t > startMs || extrema[extrema.length - 1].t < endMs) return null;
-  return { location: nearest, extrema };
+  // `live` is what was looked up (raw, before tideOffset) in the archive's shape, so the caller can save it for next time
+  const live = rawEntries
+    .map((e) => ({ time: String(e.dateTime || "").replace("T", " ").slice(0, 19), type: e.type, heightM: e.height }))
+    .filter((e) => /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(e.time) && (e.type === "high" || e.type === "low") && Number.isFinite(e.heightM));
+  return { location: nearest, extrema, live };
 }
 
 /**

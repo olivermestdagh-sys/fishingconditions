@@ -33,8 +33,10 @@ const fns = new Function(
     fn("ribbonStoredCoverage"),
     fn("ribbonStoredToArrays"),
     fn("ribbonLayerStored"),
+    grab(/const SHORE_OPTIONS[^\n]*\r?\n/),
+    fn("ribbonLookupRows"),
     fn("ribbonRowTimes"),
-    "return { ribbonBuildSessions, ribbonCarryForward, ribbonMarkConditionsAt, ribbonLayoutDots, ribbonSunTimes, parseNaive, ribbonDayFloor, ribbonSegmentBounds, ribbonSessionsInRange, ribbonViewWindow, ribbonRowTimes, ribbonStoredCoverage, ribbonStoredToArrays, ribbonLayerStored };",
+    "return { ribbonBuildSessions, ribbonCarryForward, ribbonMarkConditionsAt, ribbonLayoutDots, ribbonSunTimes, parseNaive, ribbonDayFloor, ribbonSegmentBounds, ribbonSessionsInRange, ribbonViewWindow, ribbonRowTimes, ribbonStoredCoverage, ribbonStoredToArrays, ribbonLayerStored, ribbonLookupRows };",
   ].join("\n")
 )();
 const T = (s) => fns.parseNaive(s);
@@ -191,4 +193,28 @@ test("stored values are laid over live ones; live fills what the archive lacks",
   assert.deepEqual(merged.pressure_msl, [1000, 1001, null]);
   assert.equal(fns.ribbonLayerStored(null, st, fields), st);
   assert.equal(fns.ribbonLayerStored(live, null, fields), live);
+});
+
+test("live Open-Meteo arrays become archive rows for just the hours of the window", () => {
+  const from = T("2026-09-11T06:00:00");
+  const to = T("2026-09-11T09:00:00");
+  const hourly = {
+    time: ["2026-09-11T05:00", "2026-09-11T06:00", "2026-09-11T07:00", "2026-09-11T08:00", "2026-09-11T09:00"],
+    windspeed_10m: [1, 12, 14, 16, 18],
+    winddirection_10m: [0, 200, 230, null, 90], // 200° is SSW, 230° SW
+    temperature_2m: [9, 10, 11, 12, 13],
+    pressure_msl: [1010, 1011, 1012, 1013, 1014],
+  };
+  const marine = { time: ["2026-09-11T07:00", "2026-09-11T08:00"], sea_surface_temperature: [14, null], ocean_current_velocity: [1.2, null], ocean_current_direction: [90, null] };
+  const rows = fns.ribbonLookupRows(hourly, marine, from, to);
+  assert.deepEqual(rows.map((r) => r.hour), ["2026-09-11 06:00", "2026-09-11 07:00", "2026-09-11 08:00"]); // 05:00 and 09:00 are outside
+  assert.equal(rows[0].windDir, "SSW");
+  assert.equal(rows[1].windDir, "SW");
+  assert.equal(rows[2].windDir, null);
+  assert.equal(rows[1].waterTempC, 14);
+  assert.equal(rows[1].currentKmh, 1.2);
+  assert.equal(rows[0].waterTempC, null);
+  assert.deepEqual(fns.ribbonLookupRows(null, null, from, to), []);
+  // an hour Open-Meteo has no values for yet (it lags about 2 days) isn't worth a row
+  assert.deepEqual(fns.ribbonLookupRows({ time: ["2026-09-11T06:00"], windspeed_10m: [null], winddirection_10m: [null], temperature_2m: [null], pressure_msl: [null] }, null, from, to), []);
 });
