@@ -453,6 +453,7 @@ function renderAllReports() {
   renderTideReport();
   renderGearReport();
   renderLocationReport();
+  refreshSessionRibbon(); // the calendar follows the date filters (it ignores the other catch filters)
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -475,7 +476,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   resetReportsFilters();
   reportsFilteredCatches = reportsAllMarks.filter((m) => m.type === "Catch");
   renderAllReports();
-  initSessionRibbon(reportsAllMarks); // the session ribbon isn't affected by the catch filters above
+  initSessionRibbon(reportsAllMarks);
 
   const toggle = document.getElementById("reportsFiltersToggle");
   const content = document.getElementById("reportsFiltersContent");

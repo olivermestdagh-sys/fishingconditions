@@ -98,23 +98,29 @@
     </section>
     <section class="summary-card report-block" id="reportRibbonBlock">
       <h3>Session ribbon</h3>
-      <p class="footnote">One logged session on a single time axis: the session bar, a dot for each catch, the tide behind it, the wind (coloured by how good it is for the location and craft) and the light. Hover or tap for the conditions at any moment.</p>
-      <div id="ribbonEmpty" class="report-empty" style="display:none;">No fishing sessions logged yet. Sessions come from the Sync tab's trail import.</div>
+      <p class="footnote">A continuous calendar of your fishing sessions, three days at a time — scroll sideways for the rest of the date range set in the filters above. Each session shows its own location's tide, the wind (coloured by how good it is for the craft), the light, the session bar and a dot for every catch. Hover or tap for the conditions at any moment.</p>
+      <div id="ribbonEmpty" class="report-empty" style="display:none;"></div>
       <div id="ribbonBody">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px;">
-          <select id="ribbonSessionSelect" aria-label="Choose a session" style="flex:1 1 260px;min-width:0;max-width:100%;"></select>
-          <span class="footnote" style="margin:0;">Wind scored for:</span>
+          <button type="button" data-ribbon-page="-1" class="btn-secondary" aria-label="Previous three days">◀ 3 days</button>
+          <button type="button" data-ribbon-page="1" class="btn-secondary" aria-label="Next three days">3 days ▶</button>
+          <span class="footnote" style="margin:0 0 0 8px;">Wind scored for:</span>
           <button type="button" data-ribbon-craft="Kayak" class="btn-primary" aria-pressed="true">Kayak</button>
           <button type="button" data-ribbon-craft="Land based" class="btn-secondary" aria-pressed="false">Land based</button>
         </div>
         <p class="footnote" id="ribbonSummary" style="margin:0 0 6px;text-align:left;"></p>
         <div id="ribbonLegend" style="margin:4px 0 8px;"></div>
-        <div id="ribbonHost" style="position:relative;width:100%;"></div>
+        <div id="ribbonWrap" style="position:relative;width:100%;">
+          <div id="ribbonAxis" style="display:none;position:absolute;left:0;top:0;z-index:3;background:var(--white);pointer-events:none;"></div>
+          <div id="ribbonScroll" style="overflow-x:auto;width:100%;">
+            <div id="ribbonHost" style="position:relative;"></div>
+          </div>
+        </div>
         <details style="margin-top:8px;">
           <summary class="footnote" style="cursor:pointer;">Table view</summary>
           <div style="overflow-x:auto;">
             <table class="report-table">
-              <thead><tr><th>Time</th><th>Species</th><th>Length</th><th>Tide</th><th>Wind</th><th>Weather</th></tr></thead>
+              <thead><tr><th>Date</th><th>Time</th><th>Species</th><th>Length</th><th>Tide</th><th>Wind</th><th>Weather</th></tr></thead>
               <tbody id="ribbonTableBody"></tbody>
             </table>
           </div>

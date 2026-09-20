@@ -15,6 +15,9 @@ const fns = new Function(
   [
     grab(/const RIBBON_PAD_MS[^\n]*\r?\n/),
     grab(/const RIBBON_TIME_ZONE[^\n]*\r?\n/),
+    grab(/const RIBBON_DAY_MS[^\n]*\r?\n/),
+    grab(/const RIBBON_VISIBLE_DAYS[^\n]*\r?\n/),
+    grab(/const RIBBON_MAX_DAYS[^\n]*\r?\n/),
     fn("parseNaive"),
     fn("naiveDateOnlyStr"),
     "const previewDegreesToCompass = (d) => ['N','NE','E','SE','S','SW','W','NW'][Math.round(d / 45) % 8];",
@@ -29,7 +32,10 @@ const fns = new Function(
     fn("ribbonLocalWallMs"),
     fn("ribbonSolarEvent"),
     fn("ribbonSunTimes"),
-    "return { ribbonBuildSessions, ribbonCarryForward, ribbonMarkConditionsAt, ribbonTideAt, ribbonTideCurve, ribbonWindCellsFromHourly, ribbonWindCellsFromMarks, ribbonLayoutDots, ribbonSunTimes, parseNaive };",
+    fn("ribbonDayFloor"),
+    fn("ribbonRange"),
+    fn("ribbonSegmentBounds"),
+    "return { ribbonBuildSessions, ribbonCarryForward, ribbonMarkConditionsAt, ribbonTideAt, ribbonTideCurve, ribbonWindCellsFromHourly, ribbonWindCellsFromMarks, ribbonLayoutDots, ribbonSunTimes, parseNaive, ribbonDayFloor, ribbonRange, ribbonSegmentBounds };",
   ].join("\n")
 )();
 const T = (s) => fns.parseNaive(s);
@@ -113,4 +119,44 @@ test("calculated light times match the stored sun times for a known day", () => 
   assert.ok(within(sun.sunrise, "06:12"), "sunrise");
   assert.ok(within(sun.sunset, "18:13"), "sunset");
   assert.ok(within(sun.lastLight, "18:40"), "last light");
+});
+
+const mk = (id, start, end, extra = {}) => ({ groupId: id, start: T(start), end: T(end), ...extra });
+
+test("the calendar spans the filter dates, or the data when a filter is blank", () => {
+  const a = mk("a", "2026-09-10T06:00:00", "2026-09-10T09:00:00");
+  const b = mk("b", "2026-09-14T06:00:00", "2026-09-14T09:00:00");
+  const open = fns.ribbonRange([a, b], "", "");
+  assert.equal(open.from, T("2026-09-10T00:00:00"));
+  assert.equal(open.to, T("2026-09-15T00:00:00"));
+  assert.deepEqual(open.sessions.map((s) => s.groupId), ["a", "b"]);
+  const bounded = fns.ribbonRange([a, b], "2026-09-12", "2026-09-14");
+  assert.equal(bounded.from, T("2026-09-12T00:00:00"));
+  assert.equal(bounded.to, T("2026-09-15T00:00:00")); // the "to" date is included
+  assert.deepEqual(bounded.sessions.map((s) => s.groupId), ["b"]);
+});
+
+test("the calendar is always at least the three visible days, and null with no sessions", () => {
+  const a = mk("a", "2026-09-10T06:00:00", "2026-09-10T09:00:00");
+  const r = fns.ribbonRange([a], "", "");
+  assert.equal(r.to - r.from, 3 * 86400000);
+  assert.equal(fns.ribbonRange([], "", ""), null);
+});
+
+test("two sessions on one day get non-overlapping condition windows that still contain each session", () => {
+  const a = mk("a", "2026-09-10T06:00:00", "2026-09-10T08:00:00");
+  const b = mk("b", "2026-09-10T15:00:00", "2026-09-10T17:00:00");
+  const [sa, sb] = fns.ribbonSegmentBounds([b, a]);
+  assert.equal(sa.session.groupId, "a");
+  assert.equal(sa.from, T("2026-09-10T00:00:00"));
+  assert.equal(sa.to, sb.from);
+  assert.equal(sb.to, T("2026-09-11T00:00:00"));
+  assert.ok(sa.from <= a.start && sa.to >= a.end && sb.from <= b.start && sb.to >= b.end);
+});
+
+test("a session that runs past midnight covers both days", () => {
+  const a = mk("a", "2026-09-10T22:00:00", "2026-09-11T02:00:00");
+  const [s] = fns.ribbonSegmentBounds([a]);
+  assert.equal(s.from, T("2026-09-10T00:00:00"));
+  assert.equal(s.to, T("2026-09-12T00:00:00"));
 });
