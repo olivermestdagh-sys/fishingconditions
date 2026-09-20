@@ -314,7 +314,9 @@ function ribbonChunkSegments(segs, pxPerMs, maxCssPx) {
 // ---------------------------------------------------------------------
 
 const RIBBON_HEADER_H = 40;
-const RIBBON_DOT_R = 6; // every catch dot is the same size
+const RIBBON_DOT_R = 6; // a catch with no recorded length
+const RIBBON_DOT_R_MIN = 4.5; // dot radius runs from here (shortest fish in the session) ...
+const RIBBON_DOT_R_MAX = 8.5; // ... to here (longest)
 const RIBBON_DOT_TOP = 12; // centre of the first row of dots, below the top of the plot
 
 function ribbonSpeciesColor(species) {
@@ -354,6 +356,14 @@ function ribbonConditionLines(state, t) {
   return lines;
 }
 
+function ribbonSessionTooltipHtml(state) {
+  const s = state.session;
+  const n = s.catches.length;
+  return `<div><strong>${escapeHtml(s.name)}</strong> · ${ribbonFmtDay(s.start)} ${ribbonFmtTime(s.start)}–${ribbonFmtTime(s.end)}</div>` +
+    (state.locationName ? `<div style="color:var(--grey-700);">${escapeHtml(state.locationName)}</div>` : "") +
+    `<div style="color:var(--grey-700);">${n} catch${n === 1 ? "" : "es"}</div>`;
+}
+
 function ribbonDotTooltipHtml(state, dot) {
   const c = dot.c;
   const head = `<strong>${escapeHtml(c.species || c.name || "Catch")}</strong> · ${ribbonFmtDay(c._t)} ${ribbonFmtTime(c._t)}${c.size != null ? ` · ${c.size} cm` : ""}`;
@@ -363,19 +373,27 @@ function ribbonDotTooltipHtml(state, dot) {
 /**
  * Draws the sessions inside the chart itself, so they're part of the graph:
  * the site's green tint over each session, and a dot for every catch along the
- * top (all the same size, in that species' mark colour, stacking downward
- * where catches are close together). Also answers hover/tap over a dot with its
- * own tooltip (and swallows that event so the chart's normal tooltip doesn't
- * fight it).
+ * top (sized by the fish's length when recorded, in that species' mark colour,
+ * stacking downward where catches are close together). hitAt(x, y) tells the
+ * page what is under a canvas point — a catch dot, else a shaded session — so
+ * their tooltips can always be shown (see ribbonWireHover).
  */
 function buildRibbonSessionsPlugin(states, onHover) {
   let dots = [];
+  let lastChart = null;
   const hitAt = (x, y) => {
     const dot = dots.find((d) => Math.hypot(x - d.x, y - d.y) <= d.r + 4);
-    return dot ? { dot } : null;
+    if (dot) return { dot };
+    if (lastChart && lastChart.chartArea && y >= lastChart.chartArea.top && y <= lastChart.chartArea.bottom) {
+      const t = lastChart.scales.x.getValueForPixel(x);
+      const state = states.find((s) => t >= s.session.start && t <= s.session.end);
+      if (state) return { session: state };
+    }
+    return null;
   };
   return {
     id: "ribbonSessions",
+    hitAt,
     beforeDraw(chart) {
       const { ctx, chartArea, scales } = chart;
       if (!chartArea || !scales.x) return;
@@ -393,13 +411,18 @@ function buildRibbonSessionsPlugin(states, onHover) {
     afterDatasetsDraw(chart) {
       const { ctx, chartArea, scales } = chart;
       if (!chartArea || !scales.x) return;
+      lastChart = chart;
       const px = (t) => scales.x.getPixelForValue(t);
       const next = [];
       for (const state of states) {
-        const items = state.session.catches.map((c) => ({ c, state, x: px(c._t), r: RIBBON_DOT_R }));
+        const sizes = state.session.catches.map((c) => c.size).filter((v) => v != null);
+        const sMin = Math.min(...sizes);
+        const sMax = Math.max(...sizes);
+        const radiusFor = (c) => (c.size != null && sMax > sMin ? RIBBON_DOT_R_MIN + ((c.size - sMin) / (sMax - sMin)) * (RIBBON_DOT_R_MAX - RIBBON_DOT_R_MIN) : RIBBON_DOT_R);
+        const items = state.session.catches.map((c) => ({ c, state, x: px(c._t), r: radiusFor(c) }));
         ribbonLayoutDots(items);
         for (const d of items) {
-          d.y = chartArea.top + RIBBON_DOT_TOP + d.level * (2 * RIBBON_DOT_R + 2);
+          d.y = chartArea.top + RIBBON_DOT_TOP + d.level * (2 * RIBBON_DOT_R_MAX + 2);
           ctx.save();
           ctx.beginPath();
           ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
@@ -413,24 +436,6 @@ function buildRibbonSessionsPlugin(states, onHover) {
         }
       }
       dots = next;    },
-    // A dot under the pointer gets its own tooltip; the event is then dropped so the chart's normal one doesn't also fire.
-    beforeEvent(chart, args) {
-      const e = args.event;
-      if (!e || e.x == null) return;
-      if (e.type === "mouseout") {
-        onHover(chart, null);
-        return;
-      }
-      if (e.type !== "mousemove" && e.type !== "click" && e.type !== "touchstart" && e.type !== "touchmove") return;
-      const hit = hitAt(e.x, e.y);
-      onHover(chart, hit, e);
-      if (hit) {
-        chart.setActiveElements([]);
-        chart.tooltip.setActiveElements([], { x: e.x, y: e.y });
-        chart.draw();
-        return false;
-      }
-    },
   };
 }
 
@@ -452,6 +457,7 @@ function ribbonRenderChunk(chunk) {
   });
   const rows = ribbonJoinRowBlocks(blocks);
   const sunTimes = states.flatMap((s) => s.sunTimes);
+  const plugin = buildRibbonSessionsPlugin(states);
   const tideHeights = states.flatMap((s) => (s.raw && s.raw.tide ? s.raw.tide.extrema.map((e) => e.height) : []));
   chunk.chart = renderConditionsChart({
     canvas: box.querySelector("canvas"),
@@ -466,8 +472,14 @@ function ribbonRenderChunk(chunk) {
     xRange: { min: chunk.from, max: chunk.to },
     showFirstBoxIcons: true, // once per chart, at its first strip box
     spanGaps: false,
-    extraPlugins: [buildRibbonSessionsPlugin(states, (chart, hit, e) => ribbonShowTip(chunk, hit, e))],
+    disableBuiltinEvents: true, // the graph's own hover tip is off until switched on with a 2-second hold, like the other graphs (below)
+    extraPlugins: [plugin],
   });
+  if (chunk.chart) {
+    const canvas = box.querySelector("canvas");
+    ribbonWireHover(chunk, canvas, plugin); // catch and session tooltips: always on
+    wireHoldToShowTooltip(() => chunk.chart, canvas); // a 2-second press toggles the graph's own tooltip; off by default
+  }
 }
 
 function ribbonShowTip(chunk, hit, e) {
@@ -478,13 +490,25 @@ function ribbonShowTip(chunk, hit, e) {
     tip.style.display = "none";
     return;
   }
-  tip.innerHTML = ribbonDotTooltipHtml(hit.dot.state, hit.dot);
+  tip.innerHTML = hit.dot ? ribbonDotTooltipHtml(hit.dot.state, hit.dot) : ribbonSessionTooltipHtml(hit.session);
   tip.style.display = "block";
   const x = chunk.left + e.x;
   const visLeft = scroll.scrollLeft + 4;
   const visRight = scroll.scrollLeft + scroll.clientWidth - 4;
   tip.style.left = Math.min(Math.max(visLeft, x + 12), Math.max(visLeft, visRight - tip.offsetWidth)) + "px";
   tip.style.top = RIBBON_HEADER_H + e.y + 16 + "px";
+}
+
+/** Catch and session tooltips follow the pointer over the canvas all the time (independent of the 2-second-hold graph tooltip). */
+function ribbonWireHover(chunk, canvas, plugin) {
+  const show = (e) => {
+    const x = localXFromEvent(e, canvas);
+    const y = localYFromEvent(e, canvas);
+    ribbonShowTip(chunk, plugin.hitAt(x, y), { x, y });
+  };
+  canvas.addEventListener("pointermove", show);
+  canvas.addEventListener("pointerdown", show);
+  canvas.addEventListener("pointerleave", () => ribbonShowTip(chunk, null));
 }
 
 // ---------------------------------------------------------------------
