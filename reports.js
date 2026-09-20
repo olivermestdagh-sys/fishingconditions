@@ -346,6 +346,161 @@ function renderTideReport() {
 }
 
 // ---------------------------------------------------------------------
+// Tide clock — effort, catches and catch rate by hours since low tide
+// ---------------------------------------------------------------------
+
+let reportTideClockChartInstance = null;
+let tideClockSessions = null; // every session, built once from the marks
+const tideClockExtremaCache = new Map(); // session groupId -> stored tide events (or null)
+let tideClockRenderId = 0; // a newer render supersedes one still loading tide events
+const TIDE_CLOCK_FALLBACK_COLORS = ["#2e7d32", "#1565c0", "#ef6c00", "#6a1b9a", "#00838f", "#c62828", "#827717", "#455a64"];
+
+function tideClockSpeciesColor(species, i) {
+  try {
+    const c = ribbonSpeciesColor(species);
+    if (c) return c;
+  } catch {
+    // mark lists not loaded yet — use the fallback palette
+  }
+  return TIDE_CLOCK_FALLBACK_COLORS[i % TIDE_CLOCK_FALLBACK_COLORS.length];
+}
+
+async function renderTideClockReport() {
+  const myId = ++tideClockRenderId;
+  const note = document.getElementById("reportTideClockNote");
+  const empty = document.getElementById("reportTideClockEmpty");
+  const canvas = document.getElementById("reportTideClockChart");
+  const legend = document.getElementById("reportTideClockLegend");
+  if (!canvas) return;
+  const clear = (msg) => {
+    empty.textContent = msg;
+    empty.style.display = "block";
+    canvas.style.display = "none";
+    if (legend) legend.innerHTML = "";
+    if (reportTideClockChartInstance) {
+      reportTideClockChartInstance.destroy();
+      reportTideClockChartInstance = null;
+    }
+  };
+
+  if (!tideClockSessions) tideClockSessions = ribbonBuildSessions(reportsAllMarks);
+  const sessions = ribbonSessionsInRange(tideClockSessions, reportsFilters.dateFrom, reportsFilters.dateTo);
+  if (sessions.length === 0) {
+    note.textContent = "";
+    clear("No sessions in the current date range.");
+    return;
+  }
+  note.textContent = "Loading tide times…";
+  await tideClockLoadExtrema(sessions, tideClockExtremaCache);
+  if (myId !== tideClockRenderId) return; // filters changed while loading
+
+  const okIds = new Set(reportsFilteredCatches.map((c) => c.id));
+  const agg = tideClockAggregate(sessions, (s) => tideClockExtremaCache.get(s.groupId) || null, (c) => okIds.has(c.id));
+  note.textContent =
+    `${agg.used} of ${sessions.length} session${sessions.length === 1 ? "" : "s"} used` +
+    (agg.skipped ? ` (${agg.skipped} left out — no stored tide times for them)` : "") +
+    `; ${agg.catches} catch${agg.catches === 1 ? "" : "es"} placed on the tide.`;
+  if (agg.used === 0) {
+    clear("None of these sessions have stored tide times yet.");
+    return;
+  }
+  empty.style.display = "none";
+  canvas.style.display = "block";
+
+  const speciesTotals = new Map();
+  for (const b of agg.bins) for (const [sp, n] of Object.entries(b.bySpecies)) speciesTotals.set(sp, (speciesTotals.get(sp) || 0) + n);
+  const speciesList = Array.from(speciesTotals.keys()).sort((a, b) => speciesTotals.get(b) - speciesTotals.get(a));
+  const colorOf = (sp) => tideClockSpeciesColor(sp, speciesList.indexOf(sp));
+
+  const labels = agg.bins.map((_, i) => i * TIDE_CLOCK_BIN_H);
+  const datasets = [
+    {
+      type: "bar",
+      label: "Effort (hours fished)",
+      data: agg.bins.map((b) => b.effortH),
+      yAxisID: "yEffort",
+      backgroundColor: "rgba(120,120,120,0.22)",
+      borderWidth: 0,
+      categoryPercentage: 1,
+      barPercentage: 1,
+      order: 3,
+    },
+    ...speciesList.map((sp) => ({
+      type: "bar",
+      label: sp,
+      data: agg.bins.map((b) => b.bySpecies[sp] || 0),
+      yAxisID: "y",
+      stack: "catches",
+      backgroundColor: colorOf(sp),
+      borderColor: "#ffffff",
+      borderWidth: 1,
+      categoryPercentage: 0.9,
+      barPercentage: 0.9,
+      order: 2,
+    })),
+    {
+      type: "line",
+      label: "Catches per hour",
+      data: agg.bins.map((b) => b.rate),
+      yAxisID: "yRate",
+      borderColor: "#c62828",
+      backgroundColor: "#c62828",
+      borderWidth: 2,
+      pointRadius: 3,
+      spanGaps: false,
+      tension: 0.25,
+      order: 1,
+    },
+  ];
+
+  if (legend) {
+    const chip = (color, text) =>
+      `<span style="display:inline-flex;align-items:center;gap:5px;margin:0 12px 4px 0;font-size:0.78rem;"><span style="width:11px;height:11px;border-radius:3px;background:${color};display:inline-block;"></span>${escapeHtml(text)}</span>`;
+    legend.innerHTML =
+      chip("rgba(120,120,120,0.4)", "Hours fished") + speciesList.map((sp) => chip(colorOf(sp), sp)).join("") + chip("#c62828", "Catches per hour");
+  }
+
+  if (reportTideClockChartInstance) reportTideClockChartInstance.destroy();
+  reportTideClockChartInstance = new Chart(canvas.getContext("2d"), {
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          filter: (item) => item.raw !== null && item.raw !== 0,
+          callbacks: {
+            title: (items) => {
+              if (!items.length) return "";
+              const h = Number(items[0].label);
+              return `${h}–${h + TIDE_CLOCK_BIN_H} hours after low tide`;
+            },
+            label: (item) => {
+              if (item.dataset.yAxisID === "yEffort") return `Fished: ${item.raw.toFixed(1)} h`;
+              if (item.dataset.yAxisID === "yRate") return `Rate: ${item.raw.toFixed(2)} catches/h`;
+              return `${item.dataset.label}: ${item.raw}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          stacked: true,
+          title: { display: true, text: "Hours since low tide" },
+          ticks: { callback: (v, i) => (labels[i] % 1 === 0 ? labels[i] : ""), maxRotation: 0, autoSkip: false },
+          grid: { display: false },
+        },
+        y: { stacked: true, beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: "Catches" } },
+        yEffort: { display: false, beginAtZero: true, position: "right", grid: { display: false } },
+        yRate: { beginAtZero: true, position: "right", grid: { display: false }, title: { display: true, text: "Catches/hour" } },
+      },
+    },
+  });
+}
+
+// ---------------------------------------------------------------------
 // Report 2 — bait/rig/rod effectiveness
 // ---------------------------------------------------------------------
 
@@ -451,6 +606,7 @@ function renderLocationReport() {
 function renderAllReports() {
   document.getElementById("reportsSummaryLine").textContent = `${reportsFilteredCatches.length} catch${reportsFilteredCatches.length === 1 ? "" : "es"} match the current filters (out of ${reportsAllMarks.filter((m) => m.type === "Catch").length} total).`;
   renderTideReport();
+  renderTideClockReport();
   renderGearReport();
   renderLocationReport();
   refreshSessionRibbon(); // the calendar follows the date filters (it ignores the other catch filters)

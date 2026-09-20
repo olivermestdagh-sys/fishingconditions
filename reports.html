@@ -102,6 +102,15 @@
       </div>
     </section>
 
+    <section class="summary-card report-block" id="reportTideClockBlock">
+      <h3>Tide clock</h3>
+      <p class="footnote">When in the tide do you catch fish? Every session is laid onto one tide cycle, measured in hours since the last low tide. Grey columns are how long you fished at each point of the tide, coloured columns are catches (by species), and the line is catches per hour of fishing. Effort follows the date range in the filters; catches follow all the filters. Tides here are mixed semidiurnal, so the same hour isn't always the same tide size — and thin columns are noisy, so the line only appears where you've fished at least an hour.</p>
+      <p class="footnote" id="reportTideClockNote" style="margin:0 0 6px;"></p>
+      <div id="reportTideClockLegend" style="margin:4px 0 8px;"></div>
+      <div class="report-chart-wrap"><canvas id="reportTideClockChart" role="img" aria-label="Chart of fishing effort, catches and catch rate by hours since low tide"></canvas></div>
+      <div id="reportTideClockEmpty" class="report-empty" style="display:none;"></div>
+    </section>
+
     <div class="reports-summary-line" id="reportsSummaryLine"></div>
 
     <section class="summary-card report-block" id="reportTideBlock">
@@ -147,5 +156,6 @@
 <script src="js/chart-render.js"></script>
 <script src="js/week-tools.js"></script>
 <script src="js/session-ribbon.js"></script>
+<script src="js/tide-clock.js"></script>
 <script src="reports.js"></script>
 </body></html>
