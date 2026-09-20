@@ -1,5 +1,5 @@
 // session-ribbon.js
-// The Reports tab's "Session ribbon": a continuous, horizontally scrolling calendar (three days visible at a time, bounded by the Reports date filters). Each fishing session on it gets the site's own conditions graph for its own location (the same renderConditionsChart Week Ahead and the Location tab use: night shading, tide fill, wind arrows, Location/Fishing condition strips), with the session bar and a dot for every catch (in that species' mark colour) drawn over it.
+// The Reports tab's "Session ribbon": a continuous, horizontally scrolling calendar (three days visible at a time, bounded by the Reports date filters). Each fishing session on it gets the site's own conditions graph for its own location (the same renderConditionsChart Week Ahead and the Location tab use: night shading, tide fill, wind arrows, Location/Fishing condition strips), with the session shaded and a dot for every catch (in that species' mark colour) drawn over it.
 // Loaded by reports.html after mark-lookup.js, weather-preview.js and chart-render.js. The top half of this file is pure logic (tested in tests/session-ribbon.test.mjs); the bottom half builds the rows, draws, and talks to the page.
 //
 // Data used (nothing new is stored):
@@ -86,7 +86,7 @@ function ribbonMarkConditionsAt(marks, t) {
   return out;
 }
 
-/** Lays catch dots out so none hide each other: items {x, r} (sorted by x) get a `level` — 0 sits on the bar, higher levels stack above. */
+/** Lays catch dots out so none hide each other: items {x, r} (sorted by x) get a `level` — level 0 is the top row, higher levels stack below it. */
 function ribbonLayoutDots(items) {
   const lastAtLevel = [];
   for (const it of items) {
@@ -314,8 +314,8 @@ function ribbonChunkSegments(segs, pxPerMs, maxCssPx) {
 // ---------------------------------------------------------------------
 
 const RIBBON_HEADER_H = 40;
-const RIBBON_BAR_Y = 6; // top of the session bar, below the top of the plot
-const RIBBON_BAR_H = 12;
+const RIBBON_DOT_R = 6; // every catch dot is the same size
+const RIBBON_DOT_TOP = 12; // centre of the first row of dots, below the top of the plot
 
 function ribbonSpeciesColor(species) {
   const style = markStyleFor({ species, type: "Catch" }, { groupByKey: "species", markLists: ribbonMarkLists });
@@ -360,29 +360,19 @@ function ribbonDotTooltipHtml(state, dot) {
   return `<div>${head}</div>` + ribbonConditionLines(state, c._t).map((l) => `<div style="color:var(--grey-700);">${escapeHtml(l)}</div>`).join("");
 }
 
-function ribbonBarTooltipHtml(state) {
-  const s = state.session;
-  const n = s.catches.length;
-  return `<div><strong>${escapeHtml(s.name)}</strong> · ${ribbonFmtDay(s.start)} ${ribbonFmtTime(s.start)}–${ribbonFmtTime(s.end)}</div>` +
-    (state.locationName ? `<div style="color:var(--grey-700);">${escapeHtml(state.locationName)}</div>` : "") +
-    `<div style="color:var(--grey-700);">${n} catch${n === 1 ? "" : "es"}</div>`;
-}
-
 /**
  * Draws the sessions inside the chart itself, so they're part of the graph:
- * the site's green tint and dashed edges over each session, a bar along the
- * top with a dot on it for every catch (in that species' mark colour, stacking
- * downward where catches are close together). No text labels beyond the times
- * on the bar. Also answers hover/tap over a bar or dot with its own tooltip
- * (and swallows that event so the chart's normal tooltip doesn't fight it).
+ * the site's green tint over each session, and a dot for every catch along the
+ * top (all the same size, in that species' mark colour, stacking downward
+ * where catches are close together). Also answers hover/tap over a dot with its
+ * own tooltip (and swallows that event so the chart's normal tooltip doesn't
+ * fight it).
  */
 function buildRibbonSessionsPlugin(states, onHover) {
-  let hits = { bars: [], dots: [] };
+  let dots = [];
   const hitAt = (x, y) => {
-    const dot = hits.dots.find((d) => Math.hypot(x - d.x, y - d.y) <= d.r + 4);
-    if (dot) return { dot };
-    const bar = hits.bars.find((b) => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1);
-    return bar ? { bar } : null;
+    const dot = dots.find((d) => Math.hypot(x - d.x, y - d.y) <= d.r + 4);
+    return dot ? { dot } : null;
   };
   return {
     id: "ribbonSessions",
@@ -404,37 +394,12 @@ function buildRibbonSessionsPlugin(states, onHover) {
       const { ctx, chartArea, scales } = chart;
       if (!chartArea || !scales.x) return;
       const px = (t) => scales.x.getPixelForValue(t);
-      const next = { bars: [], dots: [] };
+      const next = [];
       for (const state of states) {
-        const { session } = state;
-        const x0 = px(session.start);
-        const x1 = px(session.end);
-        const y0 = chartArea.top + RIBBON_BAR_Y;
-        ctx.save(); // the green tint (drawn before the lines) marks the session's extent — no edge lines
-        const w = Math.max(3, x1 - x0);
-        ctx.fillStyle = "rgba(31, 78, 120, 0.92)";
-        ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(x0, y0, w, RIBBON_BAR_H, 4);
-        else ctx.rect(x0, y0, w, RIBBON_BAR_H);
-        ctx.fill();
-        if (w >= 74) {
-          ctx.fillStyle = "#ffffff";
-          ctx.font = "9.5px -apple-system, BlinkMacSystemFont, sans-serif";
-          ctx.textAlign = "left";
-          ctx.textBaseline = "middle";
-          ctx.fillText(`${ribbonFmtTime(session.start)}–${ribbonFmtTime(session.end)}`, x0 + 5, y0 + RIBBON_BAR_H / 2 + 0.5);
-        }
-        ctx.restore();
-        next.bars.push({ x0, x1, y0, y1: y0 + RIBBON_BAR_H, state });
-
-        const sizes = session.catches.map((c) => c.size).filter((v) => v != null);
-        const sMin = Math.min(...sizes);
-        const sMax = Math.max(...sizes);
-        const radiusFor = (c) => (c.size != null && sMax > sMin ? 4.5 + ((c.size - sMin) / (sMax - sMin)) * 4 : 5.5);
-        const dots = session.catches.map((c) => ({ c, state, x: px(c._t), r: radiusFor(c) }));
-        ribbonLayoutDots(dots);
-        for (const d of dots) {
-          d.y = y0 + RIBBON_BAR_H / 2 + d.level * 12;
+        const items = state.session.catches.map((c) => ({ c, state, x: px(c._t), r: RIBBON_DOT_R }));
+        ribbonLayoutDots(items);
+        for (const d of items) {
+          d.y = chartArea.top + RIBBON_DOT_TOP + d.level * (2 * RIBBON_DOT_R + 2);
           ctx.save();
           ctx.beginPath();
           ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
@@ -444,12 +409,11 @@ function buildRibbonSessionsPlugin(states, onHover) {
           ctx.strokeStyle = "#ffffff";
           ctx.stroke();
           ctx.restore();
-          next.dots.push(d);
+          next.push(d);
         }
       }
-      hits = next;
-    },
-    // A bar/dot under the pointer gets its own tooltip; the event is then dropped so the chart's normal one doesn't also fire.
+      dots = next;    },
+    // A dot under the pointer gets its own tooltip; the event is then dropped so the chart's normal one doesn't also fire.
     beforeEvent(chart, args) {
       const e = args.event;
       if (!e || e.x == null) return;
@@ -514,7 +478,7 @@ function ribbonShowTip(chunk, hit, e) {
     tip.style.display = "none";
     return;
   }
-  tip.innerHTML = hit.dot ? ribbonDotTooltipHtml(hit.dot.state, hit.dot) : ribbonBarTooltipHtml(hit.bar.state);
+  tip.innerHTML = ribbonDotTooltipHtml(hit.dot.state, hit.dot);
   tip.style.display = "block";
   const x = chunk.left + e.x;
   const visLeft = scroll.scrollLeft + 4;
@@ -555,13 +519,9 @@ function ribbonShoreFor(locations, lat, lng, craft) {
   return { name: displayNameFor(nearest), shore: forCraft.shore || null };
 }
 
-function ribbonChip(color, label, shape) {
-  const swatch = shape === "bar"
-    ? `<span style="width:16px;height:10px;border-radius:3px;background:${color};display:inline-block;"></span>`
-    : `<span style="width:11px;height:11px;border-radius:50%;background:${color};display:inline-block;"></span>`;
-  return `<span style="display:inline-flex;align-items:center;gap:5px;margin:0 12px 4px 0;font-size:0.78rem;">${swatch}${escapeHtml(label)}</span>`;
+function ribbonChip(color, label) {
+  return `<span style="display:inline-flex;align-items:center;gap:5px;margin:0 12px 4px 0;font-size:0.78rem;"><span style="width:11px;height:11px;border-radius:50%;background:${color};display:inline-block;"></span>${escapeHtml(label)}</span>`;
 }
-
 function ribbonUpdateChrome() {
   const model = ribbonModel;
   if (!model) return;
@@ -577,7 +537,7 @@ function ribbonUpdateChrome() {
     `${states.length} session${states.length === 1 ? "" : "s"}, ${catches} catch${catches === 1 ? "" : "es"} · ${ribbonFmtDay(model.range.from, true)} – ${ribbonFmtDay(model.range.to - 1, true)} (${notes.join("; ")})`;
 
   const species = Array.from(new Set(states.flatMap((s) => s.session.catches.map((k) => k.species)).filter(Boolean)));
-  document.getElementById("ribbonLegend").innerHTML = species.map((sp) => ribbonChip(ribbonSpeciesColor(sp), sp)).join("") + ribbonChip("#1f4e78", "Session", "bar");
+  document.getElementById("ribbonLegend").innerHTML = species.map((sp) => ribbonChip(ribbonSpeciesColor(sp), sp)).join("");
 
   const rows = [];
   for (const s of states) {
