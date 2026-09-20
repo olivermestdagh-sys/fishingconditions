@@ -182,7 +182,7 @@ function ribbonSegmentBounds(sessions) {
 // Conditions rows (the same shape every other graph on the site uses)
 // ---------------------------------------------------------------------
 
-/** Sun times for every date in [from, to] at (lat, lng), in the {date, firstLight, sunrise, sunset, lastLight} shape the day/night shading expects. */
+/** Sun times for every date in [from, to) at (lat, lng), in the {date, firstLight, sunrise, sunset, lastLight} shape the day/night shading expects. */
 function ribbonSunTimesForRange(from, to, lat, lng) {
   const fmt = (ms) => (ms == null ? null : new Date(ms).toISOString().slice(0, 19).replace("T", " "));
   const out = [];
@@ -194,31 +194,43 @@ function ribbonSunTimesForRange(from, to, lat, lng) {
   return out;
 }
 
+/** The hourly grid [from, to) plus a last row just before `to`, so a day's data runs right up to its midnight without spilling a row into the next day. */
+function ribbonRowTimes(from, to) {
+  const times = [];
+  for (let t = Math.ceil(from / 3600000) * 3600000; t < to; t += 3600000) times.push(t);
+  const last = to - 120000; // two minutes short of midnight, leaving room for the block-end row a minute after it (still the same day)
+  if (times.length === 0 || times[times.length - 1] < last) times.push(last);
+  return times;
+}
+
 /**
  * Builds hourly "rows" (Tide Height, Tide Status, Wind, Temp, Pressure, Water
- * Temp, Location Condition, Fishing Condition) for [from, to] from the
+ * Temp, Location Condition, Fishing Condition) for [from, to) from the
  * historical lookups, using the same building blocks as the Location tab's
  * preview graph (deriveTideStatus, attachFishingConditionScores,
  * attachConditionScores) so scores and shading match the other pages.
  * `raw` = { hourly, marine, tide } as fetched; `tide` is null when the
  * location has no tide data, in which case no tide fields are set at all.
+ * With `raw` null (conditions not fetched yet) the rows are blank — they hold
+ * the place on the graph (day/night shading) but carry no values or scores.
  */
 function ribbonBuildRows(raw, from, to, craft, shore, sunTimes) {
   const iso = (ms) => new Date(ms).toISOString().slice(0, 19);
+  const byT = new Map();
+  const rowAt = (t) => {
+    if (!byT.has(t)) byT.set(t, { dateTime: iso(t), _t: t });
+    return byT.get(t);
+  };
+  for (const t of ribbonRowTimes(from, to)) rowAt(t);
+  if (!raw) return Array.from(byT.values());
+
   const lookup = (obj, field) => (obj && obj.time ? openMeteoHourlyLookup(obj.time, obj[field]) : {});
   const speed = lookup(raw.hourly, "windspeed_10m");
   const dirDeg = lookup(raw.hourly, "winddirection_10m");
   const temp = lookup(raw.hourly, "temperature_2m");
   const pressure = lookup(raw.hourly, "pressure_msl");
   const sst = lookup(raw.marine, "sea_surface_temperature");
-
-  const byT = new Map();
-  const rowAt = (t) => {
-    if (!byT.has(t)) byT.set(t, { dateTime: iso(t), _t: t });
-    return byT.get(t);
-  };
-  for (let t = Math.ceil(from / 3600000) * 3600000; t <= to; t += 3600000) {
-    const row = rowAt(t);
+  for (const row of byT.values()) {
     const key = row.dateTime.slice(0, 13).replace("T", " ");
     if (speed[key] != null) row["Wind Forecast (km/h)"] = Math.round(speed[key] * 10) / 10;
     if (dirDeg[key] != null) row["Wind Forecast Dir"] = previewDegreesToCompass(dirDeg[key]);
@@ -231,7 +243,7 @@ function ribbonBuildRows(raw, from, to, craft, shore, sunTimes) {
   if (tidal) {
     const events = raw.tide.extrema.map((e) => ({ _t: e.t, "Tide Height (m)": e.height }));
     for (const e of raw.tide.extrema) {
-      if (e.t < from || e.t > to) continue;
+      if (e.t < from || e.t >= to) continue;
       const row = rowAt(e.t);
       row["Tide Height (m)"] = e.height;
       row["Tide Type"] = e.type;
@@ -250,11 +262,51 @@ function ribbonBuildRows(raw, from, to, craft, shore, sunTimes) {
   return rows;
 }
 
+/**
+ * One continuous row list from several sessions' row lists (each already a
+ * day-aligned block): concatenated in time order, with an empty row just
+ * after each block so the lines and condition strips stop at the block's edge
+ * instead of stretching across the days with no session (blocks on consecutive
+ * days run straight on, no marker between them).
+ */
+function ribbonJoinRowBlocks(blocks) {
+  const rows = [];
+  const sorted = blocks.filter((b) => b.length).sort((a, b) => a[0]._t - b[0]._t);
+  sorted.forEach((block, i) => {
+    rows.push(...block);
+    const last = block[block.length - 1]._t;
+    const next = sorted[i + 1] ? sorted[i + 1][0]._t : null;
+    const gapAt = last + 60000;
+    if (next == null || next - last > 2 * 3600000) rows.push({ dateTime: new Date(gapAt).toISOString().slice(0, 19), _t: gapAt, _break: true }); // _break: renderConditionsChart leaves it out of its hourly bucketing
+  });
+  return rows;
+}
+
 /** The row closest in time to t. */
 function ribbonNearestRow(rows, t) {
   let best = null;
-  for (const r of rows) if (!best || Math.abs(r._t - t) < Math.abs(best._t - t)) best = r;
+  for (const r of rows) if (r["Wind Forecast (km/h)"] != null || r["Tide Height (m)"] != null || r["Condition"] != null) if (!best || Math.abs(r._t - t) < Math.abs(best._t - t)) best = r;
   return best;
+}
+
+/**
+ * Splits the sessions into runs of segments that each fit in one canvas.
+ * Browsers cap a canvas at roughly 16k device pixels, so a very long calendar
+ * needs more than one chart; almost always it's a single chart, which is what
+ * keeps the graph continuous. A chart starts at its first session's day.
+ */
+function ribbonChunkSegments(segs, pxPerMs, maxCssPx) {
+  const chunks = [];
+  for (const seg of segs) {
+    const cur = chunks[chunks.length - 1];
+    if (cur && (seg.to - cur.from) * pxPerMs <= maxCssPx) {
+      cur.segs.push(seg);
+      cur.to = Math.max(cur.to, seg.to);
+    } else {
+      chunks.push({ from: seg.from, to: seg.to, segs: [seg] });
+    }
+  }
+  return chunks;
 }
 
 // ---------------------------------------------------------------------
@@ -262,8 +314,9 @@ function ribbonNearestRow(rows, t) {
 // ---------------------------------------------------------------------
 
 const RIBBON_HEADER_H = 40;
-const RIBBON_BAR_Y = 8; // top of the session bar inside the chart area
+const RIBBON_BAR_Y = 6; // top of the session bar, below the top of the plot
 const RIBBON_BAR_H = 12;
+const RIBBON_SESSION_GREEN = "#16a34a"; // the site's session/good-condition green (see buildSessionSpanPlugin)
 
 function ribbonSpeciesColor(species) {
   const style = markStyleFor({ species, type: "Catch" }, { groupByKey: "species", markLists: ribbonMarkLists });
@@ -278,7 +331,7 @@ function ribbonFmtDay(ms, withYear) {
   return new Intl.DateTimeFormat([], { timeZone: "UTC", weekday: "short", day: "numeric", month: "short", ...(withYear ? { year: "numeric" } : {}) }).format(new Date(ms));
 }
 
-/** Recorded (mark-carried) conditions plus, once loaded, the site's own row values at time t — for tooltips and the table. */
+/** The site's own row values at time t (once loaded) plus what was recorded on the marks — for tooltips. */
 function ribbonConditionLines(state, t) {
   const lines = [];
   const row = state.rows ? ribbonNearestRow(state.rows, t) : null;
@@ -302,10 +355,183 @@ function ribbonConditionLines(state, t) {
   return lines;
 }
 
-function ribbonTooltipHtml(state, t, dot) {
+function ribbonDotTooltipHtml(state, dot) {
   const c = dot.c;
   const head = `<strong>${escapeHtml(c.species || c.name || "Catch")}</strong> · ${ribbonFmtDay(c._t)} ${ribbonFmtTime(c._t)}${c.size != null ? ` · ${c.size} cm` : ""}`;
-  return `<div>${head}</div>` + ribbonConditionLines(state, t).map((l) => `<div style="color:var(--grey-700);">${escapeHtml(l)}</div>`).join("");
+  return `<div>${head}</div>` + ribbonConditionLines(state, c._t).map((l) => `<div style="color:var(--grey-700);">${escapeHtml(l)}</div>`).join("");
+}
+
+function ribbonBarTooltipHtml(state) {
+  const s = state.session;
+  const n = s.catches.length;
+  return `<div><strong>${escapeHtml(s.name)}</strong> · ${ribbonFmtDay(s.start)} ${ribbonFmtTime(s.start)}–${ribbonFmtTime(s.end)}</div>` +
+    (state.locationName ? `<div style="color:var(--grey-700);">${escapeHtml(state.locationName)}</div>` : "") +
+    `<div style="color:var(--grey-700);">${n} catch${n === 1 ? "" : "es"}</div>`;
+}
+
+/**
+ * Draws the sessions inside the chart itself, so they're part of the graph:
+ * the site's green tint and dashed edges over each session, a bar along the
+ * top with a dot on it for every catch (in that species' mark colour, stacking
+ * downward where catches are close together). No text labels beyond the times
+ * on the bar. Also answers hover/tap over a bar or dot with its own tooltip
+ * (and swallows that event so the chart's normal tooltip doesn't fight it).
+ */
+function buildRibbonSessionsPlugin(states, onHover) {
+  let hits = { bars: [], dots: [] };
+  const hitAt = (x, y) => {
+    const dot = hits.dots.find((d) => Math.hypot(x - d.x, y - d.y) <= d.r + 4);
+    if (dot) return { dot };
+    const bar = hits.bars.find((b) => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1);
+    return bar ? { bar } : null;
+  };
+  return {
+    id: "ribbonSessions",
+    beforeDraw(chart) {
+      const { ctx, chartArea, scales } = chart;
+      if (!chartArea || !scales.x) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(22, 163, 74, 0.14)";
+      for (const { session } of states) {
+        const from = Math.max(session.start, scales.x.min);
+        const to = Math.min(session.end, scales.x.max);
+        if (to <= from) continue;
+        const x0 = scales.x.getPixelForValue(from);
+        ctx.fillRect(x0, chartArea.top, scales.x.getPixelForValue(to) - x0, chartArea.bottom - chartArea.top);
+      }
+      ctx.restore();
+    },
+    afterDatasetsDraw(chart) {
+      const { ctx, chartArea, scales } = chart;
+      if (!chartArea || !scales.x) return;
+      const px = (t) => scales.x.getPixelForValue(t);
+      const next = { bars: [], dots: [] };
+      for (const state of states) {
+        const { session } = state;
+        const x0 = px(session.start);
+        const x1 = px(session.end);
+        const y0 = chartArea.top + RIBBON_BAR_Y;
+        ctx.save();
+        ctx.strokeStyle = RIBBON_SESSION_GREEN;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([3, 3]);
+        for (const x of [x0, x1]) {
+          ctx.beginPath();
+          ctx.moveTo(x, chartArea.top);
+          ctx.lineTo(x, chartArea.bottom);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+        const w = Math.max(3, x1 - x0);
+        ctx.fillStyle = "rgba(31, 78, 120, 0.92)";
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x0, y0, w, RIBBON_BAR_H, 4);
+        else ctx.rect(x0, y0, w, RIBBON_BAR_H);
+        ctx.fill();
+        if (w >= 74) {
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "9.5px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.textAlign = "left";
+          ctx.textBaseline = "middle";
+          ctx.fillText(`${ribbonFmtTime(session.start)}–${ribbonFmtTime(session.end)}`, x0 + 5, y0 + RIBBON_BAR_H / 2 + 0.5);
+        }
+        ctx.restore();
+        next.bars.push({ x0, x1, y0, y1: y0 + RIBBON_BAR_H, state });
+
+        const sizes = session.catches.map((c) => c.size).filter((v) => v != null);
+        const sMin = Math.min(...sizes);
+        const sMax = Math.max(...sizes);
+        const radiusFor = (c) => (c.size != null && sMax > sMin ? 4.5 + ((c.size - sMin) / (sMax - sMin)) * 4 : 5.5);
+        const dots = session.catches.map((c) => ({ c, state, x: px(c._t), r: radiusFor(c) }));
+        ribbonLayoutDots(dots);
+        for (const d of dots) {
+          d.y = y0 + RIBBON_BAR_H / 2 + d.level * 12;
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+          ctx.fillStyle = ribbonSpeciesColor(d.c.species);
+          ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = "#ffffff";
+          ctx.stroke();
+          ctx.restore();
+          next.dots.push(d);
+        }
+      }
+      hits = next;
+    },
+    // A bar/dot under the pointer gets its own tooltip; the event is then dropped so the chart's normal one doesn't also fire.
+    beforeEvent(chart, args) {
+      const e = args.event;
+      if (!e || e.x == null) return;
+      if (e.type === "mouseout") {
+        onHover(chart, null);
+        return;
+      }
+      if (e.type !== "mousemove" && e.type !== "click" && e.type !== "touchstart" && e.type !== "touchmove") return;
+      const hit = hitAt(e.x, e.y);
+      onHover(chart, hit, e);
+      if (hit) {
+        chart.setActiveElements([]);
+        chart.tooltip.setActiveElements([], { x: e.x, y: e.y });
+        chart.draw();
+        return false;
+      }
+    },
+  };
+}
+
+/** Draws (or redraws) one chart — the shared renderConditionsChart, with the same options Week Ahead uses for a row — for a run of session segments. */
+function ribbonRenderChunk(chunk) {
+  const box = chunk.box;
+  if (!box) return;
+  if (chunk.chart) {
+    chunk.chart.destroy();
+    chunk.chart = null;
+  }
+  box.innerHTML = `<canvas role="img" aria-label="Conditions and catches for the fishing sessions in this period"></canvas>`;
+  const states = chunk.segs.map((seg) => seg.state);
+  const blocks = states.map((s) => {
+    s.craft = ribbonCraft;
+    s.sunTimes = ribbonSunTimesForRange(s.seg.from, s.seg.to, s.session.lat, s.session.lng);
+    s.rows = ribbonBuildRows(s.raw, s.seg.from, s.seg.to, ribbonCraft, s.shore, s.sunTimes);
+    return s.rows;
+  });
+  const rows = ribbonJoinRowBlocks(blocks);
+  const sunTimes = states.flatMap((s) => s.sunTimes);
+  const tideHeights = states.flatMap((s) => (s.raw && s.raw.tide ? s.raw.tide.extrema.map((e) => e.height) : []));
+  chunk.chart = renderConditionsChart({
+    canvas: box.querySelector("canvas"),
+    rows,
+    sunTimes,
+    existingChart: null,
+    tideMaxObserved: tideHeights.length ? Math.max(...tideHeights) : null,
+    moonPhases: null,
+    showDayHeading: false,
+    showSunTimes: false,
+    compact: true,
+    xRange: { min: chunk.from, max: chunk.to },
+    showFirstBoxIcons: true, // once per chart, at its first strip box
+    spanGaps: false,
+    extraPlugins: [buildRibbonSessionsPlugin(states, (chart, hit, e) => ribbonShowTip(chunk, hit, e))],
+  });
+}
+
+function ribbonShowTip(chunk, hit, e) {
+  const tip = document.getElementById("ribbonTip");
+  const scroll = document.getElementById("ribbonScroll");
+  if (!tip) return;
+  if (!hit) {
+    tip.style.display = "none";
+    return;
+  }
+  tip.innerHTML = hit.dot ? ribbonDotTooltipHtml(hit.dot.state, hit.dot) : ribbonBarTooltipHtml(hit.bar.state);
+  tip.style.display = "block";
+  const x = chunk.left + e.x;
+  const visLeft = scroll.scrollLeft + 4;
+  const visRight = scroll.scrollLeft + scroll.clientWidth - 4;
+  tip.style.left = Math.min(Math.max(visLeft, x + 12), Math.max(visLeft, visRight - tip.offsetWidth)) + "px";
+  tip.style.top = RIBBON_HEADER_H + e.y + 16 + "px";
 }
 
 // ---------------------------------------------------------------------
@@ -316,8 +542,8 @@ let ribbonSessions = [];
 let ribbonCraft = "Kayak";
 let ribbonMarkLists = [];
 let ribbonLocations = [];
-let ribbonModel = null; // { range, states, x, pxPerMs, width, rowH }
-const ribbonStates = new Map(); // groupId -> { session, seg, raw, rows, sunTimes, chart, craft }
+let ribbonModel = null; // { range, states, chunks, x, pxPerMs, dayPx, width, rowH }
+const ribbonStates = new Map(); // groupId -> { session, seg, raw, rows, sunTimes, craft, shore, locationName }
 const ribbonLoading = new Set();
 let ribbonReady = false;
 let ribbonWantInitialScroll = true;
@@ -352,8 +578,8 @@ function ribbonUpdateChrome() {
   if (!model) return;
   const states = model.states;
   const catches = states.reduce((n, s) => n + s.session.catches.length, 0);
-  const noTide = states.filter((s) => s.rows && !s.raw.tide).length;
-  const loading = states.filter((s) => !s.rows).length;
+  const noTide = states.filter((s) => s.raw && !s.raw.tide).length;
+  const loading = states.filter((s) => !s.raw).length;
   const notes = [];
   if (loading) notes.push(`loading conditions for ${loading} session${loading === 1 ? "" : "s"}…`);
   if (noTide) notes.push(`no tide data for ${noTide} session${noTide === 1 ? "" : "s"}, so their tide layer is left out`);
@@ -379,12 +605,12 @@ function ribbonUpdateChrome() {
 }
 
 /** The date/hour header shared by the whole calendar (like Week Ahead's), plus faint day lines running down through the chart area. */
-function ribbonHeaderSvg(model, dayPx) {
-  const { range, x, width, rowH } = model;
+function ribbonHeaderSvg(model) {
+  const { range, x, width, rowH, dayPx } = model;
   const labelHours = dayPx >= 576 ? 1 : dayPx >= 288 ? 3 : 6;
   let svg = `<svg width="${width}" height="${RIBBON_HEADER_H + rowH}" style="position:absolute;left:0;top:0;pointer-events:none;" aria-hidden="true">`;
   for (let d = range.from; d < range.to; d += RIBBON_DAY_MS) {
-    svg += `<line x1="${x(d)}" x2="${x(d)}" y1="0" y2="${RIBBON_HEADER_H + rowH}" style="stroke:var(--grey-300, #cbd5e1)" stroke-width="1"/>`;
+    svg += `<line x1="${x(d)}" x2="${x(d)}" y1="0" y2="${RIBBON_HEADER_H}" style="stroke:var(--grey-300, #cbd5e1)" stroke-width="1"/>`;
     svg += `<text x="${x(d) + 5}" y="14" font-size="11" font-weight="600" style="fill:var(--grey-700)">${ribbonFmtDay(d)}</text>`;
     for (let h = 0; h < 24; h += labelHours) {
       svg += `<text x="${x(d + h * 3600000) + (h === 0 ? 5 : 0)}" y="32" ${h === 0 ? "" : 'text-anchor="middle"'} font-size="10" style="fill:var(--grey-500)">${String(h).padStart(2, "0")}</text>`;
@@ -393,96 +619,6 @@ function ribbonHeaderSvg(model, dayPx) {
   }
   svg += `</svg>`;
   return svg;
-}
-
-/** Session bars and catch dots, drawn over the charts. Only the bars/dots take pointer events, so the chart underneath keeps its own hover tooltip. */
-function ribbonOverlaySvg(model) {
-  const { states, x, width, rowH } = model;
-  let svg = `<svg id="ribbonOverlay" width="${width}" height="${rowH}" style="position:absolute;left:0;top:${RIBBON_HEADER_H}px;pointer-events:none;" role="img" aria-label="Fishing sessions and catches">`;
-  model.dots = [];
-  for (const s of states) {
-    const { session } = s;
-    const bx = x(session.start);
-    const bw = Math.max(3, x(session.end) - bx);
-    svg += `<rect data-bar="${escapeHtml(session.groupId)}" x="${bx}" y="${RIBBON_BAR_Y}" width="${bw}" height="${RIBBON_BAR_H}" rx="4" fill="#1f4e78" fill-opacity="0.92" style="pointer-events:all;"/>`;
-    if (bw >= 74) svg += `<text x="${bx + 5}" y="${RIBBON_BAR_Y + 9}" font-size="9.5" fill="#ffffff" style="pointer-events:none;">${ribbonFmtTime(session.start)}–${ribbonFmtTime(session.end)}</text>`;
-
-    const sizes = session.catches.map((c) => c.size).filter((v) => v != null);
-    const sMin = Math.min(...sizes);
-    const sMax = Math.max(...sizes);
-    const radiusFor = (c) => (c.size != null && sMax > sMin ? 4.5 + ((c.size - sMin) / (sMax - sMin)) * 4 : 5.5);
-    const dots = session.catches.map((c) => ({ c, state: s, x: x(c._t), r: radiusFor(c) }));
-    ribbonLayoutDots(dots);
-    for (const d of dots) {
-      d.y = RIBBON_BAR_Y + RIBBON_BAR_H / 2 + d.level * 12; // on the bar, stacking downward where they'd overlap
-      svg += `<circle data-dot="${model.dots.length}" cx="${d.x}" cy="${d.y}" r="${d.r}" fill="${ribbonSpeciesColor(d.c.species)}" style="stroke:var(--white);stroke-width:1.5;pointer-events:all;"/>`;
-      model.dots.push(d);
-    }
-  }
-  svg += `</svg>`;
-  return svg;
-}
-
-function ribbonAttachHover(host, model) {
-  const overlay = host.querySelector("#ribbonOverlay");
-  const tip = host.querySelector("#ribbonTip");
-  const scroll = document.getElementById("ribbonScroll");
-  const hide = () => (tip.style.display = "none");
-  const place = (px, py, html) => {
-    tip.innerHTML = html;
-    tip.style.display = "block";
-    const visLeft = scroll.scrollLeft + 4;
-    const visRight = scroll.scrollLeft + scroll.clientWidth - 4;
-    tip.style.left = Math.min(Math.max(visLeft, px + 12), Math.max(visLeft, visRight - tip.offsetWidth)) + "px";
-    tip.style.top = RIBBON_HEADER_H + py + 16 + "px";
-  };
-  const onMove = (e) => {
-    const dotEl = e.target.closest && e.target.closest("[data-dot]");
-    const barEl = e.target.closest && e.target.closest("[data-bar]");
-    const rect = overlay.getBoundingClientRect();
-    if (dotEl) {
-      const d = model.dots[Number(dotEl.dataset.dot)];
-      place(d.x, d.y, ribbonTooltipHtml(d.state, d.c._t, d));
-    } else if (barEl) {
-      const s = model.states.find((st) => st.session.groupId === barEl.dataset.bar);
-      place(e.clientX - rect.left, RIBBON_BAR_Y, `<div><strong>${escapeHtml(s.session.name)}</strong> · ${ribbonFmtDay(s.session.start)} ${ribbonFmtTime(s.session.start)}–${ribbonFmtTime(s.session.end)}</div>${s.locationName ? `<div style="color:var(--grey-700);">${escapeHtml(s.locationName)}</div>` : ""}<div style="color:var(--grey-700);">${s.session.catches.length} catch${s.session.catches.length === 1 ? "" : "es"}</div>`);
-    } else {
-      hide();
-    }
-  };
-  overlay.addEventListener("pointermove", onMove);
-  overlay.addEventListener("pointerdown", onMove);
-  overlay.addEventListener("pointerleave", hide);
-}
-
-/** Draws (or redraws) one session's chart into its segment box, the way Week Ahead draws a row: the shared renderConditionsChart with the same options. */
-function ribbonRenderChart(state) {
-  const box = document.querySelector(`[data-ribbon-seg="${CSS.escape(state.session.groupId)}"]`);
-  if (!box || !state.raw) return;
-  if (state.chart) {
-    state.chart.destroy();
-    state.chart = null;
-  }
-  box.innerHTML = `<canvas role="img" aria-label="Conditions for ${escapeHtml(state.session.name)}"></canvas>`;
-  box.style.background = "";
-  state.craft = ribbonCraft;
-  state.sunTimes = ribbonSunTimesForRange(state.seg.from, state.seg.to, state.session.lat, state.session.lng);
-  state.rows = ribbonBuildRows(state.raw, state.seg.from, state.seg.to, ribbonCraft, state.shore, state.sunTimes);
-  const tideHeights = state.raw.tide ? state.raw.tide.extrema.map((e) => e.height) : [];
-  state.chart = renderConditionsChart({
-    canvas: box.querySelector("canvas"),
-    rows: state.rows,
-    sunTimes: state.sunTimes,
-    existingChart: null,
-    tideMaxObserved: tideHeights.length ? Math.max(...tideHeights) : null,
-    moonPhases: null,
-    showDayHeading: false,
-    showSunTimes: false,
-    compact: true,
-    sessionSpan: [{ from: state.session.start, to: state.session.end }],
-    xRange: { min: state.seg.from, max: state.seg.to },
-    showFirstBoxIcons: true,
-  });
 }
 
 /** Draws the calendar for the current filters, keeping the scroll position (or centring the newest session the first time). */
@@ -508,6 +644,7 @@ function ribbonDraw() {
   empty.style.display = "none";
   body.style.display = "block";
 
+  if (ribbonModel) ribbonModel.chunks.forEach((c) => c.chart && c.chart.destroy());
   const viewportW = Math.max(300, scroll.clientWidth || 600);
   const dayPx = Math.max(144, viewportW / RIBBON_VISIBLE_DAYS); // three days across, never squeezed below ~6px an hour
   const pxPerMs = dayPx / RIBBON_DAY_MS;
@@ -516,45 +653,35 @@ function ribbonDraw() {
   const width = Math.ceil(totalDays * dayPx);
   const rowH = viewportW <= 700 ? 210 : 328; // Week Ahead's row heights
 
-  const segs = ribbonSegmentBounds(range.sessions);
-  const states = segs.map((seg) => {
+  const segs = ribbonSegmentBounds(range.sessions).map((seg) => {
     let st = ribbonStates.get(seg.session.groupId);
     if (!st) {
-      st = { session: seg.session, raw: null, rows: null, chart: null };
+      st = { session: seg.session, raw: null, rows: null };
       ribbonStates.set(seg.session.groupId, st);
     }
     // new bounds (different filters) mean the fetched window may no longer cover the segment
-    if (st.raw && (st.raw.window.from > seg.from || st.raw.window.to < seg.to)) {
-      st.raw = null;
-      st.rows = null;
-    }
-    if (st.chart) {
-      st.chart.destroy();
-      st.chart = null;
-    }
+    if (st.raw && (st.raw.window.from > seg.from || st.raw.window.to < seg.to)) st.raw = null;
     st.seg = seg;
     const spot = ribbonLocations.length ? ribbonShoreFor(ribbonLocations, seg.session.lat, seg.session.lng, ribbonCraft) : { name: null, shore: null };
     st.shore = spot.shore;
     st.locationName = spot.name;
-    return st;
+    return { ...seg, state: st };
   });
+  const maxCssPx = Math.floor(16000 / (window.devicePixelRatio || 1));
+  const chunks = ribbonChunkSegments(segs, pxPerMs, maxCssPx).map((c) => ({ ...c, left: x(c.from), width: (c.to - c.from) * pxPerMs, chart: null, box: null }));
 
   const previousLeft = scroll.scrollLeft;
-  const model = { range, states, x, pxPerMs, dayPx, width, rowH, viewportW };
-  const boxes = states
-    .map((s) => {
-      const left = x(s.seg.from);
-      const w = (s.seg.to - s.seg.from) * pxPerMs;
-      return `<div class="ribbon-seg" data-ribbon-seg="${escapeHtml(s.session.groupId)}" style="left:${left}px;top:${RIBBON_HEADER_H}px;width:${w}px;height:${rowH}px;"><span class="footnote" style="position:absolute;left:8px;top:${RIBBON_BAR_Y + RIBBON_BAR_H + 6}px;margin:0;">${s.raw ? "" : "Loading conditions…"}</span></div>`;
-    })
-    .join("");
+  const model = { range, states: segs.map((s) => s.state), chunks, x, pxPerMs, dayPx, width, rowH, viewportW };
   host.style.width = width + "px";
   host.style.height = RIBBON_HEADER_H + rowH + "px";
-  host.innerHTML = ribbonHeaderSvg(model, dayPx) + boxes + ribbonOverlaySvg(model) +
+  host.innerHTML = ribbonHeaderSvg(model) +
+    chunks.map((c, i) => `<div class="ribbon-seg" data-ribbon-chunk="${i}" style="left:${c.left}px;top:${RIBBON_HEADER_H}px;width:${c.width}px;height:${rowH}px;"></div>`).join("") +
     `<div id="ribbonTip" role="status" style="display:none;position:absolute;z-index:5;pointer-events:none;max-width:240px;padding:6px 8px;border-radius:8px;font-size:0.78rem;line-height:1.35;background:var(--white);box-shadow:0 2px 10px rgba(0,0,0,0.3);"></div>`;
+  chunks.forEach((c, i) => {
+    c.box = host.querySelector(`[data-ribbon-chunk="${i}"]`);
+    ribbonRenderChunk(c); // draws straight away — blank rows hold the place (night shading, sessions) until each session's conditions load
+  });
   ribbonModel = model;
-  ribbonAttachHover(host, model);
-  states.forEach((s) => s.raw && ribbonRenderChart(s));
   ribbonUpdateChrome();
 
   if (ribbonWantInitialScroll) {
@@ -603,6 +730,7 @@ async function ribbonLoadVisible() {
   const rightT = model.range.from + (scroll.scrollLeft + scroll.clientWidth) / model.pxPerMs + RIBBON_DAY_MS;
   const todo = model.states.filter((s) => !s.raw && !ribbonLoading.has(s.session.groupId) && s.session.end >= leftT && s.session.start <= rightT);
   if (todo.length === 0) return;
+  const redraw = new Set();
   await Promise.all(
     todo.map(async (state) => {
       const { session, seg } = state;
@@ -628,14 +756,17 @@ async function ribbonLoadVisible() {
           tide,
           window: { from: seg.from, to: seg.to },
         };
-        // the box may have been rebuilt while waiting; only draw if this state is still the one on screen
-        if (ribbonModel && ribbonModel.states.includes(state)) ribbonRenderChart(state);
+        redraw.add(state);
       } finally {
         ribbonLoading.delete(session.groupId);
       }
     })
   );
-  ribbonUpdateChrome();
+  // one redraw per chart that gained data (skipped if the calendar was rebuilt while waiting)
+  if (ribbonModel === model) {
+    model.chunks.filter((c) => c.segs.some((s) => redraw.has(s.state))).forEach(ribbonRenderChunk);
+    ribbonUpdateChrome();
+  }
 }
 
 /** Called by reports.js whenever the report filters change: redraws for the new date range. */
@@ -662,7 +793,7 @@ async function initSessionRibbon(allMarks) {
         b.className = on ? "btn-primary" : "btn-secondary";
         b.setAttribute("aria-pressed", on ? "true" : "false");
       });
-      ribbonDraw(); // redraws every loaded chart with the new craft's Location Condition
+      ribbonDraw(); // redraws every chart with the new craft's Location Condition
     })
   );
   document.querySelectorAll("[data-ribbon-page]").forEach((btn) =>

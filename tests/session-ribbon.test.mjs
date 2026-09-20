@@ -30,7 +30,10 @@ const fns = new Function(
     fn("ribbonDayFloor"),
     fn("ribbonRange"),
     fn("ribbonSegmentBounds"),
-    "return { ribbonBuildSessions, ribbonCarryForward, ribbonMarkConditionsAt, ribbonLayoutDots, ribbonSunTimes, parseNaive, ribbonDayFloor, ribbonRange, ribbonSegmentBounds };",
+    fn("ribbonRowTimes"),
+    fn("ribbonJoinRowBlocks"),
+    fn("ribbonChunkSegments"),
+    "return { ribbonBuildSessions, ribbonCarryForward, ribbonMarkConditionsAt, ribbonLayoutDots, ribbonSunTimes, parseNaive, ribbonDayFloor, ribbonRange, ribbonSegmentBounds, ribbonRowTimes, ribbonJoinRowBlocks, ribbonChunkSegments };",
   ].join("\n")
 )();
 const T = (s) => fns.parseNaive(s);
@@ -125,4 +128,48 @@ test("a session that runs past midnight covers both days", () => {
   const [s] = fns.ribbonSegmentBounds([a]);
   assert.equal(s.from, T("2026-09-10T00:00:00"));
   assert.equal(s.to, T("2026-09-12T00:00:00"));
+});
+test("a day's rows run hourly up to its midnight without spilling into the next day", () => {
+  const from = T("2026-09-10T00:00:00");
+  const to = T("2026-09-11T00:00:00");
+  const times = fns.ribbonRowTimes(from, to);
+  assert.equal(times[0], from);
+  assert.ok(times.every((t) => t < to), "no row at or after the next midnight");
+  assert.equal(times[times.length - 1], to - 120000);
+  assert.equal(times.length, 25); // 24 hourly rows (00:00..23:00) + the end-of-day row
+});
+
+test("separate session blocks are joined with an empty row so lines and strips stop at the block's edge", () => {
+  const row = (iso) => ({ dateTime: iso, _t: T(iso) });
+  const a = [row("2026-09-10T00:00:00"), row("2026-09-10T23:58:00")];
+  const b = [row("2026-09-13T00:00:00"), row("2026-09-13T23:58:00")];
+  const joined = fns.ribbonJoinRowBlocks([b, a]);
+  assert.equal(joined.length, 6);
+  assert.equal(joined[2]._t, T("2026-09-10T23:58:00") + 60000); // gap marker straight after block a
+  assert.equal(joined[2].dateTime.slice(0, 10), "2026-09-10"); // still the same day, so no extra day is shaded
+  assert.equal(joined[2]["Wind Forecast (km/h)"], undefined);
+  assert.equal(joined[2]._break, true); // marked so the chart keeps it out of hourly bucketing
+  assert.ok(joined[3]._t > joined[2]._t && joined[5]._t > joined[3]._t);
+});
+
+test("sessions share one chart unless a canvas would be too wide", () => {
+  const seg = (fromDay, toDay) => ({ from: T(`${fromDay}T00:00:00`), to: T(`${toDay}T00:00:00`) });
+  const segs = [seg("2026-09-01", "2026-09-02"), seg("2026-09-05", "2026-09-06"), seg("2026-09-20", "2026-09-21")];
+  const pxPerMs = 100 / 86400000; // 100 px a day
+  const one = fns.ribbonChunkSegments(segs, pxPerMs, 5000);
+  assert.equal(one.length, 1);
+  assert.equal(one[0].segs.length, 3);
+  assert.equal(one[0].from, segs[0].from); // starts at the first session's day
+  assert.equal(one[0].to, segs[2].to);
+  const split = fns.ribbonChunkSegments(segs, pxPerMs, 800); // 8 days of width
+  assert.equal(split.length, 2);
+  assert.deepEqual(split.map((c) => c.segs.length), [2, 1]);
+});
+test("blocks on consecutive days run straight on with no break between them", () => {
+  const row = (iso) => ({ dateTime: iso, _t: T(iso) });
+  const a = [row("2026-09-10T00:00:00"), row("2026-09-10T23:58:00")];
+  const b = [row("2026-09-11T00:00:00"), row("2026-09-11T23:58:00")];
+  const joined = fns.ribbonJoinRowBlocks([a, b]);
+  assert.equal(joined.filter((r) => r._break).length, 1); // only after the last block
+  assert.equal(joined.length, 5);
 });

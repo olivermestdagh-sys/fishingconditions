@@ -69,35 +69,6 @@
       </div>
     </section>
 
-    <div class="reports-summary-line" id="reportsSummaryLine"></div>
-
-    <section class="summary-card report-block" id="reportTideBlock">
-      <h3>Catch rate by tide stage</h3>
-      <p class="footnote">Every logged Catch, grouped by the tide recorded at the time. Choose which one forms the columns; the other is stacked inside them.</p>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 6px;">
-        <span class="footnote" style="margin:0;">Columns by:</span>
-        <button type="button" data-tide-group="condition" class="btn-primary" aria-pressed="true">Tide condition</button>
-        <button type="button" data-tide-group="extreme" class="btn-secondary" aria-pressed="false">Tide extreme</button>
-      </div>
-      <p class="footnote" id="reportTideNote" style="margin:0 0 6px;"></p>
-      <div id="reportTideLegend" style="margin:4px 0 8px;"></div>
-      <div class="report-chart-wrap"><canvas id="reportTideChart" role="img" aria-label="Stacked bar chart of catches by tide condition or tide extreme, with the other stacked inside each column"></canvas></div>
-      <div id="reportTideEmpty" class="report-empty" style="display:none;">No catches match the current filters.</div>
-    </section>
-
-    <section class="summary-card report-block" id="reportGearBlock">
-      <h3>Bait, rig &amp; rod effectiveness</h3>
-      <p class="footnote">Catch counts for each bait/rig/rod actually used — a session's own gear, carried onto every catch logged during it.</p>
-      <div id="reportGearTables"></div>
-      <div id="reportGearEmpty" class="report-empty" style="display:none;">No catches match the current filters.</div>
-    </section>
-
-    <section class="summary-card report-block" id="reportLocationBlock">
-      <h3>Catches by location</h3>
-      <p class="footnote">Every catch matched to its nearest tracked location.</p>
-      <div id="reportLocationTableWrap"></div>
-      <div id="reportLocationEmpty" class="report-empty" style="display:none;">No catches match the current filters.</div>
-    </section>
     <section class="summary-card report-block" id="reportRibbonBlock">
       <h3>Session ribbon</h3>
       <p class="footnote">A continuous calendar of your fishing sessions, three days at a time — scroll sideways for the rest of the date range set in the filters above, or step with Previous / Next session. Each session shows its own location's conditions graph (the same one as the other pages), the session bar and a dot for every catch in that species' mark colour. Hover or tap a dot or the graph for the conditions at that moment.</p>
@@ -128,6 +99,37 @@
         </details>
       </div>
     </section>
+
+    <div class="reports-summary-line" id="reportsSummaryLine"></div>
+
+    <section class="summary-card report-block" id="reportTideBlock">
+      <h3>Catch rate by tide stage</h3>
+      <p class="footnote">Every logged Catch, grouped by the tide recorded at the time. Choose which one forms the columns; the other is stacked inside them.</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 6px;">
+        <span class="footnote" style="margin:0;">Columns by:</span>
+        <button type="button" data-tide-group="condition" class="btn-primary" aria-pressed="true">Tide condition</button>
+        <button type="button" data-tide-group="extreme" class="btn-secondary" aria-pressed="false">Tide extreme</button>
+      </div>
+      <p class="footnote" id="reportTideNote" style="margin:0 0 6px;"></p>
+      <div id="reportTideLegend" style="margin:4px 0 8px;"></div>
+      <div class="report-chart-wrap"><canvas id="reportTideChart" role="img" aria-label="Stacked bar chart of catches by tide condition or tide extreme, with the other stacked inside each column"></canvas></div>
+      <div id="reportTideEmpty" class="report-empty" style="display:none;">No catches match the current filters.</div>
+    </section>
+
+    <section class="summary-card report-block" id="reportGearBlock">
+      <h3>Bait, rig &amp; rod effectiveness</h3>
+      <p class="footnote">Catch counts for each bait/rig/rod actually used — a session's own gear, carried onto every catch logged during it.</p>
+      <div id="reportGearTables"></div>
+      <div id="reportGearEmpty" class="report-empty" style="display:none;">No catches match the current filters.</div>
+    </section>
+
+    <section class="summary-card report-block" id="reportLocationBlock">
+      <h3>Catches by location</h3>
+      <p class="footnote">Every catch matched to its nearest tracked location.</p>
+      <div id="reportLocationTableWrap"></div>
+      <div id="reportLocationEmpty" class="report-empty" style="display:none;">No catches match the current filters.</div>
+    </section>
+
   </section>
 </main>
 
