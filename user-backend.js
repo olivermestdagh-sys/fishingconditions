@@ -1289,20 +1289,33 @@ function validateMarkListInput(body, { partial }) {
 // notes for how many currently exist.
 // ---------------------------------------------------------------------
 
+// Who owns a mark. Catches and Sessions are the signed-in person's own record, so they live in their own account;
+// Mark and POI points are the shared set kept under the "public" account, which only Admin can write to. So the owner
+// follows the mark's type (the client no longer picks it, and a mark edited to another type changes owner with it).
+const PERSONAL_MARK_TYPES = ["Catch", "Session Start", "Session End"];
+
+function markOwnerFor(user, type) {
+  if (user.role !== "admin") return user.id;
+  return PERSONAL_MARK_TYPES.includes(type) ? user.id : PUBLIC_USER_ID;
+}
+
+/** The accounts whose marks a caller can see and change: their own, plus (Admin only) the shared "public" ones. */
+function markOwnerIds(user) {
+  return user.role === "admin" ? [user.id, PUBLIC_USER_ID] : [user.id];
+}
+
 async function handleMarksCollection(request, url, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
-  const resolved = resolveEffectiveUserId(url, user);
-  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
-  const uid = resolved.id;
 
   if (request.method === "GET") {
     const limit = Math.min(parseInt(url.searchParams.get("limit"), 10) || 200, 500);
     const offset = Math.max(parseInt(url.searchParams.get("offset"), 10) || 0, 0);
+    const owners = markOwnerIds(user);
     const { results } = await env.DB.prepare(
-      "SELECT * FROM marks WHERE user_id = ? ORDER BY date_time DESC LIMIT ? OFFSET ?"
+      `SELECT * FROM marks WHERE user_id IN (${owners.map(() => "?").join(", ")}) ORDER BY date_time DESC LIMIT ? OFFSET ?`
     )
-      .bind(uid, limit, offset)
+      .bind(...owners, limit, offset)
       .all();
     return jsonResponse(results.map(rowToMark), 200, env);
   }
@@ -1325,7 +1338,7 @@ async function handleMarksCollection(request, url, env) {
     const id = typeof body.id === "string" && body.id.trim() ? body.id.trim() : crypto.randomUUID();
     const now = Date.now();
     try {
-      await insertOrUpdateMark(env, id, uid, body, now);
+      await insertOrUpdateMark(env, id, markOwnerFor(user, body.type), body, now);
     } catch (err) {
       return jsonResponse({ error: "A mark with that id already exists." }, 409, env);
     }
@@ -1339,23 +1352,27 @@ async function handleMarksCollection(request, url, env) {
 async function handleMarkItem(request, url, env, id) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
-  const resolved = resolveEffectiveUserId(url, user);
-  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
-  const uid = resolved.id;
 
-  const existing = await env.DB.prepare("SELECT * FROM marks WHERE id = ? AND user_id = ?").bind(id, uid).first();
+  // Whichever of the caller's accounts holds it (see markOwnerIds); uid is that row's real owner.
+  const owners = markOwnerIds(user);
+  const existing = await env.DB.prepare(`SELECT * FROM marks WHERE id = ? AND user_id IN (${owners.map(() => "?").join(", ")})`)
+    .bind(id, ...owners)
+    .first();
   if (!existing) return jsonResponse({ error: "Mark not found." }, 404, env);
+  const uid = existing.user_id;
 
   if (request.method === "PUT") {
     const body = await readJsonBody(request);
     const validationError = validateMarkInput(body, { partial: true });
     if (validationError) return jsonResponse({ error: validationError }, 400, env);
     const merged = mergeMarkFields(existing, body);
+    // A change of type can change who the mark belongs to (e.g. a Mark edited into a Catch).
+    const newOwner = markOwnerFor(user, merged.type);
     await env.DB.prepare(
       `UPDATE marks SET lat=?, lng=?, name=?, type=?, date_time=?, source=?, source_uuid=?, species=?, bait=?, rig=?,
                         rod=?, berley=?, notes=?, size=?, released=?, weather_condition=?, tide_condition=?, tide_extreme=?, water_condition=?,
                         water_depth=?, water_temperature=?, temperature=?, barometer=?, wind_direction=?, wind_speed=?,
-                        session_role=?, session_group_id=?
+                        session_role=?, session_group_id=?, user_id=?
        WHERE id = ? AND user_id = ?`
     )
       .bind(
@@ -1363,7 +1380,7 @@ async function handleMarkItem(request, url, env, id) {
         merged.species, merged.bait, merged.rig, merged.rod, merged.berley, merged.notes, merged.size, merged.released,
         merged.weatherCondition, merged.tideCondition, merged.tideExtreme, merged.waterCondition, merged.waterDepth,
         merged.waterTemperature, merged.temperature, merged.barometer, merged.windDirection, merged.windSpeed,
-        merged.sessionRole, merged.sessionGroupId,
+        merged.sessionRole, merged.sessionGroupId, newOwner,
         id, uid
       )
       .run();
@@ -2031,10 +2048,12 @@ async function handlePublicMarkLists(env) {
 async function handlePublicMarks(request, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  // Admin sees their own marks (Catches, Sessions) together with the shared "public" ones (Mark, POI); see markOwnerFor.
+  const owners = markOwnerIds(user);
   const { results } = await env.DB.prepare(
-    "SELECT * FROM marks WHERE user_id = ? ORDER BY date_time DESC"
+    `SELECT * FROM marks WHERE user_id IN (${owners.map(() => "?").join(", ")}) ORDER BY date_time DESC`
   )
-    .bind(ownerScopeId(user))
+    .bind(...owners)
     .all();
   return new Response(JSON.stringify(results.map(rowToMark)), {
     status: 200,
@@ -2046,10 +2065,11 @@ async function handlePublicMarks(request, env) {
   });
 }
 
-/** Whose rows a signed-in caller sees on the formerly-public endpoints: the
- * Admin's own data lives under the shared "public" account (the site's
+/** Whose rows a signed-in caller sees on the formerly-public endpoints (mark lists, settings/home location): the
+ * Admin's settings live under the shared "public" account (the site's
  * original single-owner dataset was migrated there), so Admin maps to it;
- * every other user sees only rows stored under their own id. */
+ * every other user sees only rows stored under their own id. Marks are different:
+ * see markOwnerFor / markOwnerIds. */
 function ownerScopeId(user) {
   return user.role === "admin" ? PUBLIC_USER_ID : user.id;
 }

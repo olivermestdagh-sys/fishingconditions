@@ -931,8 +931,9 @@ function collectMarkFormValues(form, originalMark) {
 }
 
 /**
- * Writes one mark to D1 via POST or PUT /api/marks (Public's own rows,
- * ?userId=public) — replaces saveMarkToGitHub's read-sha/modify/write-
+ * Writes one mark to D1 via POST or PUT /api/marks (the Worker decides whose
+ * account it belongs to from its type — Catches/Sessions are the signed-in
+ * person's own, Mark/POI the shared set; see markOwnerFor in user-backend.js) — replaces saveMarkToGitHub's read-sha/modify/write-
  * whole-file pattern with a single REST call per save. `isNew` (passed by
  * the caller — see wireMarkPopupButtons's own options.isNew) decides
  * POST vs PUT directly, rather than this function re-deriving it by
@@ -958,8 +959,8 @@ async function saveMarkToD1(updatedMark, isNew) {
     // that was cleared on purpose.
     if (isNew && typeof fillBlankMarkConditions === "function") await fillBlankMarkConditions(updatedMark);
     const url = isNew
-      ? `${USER_BACKEND_URL}/api/marks?userId=public`
-      : `${USER_BACKEND_URL}/api/marks/${updatedMark.id}?userId=public`;
+      ? `${USER_BACKEND_URL}/api/marks`
+      : `${USER_BACKEND_URL}/api/marks/${updatedMark.id}`;
     const res = await fetch(url, {
       method: isNew ? "POST" : "PUT",
       credentials: "include",
@@ -985,7 +986,7 @@ async function saveMarkToD1(updatedMark, isNew) {
  */
 async function deleteMarkFromD1(markId) {
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/marks/${markId}?userId=public`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/marks/${markId}`, {
       method: "DELETE",
       credentials: "include",
     });
@@ -1031,7 +1032,7 @@ async function saveMarksBatchToD1(newMarks) {
         // Blank conditions are filled from looked-up data just before each mark is saved (see saveMarkToD1).
         (typeof fillBlankMarkConditions === "function" ? fillBlankMarkConditions(mark) : Promise.resolve(mark))
           .then(() =>
-            fetch(`${USER_BACKEND_URL}/api/marks?userId=public`, {
+            fetch(`${USER_BACKEND_URL}/api/marks`, {
               method: "POST",
               credentials: "include",
               headers: { "Content-Type": "application/json" },
