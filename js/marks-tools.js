@@ -82,6 +82,19 @@ function markMatchesFilters(mark, filters) {
 }
 
 /**
+ * The marks currently visible on the map: every mark in state.marksById that
+ * passes state.filters (the same test applyMarkFiltersAndGrouping uses to
+ * show/hide markers, so an export and the map always agree).
+ */
+function getVisibleMarks(state) {
+  const visible = [];
+  state.marksById.forEach((mark) => {
+    if (markMatchesFilters(mark, state.filters)) visible.push(mark);
+  });
+  return visible;
+}
+
+/**
  * Re-applies state.filters and state.groupByKey to every mark currently
  * known about (state.marksById/markersById) — shows/hides each marker on
  * `map` to match the filter, and restyles/re-tooltips whatever's left

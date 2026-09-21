@@ -327,6 +327,9 @@ async function loadAndRenderMarks(map, state) {
   } catch (err) {
     console.error("Could not load mark lists (edit dropdowns will be limited):", err);
   }
+  // The Map tab rebuilds its map when the mode changes (Normal/Live/Import)
+  // and flags the old state as discarded — nothing left to draw onto.
+  if (state._discarded) return;
 
   // Every mark marker lives inside this ONE cluster group, never added to
   // `map` directly — real-world mark counts (a couple thousand, all real

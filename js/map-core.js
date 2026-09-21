@@ -285,6 +285,7 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
 
   wireMapPopupZIndexToggle(map);
 
+  const persistView = opts.persistView !== false;
   const bounds = [];
   for (const p of valid) {
     bounds.push([p.lat, p.lng]);
@@ -311,7 +312,10 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
   const applyInitialView = () => {
     let savedView = null;
     try {
-      savedView = JSON.parse(localStorage.getItem(MAP_VIEW_STORAGE_KEY) || "null");
+      // persistView:false (Live and Import modes on the Map tab) neither
+      // restores nor overwrites the shared saved view — those modes set
+      // their own view and shouldn't change where Normal mode reopens.
+      savedView = persistView ? JSON.parse(localStorage.getItem(MAP_VIEW_STORAGE_KEY) || "null") : null;
     } catch {
       savedView = null;
     }
@@ -348,8 +352,10 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
     const center = map.getCenter();
     localStorage.setItem(MAP_VIEW_STORAGE_KEY, JSON.stringify({ lat: center.lat, lng: center.lng, zoom: map.getZoom() }));
   };
-  map.on("moveend", saveCurrentView);
-  map.on("zoomend", saveCurrentView);
+  if (persistView) {
+    map.on("moveend", saveCurrentView);
+    map.on("zoomend", saveCurrentView);
+  }
 
   if (opts.onMapClick) {
     // A click that's only dismissing an already-open popup shouldn't ALSO

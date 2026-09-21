@@ -1,21 +1,17 @@
-const DATA_URL = "data/conditions.json";
+// Live mode of the Map tab (conditions.html): GPS lookup, closest tracked location, its 48-hour graph, and
+// tap-the-map-to-log-a-catch. Moved here from the old Live tab (live.js). app.js owns the mode switching:
+// it calls liveInitOnce() once, then liveEnter()/liveExit() as the Live toggle changes.
+// parseNaive, nowInNaiveEncoding, CONDITION_COLORS, renderConditionsChart, wireHoldToShowTooltip,
+// setupFullscreenToggle, requestGpsPosition, currentGpsPosition and the marks functions come from js/*.js
+// (loaded before this file); isMobileDevice and `state` come from app.js.
+
 const SETTINGS_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev/api/public/settings";
-// Points at the live, unauthenticated user-backend endpoint (D1, Public's
-// own row) rather than the static config/settings.json file it used to —
-// same migration pattern as MARK_LISTS_FILE_PATH/MARKS_FILE_PATH
-// (charts.js): same response shape ({googleRoutesApiKey, homeLat,
-// homeLng}), so nothing below this constant needed to change at all.
+// Points at the live, unauthenticated user-backend endpoint (D1, Public's own row): {googleRoutesApiKey, homeLat, homeLng}.
 const TIMINGS_STORAGE_KEY = "liveHomeTimings";
 
-// Same convention as week.js's own PIXELS_PER_HOUR — a genuinely
-// readable, un-squashed width per hour of data, rather than cramming a
-// full 48-hour window into one phone-width canvas. Only used on mobile
-// (see renderForLocation's isMobileDevice branch) — desktop has enough
-// width already that squashing to fit was never the complaint here.
-const PIXELS_PER_HOUR = 32;
-const isMobileDevice = Math.min(window.innerWidth, window.innerHeight) <= 900;
-
-// CONDITION_COLORS comes from charts.js (loaded before this file).
+// Same convention as Week Ahead's PIXELS_PER_HOUR — a readable, un-squashed width per hour of data,
+// rather than cramming a full 48-hour window into one phone-width canvas. Mobile only (see renderForLocation).
+const LIVE_PIXELS_PER_HOUR = 32;
 
 let liveData = null;
 let liveChart = null;
@@ -23,22 +19,14 @@ let currentLocationName = null;
 let currentType = null;
 let currentLoc = null;
 let stopFishingTime = null;
-// googleRoutesApiKey, currentGpsPosition, requestGpsPosition all come from
-// charts.js (loaded before this file).
-// Home address — a single lat/lng set on the Settings tab's map ("Add
-// Home"), loaded from config/settings.json below. A fixed, precise
-// coordinate set once, rather than a free-text address geocoded at
-// request time.
+// Home address — a single lat/lng set on the Settings tab's map ("Add Home"), loaded from the settings endpoint.
 let homeLat = null;
 let homeLng = null;
 
-function timeToMinutes(hhmm) {
-  const m = String(hhmm || "").match(/^(\d{1,2}):(\d{1,2})$/);
-  if (!m) return null;
-  return Number(m[1]) * 60 + Number(m[2]);
-}
+// timeToMinutes comes from js/week-tools.js (identical).
 
-function minutesToClock(mins) {
+// 12-hour, unlike week-tools' 24-hour minutesToClock.
+function liveMinutesToClock(mins) {
   const wrapped = ((Math.round(mins) % 1440) + 1440) % 1440;
   const h = Math.floor(wrapped / 60);
   const m = wrapped % 60;
@@ -100,9 +88,8 @@ async function updateTimings() {
     return;
   }
 
-  // getDriveTimeBetweenCoords comes from charts.js — this location's own
-  // saved lat/lng to the saved home lat/lng, NOT the device's current GPS
-  // position (that's the SEPARATE "back to car" segment below).
+  // This location's own saved lat/lng to the saved home lat/lng, NOT the
+  // device's current GPS position (that's the SEPARATE "back to car" segment below).
   const driveMinutes = await getDriveTimeBetweenCoords(currentLoc.lat, currentLoc.lng, homeLat, homeLng);
   if (driveMinutes == null) {
     setTimingsStatus("Couldn't calculate drive time — check that the Routes API key is set up.", true);
@@ -124,7 +111,7 @@ async function updateTimings() {
   stopFishingTime = homeByTimestamp - totalMinutesNeeded * 60000;
 
   setTimingsStatus(
-    `Stop fishing by <strong>${minutesToClock((stopFishingTime - todayMidnight) / 60000)}</strong> to be home by ${homeByStr} ` +
+    `Stop fishing by <strong>${liveMinutesToClock((stopFishingTime - todayMidnight) / 60000)}</strong> to be home by ${homeByStr} ` +
     `— back to car ${Math.round(backToCarMinutes)} min, pack up ${Math.round(packUpMinutes)} min, drive ${Math.round(driveMinutes)} min.`
   );
 
@@ -141,7 +128,7 @@ function distanceKm(lat1, lng1, lat2, lng2) {
 }
 
 function findNearestLocation(locations, lat, lng) {
-  // The same physical spot can now appear multiple times (once per type),
+  // The same physical spot can appear multiple times (once per type),
   // all sharing the same lat/lng — dedupe to unique NAMES first, so a
   // GPS match resolves to one physical place, not an arbitrary type.
   const seenNames = new Set();
@@ -160,19 +147,18 @@ function findNearestLocation(locations, lat, lng) {
 }
 
 /**
- * Builds the map (renderLeafletLocationMap, charts.js) — one marker per
- * tracked location (same dedup-by-name-then-both-types-if-present pattern
- * as the Location tab's own renderLocationMap in app.js), PLUS the
- * device's own current position as a distinct red dot marker
- * (iconKind:"currentPosition") when GPS succeeded — see init(). Clicking a
- * location marker opens/updates the hover panel for that spot; clicking
- * either the position marker OR any other open water starts a new fishing
- * mark right there (see handleMapClickForMarks, charts.js) — for the
- * position marker specifically, using the actual gpsPosition coordinates
- * rather than wherever the click's own lat/lng landed, since a marker click
- * doesn't hand back map coordinates the way a plain map click does.
+ * Builds the Live-mode map: one marker per tracked location (same
+ * dedup-by-name pattern as Normal mode's renderLocationMap), PLUS the
+ * device's own current position as a distinct red dot marker when GPS
+ * succeeded. Clicking a location marker opens/updates the hover panel for
+ * that spot; clicking either the position marker OR any other open water
+ * starts a new fishing mark right there (handleMapClickForMarks with no
+ * preview callback) — for the position marker, using the actual
+ * gpsPosition coordinates, since a marker click doesn't hand back map
+ * coordinates the way a plain map click does.
+ * Returns {map, markLayerState} so app.js can use the marks for export.
  */
-function renderLiveMap(gpsPosition) {
+function liveBuildMap(gpsPosition) {
   const markLayerState = createMarkLayerState();
   const byName = new Map();
   for (const loc of liveData.locations || []) {
@@ -197,10 +183,9 @@ function renderLiveMap(gpsPosition) {
       // currentLoc's own real tide data) plus "last value used" for
       // everything else EXCEPT Weather Condition, which deliberately gets
       // no default at all — see computeQuickMarkDefaults' own comment
-      // (charts.js) for why. A plain map click (below, and the Location
-      // tab's own click) always starts blank; guessing conditions for an
-      // arbitrary clicked point would be guessing about somewhere the
-      // person isn't necessarily standing.
+      // (js/marks-core.js). A plain map click always starts blank; guessing
+      // conditions for an arbitrary clicked point would be guessing about
+      // somewhere the person isn't necessarily standing.
       onClick: () => {
         const defaults = { ...getLastMarkFieldValues(), ...computeQuickMarkDefaults(getRowsForCurrentLoc()) };
         handleMapClickForMarks(map, gpsPosition.lat, gpsPosition.lng, markLayerState, null, defaults);
@@ -208,56 +193,42 @@ function renderLiveMap(gpsPosition) {
     });
   }
 
-  const map = renderLeafletLocationMap("liveMap", points, {
+  const map = renderLeafletLocationMap("locationMap", points, {
+    persistView: false, // Live sets its own view; don't overwrite where Normal mode reopens
     onMapClick: (lat, lng) => handleMapClickForMarks(map, lat, lng, markLayerState, null),
   });
-  // Overrides whatever renderLeafletLocationMap itself just set (either a
-  // saved view shared with the Location/Settings maps, or a fit-everything
-  // view) — Live's whole point is "where am I right now", so it should
-  // always open centered on the device's actual position when that's
-  // available, not wherever a DIFFERENT page's map was last left looking.
+  // Live's whole point is "where am I right now", so it always opens
+  // centered on the device's actual position when that's available.
   if (map && gpsPosition) {
     map.setView([gpsPosition.lat, gpsPosition.lng], 13);
   }
-  // Same fishing-marks layer as the Location tab (charts.js) — gated the
-  // same way (getConnection()), same caveats apply (see that function's own
-  // comment). markLayerState is created above (not inside
-  // loadAndRenderMarks) so the onMapClick/onClick handlers just wired in
-  // have somewhere to read marksById/markersById/markLists from once this
-  // finishes loading them, without a second callback.
   if (map) loadAndRenderMarks(map, markLayerState);
+  return { map, markLayerState };
 }
 
 // Whether the panel's expanded content (ratings, timings, chart) is
 // currently showing, vs just the collapsed name+distance banner. Reset to
 // false whenever a genuinely NEW location is selected (see
 // selectLocationAndType) — "when first getting a location, only show the
-// banner" applies fresh each time a different spot is picked, not just
-// the very first one all session.
+// banner" applies fresh each time a different spot is picked.
 let isPanelExpanded = false;
 // Whether renderForLocation (which builds both the summary badges AND the
 // Chart.js chart) has actually run yet for whatever's currently in
-// currentLoc. Deliberately deferred until the panel is actually expanded,
-// not run eagerly the moment a location is selected — building a chart
-// into a canvas that's sitting inside a display:none container measures
-// as zero width/height (a real, previously-hit bug elsewhere on this
-// site), so rendering only happens once the container is actually
-// visible, in setPanelExpanded below.
+// currentLoc. Deferred until the panel is actually expanded — building a
+// chart into a canvas inside a display:none container measures as zero
+// width/height, so rendering only happens once the container is visible.
 let hasRenderedExpandedContentForCurrentLoc = false;
 
 function showLiveHoverPanel() {
-  // See showLocationHoverPanel's own comment (app.js) — same real bug,
-  // same fix, on the Live tab's own hover panel.
+  // Same fix as showLocationHoverPanel (app.js): the two panels compete for space.
   if (typeof closeMarkDetailPanel === "function") closeMarkDetailPanel();
   document.getElementById("liveHoverPanel").style.display = "block";
 }
 
 function hideLiveHoverPanel() {
   document.getElementById("liveHoverPanel").style.display = "none";
-  // Collapses for next time, regardless of whether the SAME marker gets
-  // tapped again afterward (selectLocationAndType's own "same location"
-  // branch wouldn't otherwise reset this) — closing the panel should
-  // always mean "start fresh, collapsed" the next time it opens.
+  // Collapses for next time — closing the panel always means "start fresh,
+  // collapsed" the next time it opens.
   setPanelExpanded(false);
 }
 
@@ -286,8 +257,7 @@ function renderTypePicker(availableTypes, selectedType, onSelect) {
   const section = document.getElementById("typePickerSection");
   const container = document.getElementById("typePicker");
   container.innerHTML = "";
-  // Only worth showing a picker at all when there's actually a choice —
-  // a location with just one type doesn't need a toggle for it.
+  // Only worth showing a picker when there's actually a choice.
   if (availableTypes.length <= 1) {
     section.style.display = "none";
     return;
@@ -305,11 +275,9 @@ function renderTypePicker(availableTypes, selectedType, onSelect) {
 }
 
 // Selects a physical location by name, resolving which type variant to
-// actually show — defaults to Kayak when available (per the site owner's
-// stated preference), falling back to whichever type IS available for
-// locations that don't have a Kayak option at all. Opens (or keeps open)
-// the hover panel and updates its banner — the map-click equivalent of
-// tapping a marker on the Location tab.
+// actually show — defaults to Kayak when available, falling back to
+// whichever type IS available. Opens (or keeps open) the hover panel and
+// updates its banner.
 function selectLocationAndType(name, preferredType) {
   const variants = (liveData.locations || []).filter((l) => l.name === name);
   if (variants.length === 0) return;
@@ -326,10 +294,8 @@ function selectLocationAndType(name, preferredType) {
 
   const loc = variants.find((v) => v.type === type);
   currentLoc = loc;
-  // Pack-up time (part of the stop-fishing calculation) differs by type,
-  // and the reference point itself changes on a different location — any
-  // previously calculated line would be stale, so clear it rather than
-  // show a result that no longer matches what's on screen.
+  // Pack-up time differs by type, and the reference point itself changes on
+  // a different location — any previously calculated line would be stale.
   stopFishingTime = null;
   if (isNewLocation) hasCenteredLiveChartOnNow = false; // a genuinely new location is worth re-centering on "now" again; switching type on the SAME spot isn't
   setTimingsStatus("");
@@ -339,19 +305,17 @@ function selectLocationAndType(name, preferredType) {
   showLiveHoverPanel();
 
   if (isNewLocation) {
-    // A genuinely new spot always starts collapsed — see the ask this
-    // implements: "when first getting a location only show the banner".
+    // A genuinely new spot always starts collapsed.
     hasRenderedExpandedContentForCurrentLoc = false;
     setPanelExpanded(false);
   } else if (isPanelExpanded) {
     // Same spot, just switched Kayak/Land based type, and the panel's
-    // already open — refresh what's showing immediately rather than
-    // making the person re-expand to see the type they just picked.
+    // already open — refresh what's showing immediately.
     renderForLocation(loc);
   }
 }
 
-function renderSummary(loc, rows, now) {
+function liveRenderSummary(loc, rows, now) {
   const card = document.getElementById("liveSummaryCard");
   card.style.display = "flex";
   if (rows.length === 0) {
@@ -368,10 +332,7 @@ function renderSummary(loc, rows, now) {
   const conditionVal = conditionRow ? conditionRow["Condition"] : null;
   const fishingVal = fishingRow ? fishingRow["Fishing Condition"] : null;
 
-  // Compact inline versions of the same badges/stats that used to live in
-  // their own stacked card — same data, same condition-badge colors, just
-  // small enough to sit directly on the heading row next to the location
-  // name (see live.html's .live-heading-row) rather than below it.
+  // Compact inline badges/stats that sit directly on the heading row next to the location name.
   card.innerHTML = `
     <span class="condition-badge live-inline-badge" title="Location condition" style="background:${conditionVal != null ? (CONDITION_COLORS[Math.round(conditionVal)] || "var(--cond-none)") : "var(--cond-none)"}">${conditionVal != null ? conditionVal : "–"}</span>
     <span class="condition-badge live-inline-badge" title="Fishing condition" style="background:${fishingVal != null ? (CONDITION_COLORS[Math.round(fishingVal)] || "var(--cond-none)") : "var(--cond-none)"}">${fishingVal != null ? fishingVal : "–"}</span>
@@ -382,18 +343,14 @@ function renderSummary(loc, rows, now) {
 }
 
 // Tracks whether we've already auto-centered the mobile chart on "now"
-// for the CURRENT location — reset when the location changes (see
-// selectLocationAndType), but NOT on every re-render for the same
-// location (switching type, updating timings), so a manually-scrolled
-// position isn't yanked away by those.
+// for the CURRENT location — reset when the location changes, but NOT on
+// every re-render for the same location, so a manually-scrolled position
+// isn't yanked away.
 let hasCenteredLiveChartOnNow = false;
 
 // Shared by renderForLocation and the "You are here" quick-mark-entry click
-// handler (renderLiveMap) — both need the exact same filtered/sorted/
-// _t-annotated rows for currentLoc; extracted so the quick-entry defaults
-// (computeQuickMarkDefaults, charts.js) read the same real tide/wind data
-// the chart itself is built from, not a second, possibly-differently-shaped
-// copy of it.
+// handler (liveBuildMap) — both need the exact same filtered/sorted/
+// _t-annotated rows for currentLoc.
 function getRowsForCurrentLoc() {
   if (!currentLoc) return [];
   return (liveData.rows || [])
@@ -410,7 +367,7 @@ function renderForLocation(loc) {
   const windowEnd = nowMs + 24 * 3600 * 1000;
   const windowRows = rows.filter((r) => r._t >= windowStart && r._t <= windowEnd);
 
-  renderSummary(loc, windowRows, new Date());
+  liveRenderSummary(loc, windowRows, new Date());
 
   const frame = document.getElementById("liveChartFrame");
   const emptyState = document.getElementById("liveHoverPanelEmptyState");
@@ -425,21 +382,14 @@ function renderForLocation(loc) {
   const sunTimes = (liveData.sunTimes && liveData.sunTimes[loc.name]) || [];
 
   const canvas = document.getElementById("liveChart");
-  // Sets the WRAPPER's width, not the canvas's own — confirmed directly
-  // (inspecting a live chart) that setting the canvas's own width doesn't
-  // actually work: Chart.js's own responsive resize logic runs after
-  // renderConditionsChart below and silently resets the canvas back down
-  // to match its parent, discarding this every time. Making the PARENT
-  // wide instead and letting Chart.js's normal "fill 100% of my
-  // container" behavior do the work is the only way this actually holds
-  // — same reasoning as week.js's #weekTimelineInner. On mobile: natural,
-  // un-squashed per-hour width (same PIXELS_PER_HOUR convention as
-  // week.js) instead of forcing the full 48-hour window into one
-  // phone-width canvas. Desktop is untouched (100%, fills the frame
-  // exactly, no scrolling — there was never a "squashed" complaint there).
+  // Sets the WRAPPER's width, not the canvas's own — Chart.js's own
+  // responsive resize logic silently resets the canvas back down to match
+  // its parent, so making the PARENT wide is the only way this holds. On
+  // mobile: natural, un-squashed per-hour width instead of forcing the full
+  // 48-hour window into one phone-width canvas. Desktop fills the frame.
   const wideInner = document.getElementById("liveChartWideInner");
   if (isMobileDevice) {
-    wideInner.style.width = 48 * PIXELS_PER_HOUR + "px";
+    wideInner.style.width = 48 * LIVE_PIXELS_PER_HOUR + "px";
   } else {
     wideInner.style.width = "100%";
   }
@@ -455,20 +405,17 @@ function renderForLocation(loc) {
     minTideHeight: loc.minTideHeight,
     stopFishingTime,
     compact: false,
-    disableBuiltinEvents: true, // this page drives the tooltip itself — see wireHoldToShowTooltip in init(), and charts.js
+    disableBuiltinEvents: true, // this mode drives the tooltip itself — see wireHoldToShowTooltip in liveInitOnce
     tideOffsetMinutes: loc.tideOffset,
     // Explicit, not left to auto-fit — guarantees "now" sits at EXACTLY
-    // the horizontal midpoint of the canvas (windowStart..windowEnd is
-    // symmetric around nowMs by construction), which is what the mobile
-    // centering scroll just below depends on.
+    // the horizontal midpoint of the canvas, which the mobile centering scroll below depends on.
     xRange: { min: windowStart, max: windowEnd },
   });
 
   if (isMobileDevice && !hasCenteredLiveChartOnNow) {
     hasCenteredLiveChartOnNow = true;
     // Deferred a tick so the canvas has actually taken on the width set
-    // above (and .live-chart-scroll's own scrollWidth reflects it) before
-    // computing where the midpoint is.
+    // above before computing where the midpoint is.
     requestAnimationFrame(() => {
       const scrollWrap = document.getElementById("liveChartScroll");
       if (!scrollWrap) return;
@@ -488,24 +435,9 @@ function setGpsStatus(html) {
   el.style.display = "block";
 }
 
-async function init() {
-  await Prefs.load(); // a signed-in user's saved settings (js/prefs.js); the device's own values when signed out or offline
-
-  // Loaded separately from the main data fetch, with its own error handling
-  // — a missing/malformed settings file shouldn't break the rest of the
-  // page, just leave the drive-time feature gracefully unavailable.
-  try {
-    const settingsRes = await fetch(SETTINGS_URL, { cache: "no-store", credentials: "include" });
-    if (settingsRes.ok) {
-      const settings = await settingsRes.json();
-      googleRoutesApiKey = settings.googleRoutesApiKey || null;
-      homeLat = settings.homeLat ?? null;
-      homeLng = settings.homeLng ?? null;
-    }
-  } catch (err) {
-    console.error("Could not load settings:", err);
-  }
-
+// One-time wiring of Live's own controls. Called once by app.js at page load.
+let liveSettingsPromise = null;
+function liveInitOnce() {
   let savedTimings = null;
   try {
     savedTimings = JSON.parse(localStorage.getItem(TIMINGS_STORAGE_KEY) || "null");
@@ -518,59 +450,84 @@ async function init() {
   document.getElementById("btnUpdateTimings").addEventListener("click", updateTimings);
   document.getElementById("btnCloseLiveHoverPanel").addEventListener("click", hideLiveHoverPanel);
   document.getElementById("liveHoverPanelBanner").addEventListener("click", () => setPanelExpanded(!isPanelExpanded));
-  // Wired once here, not inside renderForLocation — that function reuses
-  // this same persistent <canvas> across every location switch and
-  // re-render (destroying and recreating the Chart.js instance each time,
-  // but never the canvas element itself), so wiring these per-render
-  // would stack up duplicate listeners on the same canvas. getChart()
-  // always reads whatever the current liveChart is, so this stays correct
-  // across those re-renders without needing to be re-wired.
+  // Wired once, not inside renderForLocation — that function reuses this
+  // same persistent <canvas> across every re-render (destroying and
+  // recreating the Chart.js instance each time, never the canvas element),
+  // so wiring per-render would stack up duplicate listeners. The getter
+  // always reads whatever the current liveChart is.
   wireHoldToShowTooltip(() => liveChart, document.getElementById("liveChart"));
   setupFullscreenToggle("liveChartFrame");
+}
 
-  try {
-    const res = await fetch(DATA_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    liveData = await res.json();
-    if (liveData.generatedAt) {
-      const dt = new Date(liveData.generatedAt);
-      setUpdatedStamp(document.getElementById("updated"), dt);
-    }
-    // Awaited — small, fast, local file (not the slow WillyWeather
-    // pipeline), so negligible delay; avoids a race where the very first
-    // location match/render below could happen before tideOffset had
-    // been merged in.
-    await loadTideOffsets(liveData.locations);
-  } catch (err) {
-    setGpsStatus(`Could not load conditions data — check your connection.`);
-    console.error(err);
-    return;
+// Loaded separately from the main data fetch, with its own error handling —
+// a missing settings response just leaves the drive-time feature unavailable.
+function liveLoadSettings() {
+  if (!liveSettingsPromise) {
+    liveSettingsPromise = (async () => {
+      try {
+        const settingsRes = await fetch(SETTINGS_URL, { cache: "no-store", credentials: "include" });
+        if (settingsRes.ok) {
+          const settings = await settingsRes.json();
+          googleRoutesApiKey = settings.googleRoutesApiKey || null;
+          homeLat = settings.homeLat ?? null;
+          homeLng = settings.homeLng ?? null;
+        }
+      } catch (err) {
+        console.error("Could not load settings:", err);
+      }
+    })();
   }
+  return liveSettingsPromise;
+}
+
+/**
+ * Switches the Map tab into Live mode: GPS lookup, closest location, and the
+ * Live map. `isStale()` says whether the person has since changed mode again
+ * (GPS can take a while), in which case nothing more is drawn.
+ * Resolves to {map, markLayerState}, or null if it went stale.
+ */
+async function liveEnter(isStale) {
+  liveData = state.data;
+  setGpsStatus("Finding your location…");
+  liveLoadSettings(); // not awaited — only the drive-time feature needs it
+
+  // requestGpsPosition (js/week-tools.js) — shared/cached, so this doesn't
+  // trigger a SECOND permission prompt. Assigned to the SHARED
+  // currentGpsPosition since updateDistanceDisplay needs it later too.
+  currentGpsPosition = await requestGpsPosition();
+  if (isStale()) return null;
 
   const locations = liveData.locations || [];
-
-  // requestGpsPosition (charts.js) — shared/cached, so this doesn't
-  // trigger a SECOND permission prompt if something else on the page
-  // (e.g. a later "Update timings" click) also asks; that action does its
-  // own fresh read regardless, since position may have moved on since.
-  // Assigned to the SHARED currentGpsPosition (charts.js) rather than a
-  // local variable — updateDistanceDisplay needs it later too, whenever a
-  // DIFFERENT marker gets tapped after this initial match, not just here.
-  currentGpsPosition = await requestGpsPosition();
   if (!currentGpsPosition) {
     setGpsStatus(`Couldn't get your location — showing all tracked spots. Tap one on the map to view it.`);
-    renderLiveMap(null);
-    return;
+    return liveBuildMap(null);
   }
 
   const match = findNearestLocation(locations, currentGpsPosition.lat, currentGpsPosition.lng);
-  renderLiveMap(currentGpsPosition);
+  const built = liveBuildMap(currentGpsPosition);
   if (!match) {
     setGpsStatus(`Got your location, but no configured spots have coordinates yet.`);
-    return;
+    return built;
   }
   setGpsStatus("");
   selectLocationAndType(match.location.name, "Kayak");
+  return built;
 }
 
-init();
+// Leaves Live mode: hides its panel/status and resets its per-location state,
+// so re-entering re-matches the nearest spot from scratch.
+function liveExit() {
+  document.getElementById("liveHoverPanel").style.display = "none";
+  setGpsStatus("");
+  if (liveChart) {
+    liveChart.destroy();
+    liveChart = null;
+  }
+  isPanelExpanded = false;
+  hasRenderedExpandedContentForCurrentLoc = false;
+  hasCenteredLiveChartOnNow = false;
+  currentLocationName = null;
+  currentType = null;
+  currentLoc = null;
+  stopFishingTime = null;
+}

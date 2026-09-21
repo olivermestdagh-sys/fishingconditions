@@ -170,6 +170,12 @@ async function clearPersistedReviewState() {
     const db = await openReviewStateDB();
     const tx = db.transaction(REVIEW_STATE_STORE, "readwrite");
     tx.objectStore(REVIEW_STATE_STORE).delete(REVIEW_STATE_KEY);
+    // Waits for the delete to commit — finishing an import goes straight on to
+    // the normal map, and a reload before this lands would bring the review back.
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
   } catch (err) {
     console.error("Failed to clear persisted review state:", err);
   }
@@ -684,46 +690,7 @@ function naiveToGpxTime(naive) {
 // Species' own assigned Format wins over its Mark Type's for BOTH axes
 // when both are set, mirroring resolveMarkShapeFormat/resolveMarkColorFormat
 // in charts.js exactly (kept as separate small copies here rather than
-// importing them, since sync.js and charts.js load on different pages).
-
-/** Mirrors resolveMarkShapeFormat in charts.js exactly — see that copy's
- * own comment for the species-then-type priority, and why a species-level
- * shape assignment is meant to stay the exception, not the everyday
- * case. */
-function resolveMarkShapeFormat(m) {
-  if (m.species) {
-    const speciesEntry = markLists.find((r) => r.field === "Species" && r.value === m.species);
-    if (speciesEntry && speciesEntry.shapeFormat) {
-      const format = markLists.find((r) => r.field === "Mark Shape Format" && r.value === speciesEntry.shapeFormat);
-      if (format) return format;
-    }
-  }
-  const typeEntry = markLists.find((r) => r.field === "Mark Type" && r.value === m.type);
-  if (typeEntry && typeEntry.shapeFormat) {
-    const format = markLists.find((r) => r.field === "Mark Shape Format" && r.value === typeEntry.shapeFormat);
-    if (format) return format;
-  }
-  return null;
-}
-
-/** Mirrors resolveMarkColorFormat in charts.js exactly — see that copy's
- * own comment for the species-then-type priority (colour is meant to be
- * the everyday case for a species-level assignment, unlike shape above). */
-function resolveMarkColorFormat(m) {
-  if (m.species) {
-    const speciesEntry = markLists.find((r) => r.field === "Species" && r.value === m.species);
-    if (speciesEntry && speciesEntry.colorFormat) {
-      const format = markLists.find((r) => r.field === "Mark Colour Format" && r.value === speciesEntry.colorFormat);
-      if (format) return format;
-    }
-  }
-  const typeEntry = markLists.find((r) => r.field === "Mark Type" && r.value === m.type);
-  if (typeEntry && typeEntry.colorFormat) {
-    const format = markLists.find((r) => r.field === "Mark Colour Format" && r.value === typeEntry.colorFormat);
-    if (format) return format;
-  }
-  return null;
-}
+// (now the shared copies in js/marks-layer.js, called with this file's markLists).
 
 // Legacy fallback shape per Mark Type, used ONLY when neither a mark's
 // species nor its Type has a Mark Shape Format assigned at all (see
@@ -785,9 +752,9 @@ function legacyColorFragment(device) {
  * fragment, so a mark never exports with half its <sym> silently blank. */
 function gpxSymForMark(m, device) {
   const symField = device === "garmin" ? "garminSym" : "lowranceSym";
-  const shapeFormat = resolveMarkShapeFormat(m);
+  const shapeFormat = resolveMarkShapeFormat(m, markLists);
   const shapeFragment = (shapeFormat && shapeFormat[symField]) || legacyShapeFragment(m.type, device);
-  const colorFormat = resolveMarkColorFormat(m);
+  const colorFormat = resolveMarkColorFormat(m, markLists);
   const colorFragment = (colorFormat && colorFormat[symField]) || legacyColorFragment(device);
   return `${shapeFragment}${colorFragment}`;
 }
@@ -920,17 +887,13 @@ async function handleExportClick(device) {
   statusEl.textContent = "Building export…";
   statusEl.style.color = "";
   try {
-    // Fresh fetch rather than reusing the in-memory existingMarks — this
-    // button should export whatever is REALLY in D1 right now, not a copy
-    // that might be stale if marks were edited elsewhere (another tab,
-    // another device) since this page loaded. Cache-busted for the same
-    // reason loadAndRenderMarks is (charts.js) — the endpoint's own 60s
-    // Cache-Control could otherwise serve a just-edited mark's old value.
-    const res = await fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store", credentials: "include" });
-    if (!res.ok) throw new Error(`Could not load marks (${res.status})`);
-    const marks = await res.json(); // bare array — see handlePublicMarks, user-backend.js
-    if (!Array.isArray(marks) || marks.length === 0) {
-      statusEl.textContent = "No marks to export yet.";
+    // Only what the map is showing: every mark on the map that the current
+    // filters leave visible (getVisibleMarks, js/marks-tools.js — the same
+    // test that hides/shows the markers). currentMarkLayerState is the
+    // Normal-mode map's marks layer (app.js).
+    const marks = currentMarkLayerState ? getVisibleMarks(currentMarkLayerState) : [];
+    if (marks.length === 0) {
+      statusEl.textContent = "No visible marks to export — check the filters, or wait for the marks to finish loading.";
       return;
     }
     const gpx = buildGpxDocument(marks, device);
@@ -954,7 +917,7 @@ async function handleExportClick(device) {
     }
     const savedNote = outcome === "saved-fallback" ? " (saved to your browser's default download location — this browser doesn't support choosing a folder)" : "";
     const deviceLabel = device === "garmin" ? "Garmin" : "Lowrance";
-    statusEl.textContent = `Exported ${marks.length} marks as ${filename}${savedNote} — load this onto your ${deviceLabel} via its GPX import option.`;
+    statusEl.textContent = `Exported ${marks.length} visible mark${marks.length === 1 ? "" : "s"} as ${filename}${savedNote} — load this onto your ${deviceLabel} via its GPX import option.`;
     statusEl.style.color = "#16a34a";
   } catch (err) {
     console.error("GPX export failed:", err);
@@ -986,7 +949,7 @@ function candidateMatchesSearch(c) {
   return haystack.includes(searchFilter);
 }
 
-function renderSummary() {
+function syncRenderSummary() {
   const el = document.getElementById("syncSummary");
   if (!el) return;
   const newCount = reviewableCandidates().length;
@@ -1070,7 +1033,7 @@ function renderReviewList() {
 function openCandidatePopup(idx) {
   const c = candidates[idx];
   if (!c) return;
-  if (!reviewMap) renderReviewMap(); // first candidate opened before any file-driven render — make sure the map exists
+  if (!reviewMap) return; // only reachable outside Import mode
   const popup = L.popup({ maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" })
     .setLatLng([c.lat, c.lng])
     .setContent(buildMarkPopupEditHtml(c, markLists))
@@ -1108,7 +1071,7 @@ function openCandidatePopup(idx) {
  * any actual edit or delete.
  */
 function openExistingMarkViewPopup(mark) {
-  if (!reviewMap) renderReviewMap();
+  if (!reviewMap) return; // only reachable outside Import mode
   const fields = [
     ["Type", mark.type],
     ["Date/Time", mark.dateTime],
@@ -1210,7 +1173,7 @@ async function addMarkCandidateAtPoint(point, type) {
     selected: true,
   };
   candidates.push(c);
-  renderSummary();
+  syncRenderSummary();
   renderReviewList();
   openCandidatePopup(candidates.length - 1);
 }
@@ -1455,9 +1418,17 @@ async function handleImportClick() {
         )
       )
     );
-    renderSummary();
+    syncRenderSummary();
     renderReviewList();
     renderTracksTree();
+    renderReviewMap(); // the imported spots are no longer part of the review
+    btn.disabled = false;
+    // Nothing left to review or tick: the import is complete, so go back to
+    // the normal map (which reloads marks, now including the new ones).
+    // Otherwise more can still be picked, and "Done" ends the review.
+    if (reviewableCandidates().length === 0 && collectCheckedSessionMarks().length === 0) {
+      await finishImportReview(`Imported ${result.added} mark${result.added === 1 ? "" : "s"}.`);
+    }
   } else {
     statusEl.textContent = "Import failed: " + result.error;
     statusEl.style.color = "#dc2626";
@@ -1533,9 +1504,10 @@ async function handleFileInputChange(e) {
   const statusEl = document.getElementById("parseStatus");
   statusEl.textContent = "Reading file…";
   statusEl.style.color = "";
-  document.getElementById("reviewSection").style.display = "none";
 
   try {
+    candidates = [];
+    trackData = [];
     const isUsr = /\.usr$/i.test(file.name);
     let rawWaypoints;
     let sourceLabel;
@@ -1633,30 +1605,21 @@ async function handleFileInputChange(e) {
       if (searchBox) searchBox.value = "";
       document.getElementById("importStatus").textContent = "";
 
-      renderSummary();
-      renderReviewList();
       candidateStatusPrefix = `${candidates.length} distinct spot${candidates.length === 1 ? "" : "s"} found from ${rawWaypoints.length} raw waypoints`;
     }
 
-    // ONE combined section now covers both marks candidates and track data
-    // — shown whenever EITHER has something in it (a trail-only export
-    // with no waypoints at all is a completely normal thing to upload
-    // here, and vice versa).
-    document.getElementById("reviewSection").style.display = rawWaypoints.length > 0 || trackData.length > 0 ? "block" : "none";
-    document.getElementById("btnClearSavedReview").style.display = rawWaypoints.length > 0 || trackData.length > 0 ? "inline-block" : "none";
-    document.getElementById("marksGroupBody").style.display = sideGroupCollapsed.marks ? "none" : "block";
-    document.getElementById("tracksGroupBody").style.display = sideGroupCollapsed.tracks ? "none" : "block";
-    if (trackData.length > 0) {
-      selectedCandidateKey = null;
-      renderTracksTree();
-    }
-    if (rawWaypoints.length > 0 || trackData.length > 0) renderReviewMap({ fitBounds: true });
+    if (trackData.length > 0) selectedCandidateKey = null;
 
     const totalDays = trackData.reduce((sum, t) => sum + t.dayGroups.length, 0);
     const trackStatusSuffix = trackData.length > 0 ? `${totalDays} track day${totalDays === 1 ? "" : "s"} found` : "";
     statusEl.textContent =
       "Done — " + [candidateStatusPrefix, trackStatusSuffix].filter(Boolean).join("; ") + ".";
     statusEl.style.color = "#16a34a";
+    // One review panel covers both marks candidates and track data — a
+    // trail-only export with no waypoints is a completely normal thing to
+    // load here, and vice versa. Import mode swaps the map for one showing
+    // only what's in the file, and stays until imported or cancelled.
+    await setMode("import");
   } catch (err) {
     console.error("Import parse failed:", err);
     statusEl.textContent = "Could not read that file: " + err.message;
@@ -2006,7 +1969,7 @@ async function openTrackCandidatePopup(trackIdx, dayIdx, segIdx, candIdx) {
   const candidate = seg.candidates[candIdx];
   const point = day.points[candidate.pointIdx];
 
-  if (!reviewMap) renderReviewMap();
+  if (!reviewMap) return; // only reachable outside Import mode
   const popup = L.popup({ maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" })
     .setLatLng([point.lat, point.lon])
     .setContent(buildTrackCandidatePopupHtml(candidate, point, markLists))
@@ -2371,7 +2334,7 @@ function segmentBackgroundTint(seg) {
 function zoomMapToDay(trackIdx, dayIdx) {
   const day = trackData[trackIdx].dayGroups[dayIdx];
   const latLngs = day.points.map((p) => [p.lat, p.lon]);
-  if (!reviewMap) renderReviewMap();
+  if (!reviewMap) return; // only reachable outside Import mode
   if (latLngs.length > 0) reviewMap.fitBounds(latLngs, { padding: [20, 20] });
 }
 
@@ -2383,7 +2346,7 @@ function zoomMapToSegment(trackIdx, dayIdx, segIdx) {
   const seg = day.segments[segIdx];
   const segPoints = day.points.slice(seg.startIdx, seg.endIdx + 1);
   const latLngs = segPoints.map((p) => [p.lat, p.lon]);
-  if (!reviewMap) renderReviewMap();
+  if (!reviewMap) return; // only reachable outside Import mode
   if (latLngs.length > 0) reviewMap.fitBounds(latLngs, { padding: [40, 40] });
 }
 
@@ -2473,19 +2436,23 @@ function onStepCandidateClick(trackIdx, dayIdx, segIdx, candIdx, direction) {
  * it.
  */
 function renderReviewMap({ fitBounds = false } = {}) {
-  const mapEl = document.getElementById("reviewMap");
-  if (!mapEl) return;
-
-  let isNewMap = false;
-  if (!reviewMap) {
-    reviewMap = L.map("reviewMap");
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors" }).addTo(reviewMap);
-    reviewMapLayer = L.layerGroup().addTo(reviewMap);
-    isNewMap = true;
-  }
+  // The map is the Map tab's own shared one, handed over by syncShowReview
+  // when Import mode starts — this function only redraws the file's content on it.
+  if (!reviewMap) return;
 
   reviewMapLayer.clearLayers();
   const allShownLatLngs = [];
+
+  // Waypoints from the file that are still up for import, as small dots
+  // (a click opens the same edit popup as the list row). A few hundred at
+  // most — they're collapsed to distinct spots on load.
+  reviewableCandidates().forEach((c) => {
+    const idx = candidates.indexOf(c);
+    const dot = L.circleMarker([c.lat, c.lng], { radius: 5, color: "#fff", weight: 1.5, fillColor: "#2563eb", fillOpacity: 0.9 }).addTo(reviewMapLayer);
+    dot.bindTooltip(`${c.name || "(unnamed)"} — ${(c.dateTime || "").slice(0, 16)}`);
+    dot.on("click", () => openCandidatePopup(idx));
+    allShownLatLngs.push([c.lat, c.lng]);
+  });
 
   trackData.forEach((track, trackIdx) => {
     track.dayGroups.forEach((day, dayIdx) => {
@@ -2539,7 +2506,7 @@ function renderReviewMap({ fitBounds = false } = {}) {
     });
   });
 
-  if (fitBounds || isNewMap) {
+  if (fitBounds) {
     if (allShownLatLngs.length > 0) {
       reviewMap.fitBounds(allShownLatLngs, { padding: [20, 20] });
     } else {
@@ -2548,43 +2515,37 @@ function renderReviewMap({ fitBounds = false } = {}) {
   }
 }
 
-function canSync() {
-  return cachedIsAdmin;
+// ---------------------------------------------------------------------------
+// Map tab wiring (app.js drives the modes; see setMode there)
+// ---------------------------------------------------------------------------
+
+function hasImportData() {
+  return candidates.length > 0 || trackData.length > 0;
 }
 
-document.addEventListener("DOMContentLoaded", async () => {
-  const gateEl = document.getElementById("syncNotConnected");
-  const mainEl = document.getElementById("syncMain");
-  await refreshAdminStatus();
-  if (!canSync()) {
-    gateEl.style.display = "block";
-    mainEl.style.display = "none";
-    return;
-  }
-  gateEl.style.display = "none";
-  mainEl.style.display = "block";
-
+/**
+ * One-time setup for the Map tab's Import/Export controls. Admin-only (the
+ * caller checks). Loads what matching and the review rows need, restores a
+ * review left unfinished on a previous visit, and wires the buttons.
+ * Resolves to true if there is a review to go straight back into.
+ */
+async function syncInit() {
   // Loaded once, up front — needed both for matching (existingMarks) and
   // for the review row's Species dropdown options (markLists). Cache-busted
-  // like every other data fetch on this site — see loadAndRenderMarks,
-  // charts.js — the endpoints' own 60s Cache-Control could otherwise serve
-  // a just-edited value.
-  // Wrapped in try/catch (unlike before) — these are now genuine cross-
-  // origin calls to the Worker rather than same-origin static files, so a
-  // real network failure (not just a non-2xx response) is a realistic
-  // possibility worth degrading gracefully from, same as
-  // loadAndRenderMarks's own try/catch (charts.js) already does for the
-  // identical fetch pair.
+  // like every other data fetch on this site: the endpoints' own 60s
+  // Cache-Control could otherwise serve a just-edited value.
+  // Wrapped in try/catch — these are genuine cross-origin calls to the
+  // Worker, so a real network failure (not just a non-2xx response) is a
+  // realistic possibility worth degrading gracefully from.
   let existingMarksRes = { ok: false };
   try {
     existingMarksRes = await fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store", credentials: "include" });
   } catch (err) {
     console.error("Could not reach the marks endpoint:", err);
   }
-  existingMarks = existingMarksRes.ok ? await existingMarksRes.json() : []; // bare array now — see handlePublicMarks, user-backend.js
-  // fetchUnionedMarkLists (charts.js) merges in the signed-in Admin's own
-  // personal marklist rows too, not just Public's — same real bug/fix as
-  // loadAndRenderMarks's own identical call.
+  existingMarks = existingMarksRes.ok ? await existingMarksRes.json() : []; // bare array — see handlePublicMarks, user-backend.js
+  // fetchUnionedMarkLists merges in the signed-in Admin's own personal
+  // marklist rows too, not just Public's.
   try {
     markLists = await fetchUnionedMarkLists();
   } catch (err) {
@@ -2593,36 +2554,23 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   knownSpecies = markLists.filter((r) => r.field === "Species").map((r) => r.value);
 
-  // Restore a loaded-but-not-yet-saved review from a previous visit to
-  // this page, if one exists — see the persistence block's own comment,
-  // near the top of this file, for why this is needed at all (a real
-  // page reload, not just a re-render, happens every time another tab
-  // is clicked on this site).
+  // Restore a loaded-but-not-yet-finished review from a previous visit —
+  // see the persistence block's own comment, near the top of this file, for
+  // why (leaving the Map tab is a real page reload, not just a re-render).
   const persisted = await loadPersistedReviewState();
+  let restored = false;
   if (persisted && ((persisted.candidates && persisted.candidates.length > 0) || (persisted.trackData && persisted.trackData.length > 0))) {
     candidates = persisted.candidates || [];
     trackData = persisted.trackData || [];
-    document.getElementById("reviewSection").style.display = "block";
-    document.getElementById("marksGroupBody").style.display = sideGroupCollapsed.marks ? "none" : "block";
-    document.getElementById("tracksGroupBody").style.display = sideGroupCollapsed.tracks ? "none" : "block";
-    renderReviewList();
-    renderTracksTree();
-    renderReviewMap({ fitBounds: true });
+    restored = true;
     const statusEl = document.getElementById("parseStatus");
-    statusEl.textContent = `Restored your unsaved review from ${new Date(persisted.savedAt).toLocaleString()} — showing where you left off.`;
+    statusEl.textContent = `Restored your unfinished import from ${new Date(persisted.savedAt).toLocaleString()}.`;
     statusEl.style.color = "#16a34a";
-    document.getElementById("btnClearSavedReview").style.display = "inline-block";
   }
 
   document.getElementById("btnClearSavedReview").addEventListener("click", async () => {
-    if (!confirm("Discard your current unsaved review? This can't be undone.")) return;
-    candidates = [];
-    trackData = [];
-    await clearPersistedReviewState();
-    document.getElementById("reviewSection").style.display = "none";
-    document.getElementById("btnClearSavedReview").style.display = "none";
-    document.getElementById("parseStatus").textContent = "Cleared.";
-    document.getElementById("parseStatus").style.color = "";
+    if (!confirm("Cancel this import? Nothing from the file has been saved, and this can't be undone.")) return;
+    await finishImportReview("Import cancelled.");
   });
 
   document.getElementById("syncFileInput").addEventListener("change", handleFileInputChange);
@@ -2633,6 +2581,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderReviewList();
   });
   document.getElementById("btnImportSelected").addEventListener("click", handleImportClick);
+  document.getElementById("btnDoneImport").addEventListener("click", () => finishImportReview("Import finished."));
   document.getElementById("btnExportLowrance").addEventListener("click", () => handleExportClick("lowrance"));
   document.getElementById("btnExportGarmin").addEventListener("click", () => handleExportClick("garmin"));
   const filenameInput = document.getElementById("exportFilenameInput");
@@ -2658,4 +2607,42 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.querySelectorAll('[data-role="toggle-all-tracks"]').forEach((el) => {
     el.addEventListener("click", () => onToggleAllTracks(el.dataset.field));
   });
-});
+  return restored;
+}
+
+/** Import mode starts (app.js buildImportMap): the file's content goes onto
+ * the Map tab's shared map and into the right-hand review panel. */
+function syncShowReview(map) {
+  reviewMap = map;
+  reviewMapLayer = L.layerGroup().addTo(map);
+  document.getElementById("marksGroupBody").style.display = sideGroupCollapsed.marks ? "none" : "block";
+  document.getElementById("tracksGroupBody").style.display = sideGroupCollapsed.tracks ? "none" : "block";
+  syncRenderSummary();
+  renderReviewList();
+  renderTracksTree();
+  renderReviewMap({ fitBounds: true });
+}
+
+/** Import mode ends (or the map is rebuilt): the old map is gone, so let go of it. */
+function syncDetachMap() {
+  reviewMap = null;
+  reviewMapLayer = null;
+}
+
+/** Import completed or cancelled: forget the unfinished review (memory and
+ * the copy saved for the next visit) and go back to the normal map. */
+async function finishImportReview(message) {
+  clearTimeout(persistDebounceTimer); // a pending save would otherwise bring the review back
+  candidates = [];
+  trackData = [];
+  selectedCandidateKey = null;
+  highlightedSegmentKey = null;
+  await clearPersistedReviewState();
+  document.getElementById("importStatus").textContent = "";
+  document.getElementById("btnImportSelected").disabled = false;
+  document.getElementById("syncFileInput").value = ""; // so picking the same file again still counts as a change
+  const statusEl = document.getElementById("parseStatus");
+  statusEl.textContent = message;
+  statusEl.style.color = "";
+  await leaveImportMode();
+}

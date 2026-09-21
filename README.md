@@ -18,11 +18,11 @@ Live site: https://olivermestdagh-sys.github.io/fishingconditions/
  GitHub Pages (static site)            Cloudflare                        GitHub Actions
  ─────────────────────────            ──────────                        ──────────────
  index.html   Week Ahead     ──►  Worker fishingconditions-users  ◄──  update.yml (every 3 h)
- conditions.html  Location map      (user-backend.js)                    runs scripts/fetch_conditions.py
- live.html    Live                  · Google sign-in + sessions           · WillyWeather + Open-Meteo data
- sync.html    Import/export         · D1 database (locations, marks,      · writes data/conditions.json
- reports.html Reports                 pick-lists, users, settings)          and config/locations.json
- locations.html Settings            · /api/public/locations (live config) · commits them back to the repo
+ conditions.html  Map (Live, Import)  (user-backend.js)                    runs scripts/fetch_conditions.py
+ reports.html Reports               · Google sign-in + sessions           · WillyWeather + Open-Meteo data
+ locations.html Settings            · D1 database (locations, marks,      · writes data/conditions.json
+                                      pick-lists, users, settings)          and config/locations.json
+                                    · /api/public/locations (live config) · commits them back to the repo
                               ──►  Worker fishingconditions-search
                                     (willyweather-search.js) — keeps the
                                     WillyWeather API key off the browser
@@ -31,9 +31,13 @@ Live site: https://olivermestdagh-sys.github.io/fishingconditions/
 - **Frontend**: plain HTML/CSS/JS, no build step. The shared code lives in `js/*.js`
   (formerly one 9,600-line `charts.js`; older code comments that say `charts.js` mean
   these files): chart drawing, maps, marks, tide logic, backend helpers. Each page
-  loads only the shared files it needs, then its own script (`app.js`, `live.js`,
+  loads only the shared files it needs, then its own script (`app.js`, `map-live.js`, `sync.js`,
   `week.js`, ...). `npm run check-pages` (also run in CI) proves every page loads
   everything it uses.
+  The Map tab (`conditions.html`) has three modes on one map: Normal (tracked spots and
+  marks), Live (GPS, nearest spot, tap to log a catch; `map-live.js`) and Import (a Garmin/
+  Lowrance export under review; `sync.js`). `live.html` and `sync.html` only redirect here.
+  Export writes just the marks the current filters leave visible.
 - **Data job**: `scripts/fetch_conditions.py` reads the tracked locations from
   the worker, fetches forecasts (locations in parallel), scores them and writes
   `data/conditions.json` (compact JSON). The pages load that file for the graphs.

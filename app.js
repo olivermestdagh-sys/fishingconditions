@@ -68,7 +68,6 @@ async function init() {
   // avoids a race where the very first chart render below would happen
   // before tideOffset had been merged in.
   await loadTideOffsets(state.data.locations);
-  renderLocationMap();
 
   document.getElementById("btnCloseHoverPanel").addEventListener("click", hideLocationHoverPanel);
   document.getElementById("previewShoreSelect").addEventListener("change", recalcPreviewCondition);
@@ -97,14 +96,129 @@ async function init() {
   });
   setupDragToScroll(document.getElementById("locationChartScroll"));
 
-  // Restores and shows whichever location was last viewed, rather than
-  // starting on a bare map every visit — the selection was already being
-  // saved to localStorage on every pick (see selectLocationByKey) even
-  // before this, it just wasn't being read back on load until now. If the
-  // panel was last explicitly closed instead (see hideLocationHoverPanel,
-  // which clears this same entry), there's nothing saved here and the map
-  // correctly starts with no panel open, rather than reopening whatever was
-  // picked before it was closed.
+  liveInitOnce();
+  wireMapToolbar();
+  // A review that was loaded but never finished or cancelled (Import mode,
+  // see map-sync.js/sync.js) survives leaving this tab: it's restored here,
+  // and the map stays in Import mode until the person imports or cancels.
+  const hasSavedReview = cachedIsAdmin ? await syncInit() : false;
+  await setMode(hasSavedReview ? "import" : baseModeFromPrefs());
+}
+
+// ---------------------------------------------------------------------------
+// Map modes: "normal" (tracked locations + marks, the old Location tab),
+// "live" (GPS, nearest location, quick mark entry — the old Live tab) and
+// "import" (a device export under review — the old Sync tab). Every mode
+// draws onto the ONE #locationMap; changing mode tears the old map down and
+// builds a fresh one, so nothing from the previous mode's layers or click
+// handlers can leak into the next.
+// ---------------------------------------------------------------------------
+const LIVE_MODE_STORAGE_KEY = "mapLiveMode"; // per device on purpose (not synced): Live is a phone-in-the-field thing
+
+let mapMode = null;
+let modeToken = 0; // bumped on every mode change, so a slow GPS lookup can tell it's been superseded
+// The marks layer state of whichever map is showing (Normal or Live) — read by
+// the export button (getVisibleMarks) so it exports exactly what the filters leave visible.
+let currentMarkLayerState = null;
+
+function liveModePreferred() {
+  try {
+    return localStorage.getItem(LIVE_MODE_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function baseModeFromPrefs() {
+  return liveModePreferred() ? "live" : "normal";
+}
+
+// Undoes whatever the current mode put on screen. Never touches saved
+// preferences (hideLocationHoverPanel clears the remembered location, so it
+// isn't used here).
+function teardownMode() {
+  if (currentMarkLayerState) currentMarkLayerState._discarded = true;
+  currentMarkLayerState = null;
+  if (typeof closeMarkDetailPanel === "function") closeMarkDetailPanel();
+  document.getElementById("locationHoverPanel").style.display = "none";
+  if (state.chart) {
+    state.chart.destroy();
+    state.chart = null;
+  }
+  if (mapMode === "live") liveExit();
+  if (mapMode === "import") syncDetachMap();
+  document.getElementById("markControlsBar").style.display = "none";
+  document.getElementById("exportStatus").textContent = "";
+}
+
+async function setMode(next) {
+  const token = ++modeToken;
+  teardownMode();
+  mapMode = next;
+  applyModeChrome();
+
+  if (next === "import") {
+    buildImportMap();
+    return;
+  }
+  if (next === "live") {
+    const built = await liveEnter(() => token !== modeToken);
+    if (built) currentMarkLayerState = built.markLayerState;
+    return;
+  }
+  renderLocationMap();
+  restoreSavedLocation();
+}
+
+// Which toolbar controls and panels each mode shows.
+function applyModeChrome() {
+  const isImport = mapMode === "import";
+  const isLive = mapMode === "live";
+  const liveToggle = document.getElementById("liveModeToggle");
+  liveToggle.checked = isLive || (isImport && liveModePreferred());
+  liveToggle.disabled = isImport;
+  const deviceTools = document.getElementById("mapDeviceTools");
+  deviceTools.style.display = cachedIsAdmin && mapMode === "normal" ? "flex" : "none";
+  document.getElementById("importReviewPanel").style.display = isImport ? "flex" : "none";
+  document.getElementById("markDetailPanel").style.display = "none";
+  if (!isLive) document.getElementById("liveGpsStatus").style.display = "none";
+  if (isLive) document.getElementById("parseStatus").textContent = "";
+  document.body.classList.toggle("import-mode", isImport);
+}
+
+function wireMapToolbar() {
+  document.getElementById("liveModeToggle").addEventListener("change", (e) => {
+    const on = e.target.checked;
+    try {
+      localStorage.setItem(LIVE_MODE_STORAGE_KEY, on ? "1" : "0");
+    } catch {
+      /* storage blocked — the toggle still works for this visit */
+    }
+    setMode(on ? "live" : "normal");
+  });
+}
+
+// Import mode: the shared map with NO tracked-location pins and NO marks
+// layer — only what's in the import file (drawn by sync.js) is on it.
+function buildImportMap() {
+  const map = renderLeafletLocationMap("locationMap", [], {
+    persistView: false,
+    onMapClick: () => {}, // no new marks while reviewing; the trail line and popups handle their own clicks
+  });
+  if (map) syncShowReview(map);
+}
+
+// Called by sync.js when the review is finished or cancelled.
+function leaveImportMode() {
+  return setMode(baseModeFromPrefs());
+}
+
+// Restores and shows whichever location was last viewed, rather than
+// starting on a bare map every visit. If the panel was last explicitly
+// closed instead (see hideLocationHoverPanel, which clears this same
+// entry), there's nothing saved here and the map correctly starts with no
+// panel open.
+function restoreSavedLocation() {
   const saved = localStorage.getItem("selectedLocation");
   if (saved && state.rowsByLocation[saved]) {
     // Panel visible BEFORE rendering the chart into it, not after — see
@@ -197,6 +311,7 @@ function renderLocationMap() {
   }
 
   const markLayerState = createMarkLayerState();
+  currentMarkLayerState = markLayerState;
   const map = renderLeafletLocationMap("locationMap", points, {
     onMapClick: (lat, lng) => handleMapClickForMarks(map, lat, lng, markLayerState, onLocationMapClickForPreview),
   });

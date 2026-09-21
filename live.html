@@ -2,114 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<title>Olie's Kayak and Surf Fishing Conditions – Live</title>
-<meta name="description" content="Live fishing conditions for the spot nearest you, with tide, wind and weather, plus quick mark logging." />
-<meta name="theme-color" content="#0b2a4a" />
-<link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
-<link rel="apple-touch-icon" href="images/apple-touch-icon.png" />
-<link rel="manifest" href="manifest.webmanifest" />
-<link rel="stylesheet" href="style.css" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" integrity="sha384-pmjIAcz2bAn0xukfxADbZIb3t8oRT9Sv0rvO+BR5Csr6Dhqq+nZs59P0pPKQJkEV" crossorigin="anonymous" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" integrity="sha384-wgw+aLYNQ7dlhK47ZPK7FRACiq7ROZwgFNg0m04avm4CaXS+Z9Y7nMu8yNjBKYC+" crossorigin="anonymous" />
-<script src="js/install-app.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Moved – Map</title>
+<meta http-equiv="refresh" content="0; url=conditions.html" />
+<script>try { localStorage.setItem("mapLiveMode", "1"); } catch (e) {} location.replace("conditions.html");</script>
 </head>
-<body class="map-fullpage-body">
-
-<div class="sitebar"><header class="topbar">
-  <h1>Olie's Kayak and Surf Fishing Conditions</h1>
-  <div id="updated" class="updated">Loading…</div>
-  <a class="ww-credit" href="https://www.willyweather.com.au/" target="_blank" rel="noopener" aria-label="Data from WillyWeather"><span>Data from</span><img src="images/willyweather-logo.png" alt="WillyWeather"></a>
-  <button type="button" id="installAppBtn" class="install-btn" hidden>Install app</button>
-</header>
-
-<nav class="tabnav">
-  <a href="index.html">Week Ahead</a>
-  <a href="conditions.html">Location</a>
-  <a href="live.html" class="active" aria-current="page">Live</a>
-  <a href="sync.html">Sync</a>
-  <a href="reports.html">Reports</a>
-  <a href="locations.html">Settings</a>
-</nav></div>
-
-<main>
-  <div class="map-with-panel-layout">
-    <div id="liveMap" class="location-map-fullpage"></div>
-    <div id="markDetailPanel" class="mark-detail-panel" style="display:none;"></div>
-  </div>
-  <div id="liveGpsStatus" class="live-gps-status">Finding your location…</div>
-
-  <div id="markControlsBar" class="mark-controls-bar" style="display:none;">
-    <div class="mark-controls-row">
-      <label class="mark-controls-label">Colour by
-        <select id="markGroupBySelect" class="mark-controls-select"></select>
-      </label>
-      <button type="button" id="markFilterBtn" class="btn-secondary mark-controls-filter-btn">
-        Filters<span id="markFilterBadge" class="mark-filter-badge" style="display:none;"></span>
-      </button>
-    </div>
-    <div id="markActiveFilterChips" class="mark-active-filter-chips"></div>
-  </div>
-
-  <div id="liveHoverPanel" class="location-hover-panel" style="display:none;">
-    <button id="btnCloseLiveHoverPanel" class="location-hover-panel-close" aria-label="Close">&times;</button>
-
-    <section class="chart-section location-hover-panel-chart">
-      <button type="button" id="liveHoverPanelBanner" class="live-hover-banner" aria-expanded="false">
-        <div>
-          <h2 id="liveHoverPanelLocationName">&nbsp;</h2>
-          <p id="liveHoverPanelDistance" class="summary-sub" style="margin:0;"></p>
-        </div>
-        <span id="liveHoverPanelChevron" class="live-hover-chevron" aria-hidden="true">▾</span>
-      </button>
-
-      <div id="liveHoverPanelExpanded" style="display:none;">
-        <div class="location-hover-panel-heading-row live-heading-row" style="padding-right:0;margin-top:10px;">
-          <div id="liveSummaryCard" class="live-inline-stats" style="display:none;"></div>
-          <div class="live-inline-timings">
-            <label for="homeByTime">Home By</label>
-            <input type="time" id="homeByTime" />
-            <button id="btnUpdateTimings" class="btn-primary">Update</button>
-          </div>
-          <div class="graph-gesture-hint" aria-hidden="true">
-            <div>Double-tap toggles full screen</div>
-            <div>Hold for 2s to toggle data point</div>
-          </div>
-        </div>
-        <p id="timingsStatus" class="footnote" style="margin:0 0 10px;text-align:left;"></p>
-
-        <section id="typePickerSection" style="display:none;margin:0 0 12px;">
-          <div id="typePicker" class="type-photo-row"></div>
-        </section>
-
-        <div id="liveChartFrame" class="live-chart-frame" style="margin-top:6px;">
-          <div id="liveChartScroll" class="live-chart-scroll">
-            <div id="liveChartWideInner" class="live-chart-wide-inner">
-              <canvas id="liveChart" role="img" aria-label="Chart of tide height, wind, pressure and fishing condition ratings for the nearest location"></canvas>
-            </div>
-          </div>
-        </div>
-        <p id="liveHoverPanelEmptyState" class="empty-state" style="display:none;">No data yet for this location.</p>
-      </div>
-    </section>
-  </div>
-</main>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js" integrity="sha384-DhxhYObIMeMNGyAG7iK11OHzBIKyEIeRL0ad1iFPAOwZB8iirUlTT0O/WJJUk8+o" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" integrity="sha384-eXVCORTRlv4FUUgS/xmOyr66XBVraen8ATNLMESp92FKXLAMiKkerixTiBvXriZr" crossorigin="anonymous"></script>
-<script src="js/chart-base.js"></script>
-<script src="js/map-core.js"></script>
-<script src="js/marks-core.js"></script>
-<script src="js/marks-layer.js"></script>
-<script src="js/marks-tools.js"></script>
-<script src="js/backend.js"></script>
-<script src="js/prefs.js"></script>
-<script src="js/weather-preview.js"></script>
-<script src="js/mark-lookup.js"></script>
-<script src="js/chart-render.js"></script>
-<script src="js/week-tools.js"></script>
-<script src="live.js"></script>
+<body>
+<p>This page is now part of the <a href="conditions.html">Map</a> tab.</p>
 </body>
 </html>

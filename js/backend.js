@@ -36,19 +36,6 @@ function getConnection() {
   }
 }
 
-/**
- * Hides the "Sync" nav link entirely when not signed in as Admin — the
- * Sync tab is pure write/admin functionality (import/export marks), gated
- * the same way marks editing itself now is, so there's nothing useful
- * behind it otherwise; showing the link would just lead to sync.html's
- * own "not connected" card rather than anywhere actually useful. Runs its
- * own refreshAdminStatus() rather than relying on some other page's own
- * init() having already done so first — this listener fires identically
- * on every page (charts.js loads everywhere), independent of whichever
- * page-specific init() also happens to run one. No live-updating while
- * sitting on a page — signing in/out on the Account tab only takes effect
- * for THIS check on the next page load/navigation.
- */
 // Offline support (sw.js): the site opens with no signal using the last copy
 // of each file. Network-first, so it never serves stale code while online.
 if ("serviceWorker" in navigator) {
@@ -57,12 +44,6 @@ if ("serviceWorker" in navigator) {
   });
 }
 
-document.addEventListener("DOMContentLoaded", async () => {
-  const syncNavLink = document.querySelector('.tabnav a[href="sync.html"]');
-  if (!syncNavLink) return;
-  await refreshAdminStatus();
-  if (!cachedIsAdmin) syncNavLink.style.display = "none";
-});
 
 // ---------------------------------------------------------------------
 // Admin-session gating — used for "Add as permanent location" (app.js),
