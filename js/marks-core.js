@@ -923,6 +923,10 @@ function collectMarkFormValues(form, originalMark) {
  */
 async function saveMarkToD1(updatedMark, isNew) {
   try {
+    // A new mark gets its blank conditions filled from looked-up data first (mark-lookup.js; it can
+    // only leave them blank, never fail the save). Editing an existing mark never re-fills a field
+    // that was cleared on purpose.
+    if (isNew && typeof fillBlankMarkConditions === "function") await fillBlankMarkConditions(updatedMark);
     const url = isNew
       ? `${USER_BACKEND_URL}/api/marks?userId=public`
       : `${USER_BACKEND_URL}/api/marks/${updatedMark.id}?userId=public`;
@@ -987,19 +991,23 @@ async function saveMarksBatchToD1(newMarks) {
   if (!newMarks || newMarks.length === 0) {
     return { success: false, error: "Nothing selected to import." };
   }
-  const CONCURRENCY = 8;
+  const CONCURRENCY = 4; // each mark may also look up its blank conditions first
   let added = 0;
   const errors = [];
   for (let i = 0; i < newMarks.length; i += CONCURRENCY) {
     const batch = newMarks.slice(i, i + CONCURRENCY);
     const results = await Promise.all(
       batch.map((mark) =>
-        fetch(`${USER_BACKEND_URL}/api/marks?userId=public`, {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(mark),
-        })
+        // Blank conditions are filled from looked-up data just before each mark is saved (see saveMarkToD1).
+        (typeof fillBlankMarkConditions === "function" ? fillBlankMarkConditions(mark) : Promise.resolve(mark))
+          .then(() =>
+            fetch(`${USER_BACKEND_URL}/api/marks?userId=public`, {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(mark),
+            })
+          )
           .then(async (res) => {
             if (!res.ok) {
               const errBody = await res.json().catch(() => ({}));

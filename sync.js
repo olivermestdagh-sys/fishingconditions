@@ -1188,8 +1188,7 @@ function openAddMarkAtPointMenu(point, latlng) {
  * already reviews from, pre-filled with a clicked trail point's own
  * location and time, then immediately opens its full edit popup (the
  * same one every other candidate uses) so species/etc can be filled in
- * right away. Fires the historical-conditions lookup up front too,
- * matching how every other reviewable candidate already gets it.
+ * right away. Its conditions are left blank and filled in when it is saved.
  */
 async function addMarkCandidateAtPoint(point, type) {
   const key = makeMarkId();
@@ -1210,12 +1209,6 @@ async function addMarkCandidateAtPoint(point, type) {
     matchedExisting: false,
     selected: true,
   };
-  try {
-    const result = await lookupHistoricalMarkConditions(point.lat, point.lon, point.timeNaive);
-    Object.assign(c, result);
-  } catch (err) {
-    console.error("Historical lookup failed for a newly-added trail point mark:", err);
-  }
   candidates.push(c);
   renderSummary();
   renderReviewList();
@@ -1272,45 +1265,6 @@ function onToggleAllTracks(field) {
   trackData.forEach((track) => cascadeChecked(track, field, !allChecked));
   renderTracksTree();
   renderReviewMap();
-}
-
-// How many marks' historical-conditions lookups (see
-// lookupHistoricalMarkConditions, charts.js) run at once during an import —
-// each one is a real, billed WillyWeather call plus an Open-Meteo call, so
-// this deliberately stays modest rather than firing every mark in a batch
-// simultaneously. Doesn't need to be tuned per-import-size; a small pool
-// just spreads the same total work out over a bit more wall-clock time.
-const SYNC_LOOKUP_CONCURRENCY = 4;
-
-/**
- * Runs `worker(item, index)` for every item in `items`, at most `limit` at
- * once, rather than a plain Promise.all firing everything simultaneously.
- * `onProgress(doneCount, total)`, if given, fires after each item finishes
- * (success or failure) — used here to keep the import status text moving
- * instead of sitting on one static message for however long a whole batch
- * takes. A single item throwing is caught and recorded as `null` in that
- * slot rather than aborting the rest of the batch.
- */
-async function runWithConcurrencyLimit(items, limit, worker, onProgress) {
-  let nextIndex = 0;
-  let doneCount = 0;
-  const results = new Array(items.length);
-  async function runOne() {
-    while (nextIndex < items.length) {
-      const i = nextIndex++;
-      try {
-        results[i] = await worker(items[i], i);
-      } catch (err) {
-        console.error("Historical conditions lookup failed for one mark:", err);
-        results[i] = null;
-      }
-      doneCount++;
-      if (onProgress) onProgress(doneCount, items.length);
-    }
-  }
-  const runners = Array.from({ length: Math.min(limit, items.length) }, runOne);
-  await Promise.all(runners);
-  return results;
 }
 
 /**
@@ -1434,13 +1388,10 @@ async function handleImportClick() {
   statusEl.textContent = `Importing ${totalToSave} mark${totalToSave === 1 ? "" : "s"}…`;
   statusEl.style.color = "";
 
-  // Weather/Tide/Barometer/Wind are already looked up by this point — see
-  // handleFileInputChange, which runs lookupHistoricalMarkConditions for
-  // every reviewable candidate up front so the review list itself can show
-  // it (per Oliver's own call), rather than this function looking it up a
-  // second time at Import. Whatever's on each candidate now — including
-  // anything edited by hand in the review row — is exactly what gets
-  // saved.
+  // Whatever's on each candidate now — including anything edited by hand in
+  // the review popup — is what gets saved; any Weather/Tide/Barometer/Wind
+  // etc. still blank is filled from looked-up data by saveMarksBatchToD1
+  // just before each mark is saved (fillBlankMarkConditions, mark-lookup.js).
   const nowStr = nowAsNaiveString();
   const newMarks = toImport.map((c) => {
     const mark = {
@@ -1647,13 +1598,10 @@ async function handleFileInputChange(e) {
       matchedExisting: g.matchedExisting,
       selected: !g.matchedExisting, // only genuinely new spots pre-checked
       // Every other mark field this review row now also exposes for
-      // editing (see renderCandidateRow) — blank until either the
-      // historical lookup fills some of them in (weatherCondition/
-      // tideCondition/barometer/temperature/waterTemperature/
-      // windDirection/windSpeed) or the person edits one by hand.
-      // waterCondition/bait/rig/rod/berley/size/waterDepth have no lookup
-      // source at all (nothing feeds them automatically); they start
-      // blank and stay that way unless hand-edited.
+      // editing (see renderCandidateRow) — blank unless the person edits
+      // one by hand. waterCondition/bait/rig/rod/berley/size/waterDepth
+      // have no lookup source at all (nothing feeds them automatically);
+      // they stay blank unless hand-edited.
       waterCondition: undefined,
       bait: undefined,
       rig: undefined,
@@ -1661,9 +1609,9 @@ async function handleFileInputChange(e) {
       berley: undefined,
       size: undefined,
       waterDepth: undefined,
-      // Filled in below, for reviewable candidates only — see
-      // lookupHistoricalMarkConditions, charts.js. Left undefined (not
-      // shown) for anything the lookup didn't resolve.
+      // Blank here too; whatever is still blank when the mark is saved is
+      // filled in then from looked-up data (fillBlankMarkConditions,
+      // mark-lookup.js).
       weatherCondition: undefined,
       tideCondition: undefined,
       tideExtreme: undefined,
@@ -1675,28 +1623,9 @@ async function handleFileInputChange(e) {
       released: undefined,
       }));
 
-      // Real historical weather/tide/barometer/wind lookup, run up front so
-      // the review list can show it directly (per Oliver's own call — this
-      // used to run later, only at Import time) — only for candidates
-      // actually reviewable (see reviewableCandidates' own comment); a
-      // matched-existing one is never shown or imported, so there's no
-      // reason to spend a billed WillyWeather call plus an Open-Meteo call
-      // looking anything up for it.
-      const toLookUp = reviewableCandidates();
-      if (toLookUp.length > 0) {
-        statusEl.textContent = `Looking up conditions for ${toLookUp.length} new spot${toLookUp.length === 1 ? "" : "s"}…`;
-        await runWithConcurrencyLimit(
-          toLookUp,
-          SYNC_LOOKUP_CONCURRENCY,
-          async (c) => {
-            const result = await lookupHistoricalMarkConditions(c.lat, c.lng, c.dateTime || nowAsNaiveString());
-            Object.assign(c, result);
-          },
-          (done, total) => {
-            statusEl.textContent = `Looking up conditions: ${done} of ${total}…`;
-          }
-        );
-      }
+      // No conditions lookup here: the import only reads the file. Anything
+      // left blank on a candidate is filled in from looked-up data when the
+      // chosen marks are saved (fillBlankMarkConditions, mark-lookup.js).
 
       visibleCount = 100;
       searchFilter = "";
@@ -2051,7 +1980,7 @@ function buildTrackCandidatePopupHtml(candidate, point, markLists) {
           <select name="berleys" multiple size="3" style="${MARK_POPUP_INPUT_STYLE}">${multiSelectOptionsHtml(markLists, "Berley", candidate.berleys)}</select>
         </label>
         <div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--grey-200);">
-          <div class="footnote" style="margin:0 0 4px;">Auto-filled — correct by hand if needed</div>
+          <div class="footnote" style="margin:0 0 4px;">Anything left blank is filled in automatically when saved</div>
           ${weatherFieldsHtml}
           ${numericFieldsHtml}
         </div>
@@ -2067,27 +1996,15 @@ function buildTrackCandidatePopupHtml(candidate, point, markLists) {
 
 /**
  * Opens a track candidate's edit popup on the shared reviewMap, at its
- * own point's coordinates. Fires the same historical-lookup
- * (lookupHistoricalMarkConditions, charts.js) a Catch mark already gets,
- * but only the FIRST time this exact candidate is opened (its own
- * `historicalLookupDone` flag) — re-opening an already-looked-up
- * candidate shouldn't spend another billed WillyWeather call.
+ * own point's coordinates. No conditions lookup happens here (or anywhere
+ * during the import): any condition left blank is filled in when the
+ * mark is saved — see fillBlankMarkConditions, mark-lookup.js.
  */
 async function openTrackCandidatePopup(trackIdx, dayIdx, segIdx, candIdx) {
   const day = trackData[trackIdx].dayGroups[dayIdx];
   const seg = day.segments[segIdx];
   const candidate = seg.candidates[candIdx];
   const point = day.points[candidate.pointIdx];
-
-  if (!candidate.historicalLookupDone) {
-    candidate.historicalLookupDone = true; // set before the await — never fire twice even if a user double-opens while the first lookup is still in flight
-    try {
-      const result = await lookupHistoricalMarkConditions(point.lat, point.lon, point.timeNaive);
-      Object.assign(candidate, result);
-    } catch (err) {
-      console.error("Historical lookup failed for a track candidate:", err);
-    }
-  }
 
   if (!reviewMap) renderReviewMap();
   const popup = L.popup({ maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" })

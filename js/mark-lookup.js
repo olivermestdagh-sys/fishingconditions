@@ -11,16 +11,21 @@
 // single entry point everything else in this section builds toward.
 // waterDepth has no entry here at all — nothing this site already talks
 // to can supply bathymetry for an arbitrary point, so it stays a manual-
-// only field (see its own schema comment). Scope, per how this was
-// designed: ONLY runs for a brand-new mark, either created manually
-// (startNewMarkEntry) or accepted through the Sync tab's import (sync.js)
-// — never a retroactive bulk backfill over marks.json's existing ~2,500
-// marks. That's a real cost consideration, not just tidiness: WillyWeather
-// is billed per call, so backfilling every existing mark would mean
-// thousands of billed calls for a one-off convenience; doing it only at
-// creation/import time keeps this to one WillyWeather call + two
-// Open-Meteo calls (weather + marine) per NEW mark, same order of
-// magnitude as everything else this site already calls per mark.
+// only field (see its own schema comment). Scope: ONLY brand-new marks,
+// and it happens when the mark is SAVED (fillBlankMarkConditions, called
+// from saveMarkToD1 / saveMarksBatchToD1 in marks-core.js) — filling only
+// the fields still blank, never a retroactive bulk backfill over existing
+// marks and never during the Sync import itself (the import just reads
+// the file; the lookups happen when the chosen marks are saved). A
+// manually created mark's form also pre-fills them when it opens.
+//
+// The pipeline's own archive is always checked first: the station
+// readings for the hour (observations table) for wind/pressure/
+// temperature/water temperature, and the stored tide events for the
+// tide. Only what the archive can't supply goes on to Open-Meteo (free),
+// and the billed WillyWeather call happens only when the archive has no
+// tide events around the mark's time. So a mark inside the archive's
+// window costs nothing.
 //
 // Three independent data sources, fetched in parallel (see
 // lookupHistoricalMarkConditions):
@@ -254,10 +259,18 @@ function naiveDateOnlyStr(ms) {
  * wasn't for the date requested.
  */
 async function lookupTideConditionAt(lat, lng, targetMs) {
-  if (!WILLYWEATHER_SEARCH_WORKER_URL) return null;
   const nearest = await findNearestTrackedLocation(lat, lng);
   if (!nearest) return null;
 
+  // The pipeline's archive first (real station tide events, free): only when it doesn't bracket
+  // the time does this fall through to the billed WillyWeather call below.
+  const stored = await fetchStoredTideExtrema(nearest, targetMs, targetMs);
+  if (stored) {
+    const fromArchive = classifyTideFromExtrema(stored, targetMs);
+    if (fromArchive) return fromArchive;
+  }
+
+  if (!WILLYWEATHER_SEARCH_WORKER_URL) return null;
   const startDateStr = naiveDateOnlyStr(targetMs - 86400000);
   try {
     const res = await fetch(`${WILLYWEATHER_SEARCH_WORKER_URL}/weather?id=${encodeURIComponent(nearest.willyweatherId)}&startDate=${startDateStr}&days=3`);
@@ -412,22 +425,41 @@ async function fetchTideExtremaForRange(lat, lng, startMs, endMs) {
  * follows. Runs the WillyWeather tide lookup and the Open-Meteo weather
  * lookup in parallel since they're fully independent of each other.
  */
-async function lookupHistoricalMarkConditions(lat, lng, dateTimeNaive) {
+async function lookupHistoricalMarkConditions(lat, lng, dateTimeNaive, wantedKeys) {
   const result = {};
   const targetMs = parseNaive(dateTimeNaive);
   if (targetMs == null || lat == null || lng == null) return result;
   const dateStr = dateTimeNaive.slice(0, 10);
   const hourKey = dateTimeNaive.slice(0, 13);
 
+  // Only the wanted fields are looked up, and each source is only called if a wanted field is still
+  // missing after the sources before it (archive, then Open-Meteo, with the tide from the archive
+  // before the billed call — see lookupTideConditionAt).
+  const wanted = new Set(wantedKeys || MARK_LOOKUP_KEYS);
+  const stillNeed = (...keys) => keys.some((k) => wanted.has(k) && result[k] === undefined);
+
+  // 1. The pipeline's archive: the station reading for the mark's hour at the nearest tracked location.
+  if (stillNeed("windSpeed", "windDirection", "barometer", "temperature", "waterTemperature")) {
+    const row = await storedObservationRowFor(lat, lng, dateTimeNaive);
+    const fromArchive = markConditionsFromObservationRow(row);
+    for (const k of Object.keys(fromArchive)) if (wanted.has(k)) result[k] = fromArchive[k];
+  }
+
+  // 2. Everything else, in parallel: the tide (archive events, then WillyWeather) and Open-Meteo for what's still missing.
+  const needWeather = stillNeed("weatherCondition", "windSpeed", "windDirection", "barometer", "temperature");
+  const needMarine = stillNeed("waterTemperature");
   const [tide, hourly, marineHourly] = await Promise.all([
-    lookupTideConditionAt(lat, lng, targetMs),
-    fetchOpenMeteoHistoricalHourly(lat, lng, dateStr),
-    fetchOpenMeteoHistoricalMarineHourly(lat, lng, dateStr),
+    stillNeed("tideCondition", "tideExtreme") ? lookupTideConditionAt(lat, lng, targetMs) : null,
+    needWeather ? fetchOpenMeteoHistoricalHourly(lat, lng, dateStr) : null,
+    needMarine ? fetchOpenMeteoHistoricalMarineHourly(lat, lng, dateStr) : null,
   ]);
+  const put = (key, value) => {
+    if (wanted.has(key) && result[key] === undefined && value != null) result[key] = value;
+  };
 
   if (tide) {
-    result.tideCondition = tide.condition;
-    if (tide.extreme) result.tideExtreme = tide.extreme;
+    put("tideCondition", tide.condition);
+    if (tide.extreme) put("tideExtreme", tide.extreme);
   }
 
   if (hourly && Array.isArray(hourly.time)) {
@@ -437,20 +469,89 @@ async function lookupHistoricalMarkConditions(lat, lng, dateTimeNaive) {
     const code = openMeteoHourlyLookup(hourly.time, hourly.weathercode)[hourKey];
     const airTemp = openMeteoHourlyLookup(hourly.time, hourly.temperature_2m)[hourKey];
 
-    if (speed != null) result.windSpeed = Math.round(speed);
-    if (dir != null) result.windDirection = previewDegreesToCompass(dir);
-    if (pressure != null) result.barometer = Math.round(pressure * 10) / 10;
-    if (airTemp != null) result.temperature = Math.round(airTemp * 10) / 10;
-    const cond = weatherCodeToCondition(code);
-    if (cond) result.weatherCondition = cond;
+    if (speed != null) put("windSpeed", Math.round(speed));
+    if (dir != null) put("windDirection", previewDegreesToCompass(dir));
+    if (pressure != null) put("barometer", Math.round(pressure * 10) / 10);
+    if (airTemp != null) put("temperature", Math.round(airTemp * 10) / 10);
+    put("weatherCondition", weatherCodeToCondition(code));
   }
 
   if (marineHourly && Array.isArray(marineHourly.time)) {
     const waterTemp = openMeteoHourlyLookup(marineHourly.time, marineHourly.sea_surface_temperature)[hourKey];
-    if (waterTemp != null) result.waterTemperature = Math.round(waterTemp * 10) / 10;
+    if (waterTemp != null) put("waterTemperature", Math.round(waterTemp * 10) / 10);
   }
 
   return result;
+}
+
+// The mark fields a lookup can fill. waterDepth has no source at all (see the header comment).
+const MARK_LOOKUP_KEYS = ["tideCondition", "tideExtreme", "windSpeed", "windDirection", "barometer", "temperature", "weatherCondition", "waterTemperature"];
+
+/** The mark-field values held in one archive observation row (the observations table's shape: hour, tempC, windKmh, windDir, pressureHpa, waterTempC); {} for no row. Same rounding as the live lookup. */
+function markConditionsFromObservationRow(row) {
+  const out = {};
+  if (!row) return out;
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  if (num(row.windKmh) != null) out.windSpeed = Math.round(row.windKmh);
+  if (SHORE_OPTIONS.includes(row.windDir)) out.windDirection = row.windDir; // the archive uses the same 16 compass names as marks
+  if (num(row.pressureHpa) != null) out.barometer = Math.round(row.pressureHpa * 10) / 10;
+  if (num(row.tempC) != null) out.temperature = Math.round(row.tempC * 10) / 10;
+  if (num(row.waterTempC) != null) out.waterTemperature = Math.round(row.waterTempC * 10) / 10;
+  return out;
+}
+
+// One archive read per tracked location and day, shared by every mark looked up in that page load (a Sync import
+// saves many marks from the same few places and days).
+const _storedObservationDayCache = new Map();
+
+/** The archive's observation row for the hour of dateTimeNaive at the tracked location nearest (lat, lng), or null when there isn't one. */
+async function storedObservationRowFor(lat, lng, dateTimeNaive) {
+  const nearest = await findNearestTrackedLocation(lat, lng);
+  if (!nearest) return null;
+  const dayStr = dateTimeNaive.slice(0, 10);
+  const key = `${nearest.name}|${dayStr}`;
+  if (!_storedObservationDayCache.has(key)) {
+    const dayStart = parseNaive(`${dayStr}T00:00:00`);
+    _storedObservationDayCache.set(key, fetchStoredObservations(nearest.name, dayStart, dayStart + 86400000));
+  }
+  const rows = await _storedObservationDayCache.get(key);
+  const hour = dateTimeNaive.slice(0, 13).replace("T", " ") + ":00";
+  return rows.find((r) => r.hour === hour) || null;
+}
+
+/** Which of a mark's looked-up fields apply to its type and are still blank (undefined, null or ""). */
+function blankConditionKeys(mark) {
+  const applicable = fieldKeysForMarkType(mark.type);
+  return MARK_LOOKUP_KEYS.filter((k) => applicable.includes(k) && (mark[k] === undefined || mark[k] === null || mark[k] === ""));
+}
+
+/**
+ * Called when a new mark is saved (see saveMarkToD1 / saveMarksBatchToD1): every applicable condition
+ * field that is still blank is filled, in place, from looked-up data — the pipeline's archive first,
+ * then Open-Meteo, and the billed WillyWeather call only when the archive has no tide events for the
+ * time. Never overwrites a value that is already there, never throws, and gives up after 15 seconds,
+ * so a lookup problem can only ever leave fields blank, never block the save.
+ */
+async function fillBlankMarkConditions(mark) {
+  let timer = null;
+  try {
+    if (!mark || mark.lat == null || mark.lng == null || !mark.dateTime) return mark;
+    const blanks = blankConditionKeys(mark);
+    if (blanks.length === 0) return mark;
+    const dateTime = String(mark.dateTime).replace("T", " "); // marks keep "YYYY-MM-DD HH:MM:SS"; the lookup's hour keys use the same
+    const found = await Promise.race([
+      lookupHistoricalMarkConditions(mark.lat, mark.lng, dateTime, blanks),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(null), 15000);
+      }),
+    ]);
+    if (found) for (const k of blanks) if (found[k] !== undefined) mark[k] = found[k];
+  } catch (err) {
+    console.error("Filling blank conditions failed (the mark is saved without them):", err);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  return mark;
 }
 
 // --- Shore direction guess (OpenStreetMap coastline bearing) ---------------
