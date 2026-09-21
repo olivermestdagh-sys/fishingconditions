@@ -14,7 +14,7 @@ database_id = "bf81bd8d-85ba-4532-a00e-c2ba3d480619"
 
 [vars]
 ALLOWED_ORIGIN = "https://olivermestdagh-sys.github.io"
-FRONTEND_ACCOUNT_URL = "https://olivermestdagh-sys.github.io/fishingconditions/account.html"
+FRONTEND_ACCOUNT_URL = "https://olivermestdagh-sys.github.io/fishingconditions/locations.html"
 GH_REPO_NAME = "fishingconditions"
 GH_REPO_OWNER = "olivermestdagh-sys"
 GH_WORKFLOW_FILE = "update.yml"
