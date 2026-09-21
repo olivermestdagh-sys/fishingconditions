@@ -98,7 +98,6 @@ async function init() {
 
   liveInitOnce();
   wireMapToolbar();
-  wireLayoutDiag();
   // A review that was loaded but never finished or cancelled (Import mode,
   // see map-sync.js/sync.js) survives leaving this tab: it's restored here,
   // and the map stays in Import mode until the person imports or cancels.
@@ -131,64 +130,6 @@ function syncAppHeight() {
     if (!document.hidden) soon();
   });
   if (window.visualViewport) window.visualViewport.addEventListener("resize", apply);
-}
-
-// A small read-out of the phone's screen/viewport numbers, for tracking down a gap along the bottom of the
-// installed app (see the display-mode rules in style.css). Hidden by default: tap on the empty part
-// of the toolbar above the map three times quickly to show or hide it. Nothing is stored or sent anywhere.
-function wireLayoutDiag() {
-  const toolbar = document.querySelector(".map-toolbar");
-  if (!toolbar) return;
-  let box = null;
-  let timer = null;
-  const probe = document.createElement("div");
-  probe.style.cssText = "position:absolute;visibility:hidden;padding-bottom:env(safe-area-inset-bottom, 0px);";
-  document.body.appendChild(probe);
-
-  const modes = ["standalone", "fullscreen", "minimal-ui", "browser"].filter((m) => window.matchMedia(`(display-mode: ${m})`).matches);
-  function render() {
-    if (!box) return;
-    const vv = window.visualViewport;
-    const body = getComputedStyle(document.body);
-    const rows = [
-      `mode ${modes.join(",")} now ${["standalone", "fullscreen", "minimal-ui", "browser"].filter((m) => window.matchMedia(`(display-mode: ${m})`).matches).join(",")}`,
-      `orientation ${window.innerWidth > window.innerHeight ? "landscape" : "portrait"}  dpr ${window.devicePixelRatio}`,
-      `inner ${window.innerWidth}x${window.innerHeight}  outer ${window.outerWidth}x${window.outerHeight}`,
-      `screen ${screen.width}x${screen.height}  avail ${screen.availWidth}x${screen.availHeight}`,
-      `visualViewport ${vv ? `${Math.round(vv.width)}x${Math.round(vv.height)} top ${Math.round(vv.offsetTop)}` : "none"}`,
-      `screen-inner height ${screen.height - window.innerHeight}`,
-      `env(safe-area-inset-bottom) ${getComputedStyle(probe).paddingBottom}`,
-      `body padding-bottom ${body.paddingBottom}  height ${Math.round(document.body.getBoundingClientRect().height)}  --app-height ${document.documentElement.style.getPropertyValue("--app-height") || "unset"}`,
-      `fullscreen ${document.fullscreenElement ? "yes" : "no"}  immersive ${document.documentElement.classList.contains("landscape-immersive") ? "yes" : "no"}`,
-    ];
-    box.textContent = rows.join("\n");
-  }
-  function toggle() {
-    if (box) {
-      box.remove();
-      box = null;
-      return;
-    }
-    box = document.createElement("pre");
-    box.style.cssText = "position:fixed;left:6px;top:50px;z-index:99999;margin:0;padding:6px 8px;background:rgba(0,0,0,0.78);color:#fff;font:11px/1.35 monospace;border-radius:6px;pointer-events:none;white-space:pre-wrap;max-width:calc(100vw - 12px);";
-    document.body.appendChild(box);
-    render();
-  }
-  // Three quick taps on the empty part of the toolbar (a press-and-hold started text selection on phones).
-  let taps = 0;
-  toolbar.addEventListener("pointerup", (e) => {
-    if (e.target.closest("button, label, input, select, a")) return;
-    taps += 1;
-    clearTimeout(timer);
-    if (taps >= 3) {
-      taps = 0;
-      toggle();
-      return;
-    }
-    timer = setTimeout(() => (taps = 0), 700);
-  });
-  for (const ev of ["resize", "orientationchange", "fullscreenchange"]) window.addEventListener(ev, () => { render(); setTimeout(render, 400); });
-  if (window.visualViewport) window.visualViewport.addEventListener("resize", render);
 }
 
 // ---------------------------------------------------------------------------

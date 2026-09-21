@@ -3523,10 +3523,6 @@ body {
    (the old Sync tab's review list and trail tree, now in the right-hand column).
    --------------------------------------------------------------------------- */
 .map-toolbar {
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
-  touch-action: manipulation;
   flex: none;
   display: flex;
   align-items: center;
