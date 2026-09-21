@@ -214,12 +214,16 @@ const SYNC_GRID_DEG = 0.01;
 // A handful of device-name -> pick-list-species aliases where the
 // chartplotter's own shorthand doesn't match config/mark_lists.json's
 // wording exactly (seen directly in Oliver's own export: the unit saves
-// "Gummy", the site's pick-list already has the fuller "Gummy Shark").
+// "Gummy", the site's pick-list has the fuller "Shark (Gummy)").
 // Easy to extend later without any code change elsewhere — this is the
 // only place that would need a new line.
 const SYNC_SPECIES_ALIASES = {
-  gummy: "Gummy Shark",
+  gummy: "Shark (Gummy)",
+  "gummy shark": "Shark (Gummy)", // renamed from "Gummy Shark"
+  "leather jacket": "Leatherjacket", // renamed from "Leather Jacket"
+  "school shark": "Shark (School)", // renamed from "School shark"
   whiting: "Whiting (King George)", // the plain "Whiting" was renamed to King George; a device's "Whiting" waypoints are those
+  "grass whiting": "Whiting (Other)", // renamed from "Grass Whiting"
 };
 
 // ---------------------------------------------------------------------------
