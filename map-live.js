@@ -35,6 +35,18 @@ function liveMinutesToClock(mins) {
   return `${h12}:${String(m).padStart(2, "0")} ${period}`;
 }
 
+// One fresh, high-accuracy GPS fix: {lat, lng}, or null if it is unavailable, denied or times out.
+function getFreshGpsPosition() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) { resolve(null); return; }
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  });
+}
+
 function setTimingsStatus(html, isError) {
   const el = document.getElementById("timingsStatus");
   if (!el) return;
@@ -75,14 +87,7 @@ async function updateTimings() {
 
   // A fresh GPS read, not the cached currentGpsPosition from page load —
   // position may have changed since (paddled out, walked down the beach).
-  const currentPosition = await new Promise((resolve) => {
-    if (!navigator.geolocation) { resolve(null); return; }
-    navigator.geolocation.getCurrentPosition(
-      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-      () => resolve(null),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    );
-  });
+  const currentPosition = await getFreshGpsPosition();
   if (!currentPosition) {
     setTimingsStatus("Couldn't get your current location — check location access is allowed.", true);
     return;
@@ -203,7 +208,138 @@ function liveBuildMap(gpsPosition) {
     map.setView([gpsPosition.lat, gpsPosition.lng], 13);
   }
   if (map) loadAndRenderMarks(map, markLayerState);
+  liveMap = map;
+  liveMarkState = markLayerState;
   return { map, markLayerState };
+}
+
+// --- Quick-entry cards: Session defaults and Catch (js/live-cards.js) -------------------------------
+// The map and marks layer of the Live map currently showing, so a Catch can be drawn on it once saved.
+let liveMap = null;
+let liveMarkState = null;
+let activeCardFlow = null; // the open card stack, if any (only one at a time)
+
+function showLiveToast(text, isError) {
+  const el = document.createElement("div");
+  el.className = "live-card-toast" + (isError ? " error" : "");
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), isError ? 6000 : 2500);
+}
+
+// The Species/Water/Berley/Rod/Rig/Bait options from the Settings lists (the same ones the mark edit form uses).
+async function liveLoadCardOptions() {
+  let lists = [];
+  try {
+    lists = await fetchUnionedMarkLists();
+  } catch (err) {
+    console.error("Could not load mark lists for the cards:", err);
+  }
+  return sessionCardOptions(lists);
+}
+
+async function openSessionDefaults() {
+  if (activeCardFlow) return;
+  const options = await liveLoadCardOptions();
+  let draft = getSessionDefaults(options);
+  const finish = () => { activeCardFlow = null; };
+  activeCardFlow = showCardFlow({
+    getSteps: () => buildSessionCardSteps(options, draft),
+    // Saved on every press, so closing part-way loses nothing.
+    onChoose: (step, value) => {
+      draft = applySessionCardChoice(draft, step.id, value);
+      saveSessionDefaults(draft);
+    },
+    onDone: () => {
+      activeCardFlow.close();
+      finish();
+      showLiveToast("Session defaults saved");
+    },
+    onClose: finish,
+    doneLabel: "Save",
+  });
+}
+
+// Draws a just-saved Catch on the Live map like any other mark (clickable, editable), if that map is still showing.
+function addCatchToLiveMap(mark) {
+  const state = liveMarkState;
+  if (!liveMap || !state || state._discarded || !state.markerLayer) return;
+  const style = markStyleFor(mark, state);
+  const marker = createMarkShapeLayer([mark.lat, mark.lng], mark, {
+    renderer: state.canvasRenderer,
+    radius: style.radius,
+    color: style.color,
+    weight: style.weight,
+    fillColor: style.fillColor,
+    fillOpacity: 0.85,
+  }, state.markLists).addTo(state.markerLayer);
+  marker.bindTooltip(markTooltipText(mark, state), { direction: "top" });
+  marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet", autoPan: false });
+  marker._markId = mark.id;
+  marker.on("mousedown", (e) => {
+    if (isSelectModifierKey(e.originalEvent)) L.DomEvent.stop(e);
+  });
+  marker.on("click", (e) => {
+    if (!isSelectModifierKey(e.originalEvent)) return;
+    L.DomEvent.stop(e);
+    marker.closePopup();
+    toggleMarkSelection(liveMap, state, mark.id);
+  });
+  marker.on("popupopen", () => fillMarkPopupDistances(marker.getPopup().getElement(), mark));
+  state.marksById.set(mark.id, mark);
+  state.markersById.set(mark.id, marker);
+}
+
+async function saveLiveCatch(answers, defaults, gpsPromise) {
+  const position = await gpsPromise;
+  if (!position) {
+    showLiveToast("Couldn't get your location — catch not saved.", true);
+    return;
+  }
+  let tide = {};
+  try {
+    tide = computeQuickMarkDefaults(getRowsForCurrentLoc());
+  } catch {
+    tide = {}; // no tide data for this spot: the save fills what it can from looked-up data
+  }
+  const mark = buildCatchFromCards({
+    id: makeMarkId(),
+    lat: position.lat,
+    lng: position.lng,
+    dateTime: nowAsNaiveString(),
+    species: answers.species,
+    size: answers.size,
+    rod: answers.rod,
+  }, defaults, tide);
+  const result = await saveMarkToD1(mark, true);
+  if (!result.success) {
+    showLiveToast("Catch not saved: " + result.error, true);
+    return;
+  }
+  saveLastMarkFieldValues(mark);
+  addCatchToLiveMap(mark);
+  showLiveToast("Catch saved");
+}
+
+// Tap Catch: the GPS fix starts straight away (that is where the fish was), while the cards are answered.
+async function startLiveCatch() {
+  if (activeCardFlow || !liveMap || !liveMarkState) return;
+  const gpsPromise = getFreshGpsPosition();
+  const options = await liveLoadCardOptions();
+  const defaults = getSessionDefaults(options);
+  const answers = {};
+  const finish = () => { activeCardFlow = null; };
+  activeCardFlow = showCardFlow({
+    getSteps: () => buildCatchCardSteps(options, defaults).map((s) => ({ ...s, selected: answers[s.id] ? [answers[s.id]] : [] })),
+    onChoose: (step, value) => { answers[step.id] = answers[step.id] === value ? "" : value; },
+    onDone: () => {
+      activeCardFlow.close();
+      finish();
+      saveLiveCatch(answers, defaults, gpsPromise);
+    },
+    onClose: finish,
+    doneLabel: "Save catch",
+  });
 }
 
 // Whether the panel's expanded content (ratings, timings, chart) is
@@ -449,6 +585,8 @@ function liveInitOnce() {
   }
   document.getElementById("btnUpdateTimings").addEventListener("click", updateTimings);
   document.getElementById("btnCloseLiveHoverPanel").addEventListener("click", hideLiveHoverPanel);
+  document.getElementById("btnSessionDefaults").addEventListener("click", openSessionDefaults);
+  document.getElementById("btnLiveCatch").addEventListener("click", startLiveCatch);
   document.getElementById("liveHoverPanelBanner").addEventListener("click", () => setPanelExpanded(!isPanelExpanded));
   // Wired once, not inside renderForLocation — that function reuses this
   // same persistent <canvas> across every re-render (destroying and
@@ -519,6 +657,12 @@ async function liveEnter(isStale) {
 function liveExit() {
   document.getElementById("liveHoverPanel").style.display = "none";
   setGpsStatus("");
+  if (activeCardFlow) {
+    activeCardFlow.close();
+    activeCardFlow = null;
+  }
+  liveMap = null;
+  liveMarkState = null;
   if (liveChart) {
     liveChart.destroy();
     liveChart = null;

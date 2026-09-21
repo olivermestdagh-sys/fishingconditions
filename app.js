@@ -206,6 +206,8 @@ function applyModeChrome() {
   liveToggle.disabled = isImport;
   const deviceTools = document.getElementById("mapDeviceTools");
   deviceTools.style.display = cachedIsAdmin && mapMode === "normal" ? "flex" : "none";
+  document.getElementById("btnSessionDefaults").style.display = isLive ? "" : "none";
+  document.getElementById("btnLiveCatch").style.display = isLive && cachedIsSignedIn ? "" : "none";
   document.getElementById("importReviewPanel").style.display = isImport ? "flex" : "none";
   document.getElementById("markDetailPanel").style.display = "none";
   if (!isLive) document.getElementById("liveGpsStatus").style.display = "none";

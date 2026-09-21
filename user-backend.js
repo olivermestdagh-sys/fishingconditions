@@ -1731,6 +1731,7 @@ const SYNCED_PREF_KEYS = new Set([
   "selectedLocation",
   "markViewSettings",
   "markLastFieldValues",
+  "liveSessionDefaults",
 ]);
 const PREF_MAX_VALUE_LENGTH = 64 * 1024;
 

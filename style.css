@@ -3598,3 +3598,24 @@ body {
 .candidate-step-btn { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; cursor: pointer; font-weight: 700; color: var(--grey-500); flex-shrink: 0; }
 .candidate-step-btn:hover { background: var(--blue-100, #eaf2fb); color: var(--blue-900, #0b2a4a); }
 .tracks-tree-node-selected { background: var(--blue-100, #eaf2fb); }
+
+/* Live mode quick-entry cards (js/live-cards.js): full-screen stack of large-button cards for Session defaults and Catch. */
+.live-card-overlay { position: fixed; inset: 0; z-index: 10001; background: var(--blue-900, #0b2a4a); display: flex; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+body.live-card-open { overflow: hidden; }
+.live-card { display: flex; flex-direction: column; width: 100%; max-width: 640px; margin: 0 auto; height: 100vh; height: 100dvh; padding: 14px; box-sizing: border-box; color: #fff; }
+.live-card-head { flex: 0 0 auto; text-align: center; }
+.live-card-progress { font-size: 0.85rem; opacity: 0.75; }
+.live-card-title { margin: 2px 0 0; font-size: 1.6rem; color: #fff; }
+.live-card-prompt { margin: 4px 0 10px; font-size: 1rem; opacity: 0.9; }
+.live-card-hint { margin: 0 0 10px; font-size: 0.85rem; color: #fde68a; }
+.live-card-grid { flex: 1 1 auto; overflow-y: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-content: start; padding: 2px 0 10px; -webkit-overflow-scrolling: touch; }
+.live-card-choice { min-height: 64px; padding: 10px 8px; border-radius: 14px; border: 2px solid rgba(255, 255, 255, 0.35); background: rgba(255, 255, 255, 0.08); color: #fff; font-size: 1.15rem; font-weight: 600; cursor: pointer; overflow-wrap: anywhere; }
+.live-card-choice.selected { background: #16a34a; border-color: #bbf7d0; }
+.live-card-empty { grid-column: 1 / -1; text-align: center; opacity: 0.85; }
+.live-card-nav { flex: 0 0 auto; display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 10px; padding-top: 8px; }
+.live-card-nav-btn { min-height: 60px; border-radius: 14px; border: 2px solid rgba(255, 255, 255, 0.4); background: transparent; color: #fff; font-size: 1.1rem; font-weight: 700; cursor: pointer; }
+.live-card-nav-btn.live-card-next { background: #fff; color: var(--blue-900, #0b2a4a); border-color: #fff; }
+.live-card-nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.live-card-toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 10002; max-width: 90vw; padding: 12px 18px; border-radius: 12px; background: #16a34a; color: #fff; font-weight: 600; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3); }
+.live-card-toast.error { background: #dc2626; }
+.map-toolbar .live-quick-btn { font-weight: 700; }
