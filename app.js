@@ -89,7 +89,7 @@ async function init() {
   // Now matches Live/Week Ahead: hold 2s to arm, then a plain tap
   // moves the tooltip to wherever you tap next.
   wireHoldToShowTooltip(() => state.chart, document.getElementById("conditionsChart"));
-  setupFullscreenToggle("locationChartFrame");
+  setupFullscreenToggle("locationChartFrame", { fullscreenOnRotate: false });
   locationPill = mountLocationPill("locationChartFrame", {
     nameId: "hoverPanelLocationName",
     tileIds: ["hoverPanelTileInfo", "hoverPanelSessions", "hoverPanelHint"],

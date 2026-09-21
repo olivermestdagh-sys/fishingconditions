@@ -456,7 +456,7 @@ function liveInitOnce() {
   // so wiring per-render would stack up duplicate listeners. The getter
   // always reads whatever the current liveChart is.
   wireHoldToShowTooltip(() => liveChart, document.getElementById("liveChart"));
-  setupFullscreenToggle("liveChartFrame");
+  setupFullscreenToggle("liveChartFrame", { fullscreenOnRotate: false });
 }
 
 // Loaded separately from the main data fetch, with its own error handling —

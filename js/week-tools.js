@@ -1064,9 +1064,13 @@ function isLandscapePhone() {
   return touch && phoneSized && window.innerWidth > window.innerHeight && window.innerHeight <= 600;
 }
 
-function setupFullscreenToggle(targetId) {
+// options.fullscreenOnRotate (default true): turning the phone sideways puts the page into browser fullscreen.
+// The Map tab passes false — it has no use for it, and in the installed app leaving fullscreen again left a
+// gap the height of the browser bar along the bottom. (The site bar is still hidden in landscape, see applyImmersive.)
+function setupFullscreenToggle(targetId, options = {}) {
   const target = document.getElementById(targetId);
   if (!target) return;
+  const fullscreenOnRotate = options.fullscreenOnRotate !== false;
   target.style.touchAction = "manipulation";
 
   let lastTapTime = 0;
@@ -1202,7 +1206,7 @@ function setupFullscreenToggle(targetId) {
     disarmTap();
     applyImmersive();
     if (landscapePhone.matches) {
-      if (anyFullscreenElement()) return;
+      if (!fullscreenOnRotate || anyFullscreenElement()) return;
       const el = rotationTarget();
       if (await enterFullscreen(el, false)) return;
       armedTap = () => {
