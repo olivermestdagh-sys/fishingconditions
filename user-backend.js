@@ -1328,9 +1328,19 @@ function markOwnerFor(user, type) {
   return PERSONAL_MARK_TYPES.includes(type) ? user.id : PUBLIC_USER_ID;
 }
 
-/** The accounts whose marks a caller can see and change: their own, plus (Admin only) the shared "public" ones. */
+/** The accounts whose marks a caller can SEE: their own plus the shared "public" ones (never anyone else's). */
+function markReadOwnerIds(user) {
+  return [user.id, PUBLIC_USER_ID];
+}
+
+/** The accounts whose marks a caller can CHANGE: their own, plus (Admin only) the shared "public" ones. */
 function markOwnerIds(user) {
   return user.role === "admin" ? [user.id, PUBLIC_USER_ID] : [user.id];
+}
+
+/** The mark as sent to the site, with which of the caller's two sets it belongs to: "Public" (shared) or "Mine". */
+function rowToOwnedMark(row) {
+  return { ...rowToMark(row), owner: row.user_id === PUBLIC_USER_ID ? "Public" : "Mine" };
 }
 
 async function handleMarksCollection(request, url, env) {
@@ -1340,13 +1350,13 @@ async function handleMarksCollection(request, url, env) {
   if (request.method === "GET") {
     const limit = Math.min(parseInt(url.searchParams.get("limit"), 10) || 200, 500);
     const offset = Math.max(parseInt(url.searchParams.get("offset"), 10) || 0, 0);
-    const owners = markOwnerIds(user);
+    const owners = markReadOwnerIds(user);
     const { results } = await env.DB.prepare(
       `SELECT * FROM marks WHERE user_id IN (${owners.map(() => "?").join(", ")}) ORDER BY date_time DESC LIMIT ? OFFSET ?`
     )
       .bind(...owners, limit, offset)
       .all();
-    return jsonResponse(results.map(rowToMark), 200, env);
+    return jsonResponse(results.map(rowToOwnedMark), 200, env);
   }
 
   if (request.method === "POST") {
@@ -2070,21 +2080,22 @@ async function handlePublicMarkLists(env) {
 /**
  * PRIVACY CHANGE: this used to be readable by anyone with no sign-in (every
  * mark, exact position and notes). It now needs a signed-in session and
- * returns only the caller's own marks (plus, for Admin, the shared ones) — see markOwnerIds. The URL keeps its
+ * returns only the caller's own marks plus the shared "public" ones — never
+ * another user's (see markReadOwnerIds). The URL keeps its
  * "public" name only so existing callers didn't need re-pointing; they now
  * send credentials (charts.js, reports.js, sync.js).
  */
 async function handlePublicMarks(request, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
-  // Admin sees their own marks (Catches, Sessions) together with the shared "public" ones (Mark, POI); see markOwnerFor.
-  const owners = markOwnerIds(user);
+  // Everyone signed in sees their own marks (Catches, Sessions) together with the shared "public" ones (Mark, POI); see markOwnerFor.
+  const owners = markReadOwnerIds(user);
   const { results } = await env.DB.prepare(
     `SELECT * FROM marks WHERE user_id IN (${owners.map(() => "?").join(", ")}) ORDER BY date_time DESC`
   )
     .bind(...owners)
     .all();
-  return new Response(JSON.stringify(results.map(rowToMark)), {
+  return new Response(JSON.stringify(results.map(rowToOwnedMark)), {
     status: 200,
     headers: {
       "Content-Type": "application/json",

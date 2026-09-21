@@ -677,7 +677,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const gateEl = document.getElementById("reportsNotConnected");
   const mainEl = document.getElementById("reportsMain");
   await refreshAdminStatus();
-  if (!cachedIsAdmin) {
+  if (!cachedIsSignedIn) {
     gateEl.style.display = "block";
     mainEl.style.display = "none";
     return;

@@ -596,7 +596,7 @@ function buildMarkPopupViewHtml(mark) {
   // anything already sitting on `mark`).
   rows.push(`<div data-mark-distance-row="nearest" style="display:flex;gap:6px;font-size:0.85rem;margin-bottom:3px;"><span style="font-weight:600;min-width:64px;">Nearest loc.</span><span>Calculating…</span></div>`);
   rows.push(`<div data-mark-distance-row="fromyou" style="display:flex;gap:6px;font-size:0.85rem;margin-bottom:3px;"><span style="font-weight:600;min-width:64px;">From you</span><span>Calculating…</span></div>`);
-  const canEdit = cachedIsAdmin;
+  const canEdit = canEditMark(mark);
   return `
     <div data-mark-id="${escapeHtml(mark.id)}" style="min-width:200px;">
       ${rows.join("")}
@@ -856,6 +856,9 @@ function collectMarkFormValues(form, originalMark) {
     createdAt: originalMark.createdAt,
   };
   if (originalMark.source) updated.source = originalMark.source;
+  // Which set the mark belongs to follows its type for Admin (Catches/Sessions are theirs, Mark/POI shared); the Worker
+  // makes the same call on save. Everyone else's marks are all their own.
+  updated.owner = cachedIsAdmin ? (PERSONAL_MARK_TYPES.includes(type) ? "Mine" : "Public") : "Mine";
   // The role follows the type (Session Start / Session End); a mark switched out of a session type leaves its pair.
   const role = sessionRoleForType(type);
   if (role) {

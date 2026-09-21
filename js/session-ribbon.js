@@ -360,6 +360,7 @@ function ribbonLookupRows(hourly, marine, from, to) {
 /** Saves what the ribbon had to look up live into the archive (admin only, fire-and-forget: a failure just means it is looked up again next time). */
 function ribbonSaveLookups(locationName, observations, tideEvents) {
   if (!locationName || (!observations.length && !tideEvents.length)) return;
+  if (!cachedIsAdmin) return; // only Admin can write to the shared archive
   fetch(`${USER_BACKEND_URL}/api/archive/lookups`, {
     method: "POST",
     credentials: "include",

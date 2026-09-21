@@ -136,18 +136,22 @@ let cachedIsAdmin = false; // refreshed once via refreshAdminStatus() at page
                            // staleness window: signing in/out on the
                            // Settings tab in another tab won't be reflected
                            // here until this page's own next load.
+let cachedIsSignedIn = false; // set by the same refreshAdminStatus() call: anyone signed in, admin or not
 async function refreshAdminStatus() {
   try {
     const res = await fetch(`${USER_BACKEND_URL}/auth/me`, { credentials: "include" });
     if (!res.ok) {
       cachedIsAdmin = false;
+      cachedIsSignedIn = false;
       return;
     }
     const user = await res.json();
+    cachedIsSignedIn = true;
     cachedIsAdmin = user.role === "admin";
   } catch (err) {
     console.error("Admin status check failed:", err);
     cachedIsAdmin = false;
+    cachedIsSignedIn = false;
   }
 }
 
@@ -561,12 +565,20 @@ const MARK_FILTER_ONLY_FIELDS = [
   { key: "owner", label: "Mark Owner" }, // "Mine" (Catches, Sessions) or "Public" (Mark, POI) — derived from the type, see markOwnerLabel
 ];
 
-// Whose account a mark lives in, from its type — the same rule the Worker applies (PERSONAL_MARK_TYPES,
-// markOwnerFor in user-backend.js): Catches and Sessions are the signed-in person's own ("Mine"), everything
-// else (Mark, POI) is the shared "Public" set. Used by the map's Owner filter.
+// Whose set a mark belongs to: "Mine" (the signed-in person's own) or "Public" (the shared set everyone sees). The
+// Worker says so on every mark it sends (`mark.owner`). For a mark not yet saved, or edited into another type, it is
+// worked out the same way the Worker does (PERSONAL_MARK_TYPES, markOwnerFor in user-backend.js): Admin's Catches and
+// Sessions are theirs and their Mark/POI are shared; anyone else's marks are all their own. Used by the map's Mark
+// Owner filter and to decide who may edit a mark.
 const PERSONAL_MARK_TYPES = ["Catch", "Session Start", "Session End"];
 function markOwnerLabel(mark) {
+  if (mark.owner) return mark.owner;
+  if (typeof cachedIsAdmin !== "undefined" && !cachedIsAdmin) return "Mine";
   return PERSONAL_MARK_TYPES.includes(mark.type) ? "Mine" : "Public";
+}
+/** Whether the signed-in person may edit or delete this mark: Admin any, everyone else only their own (the shared ones are read-only for them). */
+function canEditMark(mark) {
+  return cachedIsAdmin || (cachedIsSignedIn && markOwnerLabel(mark) === "Mine");
 }
 /** A mark's value for a filterable field — "owner" is derived from its type, every other field is stored on the mark. */
 function markFieldValue(mark, key) {

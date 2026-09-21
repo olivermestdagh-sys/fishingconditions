@@ -486,6 +486,7 @@ function toggleMarkSelectionSilent(state, markId) {
   const marker = state.markersById.get(markId);
   const mark = state.marksById.get(markId);
   if (!marker || !mark) return;
+  if (!canEditMark(mark)) return; // the shared public marks are read-only for everyone but Admin, so they can't be bulk edited/deleted
   if (state.selectedMarkIds.has(markId)) {
     state.selectedMarkIds.delete(markId);
     applyMarkSelectionVisual(marker, mark, state, false);
@@ -1277,11 +1278,13 @@ async function handleMapClickForMarks(map, lat, lng, state, onLocationPreviewCli
     state._justFinishedBoxSelect = false;
     return;
   }
-  if (!cachedIsAdmin) {
+  if (!cachedIsSignedIn) {
     if (onLocationPreviewClick) onLocationPreviewClick(lat, lng);
     return;
   }
-  if (onLocationPreviewClick) {
+  // The "show the conditions graph here" choice is an Admin-only preview, so only Admin is asked; anyone else signed
+  // in goes straight to logging a mark.
+  if (onLocationPreviewClick && cachedIsAdmin) {
     const choice = await showMapClickChoiceDialog();
     if (choice === "graph") {
       onLocationPreviewClick(lat, lng);

@@ -82,16 +82,19 @@ test("a normal user's marks always go to their own account", async () => {
   }
 });
 
-test("Admin sees their own and the shared marks together; a normal user only their own", async () => {
+test("everyone signed in sees their own and the shared marks, never another user's; each mark says which set it is in", async () => {
   const rows = () => [
     { id: "c1", user_id: ME, type: "Catch", date_time: "2026-01-02 00:00:00" },
     { id: "m1", user_id: "public", type: "Mark", date_time: "2026-01-01 00:00:00" },
     { id: "x1", user_id: "someone-else", type: "Catch", date_time: "2026-01-03 00:00:00" },
   ];
-  const admin = await (await call(makeEnv("admin", rows()), "GET", "/api/public/marks")).json();
-  assert.deepEqual(admin.map((m) => m.id).sort(), ["c1", "m1"]);
-  const basic = await (await call(makeEnv("basic", rows()), "GET", "/api/public/marks")).json();
-  assert.deepEqual(basic.map((m) => m.id), ["c1"]);
+  for (const role of ["admin", "basic"]) {
+    for (const p of ["/api/public/marks", "/api/marks"]) {
+      const seen = await (await call(makeEnv(role, rows()), "GET", p)).json();
+      assert.deepEqual(seen.map((m) => m.id).sort(), ["c1", "m1"], `${role} ${p}`);
+      assert.deepEqual(Object.fromEntries(seen.map((m) => [m.id, m.owner])), { c1: "Mine", m1: "Public" }, `${role} ${p}`);
+    }
+  }
 });
 
 test("Admin can edit and delete a shared mark; ownership follows the type when it changes", async () => {

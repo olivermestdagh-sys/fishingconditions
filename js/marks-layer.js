@@ -305,7 +305,7 @@ function createMarkShapeLayer(latlng, mark, options, markLists) {
 }
 
 async function loadAndRenderMarks(map, state) {
-  if (!cachedIsAdmin) return;
+  if (!cachedIsSignedIn) return; // marks are only for signed-in people: their own plus the shared public set
 
   let marks;
   try {
