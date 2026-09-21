@@ -614,11 +614,11 @@ function buildMarkPopupViewHtml(mark) {
  * (cm) input, a free-text Notes textarea, and a read-only Source field
  * (see collectMarkFormValues — there's no `name` collected from it because
  * there's nothing TO collect: it's carried over from the original mark
- * unconditionally, not editable here at all). Deliberately does NOT expose
- * lat/lng: repositioning a mark's actual GPS point is a different, more
- * error-prone action (fat-finger a coordinate here and the pin silently
- * jumps oceans) than correcting its details, and wasn't asked for — the
- * pin stays exactly where it was placed.
+ * unconditionally, not editable here at all). Latitude/Longitude are shown
+ * but read-only (no `name`, so never collected): repositioning a mark's
+ * actual GPS point is a different, more error-prone action (fat-finger a
+ * coordinate here and the pin silently jumps oceans) than correcting its
+ * details — the pin stays exactly where it was placed.
  *
  * Every field beyond Name/Type/Date-Time/Source is wrapped in its own
  * `data-field-group="<key>"` div, always rendered but shown/hidden by
@@ -661,6 +661,16 @@ function buildMarkPopupEditHtml(mark, markLists) {
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Date/Time
           <input type="datetime-local" name="dateTime" step="1" value="${naiveToDatetimeLocal(mark.dateTime)}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
+        <div style="display:flex;gap:8px;">
+          <label style="display:block;flex:1;min-width:0;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Latitude
+            <input type="text" readonly data-mark-lat value="${mark.lat != null ? Number(mark.lat).toFixed(6) : "—"}"
+              style="${MARK_POPUP_INPUT_STYLE}background:var(--grey-100);color:var(--grey-500);cursor:not-allowed;" />
+          </label>
+          <label style="display:block;flex:1;min-width:0;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Longitude
+            <input type="text" readonly data-mark-lng value="${mark.lng != null ? Number(mark.lng).toFixed(6) : "—"}"
+              style="${MARK_POPUP_INPUT_STYLE}background:var(--grey-100);color:var(--grey-500);cursor:not-allowed;" />
+          </label>
+        </div>
         ${otherOptionalFieldsHtml}
         <div data-field-group="size">
           <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Size (cm)
