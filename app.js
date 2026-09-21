@@ -107,8 +107,8 @@ async function init() {
 }
 
 // A small read-out of the phone's screen/viewport numbers, for tracking down a gap along the bottom of the
-// installed app (see the display-mode rules in style.css). Hidden by default: press and hold on the empty part
-// of the toolbar above the map for about a second to show or hide it. Nothing is stored or sent anywhere.
+// installed app (see the display-mode rules in style.css). Hidden by default: tap on the empty part
+// of the toolbar above the map three times quickly to show or hide it. Nothing is stored or sent anywhere.
 function wireLayoutDiag() {
   const toolbar = document.querySelector(".map-toolbar");
   if (!toolbar) return;
@@ -147,12 +147,19 @@ function wireLayoutDiag() {
     document.body.appendChild(box);
     render();
   }
-  toolbar.addEventListener("pointerdown", (e) => {
+  // Three quick taps on the empty part of the toolbar (a press-and-hold started text selection on phones).
+  let taps = 0;
+  toolbar.addEventListener("pointerup", (e) => {
     if (e.target.closest("button, label, input, select, a")) return;
+    taps += 1;
     clearTimeout(timer);
-    timer = setTimeout(toggle, 1000);
+    if (taps >= 3) {
+      taps = 0;
+      toggle();
+      return;
+    }
+    timer = setTimeout(() => (taps = 0), 700);
   });
-  for (const ev of ["pointerup", "pointercancel", "pointermove"]) toolbar.addEventListener(ev, () => clearTimeout(timer));
   for (const ev of ["resize", "orientationchange", "fullscreenchange"]) window.addEventListener(ev, () => { render(); setTimeout(render, 400); });
   if (window.visualViewport) window.visualViewport.addEventListener("resize", render);
 }
