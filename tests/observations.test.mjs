@@ -164,7 +164,7 @@ test("prune keeps the last month, and only the 12 hours around a session before 
   const { env, sqlite } = makeDb();
   seedHistory(sqlite);
   // a session on 2026-08-10, 09:00-11:00 (start and end marks); a much newer one that changes nothing
-  sqlite.prepare("INSERT INTO marks VALUES ('s', 'Session', '2026-08-10 09:00:00'), ('e', 'Session', '2026-08-10 11:00:00'), ('c', 'Catch', '2026-08-03 12:00:00')").run();
+  sqlite.prepare("INSERT INTO marks VALUES ('s', 'Session Start', '2026-08-10 09:00:00'), ('e', 'Session End', '2026-08-10 11:00:00'), ('c', 'Catch', '2026-08-03 12:00:00')").run();
   const total = sqlite.prepare("SELECT COUNT(*) AS n FROM observations").get().n;
   const dry = await (await prune(env, { mode: "dry" })).json();
   assert.equal(dry.mode, "dry");

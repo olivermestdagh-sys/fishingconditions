@@ -769,7 +769,7 @@ function buildGpxDocument(marks, device) {
       // plus any notes.
       const descParts = [];
       if (m.name && m.name !== m.species) descParts.push(m.name);
-      if (m.type === "Session" && m.species) descParts.push(`Target: ${m.species}`);
+      if (isSessionType(m.type) && m.species) descParts.push(`Target: ${m.species}`);
       if (m.notes) descParts.push(m.notes);
       const desc = descParts.join(" — ");
       const timeTag = m.dateTime ? `<time>${escapeXml(naiveToGpxTime(m.dateTime))}</time>` : "";
@@ -783,7 +783,7 @@ function buildGpxDocument(marks, device) {
       // point, so it always wins there regardless of anything a stray
       // legacy `species` value on an old record might still hold.
       // A Session's species are its multiple target species, not its name — its own name wins, like a POI.
-      const nameTag = escapeXml(m.type === "POI" || m.type === "Session" ? (m.name || "Mark") : (m.species || m.name || "Mark"));
+      const nameTag = escapeXml(m.type === "POI" || isSessionType(m.type) ? (m.name || "Mark") : (m.species || m.name || "Mark"));
       const symTag = `<sym>${escapeXml(gpxSymForMark(m, device))}</sym>`;
       return (
         `  <wpt lat="${m.lat}" lon="${m.lng}">\n` +
@@ -1215,8 +1215,8 @@ function onToggleAllTracks(field) {
  * Every currently Import-checked session candidate, converted into a
  * mark-shaped object ready for the SAME saveMarksBatchToD1 (charts.js)
  * every regular mark import already goes through — a Session is just a
- * mark with type="Session" plus two new linking fields (sessionRole,
- * sessionGroupId), not a separate save path or a separate table. A
+ * mark with type "Session Start" or "Session End" plus two linking fields
+ * (sessionRole, sessionGroupId), not a separate save path or a separate table. A
  * segment's own Start and End share one groupId (generated once per
  * segment, regardless of how many of the two actually end up checked)
  * — what the Location/Live maps will use later to draw the connecting
@@ -1231,7 +1231,7 @@ function onToggleAllTracks(field) {
  */
 /**
  * Whether a session Start/End point is already saved: an existing Session mark
- * of the same role (start/end) on the same calendar date within
+ * of the same type (Session Start / Session End) on the same calendar date within
  * SYNC_MATCH_RADIUS_M of it — location and date only, the mark's name never
  * matters. Such a candidate is not offered for import.
  */
@@ -1239,8 +1239,7 @@ function sessionCandidateAlreadySaved(point, kind) {
   const date = syncDateKey(point.timeNaive);
   return existingMarks.some(
     (m) =>
-      m.type === "Session" &&
-      m.sessionRole === kind &&
+      m.type === (kind === "start" ? "Session Start" : "Session End") &&
       syncDateKey(m.dateTime) === date &&
       typeof m.lat === "number" &&
       typeof m.lng === "number" &&
@@ -1287,7 +1286,7 @@ function collectCheckedSessionMarks() {
             // (computeFishingSequenceNumbers), so what's saved always
             // matches what was actually seen on screen.
             name: cand.kind === "start" ? `Session ${seqNum} start` : `Session ${seqNum} end`,
-            type: "Session",
+            type: cand.kind === "start" ? "Session Start" : "Session End",
             dateTime: point.timeNaive,
             createdAt: nowStr,
             source: "trail-import",

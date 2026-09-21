@@ -258,7 +258,7 @@ CREATE TABLE IF NOT EXISTS marks (
   wind_direction TEXT,
   wind_speed REAL,
   session_role TEXT,                 -- 'start' | 'end' — ONLY meaningful when
-                                      -- type = 'Session' (Fishing Sessions
+                                      -- type = 'Session Start' / 'Session End' (Fishing Sessions
                                       -- trail-import feature); NULL for every
                                       -- other mark type
   session_group_id TEXT,             -- links a Session's Start row to its own

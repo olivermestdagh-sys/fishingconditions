@@ -16,6 +16,9 @@ const fns = new Function(
     grab(/const RIBBON_TIME_ZONE[^\n]*\r?\n/),
     grab(/const RIBBON_DAY_MS[^\n]*\r?\n/),
     grab(/const RIBBON_VIEW_PAD_MS[^\n]*\r?\n/),
+    grab(/const SESSION_TYPE_ROLES = [^\n]*\r?\n/),
+    fn("isSessionType"),
+    fn("sessionRoleForType"),
     fn("parseNaive"),
     fn("naiveDateOnlyStr"),
     fn("ribbonBuildSessions"),
@@ -42,8 +45,8 @@ const fns = new Function(
 const T = (s) => fns.parseNaive(s);
 
 const marks = [
-  { id: "s1", type: "Session", sessionRole: "start", sessionGroupId: "g1", name: "Session 1 start", dateTime: "2026-09-20T06:00:00", lat: -38.4, lng: 145.1, windSpeed: 10, windDirection: "N", tideCondition: "Running In" },
-  { id: "s2", type: "Session", sessionRole: "end", sessionGroupId: "g1", name: "Session 1 end", dateTime: "2026-09-20T10:00:00", lat: -38.4, lng: 145.1 },
+  { id: "s1", type: "Session Start", sessionRole: "start", sessionGroupId: "g1", name: "Session 1 start", dateTime: "2026-09-20T06:00:00", lat: -38.4, lng: 145.1, windSpeed: 10, windDirection: "N", tideCondition: "Running In" },
+  { id: "s2", type: "Session End", sessionRole: "end", sessionGroupId: "g1", name: "Session 1 end", dateTime: "2026-09-20T10:00:00", lat: -38.4, lng: 145.1 },
   { id: "c1", type: "Catch", species: "Whiting", dateTime: "2026-09-20T07:15:00", size: 30, windSpeed: 18, windDirection: "S" },
   { id: "c2", type: "Catch", species: "Snapper", dateTime: "2026-09-20T09:00:00" },
   { id: "c3", type: "Catch", species: "Whiting", dateTime: "2026-09-20T12:00:00" }, // after the session
@@ -58,7 +61,7 @@ test("a session gathers only the catches between its start and end", () => {
 });
 
 test("a session with no catches is still a valid session", () => {
-  const [s] = fns.ribbonBuildSessions(marks.filter((m) => m.type === "Session"));
+  const [s] = fns.ribbonBuildSessions(marks.filter((m) => m.type.startsWith("Session")));
   assert.equal(s.catches.length, 0);
   assert.equal(s.end - s.start, 4 * 3600000);
 });

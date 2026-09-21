@@ -167,13 +167,24 @@ const MARK_TYPE_FIELD_KEYS = {
   ],
 };
 MARK_TYPE_FIELD_KEYS.Fish = MARK_TYPE_FIELD_KEYS.Catch;
-// A Session (imported fishing trip, see sync.js) has always carried the full
-// Catch-level field set (it fell through to the fallback below); listed
-// explicitly now so that is deliberate. Its Species is different from a
-// Catch's in two ways — see typeRequiresSpecies / typeAllowsMultipleSpecies.
-// A Session is a trip, not a fish: no Size and no Released (anything already
-// stored in those is dropped the next time the mark is saved).
-MARK_TYPE_FIELD_KEYS.Session = MARK_TYPE_FIELD_KEYS.Catch.filter((k) => k !== "size" && k !== "released");
+// A Session (imported fishing trip, see sync.js) is two marks: "Session Start" and
+// "Session End", joined by a shared sessionGroupId. Each carries the full
+// Catch-level field set except Size and Released — a Session is a trip, not a
+// fish (anything already stored in those is dropped the next time the mark is
+// saved). Its Species is different from a Catch's in two ways — see
+// typeRequiresSpecies / typeAllowsMultipleSpecies.
+// sessionRole ("start"/"end") is kept in step with the type (see sessionRoleForType).
+const SESSION_TYPE_ROLES = { "Session Start": "start", "Session End": "end" };
+function isSessionType(type) {
+  return Object.prototype.hasOwnProperty.call(SESSION_TYPE_ROLES, type);
+}
+/** "start" / "end" for a Session Start / Session End type, otherwise null. */
+function sessionRoleForType(type) {
+  return isSessionType(type) ? SESSION_TYPE_ROLES[type] : null;
+}
+const SESSION_FIELD_KEYS = MARK_TYPE_FIELD_KEYS.Catch.filter((k) => k !== "size" && k !== "released");
+MARK_TYPE_FIELD_KEYS["Session Start"] = SESSION_FIELD_KEYS;
+MARK_TYPE_FIELD_KEYS["Session End"] = SESSION_FIELD_KEYS;
 
 /** MARK_TYPE_FIELD_KEYS[type], falling back to the full Catch-level field
  * set for anything not explicitly listed there (including "Fish" via the
@@ -187,7 +198,7 @@ function fieldKeysForMarkType(type) {
 /** Catch/Mark/Fish must have a species; a Session need not (its species are
  * optional targets), and it never gates the rest of the form. */
 function typeRequiresSpecies(type) {
-  return type !== "Session" && fieldKeysForMarkType(type).includes("species");
+  return !isSessionType(type) && fieldKeysForMarkType(type).includes("species");
 }
 
 /** A Session's species are the TARGETS for the session, so several can be set
@@ -201,7 +212,7 @@ function typeAllowsMultipleSpecies(type) {
  * same convention the Sync import already uses for bait/rig/rod/berley). */
 const SESSION_MULTI_VALUE_FIELDS = ["species", "bait", "rig", "rod", "berley"];
 function typeAllowsMultipleValues(type, key) {
-  return type === "Session" && SESSION_MULTI_VALUE_FIELDS.includes(key);
+  return isSessionType(type) && SESSION_MULTI_VALUE_FIELDS.includes(key);
 }
 
 // --- Mark quick-entry defaults ("You are here" click, Live tab only) -------
@@ -242,7 +253,7 @@ function saveLastMarkFieldValues(mark) {
     if (mark.type) current.type = mark.type;
     for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
       if (f.key === "weatherCondition" || f.key === "tideCondition" || f.key === "tideExtreme") continue; // tideCondition (and its tideExtreme modifier) has its own real-data defaulting (computeQuickMarkDefaults); weatherCondition deliberately gets no default at all, of either kind — see that same function's comment
-      if (mark.type === "Session" && typeAllowsMultipleValues("Session", f.key)) continue; // a Session's multi-value lists (targets, gear) aren't defaults for the next catch
+      if (isSessionType(mark.type) && typeAllowsMultipleValues(mark.type, f.key)) continue; // a Session's multi-value lists (targets, gear) aren't defaults for the next catch
       if (mark[f.key]) current[f.key] = mark[f.key];
     }
     Prefs.set(MARK_LAST_VALUES_STORAGE_KEY, JSON.stringify(current));
@@ -596,7 +607,7 @@ function buildMarkPopupViewHtml(mark) {
         <button type="button" class="btn-secondary" data-mark-delete style="padding:4px 10px;font-size:0.85rem;color:#dc2626;">Delete</button>
       </div>
       <div data-mark-delete-confirm style="display:none;margin-top:8px;padding:8px;border:1px solid #fecaca;background:#fef2f2;border-radius:6px;font-size:0.85rem;">
-        <div style="margin-bottom:6px;">${mark.type === "Session" ? "Delete this Fishing Session? Both its Start and End are deleted together. This can't be undone." : "Delete this mark? This can't be undone."}</div>
+        <div style="margin-bottom:6px;">${isSessionType(mark.type) ? "Delete this Fishing Session? Both its Start and End are deleted together. This can't be undone." : "Delete this mark? This can't be undone."}</div>
         <button type="button" class="btn-secondary" data-mark-delete-confirm-yes style="padding:4px 10px;font-size:0.85rem;background:#dc2626;color:#fff;border-color:#dc2626;">Yes, delete</button>
         <button type="button" class="btn-secondary" data-mark-delete-cancel style="padding:4px 10px;font-size:0.85rem;">Cancel</button>
       </div>
@@ -845,6 +856,15 @@ function collectMarkFormValues(form, originalMark) {
     createdAt: originalMark.createdAt,
   };
   if (originalMark.source) updated.source = originalMark.source;
+  // The role follows the type (Session Start / Session End); a mark switched out of a session type leaves its pair.
+  const role = sessionRoleForType(type);
+  if (role) {
+    updated.sessionRole = role;
+    if (originalMark.sessionGroupId) updated.sessionGroupId = originalMark.sessionGroupId;
+  } else if (originalMark.sessionRole || originalMark.sessionGroupId) {
+    updated.sessionRole = null;
+    updated.sessionGroupId = null;
+  }
   for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
     if (!applicable.includes(f.key)) continue;
     let v = val(f.key);
@@ -1193,7 +1213,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         const species = speciesSelect.value;
         if (syncBlock) syncBlock.style.display = "none";
         // A Session's Name is never driven by its species (they are its targets).
-        if (typeSelect && typeSelect.value === "Session") return;
+        if (typeSelect && isSessionType(typeSelect.value)) return;
         if (!species || !nameInput) return;
         const currentName = nameInput.value.trim();
         if (!currentName) {
@@ -1296,9 +1316,9 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       // repeated imports/deletes shouldn't need two separate delete
       // actions for what's really one thing).
       let pairedMark = null;
-      if (mark.type === "Session" && mark.sessionGroupId && options.state) {
+      if (isSessionType(mark.type) && mark.sessionGroupId && options.state) {
         for (const other of options.state.marksById.values()) {
-          if (other.id !== mark.id && other.type === "Session" && other.sessionGroupId === mark.sessionGroupId) {
+          if (other.id !== mark.id && isSessionType(other.type) && other.sessionGroupId === mark.sessionGroupId) {
             pairedMark = other;
             break;
           }
@@ -1352,7 +1372,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         // whatever's left in marksById now that this one's gone, rather
         // than tracked incrementally; cheap enough at real mark counts and
         // correct regardless of which half of a pair got deleted. Runs
-        // unconditionally (not just for type === "Session") since a stray
+        // unconditionally (not just for a Session type) since a stray
         // mismatch there is exactly the kind of thing worth being
         // defensive about rather than trusting the type check alone.
         if (options.map) renderSessionLines(options.map, options.state, Array.from(options.state.marksById.values()));

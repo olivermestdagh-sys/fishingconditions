@@ -1057,6 +1057,9 @@ function pickReadableTextColor(hex) {
   return luminance > 0.6 ? "#111827" : "#ffffff";
 }
 
+// MARK_LIST_FIELDS keys whose values can't be deleted (the Worker refuses too — LOCKED_MARK_LIST_FIELDS, user-backend.js).
+const LOCKED_MARK_LIST_KEYS = ["type", "tideCondition", "tideExtreme"];
+
 function renderMarkLists() {
   const container = document.getElementById("markListsGroups");
   container.innerHTML = MARK_LIST_FIELDS.map(({ key, label }) => `
@@ -1115,14 +1118,18 @@ function renderMarkLists() {
           <option value=""${currentColor ? "" : " selected"}>Colour…</option>
           ${colorNames.map((f) => `<option value="${f.replace(/"/g, "&quot;")}" ${f === currentColor ? "selected" : ""}>${f.replace(/</g, "&lt;")}</option>`).join("")}
         </select>`;
+      // Mark Type, Tide Condition and Tide Extreme values can't be deleted — they're kept for shaping/colouring.
+      const removeBtnHtml = LOCKED_MARK_LIST_KEYS.includes(key)
+        ? ""
+        : `<button type="button" data-remove-mark-value data-field="${key}" data-value="${escAttr}"
+          aria-label="Remove ${escAttr}"
+          style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>`;
       return `
       <span class="loc-chip" data-field="${key}" data-value="${escAttr}" style="display:inline-flex;align-items:center;gap:6px;${colorStyle}">
         <span>${escText}</span>
         ${shapeSelectHtml}
         ${colorSelectHtml}
-        <button type="button" data-remove-mark-value data-field="${key}" data-value="${escAttr}"
-          aria-label="Remove ${escAttr}"
-          style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>
+        ${removeBtnHtml}
       </span>
     `;
     }).join("");
@@ -1491,7 +1498,7 @@ async function onRemoveMarkSubFormat(fieldName, value) {
 // value as a pick again, it isn't broken or hidden.
 async function onRemoveMarkListValue(key, value) {
   const fieldDef = MARK_LIST_FIELDS.find((f) => f.key === key);
-  if (!fieldDef) return;
+  if (!fieldDef || LOCKED_MARK_LIST_KEYS.includes(key)) return;
   const entry = markLists.find((r) => r.field === fieldDef.label && r.value === value);
   if (!entry || !entry.id) return;
   try {

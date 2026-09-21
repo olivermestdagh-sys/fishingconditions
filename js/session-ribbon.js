@@ -3,7 +3,7 @@
 // Loaded by reports.html after mark-lookup.js, weather-preview.js and chart-render.js. The top half of this file is pure logic (tested in tests/session-ribbon.test.mjs); the bottom half builds the rows, draws, and talks to the page.
 //
 // Data used (nothing new is stored):
-//   - Session marks (type "Session", sessionRole start/end, sessionGroupId) and the Catch marks between them, by time.
+//   - Session marks (type "Session Start" / "Session End", sessionGroupId) and the Catch marks between them, by time.
 //   - The conditions recorded on those marks, carried forward: a value is in force from the mark that sets it until a later mark changes it.
 //   - Tide high/low events from WillyWeather (fetchTideExtremaForRange, cached), turned into hourly tide rows. Left out entirely when unavailable.
 //   - Hourly wind, temperature and pressure from Open-Meteo's historical archive, and sea temperature from its marine archive.
@@ -20,7 +20,7 @@ const RIBBON_TIME_ZONE = "Australia/Melbourne"; // only used to express calculat
 function ribbonBuildSessions(marks) {
   const groups = new Map();
   for (const m of marks) {
-    if (m.type !== "Session" || !m.sessionGroupId || !m.dateTime) continue;
+    if (!isSessionType(m.type) || !m.sessionGroupId || !m.dateTime) continue;
     if (!groups.has(m.sessionGroupId)) groups.set(m.sessionGroupId, []);
     groups.get(m.sessionGroupId).push(m);
   }
@@ -32,8 +32,8 @@ function ribbonBuildSessions(marks) {
 
   const sessions = [];
   for (const [groupId, ms] of groups) {
-    const startMark = ms.find((m) => m.sessionRole === "start") || null;
-    const endMark = ms.find((m) => m.sessionRole === "end") || null;
+    const startMark = ms.find((m) => sessionRoleForType(m.type) === "start") || null;
+    const endMark = ms.find((m) => sessionRoleForType(m.type) === "end") || null;
     let start = startMark ? parseNaive(startMark.dateTime) : null;
     let end = endMark ? parseNaive(endMark.dateTime) : null;
     if (start == null && end == null) continue;

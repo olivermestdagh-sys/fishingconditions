@@ -711,9 +711,9 @@ function markIdsToDeleteIncludingSessionPairs(state) {
   const ids = new Set(state.selectedMarkIds);
   for (const markId of state.selectedMarkIds) {
     const mark = state.marksById.get(markId);
-    if (!mark || mark.type !== "Session" || !mark.sessionGroupId) continue;
+    if (!mark || !isSessionType(mark.type) || !mark.sessionGroupId) continue;
     for (const other of state.marksById.values()) {
-      if (other.id !== mark.id && other.type === "Session" && other.sessionGroupId === mark.sessionGroupId) {
+      if (other.id !== mark.id && isSessionType(other.type) && other.sessionGroupId === mark.sessionGroupId) {
         ids.add(other.id);
       }
     }

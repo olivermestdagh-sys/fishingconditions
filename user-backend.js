@@ -1205,6 +1205,9 @@ async function handleMarkListsCollection(request, url, env) {
   return jsonResponse({ error: "Method not allowed." }, 405, env);
 }
 
+// Mark list fields whose values can't be deleted (see the DELETE branch of handleMarkListItem; the Settings tab hides their ×).
+const LOCKED_MARK_LIST_FIELDS = ["Mark Type", "Tide Condition", "Tide Extreme"];
+
 async function handleMarkListItem(request, url, env, id) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
@@ -1243,6 +1246,10 @@ async function handleMarkListItem(request, url, env, id) {
   }
 
   if (request.method === "DELETE") {
+    // Their values carry the shapes and colours marks are drawn with, so they can be added to and restyled but never removed.
+    if (LOCKED_MARK_LIST_FIELDS.includes(existing.field)) {
+      return jsonResponse({ error: `${existing.field} values can't be deleted — they're kept for shaping and colouring.` }, 409, env);
+    }
     await env.DB.prepare("DELETE FROM user_mark_lists WHERE id = ? AND user_id = ?").bind(id, uid).run();
     return new Response(null, { status: 204, headers: corsHeaders(env) });
   }
@@ -1889,7 +1896,7 @@ async function handlePipelineObservationsPrune(request, env) {
     `FROM ${table} WHERE datetime(${timeCol}) < datetime(?, ?)
        AND NOT EXISTS (
          SELECT 1 FROM marks m
-         WHERE m.type = 'Session' AND datetime(m.date_time) BETWEEN datetime(${table}.${timeCol}, ?) AND datetime(${table}.${timeCol}, ?)
+         WHERE m.type IN ('Session Start', 'Session End') AND datetime(m.date_time) BETWEEN datetime(${table}.${timeCol}, ?) AND datetime(${table}.${timeCol}, ?)
        )`;
   const args = [body.asOf, cutoffMod, before, after];
 

@@ -70,8 +70,8 @@ test("a mark more than 20 m away does not match even on the same date", () => {
   assert.equal(groups[0].matchedExisting, null);
 });
 
-test("a session Start/End is already saved only for the same role, date and spot", () => {
-  const existing = [{ type: "Session", sessionRole: "start", name: "Anything", lat: -38.4, lng: 145.1, dateTime: "2026-09-11T11:14:25" }];
+test("a session Start/End is already saved only for the same type, date and spot", () => {
+  const existing = [{ type: "Session Start", sessionRole: "start", name: "Anything", lat: -38.4, lng: 145.1, dateTime: "2026-09-11T11:14:25" }];
   const { sessionCandidateAlreadySaved } = make(existing);
   const point = { lat: -38.4, lon: 145.1, timeNaive: "2026-09-11 11:14:25" };
   assert.equal(sessionCandidateAlreadySaved(point, "start"), true);
@@ -81,7 +81,7 @@ test("a session Start/End is already saved only for the same role, date and spot
 });
 
 test("saved session candidates are taken out of the import", () => {
-  const existing = [{ type: "Session", sessionRole: "start", lat: -38.4, lng: 145.1, dateTime: "2026-09-11T11:14:25" }];
+  const existing = [{ type: "Session Start", sessionRole: "start", lat: -38.4, lng: 145.1, dateTime: "2026-09-11T11:14:25" }];
   const day = { points: [{ lat: -38.4, lon: 145.1, timeNaive: "2026-09-11 11:14:25" }, { lat: -38.5, lon: 145.2, timeNaive: "2026-09-11 12:00:00" }] };
   const cands = [
     { kind: "start", pointIdx: 0, importChecked: true },

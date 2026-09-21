@@ -565,7 +565,7 @@ async function loadAndRenderMarks(map, state) {
     // line connecting them (highlightSessionPair) — Oliver's own call,
     // so a session reads as one thing at a glance rather than two
     // separate pins that happen to share a purple line somewhere nearby.
-    if (mark.type === "Session" && mark.sessionGroupId) highlightSessionPair(map, state, mark.sessionGroupId);
+    if (isSessionType(mark.type) && mark.sessionGroupId) highlightSessionPair(map, state, mark.sessionGroupId);
   });
   map.on("popupclose", (e) => {
     const popupEl = e.popup.getElement();
@@ -573,7 +573,7 @@ async function loadAndRenderMarks(map, state) {
     if (!root) return;
     detachDetailPanel();
     const mark = state.marksById.get(root.dataset.markId);
-    if (mark && mark.type === "Session") clearSessionHighlight(map, state);
+    if (mark && isSessionType(mark.type)) clearSessionHighlight(map, state);
   });
 
   renderSessionLines(map, state, marks);
@@ -584,7 +584,7 @@ async function loadAndRenderMarks(map, state) {
 
 /**
  * Draws a connecting line between a Fishing Session's own Start and End
- * marks (type: "Session", linked by a shared sessionGroupId — see the
+ * marks (type "Session Start" / "Session End", linked by a shared sessionGroupId — see the
  * Sync page's own save flow, sync.js, for where these actually get
  * created). A Session is otherwise just an ordinary mark — same
  * cluster group, same popup, same Edit/Copy/Delete via the exact same
@@ -617,10 +617,11 @@ function renderSessionLines(map, state, marks) {
 
   const groups = new Map(); // sessionGroupId -> {start, end}
   for (const mark of marks) {
-    if (mark.type !== "Session" || !mark.sessionGroupId || mark.lat == null || mark.lng == null) continue;
+    if (!isSessionType(mark.type) || !mark.sessionGroupId || mark.lat == null || mark.lng == null) continue;
     const entry = groups.get(mark.sessionGroupId) || {};
-    if (mark.sessionRole === "start" && !entry.start) entry.start = mark;
-    else if (mark.sessionRole === "end" && !entry.end) entry.end = mark;
+    const role = sessionRoleForType(mark.type);
+    if (role === "start" && !entry.start) entry.start = mark;
+    else if (role === "end" && !entry.end) entry.end = mark;
     groups.set(mark.sessionGroupId, entry);
   }
 
@@ -656,7 +657,7 @@ function highlightSessionMarker(marker, mark, state) {
 function highlightSessionPair(map, state, groupId) {
   state.highlightedSessionGroupId = groupId;
   for (const [id, mark] of state.marksById.entries()) {
-    if (mark.type === "Session" && mark.sessionGroupId === groupId) {
+    if (isSessionType(mark.type) && mark.sessionGroupId === groupId) {
       const marker = state.markersById.get(id);
       if (marker) highlightSessionMarker(marker, mark, state);
     }
@@ -671,7 +672,7 @@ function clearSessionHighlight(map, state) {
   state.highlightedSessionGroupId = null;
   if (!groupId) return;
   for (const [id, mark] of state.marksById.entries()) {
-    if (mark.type === "Session" && mark.sessionGroupId === groupId) {
+    if (isSessionType(mark.type) && mark.sessionGroupId === groupId) {
       const marker = state.markersById.get(id);
       if (marker) {
         const style = markStyleFor(mark, state);
