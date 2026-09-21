@@ -427,7 +427,6 @@ function renderForLocation(loc) {
 
 function setGpsStatus(html) {
   const el = document.getElementById("liveGpsStatus");
-  document.body.classList.toggle("gps-status-shown", !!html); // lets the CSS move the filter bar clear of the pill
   if (!html) {
     el.style.display = "none";
     return;
