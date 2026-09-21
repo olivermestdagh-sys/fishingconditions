@@ -32,6 +32,10 @@ function loadMarkViewSettings() {
     if (!raw) return { groupByKey: "species", filters: {} };
     const filters = {};
     for (const [key, f] of Object.entries(raw.filters || {})) {
+      if (key === "dateTime") {
+        filters[key] = { from: f.from || "", to: f.to || "" }; // the Date/Time filter is a range, not include/exclude sets
+        continue;
+      }
       filters[key] = { include: new Set(f.include || []), exclude: new Set(f.exclude || []) };
     }
     return { groupByKey: raw.groupByKey || "species", filters };
@@ -46,6 +50,10 @@ function saveMarkViewSettings(state) {
   try {
     const filters = {};
     for (const [key, f] of Object.entries(state.filters)) {
+      if (key === "dateTime") {
+        filters[key] = { from: f.from || "", to: f.to || "" };
+        continue;
+      }
       filters[key] = { include: [...(f.include || [])], exclude: [...(f.exclude || [])] };
     }
     Prefs.set(MARK_VIEW_STORAGE_KEY, JSON.stringify({ groupByKey: state.groupByKey, filters }));
@@ -70,6 +78,20 @@ function saveMarkViewSettings(state) {
 function markMatchesFilters(mark, filters) {
   for (const [key, f] of Object.entries(filters)) {
     if (!f) continue;
+    if (key === "dateTime") {
+      // Date/Time range: {from, to} as datetime-local strings ("YYYY-MM-DDTHH:MM"), either may be blank.
+      // Marks store naive "YYYY-MM-DD HH:MM:SS", so plain string comparison orders correctly; "to" is
+      // compared at its own precision, so it includes the whole minute it names. A mark with no date
+      // fails an active range (nothing to compare).
+      if (!f.from && !f.to) continue;
+      const dt = String(mark.dateTime || "");
+      if (!dt) return false;
+      const from = String(f.from || "").replace("T", " ");
+      const to = String(f.to || "").replace("T", " ");
+      if (from && dt < from) return false;
+      if (to && dt.slice(0, to.length) > to) return false;
+      continue;
+    }
     const value = mark[key];
     if (f.include && f.include.size > 0) {
       if (!value || !f.include.has(value)) return false;
@@ -140,6 +162,10 @@ function renderActiveFilterChips(container, state, onChange) {
     for (const v of f.include || []) chips.push({ key, label, value: v, mode: "include" });
     for (const v of f.exclude || []) chips.push({ key, label, value: v, mode: "exclude" });
   }
+  // The Date/Time range is one chip per bound ("from"/"to"), not an include/exclude value.
+  const range = state.filters.dateTime;
+  if (range && range.from) chips.push({ key: "dateTime", label: "Date/Time", value: `from ${range.from.replace("T", " ")}`, mode: "from" });
+  if (range && range.to) chips.push({ key: "dateTime", label: "Date/Time", value: `to ${range.to.replace("T", " ")}`, mode: "to" });
   if (chips.length === 0) {
     container.innerHTML = "";
     return;
@@ -149,7 +175,9 @@ function renderActiveFilterChips(container, state, onChange) {
       const style =
         c.mode === "include"
           ? "background:#dcfce7;border-color:#16a34a;color:#166534;"
-          : "background:#fee2e2;border-color:#dc2626;color:#991b1b;";
+          : c.mode === "exclude"
+            ? "background:#fee2e2;border-color:#dc2626;color:#991b1b;"
+            : "background:#dbeafe;border-color:#2563eb;color:#1e40af;";
       const escValue = escapeHtml(c.value);
       return `<span class="loc-chip" style="display:inline-flex;align-items:center;gap:4px;cursor:default;font-size:0.72rem;padding:3px 8px;${style}">
         ${c.mode === "exclude" ? "NOT " : ""}${escapeHtml(c.label)}: ${escValue}
@@ -162,7 +190,8 @@ function renderActiveFilterChips(container, state, onChange) {
   container.querySelectorAll("[data-remove-active-filter]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const { field, value, mode } = btn.dataset;
-      state.filters[field]?.[mode]?.delete(value);
+      if (field === "dateTime") state.filters.dateTime[mode] = "";
+      else state.filters[field]?.[mode]?.delete(value);
       onChange();
     });
   });
@@ -185,6 +214,9 @@ function renderActiveFilterChips(container, state, onChange) {
  * Resolves once closed (no return value — the caller reads state.filters
  * directly afterward, same object that was already being mutated live).
  */
+// Which filter groups are expanded in the dialog below — kept across openings (all start collapsed).
+const markFilterOpenGroups = new Set();
+
 function showMarkFilterModal(state) {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
@@ -199,7 +231,38 @@ function showMarkFilterModal(state) {
     function chipStyleFor(chipState) {
       if (chipState === "include") return "background:#dcfce7;border-color:#16a34a;color:#166534;";
       if (chipState === "exclude") return "background:#fee2e2;border-color:#dc2626;color:#991b1b;";
+      if (chipState === "range") return "background:#dbeafe;border-color:#2563eb;color:#1e40af;";
       return "";
+    }
+    // Every group is collapsible. While collapsed, its header shows whatever is applied in it (see
+    // summaryHtmlFor), so a glance down the list says what the filters are without opening anything.
+    // Which groups are open is remembered between openings of this dialog (markFilterOpenGroups).
+    function groupHtml(key, label, bodyHtml) {
+      const open = markFilterOpenGroups.has(key);
+      return `
+        <div class="mark-filter-group" data-group="${key}" style="margin-bottom:8px;border:1px solid var(--grey-200);border-radius:8px;">
+          <button type="button" data-toggle-group="${key}" aria-expanded="${open}"
+            style="display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;padding:8px 10px;cursor:pointer;text-align:left;font:inherit;color:inherit;">
+            <span data-caret style="display:inline-block;width:0.9em;transition:transform 0.1s;${open ? "" : "transform:rotate(-90deg);"}">▾</span>
+            <span style="font-size:0.8rem;font-weight:600;flex-shrink:0;">${label}</span>
+            <span data-summary="${key}" style="display:${open ? "none" : "flex"};flex-wrap:wrap;gap:4px;min-width:0;">${summaryHtmlFor(key)}</span>
+          </button>
+          <div data-group-body="${key}" style="display:${open ? "block" : "none"};padding:0 10px 10px;">${bodyHtml}</div>
+        </div>
+      `;
+    }
+    function summaryChip(text, chipState) {
+      return `<span class="loc-chip" style="cursor:default;font-size:0.72rem;padding:2px 7px;${chipStyleFor(chipState)}">${text}</span>`;
+    }
+    // The applied filters of one group as small chips (green = required, red = excluded, blue = a date bound).
+    function summaryHtmlFor(key) {
+      const f = state.filters[key];
+      if (!f) return "";
+      const esc = (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      if (key === "dateTime") {
+        return (f.from ? summaryChip(`from ${esc(f.from.replace("T", " "))}`, "range") : "") + (f.to ? summaryChip(`to ${esc(f.to.replace("T", " "))}`, "range") : "");
+      }
+      return [...(f.include || [])].map((v) => summaryChip(esc(v), "include")).join("") + [...(f.exclude || [])].map((v) => summaryChip(`NOT ${esc(v)}`, "exclude")).join("");
     }
     function sectionHtml(key, label, values) {
       if (values.length === 0) return ""; // nothing to filter on for this field yet — no point showing an empty section
@@ -212,15 +275,24 @@ function showMarkFilterModal(state) {
             style="cursor:pointer;${chipStyleFor(cs)}">${escText}</span>`;
         })
         .join("");
-      return `
-        <div style="margin-bottom:14px;">
-          <div style="font-size:0.8rem;font-weight:600;margin-bottom:6px;">${label}</div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px;">${chips}</div>
-        </div>
-      `;
+      return groupHtml(key, label, `<div style="display:flex;flex-wrap:wrap;gap:6px;">${chips}</div>`);
+    }
+    function dateSectionHtml() {
+      const r = state.filters.dateTime || { from: "", to: "" };
+      const inputStyle = "display:block;margin-top:2px;padding:5px 8px;border-radius:8px;border:1px solid var(--grey-200);font:inherit;";
+      return groupHtml(
+        "dateTime",
+        "Date/Time",
+        `<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+          <label style="font-size:0.8rem;">From<input type="datetime-local" data-date-bound="from" value="${r.from || ""}" style="${inputStyle}" /></label>
+          <label style="font-size:0.8rem;">To<input type="datetime-local" data-date-bound="to" value="${r.to || ""}" style="${inputStyle}" /></label>
+          <button type="button" class="btn-secondary" data-date-clear style="padding:4px 10px;font-size:0.8rem;">Clear dates</button>
+        </div>`
+      );
     }
 
     const sectionsHtml =
+      dateSectionHtml() +
       MARK_LIST_FIELDS.map(({ key, label }) => sectionHtml(key, label, state.markLists.filter((r) => r.field === label).map((r) => r.value))).join("") +
       MARK_FILTER_ONLY_FIELDS.map(({ key, label }) => sectionHtml(key, label, distinctValuesForField(state.marksById, key))).join("");
 
@@ -263,19 +335,60 @@ function showMarkFilterModal(state) {
       }
       chip.dataset.state = next;
       chip.style.cssText = `cursor:pointer;${chipStyleFor(next)}`;
+      refreshSummary(key);
+    }
+
+    function refreshSummary(key) {
+      const el = overlay.querySelector(`[data-summary="${key}"]`);
+      if (el) el.innerHTML = summaryHtmlFor(key);
     }
 
     overlay.querySelectorAll(".mark-filter-chip").forEach((chip) => {
       chip.addEventListener("click", () => cycleChip(chip));
     });
+
+    // Open/close a group. The summary of applied filters only shows while it's closed (open, the chips themselves show it).
+    overlay.querySelectorAll("[data-toggle-group]").forEach((head) => {
+      head.addEventListener("click", () => {
+        const key = head.dataset.toggleGroup;
+        const open = head.getAttribute("aria-expanded") !== "true";
+        if (open) markFilterOpenGroups.add(key);
+        else markFilterOpenGroups.delete(key);
+        head.setAttribute("aria-expanded", String(open));
+        head.querySelector("[data-caret]").style.transform = open ? "" : "rotate(-90deg)";
+        head.querySelector("[data-summary]").style.display = open ? "none" : "flex";
+        overlay.querySelector(`[data-group-body="${key}"]`).style.display = open ? "block" : "none";
+      });
+    });
+
+    // Date/Time range: written straight into state.filters.dateTime as the inputs change.
+    const dateInputs = overlay.querySelectorAll("[data-date-bound]");
+    dateInputs.forEach((input) => {
+      input.addEventListener("input", () => {
+        if (!state.filters.dateTime) state.filters.dateTime = { from: "", to: "" };
+        state.filters.dateTime[input.dataset.dateBound] = input.value;
+        refreshSummary("dateTime");
+      });
+    });
+    const dateClear = overlay.querySelector("[data-date-clear]");
+    if (dateClear) {
+      dateClear.addEventListener("click", () => {
+        state.filters.dateTime = { from: "", to: "" };
+        dateInputs.forEach((input) => (input.value = ""));
+        refreshSummary("dateTime");
+      });
+    }
+
     overlay.querySelector("#markFilterClearAll").addEventListener("click", () => {
       for (const key of Object.keys(state.filters)) {
-        state.filters[key] = { include: new Set(), exclude: new Set() };
+        state.filters[key] = key === "dateTime" ? { from: "", to: "" } : { include: new Set(), exclude: new Set() };
       }
       overlay.querySelectorAll(".mark-filter-chip").forEach((chip) => {
         chip.dataset.state = "neutral";
         chip.style.cssText = "cursor:pointer;";
       });
+      dateInputs.forEach((input) => (input.value = ""));
+      overlay.querySelectorAll("[data-summary]").forEach((el) => (el.innerHTML = ""));
     });
     overlay.querySelector("#markFilterDone").addEventListener("click", cleanup);
     overlay.querySelector(".ww-candidate-close").addEventListener("click", cleanup);
@@ -311,7 +424,7 @@ function initMarkControls(map, state) {
   function refresh() {
     applyMarkFiltersAndGrouping(map, state);
     renderActiveFilterChips(chipsContainer, state, refresh);
-    const activeCount = Object.values(state.filters).reduce((n, f) => n + (f ? f.include.size + f.exclude.size : 0), 0);
+    const activeCount = Object.entries(state.filters).reduce((n, [key, f]) => n + (!f ? 0 : key === "dateTime" ? (f.from ? 1 : 0) + (f.to ? 1 : 0) : f.include.size + f.exclude.size), 0);
     badge.style.display = activeCount > 0 ? "flex" : "none";
     badge.textContent = String(activeCount);
     saveMarkViewSettings(state);

@@ -39,3 +39,28 @@ test("filters on different fields combine with AND", () => {
   };
   assert.deepEqual(ids(getVisibleMarks(stateWith(marks, filters))), ["a"]);
 });
+
+test("Date/Time range keeps marks between from and to (to includes its whole minute)", () => {
+  const dated = [
+    { id: "a", dateTime: "2026-01-01 09:59:59" },
+    { id: "b", dateTime: "2026-01-01 10:00:00" },
+    { id: "c", dateTime: "2026-01-01 10:30:45" },
+    { id: "d", dateTime: "2026-01-01 10:30:59" },
+    { id: "e", dateTime: "2026-01-01 10:31:00" },
+    { id: "f" },
+  ];
+  const filters = { dateTime: { from: "2026-01-01T10:00", to: "2026-01-01T10:30" } };
+  assert.deepEqual(ids(getVisibleMarks(stateWith(dated, filters))), ["b", "c", "d"]);
+});
+test("Date/Time with only one bound, or none, and it combines with other filters", () => {
+  const dated = [
+    { id: "a", species: "Snapper", dateTime: "2025-06-01 08:00:00" },
+    { id: "b", species: "Snapper", dateTime: "2026-06-01 08:00:00" },
+    { id: "c", species: "Bream", dateTime: "2026-06-01 08:00:00" },
+  ];
+  assert.deepEqual(ids(getVisibleMarks(stateWith(dated, { dateTime: { from: "", to: "" } }))), ["a", "b", "c"]);
+  assert.deepEqual(ids(getVisibleMarks(stateWith(dated, { dateTime: { from: "2026-01-01T00:00", to: "" } }))), ["b", "c"]);
+  assert.deepEqual(ids(getVisibleMarks(stateWith(dated, { dateTime: { from: "", to: "2025-12-31T23:59" } }))), ["a"]);
+  const both = { dateTime: { from: "2026-01-01T00:00", to: "" }, species: { include: new Set(["Snapper"]), exclude: new Set() } };
+  assert.deepEqual(ids(getVisibleMarks(stateWith(dated, both))), ["b"]);
+});
