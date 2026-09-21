@@ -1082,7 +1082,7 @@ function speciesLinksHtml(entry) {
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
   const linked = speciesLinkedNames(entry);
   const others = markLists.filter((r) => r.field === "Species" && r.value !== entry.value);
-  const summary = linked.length ? `Combined with: ${linked.map(esc).join(", ")}` : "Not combined with other species";
+  const summary = linked.length ? `Max qty shared with: ${linked.map(esc).join(", ")}` : "Max qty not shared";
   return `
     <details class="mark-list-links" data-value="${esc(entry.value)}"${speciesLinksOpenFor === entry.value ? " open" : ""} style="flex-basis:100%;min-width:0;font-size:0.75rem;white-space:normal;">
       <summary style="cursor:pointer;">${summary}</summary>
@@ -1224,7 +1224,7 @@ function renderMarkLists() {
           ${speciesLinksHtml(v)}`
         : "";
       const combinedBadge = key === "species" && v.qtyGroup
-        ? `<span title="Max Qty is combined with: ${speciesLinkedNames(v).join(", ").replace(/"/g, "&quot;").replace(/</g, "&lt;")}" style="font-size:0.65rem;opacity:0.85;">combined qty</span>`
+        ? `<span title="Max qty shared with: ${speciesLinkedNames(v).join(", ").replace(/"/g, "&quot;").replace(/</g, "&lt;")}" style="font-size:0.65rem;opacity:0.85;">qty shared</span>`
         : "";
       return `
       <span class="loc-chip" data-field="${key}" data-value="${escAttr}" style="display:inline-flex;align-items:center;gap:6px;${key === "species" ? "flex-wrap:wrap;border-radius:16px;" : ""}${colorStyle}">
