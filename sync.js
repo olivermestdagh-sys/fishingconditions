@@ -222,6 +222,7 @@ const SYNC_SPECIES_ALIASES = {
   "gummy shark": "Shark (Gummy)", // renamed from "Gummy Shark"
   "leather jacket": "Leatherjacket", // renamed from "Leather Jacket"
   "school shark": "Shark (School)", // renamed from "School shark"
+  pinky: "Snapper", // a pinky is a juvenile Snapper; the separate "Pinky" species was folded into it
   whiting: "Whiting (King George)", // the plain "Whiting" was renamed to King George; a device's "Whiting" waypoints are those
   "grass whiting": "Whiting (Other)", // renamed from "Grass Whiting"
 };
