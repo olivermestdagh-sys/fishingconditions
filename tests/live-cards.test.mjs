@@ -91,12 +91,17 @@ test("catch cards: only target species and session rods; fall back to the full l
   const defaults = { ...fns.emptySessionDefaults(), species: ["Whiting"], rods: ["Heavy"], rodSetups: { Heavy: { rig: "", bait: "" } } };
   const steps = fns.buildCatchCardSteps(options, defaults);
   assert.deepEqual(steps.map((s) => s.id), ["species", "size", "rod"]);
-  assert.deepEqual(steps[0].options, ["Whiting"]);
+  // targets first, then a divider position, then every other species
+  assert.deepEqual(steps[0].options, ["Whiting", "Bream"]);
+  assert.equal(steps[0].dividerAfter, 1);
   assert.deepEqual(steps[2].options, ["Heavy"]);
   assert.ok(steps.every((s) => s.required));
   const fallback = fns.buildCatchCardSteps(options, fns.emptySessionDefaults());
   assert.deepEqual(fallback[0].options, options.species);
+  assert.equal(fallback[0].dividerAfter, 0);
   assert.ok(fallback[0].hint);
+  const allTargets = fns.buildCatchCardSteps(options, { ...fns.emptySessionDefaults(), species: ["Bream", "Whiting"] });
+  assert.equal(allTargets[0].dividerAfter, 0, "no divider when every species is a target");
 });
 
 test("catch mark: type Catch, rig/bait from the rod, water and berley from the session, size a number", () => {

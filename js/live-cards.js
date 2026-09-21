@@ -131,10 +131,16 @@ function applySessionCardChoice(draft, stepId, value) {
  * rods; with none saved they fall back to the full lists (`usedFallback` says so, so the caller can hint at Session defaults).
  */
 function buildCatchCardSteps(options, defaults) {
-  const speciesList = defaults.species.length ? defaults.species : options.species;
+  // Targets first, then a divider, then every other species for a quick pick of something unexpected.
+  const others = options.species.filter((s) => !defaults.species.includes(s));
+  const speciesList = [...defaults.species, ...others];
   const rodList = defaults.rods.length ? defaults.rods : options.rods;
   const steps = [
-    { id: "species", title: "Species", prompt: "What did you catch?", multi: false, required: true, options: speciesList, hint: defaults.species.length ? "" : "No target species set — showing every species. Set them in Session defaults." },
+    {
+      id: "species", title: "Species", prompt: "What did you catch?", multi: false, required: true, options: speciesList,
+      dividerAfter: defaults.species.length && others.length ? defaults.species.length : 0, // index of the first "other" species, 0 = no divider
+      hint: defaults.species.length ? "" : "No target species set — showing every species. Set them in Session defaults.",
+    },
     { id: "size", title: "Size", prompt: "How big (cm)?", multi: false, required: true, options: catchSizeOptions().map(String) },
   ];
   if (rodList.length) {
@@ -218,7 +224,8 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
     const canNext = !step.required || step.selected.length > 0;
     const buttons = step.options.length
       ? step.options
-          .map((value, i) => `<button type="button" class="live-card-choice${step.selected.includes(value) ? " selected" : ""}" data-choice="${i}" aria-pressed="${step.selected.includes(value)}">${escapeHtml(value)}</button>`)
+          .map((value, i) => (step.dividerAfter && i === step.dividerAfter ? `<div class="live-card-divider" role="separator">Other species</div>` : "") +
+            `<button type="button" class="live-card-choice${step.selected.includes(value) ? " selected" : ""}" data-choice="${i}" aria-pressed="${step.selected.includes(value)}">${escapeHtml(value)}</button>`)
           .join("")
       : `<p class="live-card-empty">Nothing to choose yet — add options for this on the Settings tab.</p>`;
     overlay.innerHTML = `
