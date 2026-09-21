@@ -1498,12 +1498,49 @@ function buildTrackData(gpxText) {
     .filter((t) => t.dayGroups.length > 0);
 }
 
+/** Re-reads every saved mark (cache-busted), which matching against the file
+ * depends on. Returns false — leaving the previous copy in place — if that fails. */
+async function syncRefreshExistingMarks() {
+  try {
+    const res = await fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store", credentials: "include" });
+    if (!res.ok) return false;
+    const list = await res.json(); // bare array — see handlePublicMarks, user-backend.js
+    if (!Array.isArray(list)) return false;
+    existingMarks = list;
+    return true;
+  } catch (err) {
+    console.error("Could not reload the saved marks:", err);
+    return false;
+  }
+}
+
+/** Matches candidates restored from an earlier visit against the saved marks
+ * as they are now — they may have been saved (or imported) since the review
+ * was stored. Same rules as a fresh file (matchAgainstExisting). */
+function syncRematchCandidates() {
+  const groups = candidates.map((c) => ({
+    lat: c.lat,
+    lng: c.lng,
+    uuids: c.sourceUuid ? [c.sourceUuid] : [],
+    dateKey: syncDateKey(c.dateTime),
+    matchedExisting: null,
+  }));
+  matchAgainstExisting(groups);
+  candidates.forEach((c, i) => {
+    if (c.sourceLabel === "trail-import") return; // added by hand at a trackpoint: always the person's own call
+    c.matchedExisting = groups[i].matchedExisting;
+    if (c.matchedExisting) c.selected = false;
+  });
+}
+
 async function handleFileInputChange(e) {
   const file = e.target.files[0];
   if (!file) return;
   const statusEl = document.getElementById("parseStatus");
   statusEl.textContent = "Reading file…";
   statusEl.style.color = "";
+  // Matching below is only as good as this list, so read it fresh.
+  const marksRefreshed = await syncRefreshExistingMarks();
 
   try {
     candidates = [];
@@ -1613,8 +1650,9 @@ async function handleFileInputChange(e) {
     const totalDays = trackData.reduce((sum, t) => sum + t.dayGroups.length, 0);
     const trackStatusSuffix = trackData.length > 0 ? `${totalDays} track day${totalDays === 1 ? "" : "s"} found` : "";
     statusEl.textContent =
-      "Done — " + [candidateStatusPrefix, trackStatusSuffix].filter(Boolean).join("; ") + ".";
-    statusEl.style.color = "#16a34a";
+      "Done — " + [candidateStatusPrefix, trackStatusSuffix].filter(Boolean).join("; ") + `. Checked against ${existingMarks.length} saved marks.` +
+      (marksRefreshed ? "" : " Warning: couldn't reload your saved marks, so this used the copy from page load.");
+    statusEl.style.color = marksRefreshed ? "#16a34a" : "#d97706";
     // One review panel covers both marks candidates and track data — a
     // trail-only export with no waypoints is a completely normal thing to
     // load here, and vice versa. Import mode swaps the map for one showing
@@ -2562,6 +2600,7 @@ async function syncInit() {
   if (persisted && ((persisted.candidates && persisted.candidates.length > 0) || (persisted.trackData && persisted.trackData.length > 0))) {
     candidates = persisted.candidates || [];
     trackData = persisted.trackData || [];
+    syncRematchCandidates();
     restored = true;
     const statusEl = document.getElementById("parseStatus");
     statusEl.textContent = `Restored your unfinished import from ${new Date(persisted.savedAt).toLocaleString()}.`;
