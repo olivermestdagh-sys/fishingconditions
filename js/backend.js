@@ -60,6 +60,73 @@ if ("serviceWorker" in navigator) {
 
 const USER_BACKEND_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev";
 
+// --- Sign-in that survives blocked third-party cookies ------------------------------------------------------
+// The Worker's session cookie belongs to a different address from this site, so phone browsers increasingly
+// refuse to send it on the site's own requests — signing in "worked" but the next page saw nobody signed in.
+// So after Google sign-in the Worker redirects here with a one-time code in the URL fragment (#login=...);
+// it is swapped once for a token (POST /auth/exchange), kept in localStorage, and every request to the Worker
+// that sends credentials also carries it as `Authorization: Bearer <token>`. The cookie still works too.
+const AUTH_TOKEN_STORAGE_KEY = "authToken";
+const rawFetch = window.fetch.bind(window);
+let authExchangePromise = null; // requests to the Worker wait for this while a fresh sign-in is being finalised
+
+function readAuthToken() {
+  try {
+    return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+function writeAuthToken(token) {
+  try {
+    if (token) localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+    else localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    /* storage blocked — the cookie may still work */
+  }
+}
+
+(function finishSignInFromUrl() {
+  const match = /^#login=([^&]+)/.exec(window.location.hash || "");
+  if (!match) return;
+  const code = decodeURIComponent(match[1]);
+  // Take the code out of the address bar and history straight away.
+  window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  authExchangePromise = (async () => {
+    try {
+      const res = await rawFetch(`${USER_BACKEND_URL}/auth/exchange`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (res.ok) writeAuthToken((await res.json()).token);
+      else console.error("Sign-in code was not accepted:", res.status);
+    } catch (err) {
+      console.error("Sign-in code exchange failed:", err);
+    } finally {
+      authExchangePromise = null;
+    }
+  })();
+})();
+
+window.fetch = async function (input, init) {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input && input.url;
+  if (!url || !url.startsWith(USER_BACKEND_URL)) return rawFetch(input, init);
+  if (authExchangePromise) await authExchangePromise;
+  // Only requests that send credentials get the token: the open, read-only endpoints (wildcard CORS) don't need it.
+  const token = init && init.credentials === "include" ? readAuthToken() : null;
+  if (token) {
+    const headers = new Headers(init.headers || {});
+    headers.set("Authorization", `Bearer ${token}`);
+    init = { ...init, headers };
+  }
+  const res = await rawFetch(input, init);
+  if (url.startsWith(`${USER_BACKEND_URL}/auth/logout`)) writeAuthToken(null);
+  else if (token && res.status === 401 && url.startsWith(`${USER_BACKEND_URL}/auth/me`)) writeAuthToken(null); // expired or revoked
+  return res;
+};
+
 let cachedIsAdmin = false; // refreshed once via refreshAdminStatus() at page
                            // init (see app.js/locationsadmin.js) — read
                            // synchronously everywhere else (canEditLocations,

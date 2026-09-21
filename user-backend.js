@@ -136,6 +136,8 @@
  */
 
 const SESSION_COOKIE = "session";
+const LOGIN_CODE_PREFIX = "lc_"; // one-time login codes live in the sessions table with this prefix and a short expiry
+const LOGIN_CODE_TTL_SECONDS = 120;
 const STATE_COOKIE = "oauth_state";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 const STATE_MAX_AGE_SECONDS = 60 * 10; // 10 minutes — just needs to outlive the Google consent screen
@@ -189,6 +191,9 @@ export default {
       }
       if (url.pathname === "/auth/callback" && request.method === "GET") {
         return handleCallback(request, url, env);
+      }
+      if (url.pathname === "/auth/exchange" && request.method === "POST") {
+        return handleExchange(request, env);
       }
       if (url.pathname === "/auth/logout" && request.method === "POST") {
         return handleLogout(request, env);
@@ -452,8 +457,16 @@ async function handleCallback(request, url, env) {
     .bind(sessionId, user.id, expiresAt)
     .run();
 
+  // Phone browsers increasingly refuse the session cookie on the site's own requests (it belongs to this Worker,
+  // a different address from the site, so it is a "third-party" cookie). So the site is also handed a one-time
+  // login code in the URL fragment (never sent to any server); it swaps it for a token with POST /auth/exchange
+  // and sends that as `Authorization: Bearer` from then on. The cookie below still works wherever it is allowed.
+  const loginCode = LOGIN_CODE_PREFIX + randomToken();
+  await env.DB.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)")
+    .bind(loginCode, user.id, Date.now() + LOGIN_CODE_TTL_SECONDS * 1000)
+    .run();
   const headers = new Headers();
-  headers.append("Location", env.FRONTEND_ACCOUNT_URL);
+  headers.append("Location", `${env.FRONTEND_ACCOUNT_URL}#login=${loginCode}`);
   // Overwrite the state cookie with an immediately-expired one so it can't
   // be reused (Max-Age 0 clears it) — belt-and-braces since the state
   // check above already succeeded, this just tidies up.
@@ -462,8 +475,24 @@ async function handleCallback(request, url, env) {
   return new Response(null, { status: 302, headers });
 }
 
+// POST /auth/exchange {code}: trades the one-time login code from the sign-in redirect for a real session token.
+// The code is single-use and expires after LOGIN_CODE_TTL_SECONDS.
+async function handleExchange(request, env) {
+  const body = await readJsonBody(request);
+  const code = typeof body.code === "string" ? body.code : "";
+  if (!code.startsWith(LOGIN_CODE_PREFIX)) return jsonResponse({ error: "Invalid or expired login code." }, 400, env);
+  const row = await env.DB.prepare("SELECT user_id FROM sessions WHERE id = ? AND expires_at > ?").bind(code, Date.now()).first();
+  await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(code).run(); // single use, whether or not it was valid
+  if (!row) return jsonResponse({ error: "Invalid or expired login code." }, 400, env);
+  const token = randomToken();
+  await env.DB.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)")
+    .bind(token, row.user_id, Date.now() + SESSION_MAX_AGE_SECONDS * 1000)
+    .run();
+  return jsonResponse({ token }, 200, env);
+}
+
 async function handleLogout(request, env) {
-  const sessionId = readCookie(request, SESSION_COOKIE);
+  const sessionId = readSessionId(request);
   if (sessionId) {
     await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(sessionId).run();
   }
@@ -2379,9 +2408,17 @@ function resolveEffectiveUserId(url, callerUser) {
   return { id: requested };
 }
 
+// The session id a request carries: `Authorization: Bearer <token>` (what the site sends, since the cookie
+// can be blocked as third-party) or, failing that, the session cookie.
+function readSessionId(request) {
+  const auth = request.headers.get("Authorization") || "";
+  const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  return bearer || readCookie(request, SESSION_COOKIE);
+}
+
 async function requireUser(request, env) {
-  const sessionId = readCookie(request, SESSION_COOKIE);
-  if (!sessionId) return null;
+  const sessionId = readSessionId(request);
+  if (!sessionId || sessionId.startsWith(LOGIN_CODE_PREFIX)) return null; // a login code is only good for /auth/exchange
   const row = await env.DB.prepare(
     `SELECT users.* FROM sessions
      JOIN users ON users.id = sessions.user_id
@@ -2504,7 +2541,7 @@ function corsHeaders(env) {
     "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "",
     "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
     Vary: "Origin",
   };
 }
