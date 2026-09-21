@@ -491,7 +491,7 @@ const MARK_LIST_FIELDS = [
  */
 const MARK_FILTER_ONLY_FIELDS = [
   { key: "source", label: "Source" },
-  { key: "owner", label: "Owner" }, // "Mine" (Catches, Sessions) or "Public" (Mark, POI) — derived from the type, see markOwnerLabel
+  { key: "owner", label: "Mark Owner" }, // "Mine" (Catches, Sessions) or "Public" (Mark, POI) — derived from the type, see markOwnerLabel
 ];
 
 // Whose account a mark lives in, from its type — the same rule the Worker applies (PERSONAL_MARK_TYPES,

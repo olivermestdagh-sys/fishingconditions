@@ -23,7 +23,8 @@ function makeEnv(role, id) {
           bind(...a) { args = a; return this; },
           async first() {
             if (/FROM sessions/.test(sql)) return role ? { id, role } : null;
-            if (/home_lat/.test(sql)) return { home_lat: -37.9, home_lng: 145.2, google_routes_api_key: "KEY-" + args[0] };
+            if (/FROM site_settings/.test(sql)) return { value: "SITE-KEY" };
+            if (/home_lat/.test(sql)) return { home_lat: -37.9, home_lng: 145.2 };
             return null;
           },
           async run() {
@@ -70,8 +71,8 @@ test("the old admin path still works as an alias", async () => {
   assert.equal(res.status, 200);
 });
 
-test("each signed-in user reads their own home settings; a signed-out visitor gets nothing", async () => {
-  assert.equal((await (await getSettings(makeEnv("admin", "admin-id"))).json()).googleRoutesApiKey, "KEY-admin-id");
-  assert.equal((await (await getSettings(makeEnv("basic", "user-77"))).json()).googleRoutesApiKey, "KEY-user-77");
+test("every signed-in user gets the site-wide Routes key; a signed-out visitor gets nothing", async () => {
+  assert.equal((await (await getSettings(makeEnv("admin", "admin-id"))).json()).googleRoutesApiKey, "SITE-KEY");
+  assert.equal((await (await getSettings(makeEnv("basic", "user-77"))).json()).googleRoutesApiKey, "SITE-KEY");
   assert.deepEqual(await (await getSettings(makeEnv(null), false)).json(), { homeLat: null, homeLng: null, googleRoutesApiKey: null });
 });

@@ -291,10 +291,13 @@ function showMarkFilterModal(state) {
       );
     }
 
+    // Mark Owner comes first, then Date/Time, then the pick-list fields, then the remaining filter-only ones (Source).
+    const filterOnlySection = ({ key, label }) => sectionHtml(key, label, distinctValuesForField(state.marksById, key));
     const sectionsHtml =
+      MARK_FILTER_ONLY_FIELDS.filter((f) => f.key === "owner").map(filterOnlySection).join("") +
       dateSectionHtml() +
       MARK_LIST_FIELDS.map(({ key, label }) => sectionHtml(key, label, state.markLists.filter((r) => r.field === label).map((r) => r.value))).join("") +
-      MARK_FILTER_ONLY_FIELDS.map(({ key, label }) => sectionHtml(key, label, distinctValuesForField(state.marksById, key))).join("");
+      MARK_FILTER_ONLY_FIELDS.filter((f) => f.key !== "owner").map(filterOnlySection).join("");
 
     overlay.innerHTML = `
       <div class="ww-candidate-dialog">

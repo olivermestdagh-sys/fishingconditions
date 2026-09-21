@@ -351,3 +351,16 @@ CREATE TABLE IF NOT EXISTS user_prefs (
   updated_at INTEGER NOT NULL,     -- ms since the epoch
   PRIMARY KEY (user_id, key)
 ) WITHOUT ROWID;
+
+-- ---------------------------------------------------------------------
+-- Site-wide settings (user-backend.js, handlePublicSettings): values that belong to the site rather than to
+-- any one account. Currently one row: key 'google_routes_api_key', the Google Routes API key used to work
+-- out drive times. Served only to signed-in users; set with a direct D1 update (there is no UI for it).
+-- The old users.google_routes_api_key column is no longer read.
+-- Additive: safe to run against the live database (IF NOT EXISTS).
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS site_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL      -- ms since the epoch
+) WITHOUT ROWID;

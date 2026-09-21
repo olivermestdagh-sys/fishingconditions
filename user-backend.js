@@ -2065,33 +2065,37 @@ async function handlePublicMarks(request, env) {
   });
 }
 
+// The site-wide Google Routes API key lives in site_settings under this key (see schema-v2.sql).
+const SITE_ROUTES_KEY_SETTING = "google_routes_api_key";
+
 /**
  * Public counterpart to handlePublicMarkLists/handlePublicMarks above —
- * this is what lets week.js/live.js/locationsadmin.js read the site's own
- * home address and Google Routes API key LIVE from D1 instead of the
- * static config/settings.json file they used to. Same trust model as
- * before: the Routes API key was already sitting in a public, unauthenticated
- * static file — it's meant to be used client-side and protected by an
- * HTTP-referrer restriction in Google Cloud Console, not by secrecy, so
- * serving it back out through an open endpoint changes nothing about its
- * actual security. Read-only; there is no public write path.
+ * this is what lets week.js/live.js/locationsadmin.js read the caller's
+ * own home address, and the site's Google Routes API key, LIVE from D1
+ * instead of the static config/settings.json file they used to. The Routes
+ * key is a SITE-WIDE setting (site_settings, key "google_routes_api_key"):
+ * every signed-in user gets it so their browser can work out drive times,
+ * anonymous visitors never do. It is meant to be used client-side and is
+ * also protected by an HTTP-referrer restriction in Google Cloud Console.
+ * Read-only; there is no public write path (it is set with a direct D1 update).
  */
 async function handlePublicSettings(request, env) {
-  // PRIVACY CHANGE: the home coordinates and Routes API key are only
-  // returned to the signed-in user they belong to (their own row).
+  // PRIVACY CHANGE: the home coordinates are only returned to the signed-in
+  // user they belong to (their own row); the Routes key to any signed-in user.
   // Anonymous visitors get 200 with all nulls, so the pages still load and
   // simply skip home-based drive times.
   const user = await requireUser(request, env);
   const row = user
-    ? await env.DB.prepare("SELECT home_lat, home_lng, google_routes_api_key FROM users WHERE id = ?")
-        .bind(user.id)
-        .first()
+    ? await env.DB.prepare("SELECT home_lat, home_lng FROM users WHERE id = ?").bind(user.id).first()
+    : null;
+  const keyRow = user
+    ? await env.DB.prepare("SELECT value FROM site_settings WHERE key = ?").bind(SITE_ROUTES_KEY_SETTING).first()
     : null;
   return new Response(
     JSON.stringify({
       homeLat: row ? row.home_lat : null,
       homeLng: row ? row.home_lng : null,
-      googleRoutesApiKey: row ? row.google_routes_api_key : null,
+      googleRoutesApiKey: keyRow ? keyRow.value : null,
     }),
     {
       status: 200,

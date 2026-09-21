@@ -1,4 +1,4 @@
-﻿// Tests for the Worker's security rules: the cross-site (Origin) guard and the
+// Tests for the Worker's security rules: the cross-site (Origin) guard and the
 // "only the signed-in owner sees their marks / home location" endpoints.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -24,7 +24,8 @@ function makeEnv(role, id) {
           bind(...a) { args = a; return this; },
           async first() {
             if (/FROM sessions/.test(sql)) return role ? { id, role } : null;
-            if (/home_lat/.test(sql)) return { home_lat: -37.9, home_lng: 145.2, google_routes_api_key: "KEY-" + args[0] };
+            if (/FROM site_settings/.test(sql)) return { value: "SITE-KEY" };
+            if (/home_lat/.test(sql)) return { home_lat: -37.9, home_lng: 145.2 };
             return null;
           },
           async all() {
@@ -64,16 +65,16 @@ test("anonymous visitors get no home location or API key", async () => {
   assert.equal(r.status, 200);
   assert.deepEqual(await r.json(), { homeLat: null, homeLng: null, googleRoutesApiKey: null });
 });
-test("Admin is served their own marks and settings (home location and Routes key are the signed-in user's)", async () => {
+test("Admin is served their own marks and settings (home location is the signed-in user's; the Routes key is site-wide)", async () => {
   const env = makeEnv("admin", "admin-id");
   const marks = await (await call(env, "GET", "/api/public/marks", signedIn)).json();
   assert.equal(marks[0].id, "m1");
   const s = await (await call(env, "GET", "/api/public/settings", signedIn)).json();
-  assert.equal(s.googleRoutesApiKey, "KEY-admin-id");
+  assert.equal(s.googleRoutesApiKey, "SITE-KEY"); // the site-wide key
 });
 test("a normal user only gets their own data", async () => {
   const s = await (await call(makeEnv("basic", "user-77"), "GET", "/api/public/settings", signedIn)).json();
-  assert.equal(s.googleRoutesApiKey, "KEY-user-77");
+  assert.equal(s.googleRoutesApiKey, "SITE-KEY"); // every signed-in user gets the same site-wide key
 });
 test("responses to signed-in reads are not cacheable and use the exact site origin", async () => {
   const r = await call(makeEnv("admin", "admin-id"), "GET", "/api/public/marks", signedIn);
