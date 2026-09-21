@@ -1603,7 +1603,8 @@ async function loadLocations() {
       });
     }
     locations = [...byLocation.values()];
-    setStatus("Signed in as Admin — editing live");
+    // Says what this person actually is — this used to say "Signed in as Admin" to everybody.
+    setStatus(!isAdmin ? "Signed in" : viewingAsPublic ? "Viewing Public's settings and locations" : "Signed in as Admin — editing live");
   } catch (err) {
     console.error("Failed to load locations:", err);
     setStatus("Could not load locations: " + err.message, true);
