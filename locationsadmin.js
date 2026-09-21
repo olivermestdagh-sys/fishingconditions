@@ -1068,6 +1068,87 @@ const SPECIES_LIMIT_FIELDS = [
   { prop: "bigMaxQty", label: "Big max qty", integer: true, title: "How many big fish are allowed" },
 ];
 
+// Species whose Max Qty is one combined limit share a `qtyGroup` (see planSpeciesLinks, user-backend.js).
+let speciesLinksOpenFor = null; // which species' "Combined with" list is open, kept across the re-render a change causes
+
+/** The other species combined with this one, in list order. */
+function speciesLinkedNames(entry) {
+  if (!entry.qtyGroup) return [];
+  return markLists.filter((r) => r.field === "Species" && r.qtyGroup === entry.qtyGroup && r.value !== entry.value).map((r) => r.value);
+}
+
+/** The "Combined with" control shown on a species: a summary line plus a tick list of every other species. */
+function speciesLinksHtml(entry) {
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  const linked = speciesLinkedNames(entry);
+  const others = markLists.filter((r) => r.field === "Species" && r.value !== entry.value);
+  const summary = linked.length ? `Combined with: ${linked.map(esc).join(", ")}` : "Not combined with other species";
+  return `
+    <details class="mark-list-links" data-value="${esc(entry.value)}"${speciesLinksOpenFor === entry.value ? " open" : ""} style="flex-basis:100%;min-width:0;font-size:0.75rem;white-space:normal;">
+      <summary style="cursor:pointer;">${summary}</summary>
+      <div style="max-height:170px;overflow-y:auto;white-space:normal;display:flex;flex-direction:column;gap:3px;margin-top:4px;padding:6px 8px;border-radius:8px;background:var(--white);color:#111827;">
+        <span style="font-size:0.7rem;color:var(--grey-500);">Tick the species that share this Max Qty (one combined limit). They are linked back automatically.</span>
+        ${others.map((o) => `
+          <label style="display:flex;align-items:center;gap:6px;font-size:0.8rem;">
+            <input type="checkbox" class="mark-list-link-checkbox" data-value="${esc(entry.value)}" data-other="${esc(o.value)}"${entry.qtyGroup && o.qtyGroup === entry.qtyGroup ? " checked" : ""} />
+            ${esc(o.value)}${o.qtyGroup && o.qtyGroup !== entry.qtyGroup ? ` <em style="color:var(--grey-500);">(already combined with ${speciesLinkedNames(o).map(esc).join(", ")})</em>` : ""}
+          </label>`).join("")}
+      </div>
+    </details>`;
+}
+
+/**
+ * A "Combined with" tick changed on `speciesValue`: works out the full set now ticked and saves it (the Worker applies it
+ * to every affected species in one batch and shares this species' Max Qty with the group), then reloads the lists so
+ * every changed species shows. A species that is already in another combined group brings that whole group in, and
+ * takes over this species' Max Qty, so the person is asked first.
+ */
+async function onChangeSpeciesLinks(speciesValue, detailsEl) {
+  const entry = markLists.find((r) => r.field === "Species" && r.value === speciesValue);
+  if (!entry || !entry.id) return;
+  const checked = Array.from(detailsEl.querySelectorAll(".mark-list-link-checkbox")).filter((c) => c.checked).map((c) => c.dataset.other);
+  const added = checked.filter((name) => !speciesLinkedNames(entry).includes(name));
+  const affected = new Set();
+  let needsConfirm = false;
+  for (const name of added) {
+    const other = markLists.find((r) => r.field === "Species" && r.value === name);
+    if (!other) continue;
+    affected.add(name);
+    if (other.qtyGroup && other.qtyGroup !== entry.qtyGroup) {
+      needsConfirm = true;
+      speciesLinkedNames(other).forEach((n) => affected.add(n));
+    }
+    if ((other.maxQty ?? null) !== (entry.maxQty ?? null)) needsConfirm = true;
+  }
+  if (needsConfirm) {
+    const shared = entry.maxQty == null ? "no Max Qty set" : `a Max Qty of ${entry.maxQty}`;
+    const ok = confirm(`Combine ${entry.value} with ${[...affected].join(", ")}?\n\nEveryone in the combined group will share ${shared} (this species' Max Qty).`);
+    if (!ok) {
+      renderMarkLists(); // put the ticks back as they were
+      return;
+    }
+  }
+  speciesLinksOpenFor = speciesValue;
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/marklists/${entry.id}${effectiveUserIdParam()}`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ linkedSpecies: checked }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    await loadMarkLists(); // every species in the group may have changed
+    setMarkListsSaveStatus("", false);
+  } catch (err) {
+    console.error("Failed to save combined species:", err);
+    setMarkListsSaveStatus("Couldn't save that change: " + err.message, true);
+    renderMarkLists();
+  }
+}
+
 function renderMarkLists() {
   const container = document.getElementById("markListsGroups");
   container.innerHTML = MARK_LIST_FIELDS.map(({ key, label }) => `
@@ -1139,11 +1220,16 @@ function renderMarkLists() {
               <input type="number" class="mark-list-limit-input" data-limit-prop="${f.prop}" data-value="${escAttr}" value="${v[f.prop] ?? ""}"
                 min="0" step="${f.integer ? "1" : "any"}" inputmode="${f.integer ? "numeric" : "decimal"}" title="${f.title}"
                 style="width:74px;padding:2px 4px;font-size:0.8rem;border-radius:5px;border:1px solid var(--grey-200);background:var(--white);color:#111827;" />
-            </label>`).join("")}</div>`
+            </label>`).join("")}</div>
+          ${speciesLinksHtml(v)}`
+        : "";
+      const combinedBadge = key === "species" && v.qtyGroup
+        ? `<span title="Max Qty is combined with: ${speciesLinkedNames(v).join(", ").replace(/"/g, "&quot;").replace(/</g, "&lt;")}" style="font-size:0.65rem;opacity:0.85;">combined qty</span>`
         : "";
       return `
       <span class="loc-chip" data-field="${key}" data-value="${escAttr}" style="display:inline-flex;align-items:center;gap:6px;${key === "species" ? "flex-wrap:wrap;border-radius:16px;" : ""}${colorStyle}">
         <span>${escText}</span>
+        ${combinedBadge}
         ${shapeSelectHtml}
         ${colorSelectHtml}
         ${removeBtnHtml}
@@ -1172,6 +1258,15 @@ function renderMarkLists() {
   });
   container.querySelectorAll(".mark-list-limit-input").forEach((input) => {
     input.addEventListener("input", (e) => onSetSpeciesLimit(e.currentTarget));
+  });
+  container.querySelectorAll(".mark-list-links").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      if (details.open) speciesLinksOpenFor = details.dataset.value;
+      else if (speciesLinksOpenFor === details.dataset.value) speciesLinksOpenFor = null;
+    });
+    details.addEventListener("change", (e) => {
+      if (e.target.classList.contains("mark-list-link-checkbox")) onChangeSpeciesLinks(details.dataset.value, details);
+    });
   });
   container.querySelectorAll(".mark-list-add-btn").forEach((btn) => {
     btn.addEventListener("click", (e) => onAddMarkListValue(e.currentTarget.dataset.field));
@@ -1469,6 +1564,14 @@ function onSetSpeciesLimit(input) {
     return;
   }
   entry[def.prop] = num;
+  if (def.prop === "maxQty" && entry.qtyGroup) {
+    // Combined species share one Max Qty (the Worker writes it to the whole group): show it on the others straight away.
+    const mates = speciesLinkedNames(entry);
+    for (const r of markLists) if (r.field === "Species" && mates.includes(r.value)) r.maxQty = num;
+    document.querySelectorAll('.mark-list-limit-input[data-limit-prop="maxQty"]').forEach((el) => {
+      if (mates.includes(el.dataset.value)) el.value = num ?? "";
+    });
+  }
 
   const timerKey = `Species::${entry.value}::${def.prop}`;
   clearTimeout(markSubFormatSaveTimers.get(timerKey));

@@ -1279,6 +1279,24 @@ async function handleMarkListItem(request, url, env, id) {
     } catch (err) {
       return jsonResponse({ error: `"${merged.value}" already exists under ${merged.field}.` }, 409, env);
     }
+    if (body.linkedSpecies !== undefined) {
+      // "Combined with" — see planSpeciesLinks. Applied as one batch so a link or unlink is all-or-nothing.
+      if (merged.field !== "Species") return jsonResponse({ error: "Only species can be combined." }, 400, env);
+      const { results } = await env.DB.prepare("SELECT id, value, qty_group, max_qty FROM user_mark_lists WHERE user_id = ? AND field = 'Species'").bind(uid).all();
+      const rows = results.map((r) => ({ id: r.id, value: r.value, qtyGroup: r.qty_group ?? null, maxQty: r.max_qty ?? null }));
+      const plan = planSpeciesLinks({ rows, editedId: id, linkedValues: body.linkedSpecies, maxQty: merged.maxQty ?? null, newGroupId: crypto.randomUUID() });
+      if (plan.error) return jsonResponse({ error: plan.error }, 400, env);
+      if (plan.updates.length) {
+        await env.DB.batch(
+          plan.updates.map((u) => env.DB.prepare("UPDATE user_mark_lists SET qty_group = ?, max_qty = ? WHERE id = ? AND user_id = ?").bind(u.qtyGroup, u.maxQty, u.id, uid))
+        );
+      }
+    } else if (body.maxQty !== undefined && existing.qty_group) {
+      // The combined limit is one number: a new Max Qty on any member goes to the whole group.
+      await env.DB.prepare("UPDATE user_mark_lists SET max_qty = ? WHERE user_id = ? AND field = 'Species' AND qty_group = ?")
+        .bind(merged.maxQty ?? null, uid, existing.qty_group)
+        .run();
+    }
     const updated = await env.DB.prepare("SELECT * FROM user_mark_lists WHERE id = ?").bind(id).first();
     return jsonResponse(rowToMarkList(updated), 200, env);
   }
@@ -1289,6 +1307,14 @@ async function handleMarkListItem(request, url, env, id) {
       return jsonResponse({ error: `${existing.field} values can't be deleted — they're kept for shaping and colouring.` }, 409, env);
     }
     await env.DB.prepare("DELETE FROM user_mark_lists WHERE id = ? AND user_id = ?").bind(id, uid).run();
+    if (existing.qty_group) {
+      // A combined group left with a single species is no group.
+      await env.DB.prepare(
+        "UPDATE user_mark_lists SET qty_group = NULL WHERE user_id = ? AND qty_group = ? AND (SELECT COUNT(*) FROM user_mark_lists WHERE user_id = ? AND qty_group = ?) < 2"
+      )
+        .bind(uid, existing.qty_group, uid, existing.qty_group)
+        .run();
+    }
     return new Response(null, { status: 204, headers: corsHeaders(env) });
   }
 
@@ -1311,6 +1337,7 @@ function rowToMarkList(row) {
     maxQty: row.max_qty ?? null,
     bigMaxQty: row.big_max_qty ?? null,
     bigSize: row.big_size ?? null,
+    qtyGroup: row.qty_group ?? null,
   };
 }
 
@@ -1331,6 +1358,12 @@ function validateMarkListInput(body, { partial }) {
     if (typeof v !== "number" || !Number.isFinite(v) || v < 0) return `${label} must be a number of 0 or more, or blank.`;
     if (integer && !Number.isInteger(v)) return `${label} must be a whole number.`;
   }
+  if (body.linkedSpecies !== undefined) {
+    const list = body.linkedSpecies;
+    if (!Array.isArray(list) || list.length > 50 || list.some((v) => typeof v !== "string" || !v.trim())) {
+      return "linkedSpecies must be a list of species names.";
+    }
+  }
   if (!partial || body.field !== undefined) {
     if (typeof body.field !== "string" || !body.field.trim()) return "field is required.";
   }
@@ -1338,6 +1371,49 @@ function validateMarkListInput(body, { partial }) {
     if (typeof body.value !== "string" || !body.value.trim()) return "value is required.";
   }
   return null;
+}
+
+/**
+ * Species whose Max Qty is one combined limit share a `qty_group` id. Works out the row changes for "this species is
+ * now combined with exactly these others" (pure, so it can be tested without a database).
+ *   rows: every Species row of the account, as {id, value, qtyGroup, maxQty}
+ *   editedId: the species being edited; linkedValues: the species it is combined with (names, not including itself)
+ *   maxQty: the Max Qty to apply to the whole group (the edited species' own); newGroupId: id to use if it needs a new group
+ * Rules: the edited species plus the chosen ones form one group; a chosen species already in a different group brings
+ * that whole group in (merge); species in the edited species' old group that are no longer chosen leave it; everyone left
+ * in the group gets the same Max Qty; a group of one is no group. Returns {updates: [{id, qtyGroup, maxQty}]} listing
+ * only rows that change, or {error}.
+ */
+function planSpeciesLinks({ rows, editedId, linkedValues, maxQty, newGroupId }) {
+  const edited = rows.find((r) => r.id === editedId);
+  if (!edited) return { error: "Species not found." };
+  const byValue = new Map(rows.map((r) => [r.value, r]));
+  const chosen = [];
+  for (const v of new Set(linkedValues)) {
+    const row = byValue.get(v);
+    if (!row) return { error: `"${v}" isn't a species.` };
+    if (row.id === editedId) return { error: "A species can't be combined with itself." };
+    chosen.push(row);
+  }
+  const members = new Map([[edited.id, edited]]);
+  for (const row of chosen) {
+    members.set(row.id, row);
+    // Already in a different group: that whole group joins (the edited species' own old group is only what was ticked)
+    if (row.qtyGroup && row.qtyGroup !== edited.qtyGroup) {
+      for (const m of rows) if (m.qtyGroup === row.qtyGroup) members.set(m.id, m);
+    }
+  }
+  const groupId = members.size > 1 ? edited.qtyGroup || newGroupId : null;
+  const qty = maxQty ?? null;
+  const updates = [];
+  for (const r of rows) {
+    const inGroup = members.has(r.id);
+    const wasInEditedGroup = edited.qtyGroup && r.qtyGroup === edited.qtyGroup;
+    if (!inGroup && !wasInEditedGroup) continue;
+    const next = inGroup ? { qtyGroup: groupId, maxQty: groupId ? qty : r.maxQty ?? null } : { qtyGroup: null, maxQty: r.maxQty ?? null };
+    if ((r.qtyGroup ?? null) !== next.qtyGroup || (r.maxQty ?? null) !== next.maxQty) updates.push({ id: r.id, ...next });
+  }
+  return { updates };
 }
 
 // ---------------------------------------------------------------------

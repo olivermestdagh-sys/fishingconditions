@@ -218,6 +218,7 @@ CREATE TABLE IF NOT EXISTS user_mark_lists (
   max_qty INTEGER,                   -- bag limit: most fish allowed
   big_max_qty INTEGER,               -- how many "big" fish (at least big_size) count within the limit
   big_size REAL,                     -- length, cm, from which a fish counts as "big"
+  qty_group TEXT,                    -- species rows sharing a value share ONE combined max_qty (e.g. School + Gummy shark); NULL = not combined
   created_at INTEGER NOT NULL,
   UNIQUE (user_id, field, value)
 );
