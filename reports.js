@@ -353,16 +353,11 @@ let reportTideClockChartInstance = null;
 let tideClockSessions = null; // every session, built once from the marks
 const tideClockExtremaCache = new Map(); // session groupId -> stored tide events (or null)
 let tideClockRenderId = 0; // a newer render supersedes one still loading tide events
-const TIDE_CLOCK_FALLBACK_COLORS = ["#2e7d32", "#1565c0", "#ef6c00", "#6a1b9a", "#00838f", "#c62828", "#827717", "#455a64"];
+let tideClockMarkLists = null; // the pick-lists with their colour formats (Settings), loaded once
 
-function tideClockSpeciesColor(species, i) {
-  try {
-    const c = ribbonSpeciesColor(species);
-    if (c) return c;
-  } catch {
-    // mark lists not loaded yet — use the fallback palette
-  }
-  return TIDE_CLOCK_FALLBACK_COLORS[i % TIDE_CLOCK_FALLBACK_COLORS.length];
+/** A species' colour as set in Settings (the same one its marks use); a species with none set gets the site's usual fallback shade. */
+function tideClockSpeciesColor(species) {
+  return markStyleFor({ species: species === "Unknown" ? "" : species, type: "Catch" }, { groupByKey: "species", markLists: tideClockMarkLists || [] }).fillColor;
 }
 
 async function renderTideClockReport() {
@@ -391,6 +386,13 @@ async function renderTideClockReport() {
     return;
   }
   note.textContent = "Loading tide times…";
+  if (!tideClockMarkLists) {
+    try {
+      tideClockMarkLists = await fetchUnionedMarkLists();
+    } catch (err) {
+      console.error("Tide clock: could not load species colours:", err);
+    }
+  }
   await tideClockLoadExtrema(sessions, tideClockExtremaCache);
   if (myId !== tideClockRenderId) return; // filters changed while loading
 
@@ -417,7 +419,7 @@ async function renderTideClockReport() {
   const speciesTotals = new Map();
   for (const b of agg.bins) for (const [sp, n] of Object.entries(b.bySpecies)) speciesTotals.set(sp, (speciesTotals.get(sp) || 0) + n);
   const speciesList = Array.from(speciesTotals.keys()).sort((a, b) => speciesTotals.get(b) - speciesTotals.get(a));
-  const colorOf = (sp) => tideClockSpeciesColor(sp, speciesList.indexOf(sp));
+  const colorOf = (sp) => tideClockSpeciesColor(sp);
 
   const labels = agg.bins.map((_, i) => i * TIDE_CLOCK_BIN_H);
   const datasets = [
