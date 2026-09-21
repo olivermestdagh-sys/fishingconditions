@@ -2845,13 +2845,13 @@ main.wide {
    10px right-inset is accounted for; tying it to the viewport guarantees
    the box itself never claims more width than genuinely fits, on any
    screen. */
-/* Live tab only (the bar follows .live-gps-status in the DOM): on screens
-   narrower than 900px the GPS pill can stretch across the top and would sit
-   on top of the bar, so there the bar keeps its old lower position, below
-   the pill. Wider screens have plenty of room beside it, so the bar lines up
-   with the zoom buttons there like on the Location tab. */
+/* Only while the Live GPS message is actually showing (the body gets .gps-status-shown, see setGpsStatus in
+   map-live.js): on screens narrower than 900px the GPS pill can stretch across the top and would sit on
+   top of the bar, so there the bar sits lower, below the pill. Otherwise — Normal mode, or Live once a spot
+   is matched and the message is hidden — the bar lines up with the zoom buttons. (The pill's element is
+   always in the DOM on the Map tab, so this can't key off its mere presence.) */
 @media (max-width: 900px) {
-  .live-gps-status ~ .mark-controls-bar {
+  .gps-status-shown .live-gps-status ~ .mark-controls-bar {
     top: 56px;
   }
 }
