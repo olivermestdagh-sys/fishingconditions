@@ -6,7 +6,7 @@
 // (loaded before this file); isMobileDevice and `state` come from app.js.
 
 const SETTINGS_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev/api/public/settings";
-// Points at the live, unauthenticated user-backend endpoint (D1, Public's own row): {googleRoutesApiKey, homeLat, homeLng}.
+// The user-backend endpoint that returns the signed-in user's own home and Routes key (all null when signed out): {googleRoutesApiKey, homeLat, homeLng}.
 const TIMINGS_STORAGE_KEY = "liveHomeTimings";
 
 // Same convention as Week Ahead's PIXELS_PER_HOUR — a readable, un-squashed width per hour of data,

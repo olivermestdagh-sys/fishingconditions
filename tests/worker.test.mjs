@@ -64,12 +64,12 @@ test("anonymous visitors get no home location or API key", async () => {
   assert.equal(r.status, 200);
   assert.deepEqual(await r.json(), { homeLat: null, homeLng: null, googleRoutesApiKey: null });
 });
-test("Admin is served the shared 'public' account's data", async () => {
+test("Admin is served their own marks and settings (home location and Routes key are the signed-in user's)", async () => {
   const env = makeEnv("admin", "admin-id");
   const marks = await (await call(env, "GET", "/api/public/marks", signedIn)).json();
   assert.equal(marks[0].id, "m1");
   const s = await (await call(env, "GET", "/api/public/settings", signedIn)).json();
-  assert.equal(s.googleRoutesApiKey, "KEY-public");
+  assert.equal(s.googleRoutesApiKey, "KEY-admin-id");
 });
 test("a normal user only gets their own data", async () => {
   const s = await (await call(makeEnv("basic", "user-77"), "GET", "/api/public/settings", signedIn)).json();

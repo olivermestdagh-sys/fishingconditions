@@ -767,9 +767,8 @@ function setTiersStatus(text, isError) {
 }
 
 /**
- * Reads Public's own home_lat/home_lng from D1 (GET /api/public/settings,
- * unauthenticated — same trust model config/settings.json always had)
- * once on load, purely to show the home pin immediately if one's already
+ * Reads the signed-in user's own home_lat/home_lng from D1 (GET
+ * /api/public/settings, all null when signed out) once on load, purely to show the home pin immediately if one's already
  * set. A missing/failed read just means no home is set yet — not an
  * error worth surfacing, same as before.
  */

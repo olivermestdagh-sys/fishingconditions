@@ -2041,7 +2041,7 @@ async function handlePublicMarkLists(env) {
 /**
  * PRIVACY CHANGE: this used to be readable by anyone with no sign-in (every
  * mark, exact position and notes). It now needs a signed-in session and
- * returns only the CALLER'S OWN marks — see ownerScopeId. The URL keeps its
+ * returns only the caller's own marks (plus, for Admin, the shared ones) — see markOwnerIds. The URL keeps its
  * "public" name only so existing callers didn't need re-pointing; they now
  * send credentials (charts.js, reports.js, sync.js).
  */
@@ -2065,15 +2065,6 @@ async function handlePublicMarks(request, env) {
   });
 }
 
-/** Whose rows a signed-in caller sees on the formerly-public endpoints (mark lists, settings/home location): the
- * Admin's settings live under the shared "public" account (the site's
- * original single-owner dataset was migrated there), so Admin maps to it;
- * every other user sees only rows stored under their own id. Marks are different:
- * see markOwnerFor / markOwnerIds. */
-function ownerScopeId(user) {
-  return user.role === "admin" ? PUBLIC_USER_ID : user.id;
-}
-
 /**
  * Public counterpart to handlePublicMarkLists/handlePublicMarks above —
  * this is what lets week.js/live.js/locationsadmin.js read the site's own
@@ -2086,14 +2077,14 @@ function ownerScopeId(user) {
  * actual security. Read-only; there is no public write path.
  */
 async function handlePublicSettings(request, env) {
-  // PRIVACY CHANGE: the home coordinates and Routes API key are now only
-  // returned to the signed-in user they belong to (see ownerScopeId).
+  // PRIVACY CHANGE: the home coordinates and Routes API key are only
+  // returned to the signed-in user they belong to (their own row).
   // Anonymous visitors get 200 with all nulls, so the pages still load and
   // simply skip home-based drive times.
   const user = await requireUser(request, env);
   const row = user
     ? await env.DB.prepare("SELECT home_lat, home_lng, google_routes_api_key FROM users WHERE id = ?")
-        .bind(ownerScopeId(user))
+        .bind(user.id)
         .first()
     : null;
   return new Response(
@@ -2114,15 +2105,12 @@ async function handlePublicSettings(request, env) {
 }
 
 /**
- * Sets the site's own home address (Public's home_lat/home_lng) —
- * replaces locationsadmin.js's old saveHomeLocation, which committed to
- * config/settings.json via the GitHub Contents API. Admin-only, checked
- * directly against the session's own role rather than going through
- * resolveEffectiveUserId/?userId= — there's no "act as yourself" case
- * that makes sense here (a Basic user setting their OWN home address
- * would do nothing; there is no per-user home address anywhere on this
- * site, only the one site-wide value everyone's drive-time-to-home
- * calculation on the Live tab actually uses).
+ * Sets the signed-in user's own home address (their users.home_lat/home_lng,
+ * the row handlePublicSettings reads back) — replaces locationsadmin.js's
+ * old saveHomeLocation, which committed to config/settings.json via the
+ * GitHub Contents API. Admin-only for now, checked directly against the
+ * session's own role rather than going through resolveEffectiveUserId/
+ * ?userId=.
  */
 async function handleAdminHomeLocation(request, env) {
   const user = await requireUser(request, env);
@@ -2134,7 +2122,7 @@ async function handleAdminHomeLocation(request, env) {
     return jsonResponse({ error: "lat and lng must both be numbers." }, 400, env);
   }
   await env.DB.prepare("UPDATE users SET home_lat = ?, home_lng = ? WHERE id = ?")
-    .bind(body.lat, body.lng, PUBLIC_USER_ID)
+    .bind(body.lat, body.lng, user.id)
     .run();
   return jsonResponse({ homeLat: body.lat, homeLng: body.lng }, 200, env);
 }
