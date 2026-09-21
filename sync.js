@@ -856,30 +856,12 @@ async function saveTextFile(filename, mimeType, text) {
  * per Oliver's own call), so exporting more than once in a day doesn't
  * quietly overwrite an earlier download of the same name. Colons are
  * stripped from the time portion since they're one of the characters
- * Windows won't allow in a filename at all (see sanitizeExportFilename's
- * own comment on the rest). */
+ * Windows won't allow in a filename at all. */
 function defaultExportFilename() {
   const now = nowAsNaiveString(); // "YYYY-MM-DD HH:MM:SS"
   const datePart = now.slice(0, 10);
   const timePart = now.slice(11, 16).replace(":", "");
   return `fishing-marks-${datePart}-${timePart}.gpx`;
-}
-
-/** Whatever the person actually typed into the File name field, made safe
- * to save as-is: strips the handful of characters Windows (the strictest
- * common filesystem) won't allow in a filename at all (\/:*?"<>|), and
- * makes sure it ends in .gpx regardless of whether they typed that
- * themselves — a bare "Lang Lang Trip" becomes "Lang Lang Trip.gpx" rather
- * than downloading with no extension at all. Falls back to
- * defaultExportFilename() if the field was left blank or ends up empty
- * after stripping. */
-function sanitizeExportFilename(raw) {
-  let name = String(raw || "").trim();
-  if (!name) return defaultExportFilename();
-  name = name.replace(/[\\/:*?"<>|]/g, "").trim();
-  if (!name) return defaultExportFilename();
-  if (!/\.gpx$/i.test(name)) name += ".gpx";
-  return name;
 }
 
 async function handleExportClick(device) {
@@ -897,7 +879,6 @@ async function handleExportClick(device) {
       return;
     }
     const gpx = buildGpxDocument(marks, device);
-    const filenameInput = document.getElementById("exportFilenameInput");
     // Device name goes FIRST (lowrance-fishing-marks-..., not
     // fishing-marks-...-lowrance) — Oliver's own call, and it also means
     // the two exports sort next to each other by device when browsing a
@@ -906,7 +887,7 @@ async function handleExportClick(device) {
     // to back, a completely reasonable thing to do with two separate
     // buttons now, would otherwise silently overwrite one file with the
     // other if they'd land on the exact same name.
-    const baseFilename = sanitizeExportFilename(filenameInput ? filenameInput.value : "");
+    const baseFilename = defaultExportFilename();
     const filename = `${device}-${baseFilename}`;
     statusEl.textContent = window.showSaveFilePicker ? "Choose where to save…" : "Downloading…";
     const outcome = await saveTextFile(filename, "application/gpx+xml", gpx);
@@ -2623,8 +2604,6 @@ async function syncInit() {
   document.getElementById("btnDoneImport").addEventListener("click", () => finishImportReview("Import finished."));
   document.getElementById("btnExportLowrance").addEventListener("click", () => handleExportClick("lowrance"));
   document.getElementById("btnExportGarmin").addEventListener("click", () => handleExportClick("garmin"));
-  const filenameInput = document.getElementById("exportFilenameInput");
-  if (filenameInput) filenameInput.value = defaultExportFilename();
   document.getElementById("syncSearchBox").addEventListener("input", (e) => {
     searchFilter = e.target.value.trim().toLowerCase();
     visibleCount = 100;

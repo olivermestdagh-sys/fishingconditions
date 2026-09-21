@@ -3537,7 +3537,6 @@ body {
 .map-device-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
 .map-import-btn { cursor: pointer; display: inline-flex; align-items: center; }
 .map-toolbar .btn-secondary { padding: 4px 10px; font-size: 0.8rem; }
-.map-export-filename { flex: 1 1 110px; max-width: 170px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--grey-200); font-size: 0.8rem; }
 .map-toolbar-status { font-size: 0.8rem; }
 .map-toolbar-status:empty { display: none; }
 
