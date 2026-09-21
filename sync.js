@@ -219,6 +219,7 @@ const SYNC_GRID_DEG = 0.01;
 // only place that would need a new line.
 const SYNC_SPECIES_ALIASES = {
   gummy: "Gummy Shark",
+  whiting: "Whiting (King George)", // the plain "Whiting" was renamed to King George; a device's "Whiting" waypoints are those
 };
 
 // ---------------------------------------------------------------------------
