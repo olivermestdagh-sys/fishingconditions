@@ -111,6 +111,15 @@ test("if the higher high comes first, the marks follow the data", () => {
   assert.deepEqual(fns.tideClockSegments(avg).map((s) => s.label), ["LLW", "HHW", "HLW", "LHW", "LLW"]);
 });
 
+test("cycles running the other way round don't blur the lower and higher highs together", () => {
+  const cyc = (a, b) => ({ t0: 0, points: [{ h: 0, height: 0.2, type: "low" }, { h: 6, height: a, type: "high" }, { h: 11.5, height: 0.6, type: "low" }, { h: 17.5, height: b, type: "high" }, { h: 24.8, height: 0.2, type: "low" }] });
+  const avg = fns.tideClockAverageCycle([cyc(1.0, 1.4), cyc(1.0, 1.4), cyc(1.0, 1.4), cyc(1.4, 1.0)]);
+  assert.equal(avg.n, 4);
+  assert.equal(avg.lowerFirst, true);
+  assert.ok(Math.abs(avg.points[1].height - 1.0) < 1e-9);
+  assert.ok(Math.abs(avg.points[3].height - 1.4) < 1e-9);
+});
+
 test("the simulated tide curve runs through the average high and low heights", () => {
   const avg = fns.tideClockAverageCycle(fns.tideClockCycles(extrema));
   const curve = fns.tideClockCurve(avg);

@@ -57,22 +57,30 @@ function tideClockCycles(extrema) {
   return cycles;
 }
 
-/** The typical cycle: each of the five events averaged over the cycles. Returns { points, n, lowerHighFirst } (lowerHighFirst = cycles where the first high after the LLW is the lower one), or null with no cycles. */
+/**
+ * The typical cycle: each of the five events averaged over the cycles that run in the usual order
+ * (the order most cycles follow: lower high first or higher high first), so that mixing the two orders
+ * can't blur the lower and higher highs into one. Returns { points, n, lowerHighFirst, lowerFirst }:
+ * n cycles seen, lowerHighFirst of them with the lower high first, lowerFirst = whether that is the
+ * usual order. Null with no cycles.
+ */
 function tideClockAverageCycle(cycles) {
   if (!cycles || cycles.length === 0) return null;
   const n = cycles.length;
+  const lowerHighFirst = cycles.filter((c) => c.points[1].height < c.points[3].height).length;
+  const lowerFirst = lowerHighFirst * 2 >= n;
+  const usual = cycles.filter((c) => c.points[1].height < c.points[3].height === lowerFirst);
   const points = cycles[0].points.map((p, k) => ({
     type: p.type,
-    h: cycles.reduce((a, c) => a + c.points[k].h, 0) / n,
-    height: cycles.reduce((a, c) => a + c.points[k].height, 0) / n,
+    h: usual.reduce((a, c) => a + c.points[k].h, 0) / usual.length,
+    height: usual.reduce((a, c) => a + c.points[k].height, 0) / usual.length,
   }));
-  const lowerHighFirst = cycles.filter((c) => c.points[1].height < c.points[3].height).length;
-  return { points, n, lowerHighFirst };
+  return { points, n, lowerHighFirst, lowerFirst };
 }
 
 /** Where to mark the segments on the axis: [{ h, label }] for LLW, the first high, the low, the second high and the next LLW. The highs are named by which is usually the lower one first (LHW then HHW), or the other way round if that's what this tide does. */
 function tideClockSegments(avg) {
-  const lowerFirst = avg.lowerHighFirst * 2 >= avg.n;
+  const lowerFirst = avg.lowerFirst;
   const labels = ["LLW", lowerFirst ? "LHW" : "HHW", "HLW", lowerFirst ? "HHW" : "LHW", "LLW"];
   return avg.points.map((p, k) => ({ h: p.h, label: labels[k] }));
 }
