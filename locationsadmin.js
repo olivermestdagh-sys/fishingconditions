@@ -287,6 +287,8 @@ function makeCollapsible(sectionEl, storageKey, startCollapsed) {
   const apply = () => {
     wrapper.style.display = collapsed ? "none" : "";
     chevron.textContent = collapsed ? "▸ Show" : "▾ Hide";
+    // A map inside the section was built at 0x0 while it was folded — tell it it now has a size (see renderLeafletLocationMap).
+    if (!collapsed) window.dispatchEvent(new Event("resize"));
   };
   apply();
   if (!alreadyWired) {

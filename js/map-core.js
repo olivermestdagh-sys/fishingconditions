@@ -304,29 +304,39 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
   // re-zoom back in every time they open this page. Falls back to the
   // original "fit everything" behavior the first time, before anything's
   // ever been saved.
-  let savedView = null;
-  try {
-    savedView = JSON.parse(localStorage.getItem(MAP_VIEW_STORAGE_KEY) || "null");
-  } catch {
-    savedView = null;
-  }
-  if (savedView && typeof savedView.lat === "number" && typeof savedView.lng === "number" && typeof savedView.zoom === "number") {
-    map.setView([savedView.lat, savedView.lng], savedView.zoom);
-  } else if (bounds.length === 0) {
-    // Only reachable via the onMapClick early-return bypass above (a
-    // genuinely empty map, no locations with coordinates at all yet) —
-    // fitBounds([]) has nothing to fit, so center on Port Phillip/Western
-    // Port generally, since that's this whole site's coverage area, rather
-    // than Leaflet's default (mid-Atlantic, lat/lng 0,0).
-    map.setView([-38.2, 145.1], 9);
-  } else if (bounds.length === 1) {
-    // A single marker has no useful "bounds" to fit (fitBounds on one
-    // point zooms in to the max level, which is usually too tight) —
-    // center on it at a reasonable fixed zoom instead.
-    map.setView(bounds[0], 12);
-  } else {
-    map.fitBounds(bounds, { padding: [24, 24] });
-  }
+  // A function, not inline, because it may have to run a second time: a map
+  // built inside a hidden (display:none / collapsed) container is 0x0, and
+  // fitBounds against a 0x0 map gives a meaningless view — see the
+  // ResizeObserver at the end of this function.
+  const applyInitialView = () => {
+    let savedView = null;
+    try {
+      savedView = JSON.parse(localStorage.getItem(MAP_VIEW_STORAGE_KEY) || "null");
+    } catch {
+      savedView = null;
+    }
+    if (savedView && typeof savedView.lat === "number" && typeof savedView.lng === "number" && typeof savedView.zoom === "number") {
+      map.setView([savedView.lat, savedView.lng], savedView.zoom, { animate: false });
+    } else if (bounds.length === 0) {
+      // Only reachable via the onMapClick early-return bypass above (a
+      // genuinely empty map, no locations with coordinates at all yet) —
+      // fitBounds([]) has nothing to fit, so center on Port Phillip/Western
+      // Port generally, since that's this whole site's coverage area, rather
+      // than Leaflet's default (mid-Atlantic, lat/lng 0,0).
+      map.setView([-38.2, 145.1], 9, { animate: false });
+    } else if (bounds.length === 1) {
+      // A single marker has no useful "bounds" to fit (fitBounds on one
+      // point zooms in to the max level, which is usually too tight) —
+      // center on it at a reasonable fixed zoom instead.
+      map.setView(bounds[0], 12, { animate: false });
+    } else {
+      map.fitBounds(bounds, { padding: [24, 24], animate: false });
+    }
+  };
+  const startedHidden = container.clientWidth === 0 || container.clientHeight === 0;
+  let reapplyingInitialView = false;
+  let userMovedMap = false; // set once the user pans/zooms, so a late re-fit never undoes their view
+  applyInitialView();
 
   // Saves the current position/zoom whenever the user finishes panning or
   // zooming — registered after the initial setView/fitBounds above
@@ -334,6 +344,7 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
   // itself immediately re-trigger a save; only genuine user interaction
   // does.
   const saveCurrentView = () => {
+    if (reapplyingInitialView) return; // the late re-fit isn't the user's own choice of view
     const center = map.getCenter();
     localStorage.setItem(MAP_VIEW_STORAGE_KEY, JSON.stringify({ lat: center.lat, lng: center.lng, zoom: map.getZoom() }));
   };
@@ -386,9 +397,43 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
   // The short delay catches that one-time settle shortly after load; the
   // resize/orientationchange listeners catch it happening again later
   // (rotating the device, or the address bar toggling on scroll).
-  setTimeout(() => map.invalidateSize(), 300);
-  window.addEventListener("resize", () => map.invalidateSize());
-  window.addEventListener("orientationchange", () => map.invalidateSize());
+  //
+  // A container that is hidden when the map is built (the Settings tab's
+  // Locations section starts folded, so its map is built at 0x0) never
+  // fires any of those, and is only re-measured when it's shown — so a
+  // ResizeObserver on the container itself does the re-measuring, and
+  // re-applies the starting view once, the first time the map gets a real
+  // size (unless the user has already moved it). The listeners are removed
+  // when the map is (Settings rebuilds its map on every change).
+  map.on("dragstart zoomstart", () => {
+    userMovedMap = true;
+  });
+  let fitAtRealSize = startedHidden;
+  const remeasure = () => {
+    const nowSized = fitAtRealSize && container.clientWidth > 0 && container.clientHeight > 0;
+    if (nowSized) fitAtRealSize = false;
+    const refit = nowSized && !userMovedMap;
+    // The flag covers invalidateSize too: it fires its own moveend, which would otherwise save the meaningless 0x0 view just before the re-fit reads the saved view.
+    if (refit) reapplyingInitialView = true;
+    map.invalidateSize();
+    if (refit) {
+      applyInitialView();
+      reapplyingInitialView = false;
+    }
+  };
+  // The window listeners stay too: a page can un-hide the container and fire
+  // a "resize" itself (Settings' folding sections do), and browsers without
+  // ResizeObserver only have these.
+  const observer = window.ResizeObserver ? new ResizeObserver(remeasure) : null;
+  if (observer) observer.observe(container);
+  setTimeout(remeasure, 300);
+  window.addEventListener("resize", remeasure);
+  window.addEventListener("orientationchange", remeasure);
+  map.on("unload", () => {
+    if (observer) observer.disconnect();
+    window.removeEventListener("resize", remeasure);
+    window.removeEventListener("orientationchange", remeasure);
+  });
 
   return map;
 }
