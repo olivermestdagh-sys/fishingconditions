@@ -106,6 +106,33 @@ async function init() {
   await setMode(hasSavedReview ? "import" : baseModeFromPrefs());
 }
 
+// In the installed app (Android), 100dvh can be taller than the window you can actually see — measured on a
+// phone: a 781px page in a 725px window until the phone was rotated, which the old fixed bottom gap papered
+// over and then showed as an empty strip after rotating. So there the page height follows window.innerHeight
+// exactly (the --app-height var used by .map-fullpage-body); in a normal browser tab the var stays unset and
+// the page keeps using 100dvh.
+function syncAppHeight() {
+  const root = document.documentElement;
+  const apply = () => {
+    if (window.matchMedia("(display-mode: standalone)").matches) root.style.setProperty("--app-height", `${window.innerHeight}px`);
+    else root.style.removeProperty("--app-height");
+  };
+  apply();
+  // The window's height settles a moment after a rotation, so re-read a few times as well as on every resize.
+  const soon = () => {
+    apply();
+    for (const ms of [150, 500, 1200]) setTimeout(apply, ms);
+  };
+  window.addEventListener("resize", apply);
+  window.addEventListener("orientationchange", soon);
+  window.addEventListener("pageshow", soon);
+  document.addEventListener("fullscreenchange", soon);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) soon();
+  });
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", apply);
+}
+
 // A small read-out of the phone's screen/viewport numbers, for tracking down a gap along the bottom of the
 // installed app (see the display-mode rules in style.css). Hidden by default: tap on the empty part
 // of the toolbar above the map three times quickly to show or hide it. Nothing is stored or sent anywhere.
@@ -131,7 +158,7 @@ function wireLayoutDiag() {
       `visualViewport ${vv ? `${Math.round(vv.width)}x${Math.round(vv.height)} top ${Math.round(vv.offsetTop)}` : "none"}`,
       `screen-inner height ${screen.height - window.innerHeight}`,
       `env(safe-area-inset-bottom) ${getComputedStyle(probe).paddingBottom}`,
-      `body padding-bottom ${body.paddingBottom}  height ${Math.round(document.body.getBoundingClientRect().height)}`,
+      `body padding-bottom ${body.paddingBottom}  height ${Math.round(document.body.getBoundingClientRect().height)}  --app-height ${document.documentElement.style.getPropertyValue("--app-height") || "unset"}`,
       `fullscreen ${document.fullscreenElement ? "yes" : "no"}  immersive ${document.documentElement.classList.contains("landscape-immersive") ? "yes" : "no"}`,
     ];
     box.textContent = rows.join("\n");
@@ -831,4 +858,5 @@ function renderCharts(rows, loc, sunTimesOverride) {
   });
 }
 
+syncAppHeight(); // before init() awaits anything, so the page is the right height from the first paint
 init();

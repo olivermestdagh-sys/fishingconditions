@@ -162,6 +162,10 @@ main {
   flex-direction: column;
   height: 100vh;
   height: 100dvh; /* accounts for mobile browsers' address bar resizing the viewport; 100vh above is the fallback for browsers that don't support dvh yet, not a duplicate mistake */
+  /* In the installed app on Android, 100dvh can be taller than the window you can actually see (measured on a
+     phone: 781px against a 725px window, until the phone is rotated), so app.js sets --app-height to the real
+     window height there (syncAppHeight). Everywhere else the var is unset and this is just 100dvh again. */
+  height: var(--app-height, 100dvh);
   overflow: hidden;
 }
 
@@ -3430,24 +3434,11 @@ body {
   border-top: env(safe-area-inset-top, 0px) solid var(--blue-900);
 }
 
-/* Samsung (S21) and some other phones report no safe-area inset even in the
-   installed app, so the map pages also keep a fixed gap for the system nav bar:
-   ~48px covers a 3-button bar, and is only applied when running as an
-   installed app (browser tabs already stop above the system bars).
-   Deliberately NOT for display-mode: fullscreen: turning the phone sideways puts the
-   page into browser fullscreen (setupFullscreenToggle, js/week-tools.js), which hides the
-   system bars, so reserving room for them there just leaves an empty strip along the
-   bottom — that strip is what showed up after rotating on the Map tab. */
-@media (display-mode: standalone) {
-  .map-fullpage-body {
-    padding-bottom: max(env(safe-area-inset-bottom, 0px), 48px);
-  }
-}
-@media (display-mode: standalone) and (orientation: landscape) {
-  .map-fullpage-body {
-    padding-bottom: max(env(safe-area-inset-bottom, 0px), 24px);
-  }
-}
+/* The installed app used to keep a fixed 48px (24px sideways) gap along the bottom on phones that report no
+   safe-area inset (Samsung S21). That guess was wrong once the phone was rotated — it showed as an empty
+   strip — because the real cause was 100dvh being taller than the visible window. The map page's height is
+   now set from the actual window height instead (--app-height, see .map-fullpage-body above and
+   syncAppHeight in app.js), so no fixed gap is needed. */
 
 /* Week Ahead on touch devices: no spare padding under the graph board (the sizing
    script in index.html fills the screen down to the bottom edge), and in landscape
