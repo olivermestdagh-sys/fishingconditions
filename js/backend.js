@@ -489,14 +489,30 @@ const MARK_LIST_FIELDS = [
  * future new source (e.g. a Garmin import) becomes filterable automatically
  * the moment a mark with that value exists, no code change needed.
  */
-const MARK_FILTER_ONLY_FIELDS = [{ key: "source", label: "Source" }];
+const MARK_FILTER_ONLY_FIELDS = [
+  { key: "source", label: "Source" },
+  { key: "owner", label: "Owner" }, // "Mine" (Catches, Sessions) or "Public" (Mark, POI) — derived from the type, see markOwnerLabel
+];
+
+// Whose account a mark lives in, from its type — the same rule the Worker applies (PERSONAL_MARK_TYPES,
+// markOwnerFor in user-backend.js): Catches and Sessions are the signed-in person's own ("Mine"), everything
+// else (Mark, POI) is the shared "Public" set. Used by the map's Owner filter.
+const PERSONAL_MARK_TYPES = ["Catch", "Session Start", "Session End"];
+function markOwnerLabel(mark) {
+  return PERSONAL_MARK_TYPES.includes(mark.type) ? "Mine" : "Public";
+}
+/** A mark's value for a filterable field — "owner" is derived from its type, every other field is stored on the mark. */
+function markFieldValue(mark, key) {
+  return key === "owner" ? markOwnerLabel(mark) : mark[key];
+}
 
 /** Sorted list of every distinct non-empty value a given field actually
  * has across the currently-loaded marks — see MARK_FILTER_ONLY_FIELDS. */
 function distinctValuesForField(marksById, key) {
   const values = new Set();
   marksById.forEach((mark) => {
-    if (mark[key]) values.add(mark[key]);
+    const value = markFieldValue(mark, key);
+    if (value) values.add(value);
   });
   return [...values].sort();
 }

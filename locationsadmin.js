@@ -352,8 +352,8 @@ async function init() {
  * Runs the ENTIRE sign-in-dependent page state — called from init() and
  * again from onSignOut/onToggleViewAsPublic, since either one changes
  * what every section below should be showing. Location Groups/Fishing
- * Mark Lists/Locations are available to ANY signed-in user; Check
- * frequency, Home address, Refresh data now, Users, and Tiers are all
+ * Mark Lists/Locations and the user's own Home address are available to ANY
+ * signed-in user; Check frequency, Refresh data now, Users, and Tiers are all
  * Admin-only site-wide settings now — none of them affected by
  * viewingAsPublic (there's exactly one of each, not a per-account copy
  * to switch between).
@@ -1879,14 +1879,13 @@ async function onSettingsMapClick(lat, lng) {
  * house pin appears without needing a reload.
  */
 /**
- * Writes the clicked point to D1 (Public's home_lat/home_lng — PUT
- * /api/admin/home-location, Admin-only) rather than committing to
- * config/settings.json. Updates the map immediately on success so the
+ * Writes the clicked point to D1 (the signed-in user's own home_lat/home_lng —
+ * PUT /api/home-location) rather than committing to config/settings.json. Updates the map immediately on success so the
  * house pin appears without needing a reload.
  */
 async function saveHomeLocation(lat, lng) {
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/admin/home-location`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/home-location`, {
       method: "PUT",
       credentials: "include",
       headers: { "Content-Type": "application/json" },

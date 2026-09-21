@@ -300,8 +300,8 @@ export default {
       // a per-user concept), and require role === "admin" directly rather
       // than going through resolveEffectiveUserId. See each handler's own
       // comment for why.
-      if (url.pathname === "/api/admin/home-location" && request.method === "PUT") {
-        return handleAdminHomeLocation(request, env);
+      if ((url.pathname === "/api/home-location" || url.pathname === "/api/admin/home-location") && request.method === "PUT") {
+        return handleHomeLocation(request, env);
       }
       if (url.pathname === "/api/admin/refresh-data-now" && request.method === "POST") {
         const user = await requireUser(request, env);
@@ -2108,14 +2108,13 @@ async function handlePublicSettings(request, env) {
  * Sets the signed-in user's own home address (their users.home_lat/home_lng,
  * the row handlePublicSettings reads back) — replaces locationsadmin.js's
  * old saveHomeLocation, which committed to config/settings.json via the
- * GitHub Contents API. Admin-only for now, checked directly against the
- * session's own role rather than going through resolveEffectiveUserId/
- * ?userId=.
+ * GitHub Contents API. Any signed-in user can set their own; it never touches
+ * anyone else's row (no ?userId=). The old /api/admin/home-location path
+ * still works, as an alias.
  */
-async function handleAdminHomeLocation(request, env) {
+async function handleHomeLocation(request, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
-  if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
 
   const body = await readJsonBody(request);
   if (typeof body.lat !== "number" || typeof body.lng !== "number") {
@@ -2138,7 +2137,7 @@ async function handleAdminHomeLocation(request, env) {
  * which also needed Contents:write for everything else that token used
  * to do) as a secret, and makes the dispatch call server-side on the
  * Admin session's behalf. Admin-only, same direct role check as
- * handleAdminHomeLocation above, for the same reason.
+ * the admin checks above, for the same reason.
  */
 async function handleAdminRefreshDataNow(env) {
   requireEnv(env, ["GH_ACTIONS_TOKEN", "GH_REPO_OWNER", "GH_REPO_NAME", "GH_WORKFLOW_FILE"]);

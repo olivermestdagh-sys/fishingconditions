@@ -9,7 +9,11 @@ const fn = (name) => {
   assert.ok(m, `${name} not found in js/*.js`);
   return m[0];
 };
-const getVisibleMarks = new Function(fn("markMatchesFilters") + "\n" + fn("getVisibleMarks") + "\nreturn getVisibleMarks;")();
+const personalTypes = src.match(/const PERSONAL_MARK_TYPES = [^\n]*\r?\n/);
+assert.ok(personalTypes, "PERSONAL_MARK_TYPES not found in js/*.js");
+const getVisibleMarks = new Function(
+  [personalTypes[0], fn("markOwnerLabel"), fn("markFieldValue"), fn("markMatchesFilters"), fn("getVisibleMarks"), "return getVisibleMarks;"].join("\n")
+)();
 
 function stateWith(marks, filters) {
   return { marksById: new Map(marks.map((m) => [m.id, m])), filters };
@@ -63,4 +67,20 @@ test("Date/Time with only one bound, or none, and it combines with other filters
   assert.deepEqual(ids(getVisibleMarks(stateWith(dated, { dateTime: { from: "", to: "2025-12-31T23:59" } }))), ["a"]);
   const both = { dateTime: { from: "2026-01-01T00:00", to: "" }, species: { include: new Set(["Snapper"]), exclude: new Set() } };
   assert.deepEqual(ids(getVisibleMarks(stateWith(dated, both))), ["b"]);
+});
+
+test("Owner filter: Catches and Sessions are Mine, Mark and POI are Public", () => {
+  const owned = [
+    { id: "c", type: "Catch" },
+    { id: "s", type: "Session Start" },
+    { id: "e", type: "Session End" },
+    { id: "m", type: "Mark" },
+    { id: "p", type: "POI" },
+  ];
+  const only = (label, mode) => ({ owner: { include: new Set(mode === "include" ? [label] : []), exclude: new Set(mode === "exclude" ? [label] : []) } });
+  assert.deepEqual(ids(getVisibleMarks(stateWith(owned, only("Mine", "include")))), ["c", "e", "s"]);
+  assert.deepEqual(ids(getVisibleMarks(stateWith(owned, only("Public", "include")))), ["m", "p"]);
+  assert.deepEqual(ids(getVisibleMarks(stateWith(owned, only("Public", "exclude")))), ["c", "e", "s"]);
+  const both = { owner: { include: new Set(["Mine", "Public"]), exclude: new Set() } };
+  assert.equal(getVisibleMarks(stateWith(owned, both)).length, 5); // requiring both = everything
 });

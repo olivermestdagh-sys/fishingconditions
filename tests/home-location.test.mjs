@@ -50,10 +50,24 @@ test("Admin setting a home location writes their own row, not the shared public 
   assert.deepEqual(env.updates, [[-38.1, 145.3, "admin-id"]]);
 });
 
-test("a normal user still cannot set a home location", async () => {
+test("a normal signed-in user can set their own home location (and only theirs)", async () => {
   const env = makeEnv("basic", "user-77");
-  assert.equal((await put(env, { lat: -38.1, lng: 145.3 })).status, 403);
-  assert.deepEqual(env.updates, []);
+  assert.equal((await put(env, { lat: -38.1, lng: 145.3 })).status, 200);
+  assert.deepEqual(env.updates, [[-38.1, 145.3, "user-77"]]);
+});
+
+test("setting a home location needs a sign-in and valid numbers", async () => {
+  assert.equal((await put(makeEnv(null), { lat: -38.1, lng: 145.3 })).status, 401);
+  assert.equal((await put(makeEnv("basic", "user-77"), { lat: "x", lng: 145.3 })).status, 400);
+});
+
+test("the old admin path still works as an alias", async () => {
+  const env = makeEnv("basic", "user-77");
+  const res = await worker.fetch(
+    new Request("https://worker.example/api/admin/home-location", { method: "PUT", headers: { Cookie: "session=s", Origin: SITE, "Content-Type": "application/json" }, body: JSON.stringify({ lat: -38.1, lng: 145.3 }) }),
+    env
+  );
+  assert.equal(res.status, 200);
 });
 
 test("each signed-in user reads their own home settings; a signed-out visitor gets nothing", async () => {
