@@ -422,13 +422,14 @@ async function renderTideClockReport() {
   const colorOf = (sp) => tideClockSpeciesColor(sp);
 
   const labels = agg.bins.map((_, i) => i * TIDE_CLOCK_BIN_H);
+  const tideCurve = avg ? tideClockCurve(avg) : null;
   const datasets = [
     ...(avg
       ? [
           {
             type: "line",
             label: "Typical tide (simulated)",
-            data: tideClockCurve(avg),
+            data: tideCurve,
             yAxisID: "yTide",
             borderColor: "rgba(41,121,255,0.55)",
             backgroundColor: "rgba(41,121,255,0.10)",
@@ -487,7 +488,7 @@ async function renderTideClockReport() {
       chip("rgba(120,120,120,0.4)", "Hours fished") +
       speciesList.map((sp) => chip(colorOf(sp), sp)).join("") +
       chip("#c62828", "Catches per hour") +
-      (avg ? chip("rgba(41,121,255,0.4)", "Typical tide (simulated)") : "");
+      (avg ? chip("rgba(41,121,255,0.4)", "Typical tide (simulated, differences exaggerated)") : "");
   }
 
   // Dashed lines with a label at the average LLW / high / low / high / LLW of the cycle.
@@ -535,7 +536,7 @@ async function renderTideClockReport() {
               return `${h}–${h + TIDE_CLOCK_BIN_H} hours after LLW`;
             },
             label: (item) => {
-              if (item.dataset.yAxisID === "yTide") return `Typical tide: about ${item.raw.toFixed(2)} m`;
+              if (item.dataset.yAxisID === "yTide") return "Typical tide (shape only — differences exaggerated)";
               if (item.dataset.yAxisID === "yEffort") return `Fished: ${item.raw.toFixed(1)} h`;
               if (item.dataset.yAxisID === "yRate") return `Rate: ${item.raw.toFixed(2)} catches/h`;
               return `${item.dataset.label}: ${item.raw}`;
@@ -552,7 +553,8 @@ async function renderTideClockReport() {
         },
         y: { stacked: true, beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: "Catches" } },
         yEffort: { display: false, beginAtZero: true, position: "right", grid: { display: false } },
-        yTide: { display: false, position: "right", grid: { display: false } },
+        // the curve fills the height of the chart, which makes the lower and higher highs and lows stand apart
+        yTide: { display: false, position: "right", grid: { display: false }, ...(tideCurve ? { min: Math.min(...tideCurve) - 0.05 * (Math.max(...tideCurve) - Math.min(...tideCurve)), max: Math.max(...tideCurve) + 0.05 * (Math.max(...tideCurve) - Math.min(...tideCurve)) } : {}) },
         yRate: { beginAtZero: true, position: "right", grid: { display: false }, title: { display: true, text: "Catches/hour" } },
       },
     },

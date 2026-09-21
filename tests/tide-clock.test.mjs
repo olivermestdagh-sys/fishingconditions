@@ -25,9 +25,11 @@ const fns = new Function(
     fn("tideClockCycles"),
     fn("tideClockAverageCycle"),
     fn("tideClockSegments"),
+    grab(/const TIDE_CLOCK_EXAGGERATE[^\n]*\r?\n/),
+    fn("tideClockExaggeratedHeights"),
     fn("tideClockCurve"),
     fn("tideClockAggregate"),
-    "return { tideClockHoursSinceLLW, tideClockBinFor, tideClockSessionEffort, tideClockCycles, tideClockAverageCycle, tideClockSegments, tideClockCurve, tideClockAggregate };",
+    "return { tideClockHoursSinceLLW, tideClockBinFor, tideClockSessionEffort, tideClockCycles, tideClockAverageCycle, tideClockSegments, tideClockExaggeratedHeights, tideClockCurve,tideClockAggregate };",
   ].join("\n")
 )();
 
@@ -124,9 +126,18 @@ test("the simulated tide curve runs through the average high and low heights", (
   const avg = fns.tideClockAverageCycle(fns.tideClockCycles(extrema));
   const curve = fns.tideClockCurve(avg);
   assert.equal(curve.length, 50);
-  assert.ok(Math.abs(curve[12] - 1.0) < 0.05); // column centred on 6.25h, the first high
-  assert.ok(Math.abs(curve[35] - 1.4) < 0.05); // 17.75h, the second high
-  assert.ok(curve.every((v) => v >= 0.2 - 1e-9 && v <= 1.4 + 1e-9));
+  // 6.25h is the first high (LHW), 11.75h the middle low (HLW), 17.75h the second high (HHW); 0.25h is by the LLW
+  assert.ok(curve[35] > curve[12] && curve[12] > curve[23] && curve[23] > curve[0]); // HHW > LHW > HLW > LLW
+});
+
+test("the tide curve exaggerates the gaps between the lower/higher highs and lows without letting a low pass a high", () => {
+  const avg = fns.tideClockAverageCycle(fns.tideClockCycles(extrema));
+  const h = fns.tideClockExaggeratedHeights(avg);
+  const real = avg.points.map((p) => p.height);
+  assert.ok(h[3] - h[1] > real[3] - real[1]); // the highs are further apart than they really are
+  assert.ok(h[2] - h[0] > real[2] - real[0]); // and so are the lows
+  assert.ok(h[2] <= h[1] + 1e-9); // HLW stays at or below LHW
+  assert.ok(h.every((v, k) => Number.isFinite(v)));
 });
 
 test("aggregate counts catches into their column, works out the rate, and skips sessions without tides", () => {

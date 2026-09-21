@@ -8,6 +8,7 @@ const TIDE_CLOCK_BIN_H = 0.5; // width of one column, hours
 const TIDE_CLOCK_BINS = 50; // 50 columns x 0.5h covers 0 to 25h, a full LLW-to-LLW cycle (~24.8h)
 const TIDE_CLOCK_SLICE_MS = 5 * 60000; // sessions are cut into slices this long to work out where in the tide they were
 const TIDE_CLOCK_MAX_GAP_H = 27; // a "last LLW" older than this means the stored events have a hole, so the time is left out
+const TIDE_CLOCK_EXAGGERATE = 3; // most the typical tide curve stretches the gap between the lower and higher highs (and lows)
 const TIDE_CLOCK_MIN_EFFORT_H = 1; // a column with less effort than this shows no rate (one lucky fish in ten minutes isn't a trend)
 
 /** Hours since the latest LLW (the lower of the day's two lows) at or before tMs, or null when the events don't cover tMs (no LLW before it, no event after it, or a hole in between). */
@@ -85,9 +86,32 @@ function tideClockSegments(avg) {
   return avg.points.map((p, k) => ({ h: p.h, label: labels[k] }));
 }
 
-/** The typical tide height (m) at the centre of every column: cosine-eased between the average events, like the site's tide curves. */
-function tideClockCurve(avg) {
+/**
+ * The average event heights with the differences between the two highs, and between the two lows,
+ * exaggerated (each pushed away from the mean of its kind) so the lower and higher ones are easy to
+ * tell apart. The stretch is as much as TIDE_CLOCK_EXAGGERATE but never so much that a higher low
+ * would climb to within 30% of the way up to a lower high (the curve would lose its dip). Returns one height per average event.
+ */
+function tideClockExaggeratedHeights(avg) {
   const p = avg.points;
+  const lows = p.filter((e) => e.type === "low").map((e) => e.height);
+  const highs = p.filter((e) => e.type === "high").map((e) => e.height);
+  const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length;
+  const lowMean = mean(lows);
+  const highMean = mean(highs);
+  const spread = Math.max(...lows) - lowMean + (highMean - Math.min(...highs)); // how far the top low and the bottom high sit into the gap
+  const room = highMean - lowMean;
+  const factor = spread > 0 ? Math.max(1, Math.min(TIDE_CLOCK_EXAGGERATE, (room * 0.7) / spread)) : 1;
+  return p.map((e) => {
+    const m = e.type === "low" ? lowMean : highMean;
+    return m + (e.height - m) * factor;
+  });
+}
+
+/** The typical tide height at the centre of every column: cosine-eased between the average events (differences exaggerated, see tideClockExaggeratedHeights), like the site's tide curves. */
+function tideClockCurve(avg) {
+  const heights = tideClockExaggeratedHeights(avg);
+  const p = avg.points.map((e, k) => ({ h: e.h, height: heights[k] }));
   const out = [];
   for (let i = 0; i < TIDE_CLOCK_BINS; i++) {
     const x = (i + 0.5) * TIDE_CLOCK_BIN_H;
