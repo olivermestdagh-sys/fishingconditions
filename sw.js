@@ -38,7 +38,10 @@ self.addEventListener("fetch", (event) => {
       // a new copy of the 4 MB data file on every load.
       const key = sameOrigin ? url.origin + url.pathname : req.url;
       try {
-        const fresh = await fetch(req);
+        // "no-cache" = always ask the server whether the file changed (a cheap 304 when it hasn't). Without it the
+        // browser's own HTTP cache can hand back a file GitHub Pages marked max-age=600, so a fresh deploy would
+        // not reach an installed app for up to 10 minutes. Same-origin only; the pinned CDN libraries can cache.
+        const fresh = await fetch(req, sameOrigin ? { cache: "no-cache" } : undefined);
         if (fresh && fresh.ok) cache.put(key, fresh.clone());
         return fresh;
       } catch (err) {
