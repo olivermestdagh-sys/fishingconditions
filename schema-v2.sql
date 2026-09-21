@@ -212,6 +212,12 @@ CREATE TABLE IF NOT EXISTS user_mark_lists (
   lowrance_sym TEXT,                 -- ONLY on a Format row itself (shape OR colour): the literal Lowrance <sym> text
                                       -- fragment this piece contributes to a mark's export — see gpxSymForMark, sync.js
   garmin_sym TEXT,                   -- same, for Garmin's export format
+  -- Species rows only (added later via ALTER TABLE) — the regulation limits for that species, all optional:
+  min_size REAL,                     -- legal minimum length, cm
+  max_size REAL,                     -- legal maximum length, cm (slot limit)
+  max_qty INTEGER,                   -- bag limit: most fish allowed
+  big_max_qty INTEGER,               -- how many "big" fish (at least big_size) count within the limit
+  big_size REAL,                     -- length, cm, from which a fish counts as "big"
   created_at INTEGER NOT NULL,
   UNIQUE (user_id, field, value)
 );

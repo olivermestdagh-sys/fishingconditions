@@ -1217,11 +1217,12 @@ async function handleMarkListsCollection(request, url, env) {
     const id = crypto.randomUUID();
     try {
       await env.DB.prepare(
-        "INSERT INTO user_mark_lists (id, user_id, field, value, shape_format, color_format, color, icon, lowrance_sym, garmin_sym, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO user_mark_lists (id, user_id, field, value, shape_format, color_format, color, icon, lowrance_sym, garmin_sym, min_size, max_size, max_qty, big_max_qty, big_size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       )
         .bind(
           id, uid, body.field, body.value, body.shapeFormat ?? null, body.colorFormat ?? null, body.color ?? null,
-          body.icon ?? null, body.lowranceSym ?? null, body.garminSym ?? null, Date.now()
+          body.icon ?? null, body.lowranceSym ?? null, body.garminSym ?? null,
+          body.minSize ?? null, body.maxSize ?? null, body.maxQty ?? null, body.bigMaxQty ?? null, body.bigSize ?? null, Date.now()
         )
         .run();
     } catch (err) {
@@ -1260,12 +1261,20 @@ async function handleMarkListItem(request, url, env, id) {
       icon: body.icon !== undefined ? body.icon : existing.icon,
       lowranceSym: body.lowranceSym !== undefined ? body.lowranceSym : existing.lowrance_sym,
       garminSym: body.garminSym !== undefined ? body.garminSym : existing.garmin_sym,
+      minSize: body.minSize !== undefined ? body.minSize : existing.min_size,
+      maxSize: body.maxSize !== undefined ? body.maxSize : existing.max_size,
+      maxQty: body.maxQty !== undefined ? body.maxQty : existing.max_qty,
+      bigMaxQty: body.bigMaxQty !== undefined ? body.bigMaxQty : existing.big_max_qty,
+      bigSize: body.bigSize !== undefined ? body.bigSize : existing.big_size,
     };
     try {
       await env.DB.prepare(
-        "UPDATE user_mark_lists SET field=?, value=?, shape_format=?, color_format=?, color=?, icon=?, lowrance_sym=?, garmin_sym=? WHERE id = ? AND user_id = ?"
+        "UPDATE user_mark_lists SET field=?, value=?, shape_format=?, color_format=?, color=?, icon=?, lowrance_sym=?, garmin_sym=?, min_size=?, max_size=?, max_qty=?, big_max_qty=?, big_size=? WHERE id = ? AND user_id = ?"
       )
-        .bind(merged.field, merged.value, merged.shapeFormat, merged.colorFormat, merged.color, merged.icon, merged.lowranceSym, merged.garminSym, id, uid)
+        .bind(
+          merged.field, merged.value, merged.shapeFormat, merged.colorFormat, merged.color, merged.icon, merged.lowranceSym, merged.garminSym,
+          merged.minSize ?? null, merged.maxSize ?? null, merged.maxQty ?? null, merged.bigMaxQty ?? null, merged.bigSize ?? null, id, uid
+        )
         .run();
     } catch (err) {
       return jsonResponse({ error: `"${merged.value}" already exists under ${merged.field}.` }, 409, env);
@@ -1297,11 +1306,31 @@ function rowToMarkList(row) {
     icon: row.icon,
     lowranceSym: row.lowrance_sym,
     garminSym: row.garmin_sym,
+    minSize: row.min_size ?? null,
+    maxSize: row.max_size ?? null,
+    maxQty: row.max_qty ?? null,
+    bigMaxQty: row.big_max_qty ?? null,
+    bigSize: row.big_size ?? null,
   };
 }
 
+// Species limits: lengths in cm (any number >= 0), quantities whole numbers >= 0. All optional (null clears).
+const MARK_LIST_LIMIT_FIELDS = [
+  { key: "minSize", label: "Min Size", integer: false },
+  { key: "maxSize", label: "Max Size", integer: false },
+  { key: "maxQty", label: "Max Qty", integer: true },
+  { key: "bigMaxQty", label: "Big Max Qty", integer: true },
+  { key: "bigSize", label: "Big Size", integer: false },
+];
+
 function validateMarkListInput(body, { partial }) {
   if (!body || typeof body !== "object") return "Request body must be a JSON object.";
+  for (const { key, label, integer } of MARK_LIST_LIMIT_FIELDS) {
+    const v = body[key];
+    if (v === undefined || v === null) continue;
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) return `${label} must be a number of 0 or more, or blank.`;
+    if (integer && !Number.isInteger(v)) return `${label} must be a whole number.`;
+  }
   if (!partial || body.field !== undefined) {
     if (typeof body.field !== "string" || !body.field.trim()) return "field is required.";
   }

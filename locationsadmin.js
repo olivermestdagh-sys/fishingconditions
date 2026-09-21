@@ -1059,6 +1059,15 @@ function pickReadableTextColor(hex) {
 // MARK_LIST_FIELDS keys whose values can't be deleted (the Worker refuses too — LOCKED_MARK_LIST_FIELDS, user-backend.js).
 const LOCKED_MARK_LIST_KEYS = ["type", "tideCondition", "tideExtreme"];
 
+// The regulation limits stored on each Species value (Worker: MARK_LIST_LIMIT_FIELDS, user-backend.js). Sizes are cm.
+const SPECIES_LIMIT_FIELDS = [
+  { prop: "minSize", label: "Min size", integer: false, title: "Minimum legal size (cm)" },
+  { prop: "maxSize", label: "Max size", integer: false, title: "Maximum legal size (cm)" },
+  { prop: "maxQty", label: "Max qty", integer: true, title: "Bag limit: most fish allowed" },
+  { prop: "bigSize", label: "Big size", integer: false, title: "Length (cm) from which a fish counts as big" },
+  { prop: "bigMaxQty", label: "Big max qty", integer: true, title: "How many big fish are allowed" },
+];
+
 function renderMarkLists() {
   const container = document.getElementById("markListsGroups");
   container.innerHTML = MARK_LIST_FIELDS.map(({ key, label }) => `
@@ -1123,12 +1132,22 @@ function renderMarkLists() {
         : `<button type="button" data-remove-mark-value data-field="${key}" data-value="${escAttr}"
           aria-label="Remove ${escAttr}"
           style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>`;
+      // Species also carry their regulation limits, edited on a second line inside the chip.
+      const limitsHtml = key === "species"
+        ? `<div class="mark-list-limits" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;margin-top:2px;">${SPECIES_LIMIT_FIELDS.map((f) => `
+            <label style="display:flex;flex-direction:column;font-size:0.65rem;gap:1px;">${f.label}
+              <input type="number" class="mark-list-limit-input" data-limit-prop="${f.prop}" data-value="${escAttr}" value="${v[f.prop] ?? ""}"
+                min="0" step="${f.integer ? "1" : "any"}" inputmode="${f.integer ? "numeric" : "decimal"}" title="${f.title}"
+                style="width:74px;padding:2px 4px;font-size:0.8rem;border-radius:5px;border:1px solid var(--grey-200);background:var(--white);color:#111827;" />
+            </label>`).join("")}</div>`
+        : "";
       return `
-      <span class="loc-chip" data-field="${key}" data-value="${escAttr}" style="display:inline-flex;align-items:center;gap:6px;${colorStyle}">
+      <span class="loc-chip" data-field="${key}" data-value="${escAttr}" style="display:inline-flex;align-items:center;gap:6px;${key === "species" ? "flex-wrap:wrap;border-radius:16px;" : ""}${colorStyle}">
         <span>${escText}</span>
         ${shapeSelectHtml}
         ${colorSelectHtml}
         ${removeBtnHtml}
+        ${limitsHtml}
       </span>
     `;
     }).join("");
@@ -1150,6 +1169,9 @@ function renderMarkLists() {
       onSetMarkListValueSubFormat(e.currentTarget.dataset.fieldLabel, e.currentTarget.dataset.value, "colorFormat", e.currentTarget.value);
       renderMarkLists();
     });
+  });
+  container.querySelectorAll(".mark-list-limit-input").forEach((input) => {
+    input.addEventListener("input", (e) => onSetSpeciesLimit(e.currentTarget));
   });
   container.querySelectorAll(".mark-list-add-btn").forEach((btn) => {
     btn.addEventListener("click", (e) => onAddMarkListValue(e.currentTarget.dataset.field));
@@ -1425,6 +1447,49 @@ function onSetMarkSubFormatProperty(fieldName, formatName, prop, value) {
         })
         .catch((err) => {
           console.error("Failed to save format property:", err);
+          setMarkListsSaveStatus("Couldn't save that change: " + err.message, true);
+        });
+    }, 600)
+  );
+}
+
+/** One of a Species' limit inputs changed: blank clears it, a number of 0 or more saves it (0 is real, e.g. a no-take
+ * species), anything else is flagged and not saved. Like the sym inputs above it doesn't re-render (the person is
+ * typing in it) and the save is debounced per species+limit. */
+function onSetSpeciesLimit(input) {
+  const def = SPECIES_LIMIT_FIELDS.find((f) => f.prop === input.dataset.limitProp);
+  const entry = markLists.find((r) => r.field === "Species" && r.value === input.dataset.value);
+  if (!def || !entry || !entry.id) return;
+  const raw = input.value.trim();
+  const num = raw === "" ? null : Number(raw);
+  const valid = num === null || (Number.isFinite(num) && num >= 0 && (!def.integer || Number.isInteger(num)));
+  input.style.borderColor = valid ? "" : "#dc2626";
+  if (!valid) {
+    setMarkListsSaveStatus(`${def.label} must be ${def.integer ? "a whole number" : "a number"} of 0 or more, or blank.`, true);
+    return;
+  }
+  entry[def.prop] = num;
+
+  const timerKey = `Species::${entry.value}::${def.prop}`;
+  clearTimeout(markSubFormatSaveTimers.get(timerKey));
+  markSubFormatSaveTimers.set(
+    timerKey,
+    setTimeout(() => {
+      fetch(`${USER_BACKEND_URL}/api/marklists/${entry.id}${effectiveUserIdParam()}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [def.prop]: num }),
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            throw new Error(errBody.error || `status ${res.status}`);
+          }
+          setMarkListsSaveStatus("", false);
+        })
+        .catch((err) => {
+          console.error("Failed to save species limit:", err);
           setMarkListsSaveStatus("Couldn't save that change: " + err.message, true);
         });
     }, 600)
