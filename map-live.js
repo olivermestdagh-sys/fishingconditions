@@ -420,18 +420,22 @@ function liveActiveSession() {
   return number != null ? { mark: latest, number } : null;
 }
 
-// Keeps "+ Session"/"End Session…/Move" in step with whatever's actually on the map: the next number to show on
-// + Session, and End Session's own visibility/label from the currently active session (none shown at all until
-// the marks have loaded — never guess "Session 1" before that's actually known, same reasoning as the bag counts
-// staying blank until a run is known). Called once loadAndRenderMarks resolves, and after every save that can
-// change session state (saveLiveSession, saveLiveEndSession).
+// Keeps "+ Session"/"End Session…/Move"/"+ Catch" in step with whatever's actually on the map: the next number to
+// show on + Session, and End Session's/+Catch's own visibility (+ End Session's label) from the currently active
+// session — +Catch only makes sense once a session's actually underway to log the catch against, same as End
+// Session. Nothing but + Session's base text shown at all until the marks have loaded — never guess "Session 1"
+// or show +Catch before there's actually a session known to be active, same reasoning as the bag counts staying
+// blank until a run is known. Called once loadAndRenderMarks resolves, and after every save that can change
+// session state (saveLiveSession, saveLiveEndSession).
 function updateLiveSessionButtons() {
-  if (!liveMap || !liveMarkState) return; // not in Live mode (or it's been left) — applyModeChrome already hid both
+  if (!liveMap || !liveMarkState) return; // not in Live mode (or it's been left) — applyModeChrome already hid all three
   const btnSession = document.getElementById("btnLiveSession");
   const btnEnd = document.getElementById("btnLiveEndSession");
+  const btnCatch = document.getElementById("btnLiveCatch");
   const starts = liveSessionStarts();
   if (starts == null) {
     btnEnd.style.display = "none";
+    btnCatch.style.display = "none";
     return; // marks not loaded yet: leave + Session's base "+ Session" text alone rather than guess a number
   }
   btnSession.textContent = `+ Session ${nextSessionNumber(starts, nowInNaiveEncoding())}`;
@@ -439,8 +443,10 @@ function updateLiveSessionButtons() {
   if (active) {
     btnEnd.textContent = `End Session ${active.number}/Move`;
     btnEnd.style.display = "";
+    btnCatch.style.display = cachedIsSignedIn ? "" : "none";
   } else {
     btnEnd.style.display = "none";
+    btnCatch.style.display = "none";
   }
 }
 
