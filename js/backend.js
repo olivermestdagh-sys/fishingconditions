@@ -137,21 +137,51 @@ let cachedIsAdmin = false; // refreshed once via refreshAdminStatus() at page
                            // Settings tab in another tab won't be reflected
                            // here until this page's own next load.
 let cachedIsSignedIn = false; // set by the same refreshAdminStatus() call: anyone signed in, admin or not
+let cachedUserId = null; // the signed-in person's own real users.id (or null, signed out) — set by the same call; used to tell "Mine" apart from someone else's mark now that Admin can see everyone's (see markOwnerOptionsHtml/collectMarkFormValues, js/marks-core.js)
 async function refreshAdminStatus() {
   try {
     const res = await fetch(`${USER_BACKEND_URL}/auth/me`, { credentials: "include" });
     if (!res.ok) {
       cachedIsAdmin = false;
       cachedIsSignedIn = false;
+      cachedUserId = null;
       return;
     }
     const user = await res.json();
     cachedIsSignedIn = true;
     cachedIsAdmin = user.role === "admin";
+    cachedUserId = user.id;
   } catch (err) {
     console.error("Admin status check failed:", err);
     cachedIsAdmin = false;
     cachedIsSignedIn = false;
+    cachedUserId = null;
+  }
+}
+
+/**
+ * Every real account (Admin and Basic — Public excluded), Admin only — same GET /api/admin/users
+ * locationsadmin.js's own Users panel already calls, cached here as a plain global rather than
+ * threaded through `state` (same reasoning as cachedIsAdmin above): buildMarkPopupEditHtml's new
+ * Owner field (js/marks-core.js) needs it from every call site that builds a mark's edit popup,
+ * several of which never receive `state` at all (e.g. sync.js's own import-review popup).
+ *
+ * Best-effort like fetchUnionedMarkLists — a failed fetch just leaves the Owner picker showing
+ * only "Public" and whoever's already on the mark, rather than blocking the marks layer itself
+ * from loading. A no-op (and clears any stale list) for a non-admin or signed-out caller, since
+ * only Admin can reach /api/admin/users at all.
+ */
+let cachedAdminUsers = []; // [{id, email, name, role, tierId, tierName, createdAt}]
+async function fetchAdminUsersList() {
+  if (!cachedIsAdmin) {
+    cachedAdminUsers = [];
+    return;
+  }
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/admin/users`, { credentials: "include" });
+    if (res.ok) cachedAdminUsers = await res.json();
+  } catch (err) {
+    console.error("Could not load the user list (owner reassignment will show fewer options):", err);
   }
 }
 
@@ -562,14 +592,19 @@ const MARK_LIST_FIELDS = [
  */
 const MARK_FILTER_ONLY_FIELDS = [
   { key: "source", label: "Source" },
-  { key: "owner", label: "Mark Owner" }, // "Mine" (Catches, Sessions) or "Public" (Mark, POI) — derived from the type, see markOwnerLabel
+  { key: "owner", label: "Mark Owner" }, // "Mine", "Public" (Mark, POI) or, Admin only, "Other" (a different real user's own mark, now that Admin can see those too) — see markOwnerLabel
 ];
 
-// Whose set a mark belongs to: "Mine" (the signed-in person's own) or "Public" (the shared set everyone sees). The
-// Worker says so on every mark it sends (`mark.owner`). For a mark not yet saved, or edited into another type, it is
-// worked out the same way the Worker does (PERSONAL_MARK_TYPES, markOwnerFor in user-backend.js): Admin's Catches and
-// Sessions are theirs and their Mark/POI are shared; anyone else's marks are all their own. Used by the map's Mark
-// Owner filter and to decide who may edit a mark.
+// Whose set a mark belongs to, from the CALLER's own point of view: "Mine" (their own account), "Public" (the
+// shared set everyone sees) or — reachable by Admin only, who can now see every real user's marks (see
+// markReadOwnerIds, user-backend.js), not just their own + Public — "Other" for a different real user's own mark.
+// The Worker says so on every mark it sends (`mark.owner`; rowToOwnedMark there computes the exact same three
+// buckets). For a mark not yet saved, or edited into another type, it is worked out the same way the Worker's own
+// default does (PERSONAL_MARK_TYPES, markOwnerFor there): Admin's Catches and Sessions are theirs and their
+// Mark/POI are shared; anyone else's marks are all their own. Used by the map's Mark Owner filter and to decide
+// who may edit a mark. (Its real per-account identity — an actual name, not just this three-way bucket — is a
+// separate pair of fields, mark.ownerUserId/mark.ownerName, Admin only: see buildMarkPopupEditHtml's Owner field
+// and markTooltipText, js/marks-core.js.)
 const PERSONAL_MARK_TYPES = ["Catch", "Session Start", "Session End"];
 function markOwnerLabel(mark) {
   if (mark.owner) return mark.owner;

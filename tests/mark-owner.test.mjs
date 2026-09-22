@@ -1,5 +1,7 @@
 // Who owns a mark: Catches and Sessions belong to the signed-in person's own account, Mark/POI to the shared
-// "public" account (Admin only). The Worker decides from the mark's type; reads for Admin combine both.
+// "public" account (Admin only). The Worker decides from the mark's type; Admin's own reads/edits reach every
+// real account's marks (not just their own + Public) and can explicitly reassign a mark's owner — the map's
+// owner tooltip/reassignment feature (js/marks-core.js) needs both of those.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -13,6 +15,7 @@ const worker = (await import(pathToFileURL(tmp).href)).default;
 
 const SITE = "https://site.example";
 const ME = "admin-id";
+const KNOWN_USER_IDS = [ME, "public", "someone-else", "other-user"];
 
 // A tiny in-memory marks table behind the D1 interface the Worker uses.
 function makeEnv(role, marks) {
@@ -31,12 +34,16 @@ function makeEnv(role, marks) {
           bind(...a) { args = a; return this; },
           async first() {
             if (/FROM sessions/.test(sql)) return { id: ME, role };
+            if (/FROM users WHERE id = \?/.test(sql)) return KNOWN_USER_IDS.includes(args[0]) ? { id: args[0] } : null;
             if (/FROM marks WHERE id = \? AND user_id IN/.test(sql)) return marks.find((m) => m.id === args[0] && args.slice(1).includes(m.user_id)) || null;
             if (/FROM marks WHERE id = \?/.test(sql)) return marks.find((m) => m.id === args[0]) || null;
             return null;
           },
           async all() {
             log.selects.push(args);
+            // No "user_id IN (...)" in the SQL at all means Admin's own unrestricted read (owners === null —
+            // see markReadOwnerIds) — every row, not filtered by anything this mock needs to slice out of args.
+            if (!/user_id IN/.test(sql)) return { results: marks };
             const owners = inList(sql, args);
             return { results: marks.filter((m) => owners.includes(m.user_id)) };
           },
@@ -82,18 +89,37 @@ test("a normal user's marks always go to their own account", async () => {
   }
 });
 
-test("everyone signed in sees their own and the shared marks, never another user's; each mark says which set it is in", async () => {
+test("a normal user sees their own and the shared marks, never another user's; each mark says which set it is in", async () => {
   const rows = () => [
     { id: "c1", user_id: ME, type: "Catch", date_time: "2026-01-02 00:00:00" },
     { id: "m1", user_id: "public", type: "Mark", date_time: "2026-01-01 00:00:00" },
     { id: "x1", user_id: "someone-else", type: "Catch", date_time: "2026-01-03 00:00:00" },
   ];
-  for (const role of ["admin", "basic"]) {
-    for (const p of ["/api/public/marks", "/api/marks"]) {
-      const seen = await (await call(makeEnv(role, rows()), "GET", p)).json();
-      assert.deepEqual(seen.map((m) => m.id).sort(), ["c1", "m1"], `${role} ${p}`);
-      assert.deepEqual(Object.fromEntries(seen.map((m) => [m.id, m.owner])), { c1: "Mine", m1: "Public" }, `${role} ${p}`);
-    }
+  for (const p of ["/api/public/marks", "/api/marks"]) {
+    const seen = await (await call(makeEnv("basic", rows()), "GET", p)).json();
+    assert.deepEqual(seen.map((m) => m.id).sort(), ["c1", "m1"], p);
+    assert.deepEqual(Object.fromEntries(seen.map((m) => [m.id, m.owner])), { c1: "Mine", m1: "Public" }, p);
+    // Never another real user's identity — not even the two fields existing at all.
+    for (const m of seen) assert.equal("ownerUserId" in m, false, p);
+  }
+});
+
+test("Admin sees every real user's marks too, each tagged with its real owner and which bucket (Mine/Public/Other) it falls in for them", async () => {
+  const rows = () => [
+    { id: "c1", user_id: ME, type: "Catch", date_time: "2026-01-02 00:00:00" },
+    { id: "m1", user_id: "public", type: "Mark", date_time: "2026-01-01 00:00:00" },
+    { id: "x1", user_id: "someone-else", type: "Catch", date_time: "2026-01-03 00:00:00" },
+  ];
+  for (const p of ["/api/public/marks", "/api/marks"]) {
+    const seen = await (await call(makeEnv("admin", rows()), "GET", p)).json();
+    assert.deepEqual(seen.map((m) => m.id).sort(), ["c1", "m1", "x1"], p);
+    const byId = Object.fromEntries(seen.map((m) => [m.id, m]));
+    assert.equal(byId.c1.owner, "Mine", p);
+    assert.equal(byId.m1.owner, "Public", p);
+    assert.equal(byId.x1.owner, "Other", p);
+    assert.equal(byId.x1.ownerUserId, "someone-else", p);
+    assert.equal(byId.m1.ownerUserId, "public", p);
+    assert.equal(byId.m1.ownerName, "Public", p);
   }
 });
 
@@ -108,10 +134,53 @@ test("Admin can edit and delete a shared mark; ownership follows the type when i
   assert.deepEqual(env.log.deletes[0], { id: "m1", owner: ME });
 });
 
+test("Admin can edit and delete another real user's own mark, now that they can see it at all", async () => {
+  const marks = [{ id: "c1", user_id: "someone-else", type: "Catch", lat: 1, lng: 2, date_time: "2026-01-01 00:00:00" }];
+  const env = makeEnv("admin", marks);
+  const put = await call(env, "PUT", "/api/marks/c1", { name: "renamed" });
+  assert.equal(put.status, 200);
+  const del = await call(env, "DELETE", "/api/marks/c1");
+  assert.equal(del.status, 204);
+});
+
+test("Admin can explicitly reassign a mark's owner, overriding the usual type-driven default, for any mark type", async () => {
+  for (const type of ["Catch", "Mark", "POI"]) {
+    const marks = [{ id: "n1", user_id: "public", type, lat: 1, lng: 2, date_time: "2026-01-01 00:00:00" }];
+    const env = makeEnv("admin", marks);
+    const put = await call(env, "PUT", "/api/marks/n1", { ownerUserId: "someone-else" });
+    assert.equal(put.status, 200, type);
+    assert.equal(env.log.updates[0].owner, "someone-else", type); // NOT markOwnerFor's usual Mine/Public split
+  }
+});
+
+test("reassigning to an unknown user is rejected", async () => {
+  const marks = [{ id: "m1", user_id: "public", type: "Mark", lat: 1, lng: 2, date_time: "2026-01-01 00:00:00" }];
+  const env = makeEnv("admin", marks);
+  const res = await call(env, "PUT", "/api/marks/m1", { ownerUserId: "no-such-user" });
+  assert.equal(res.status, 400);
+  assert.equal(marks[0].user_id, "public"); // unchanged
+});
+
+test("a normal user's ownerUserId is ignored (only Admin's is honoured) even on their own mark", async () => {
+  const marks = [{ id: "c1", user_id: ME, type: "Catch", lat: 1, lng: 2, date_time: "2026-01-01 00:00:00" }];
+  const env = makeEnv("basic", marks);
+  const res = await call(env, "PUT", "/api/marks/c1", { ownerUserId: "someone-else" });
+  assert.equal(res.status, 200);
+  assert.equal(env.log.updates[0].owner, ME); // still theirs — the requested reassignment was never applied
+});
+
 test("a normal user cannot touch the shared marks", async () => {
   const marks = [{ id: "m1", user_id: "public", type: "Mark", lat: 1, lng: 2, date_time: "2026-01-01 00:00:00" }];
   const env = makeEnv("basic", marks);
   assert.equal((await call(env, "PUT", "/api/marks/m1", { name: "x" })).status, 404);
   assert.equal((await call(env, "DELETE", "/api/marks/m1")).status, 404);
+  assert.equal(marks.length, 1);
+});
+
+test("a normal user still cannot touch another real user's own mark", async () => {
+  const marks = [{ id: "c1", user_id: "someone-else", type: "Catch", lat: 1, lng: 2, date_time: "2026-01-01 00:00:00" }];
+  const env = makeEnv("basic", marks);
+  assert.equal((await call(env, "PUT", "/api/marks/c1", { name: "x" })).status, 404);
+  assert.equal((await call(env, "DELETE", "/api/marks/c1")).status, 404);
   assert.equal(marks.length, 1);
 });

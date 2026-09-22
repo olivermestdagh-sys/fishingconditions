@@ -1539,19 +1539,36 @@ function markOwnerFor(user, type) {
   return PERSONAL_MARK_TYPES.includes(type) ? user.id : PUBLIC_USER_ID;
 }
 
-/** The accounts whose marks a caller can SEE: their own plus the shared "public" ones (never anyone else's). */
+/** The accounts whose marks a caller can SEE: their own plus the shared "public" ones — except Admin, who (as of
+ * the map's own owner tooltip/reassignment feature) sees every real user's marks, not just their own, so there's
+ * something to review and hand back to the right person. Returns null to mean "no restriction" — see
+ * handleMarksCollection/handlePublicMarks, which skip the WHERE entirely in that case rather than building an
+ * always-true IN (...) list. Never anyone else's for a non-Admin caller. */
 function markReadOwnerIds(user) {
-  return [user.id, PUBLIC_USER_ID];
+  return user.role === "admin" ? null : [user.id, PUBLIC_USER_ID];
 }
 
-/** The accounts whose marks a caller can CHANGE: their own, plus (Admin only) the shared "public" ones. */
+/** The accounts whose marks a caller can CHANGE: their own, plus (Admin only) every other account's — same
+ * null-means-unrestricted convention as markReadOwnerIds above, and for the same reason: Admin can now see (and
+ * so needs to be able to edit/delete/reassign) any mark, not just their own and the shared "public" set. */
 function markOwnerIds(user) {
-  return user.role === "admin" ? [user.id, PUBLIC_USER_ID] : [user.id];
+  return user.role === "admin" ? null : [user.id];
 }
 
-/** The mark as sent to the site, with which of the caller's two sets it belongs to: "Public" (shared) or "Mine". */
-function rowToOwnedMark(row) {
-  return { ...rowToMark(row), owner: row.user_id === PUBLIC_USER_ID ? "Public" : "Mine" };
+/** The mark as sent to the caller. `owner` says which of the CALLER's own sets it belongs to: "Mine" (their own
+ * account), "Public" (the shared account), or — reachable by Admin only, now that markReadOwnerIds lets them see
+ * every account's marks — "Other" for a different real user's own mark. Admin's own response additionally carries
+ * the mark's REAL owner identity (ownerUserId/ownerName, from the users JOIN both admin queries below add) so the
+ * map can show and change it (see buildMarkPopupEditHtml's Owner field, js/marks-core.js); a non-admin caller never
+ * learns another real user's name this way, so those two fields are left off for them. */
+function rowToOwnedMark(row, viewer) {
+  const mark = rowToMark(row);
+  mark.owner = row.user_id === PUBLIC_USER_ID ? "Public" : row.user_id === viewer.id ? "Mine" : "Other";
+  if (viewer.role === "admin") {
+    mark.ownerUserId = row.user_id;
+    mark.ownerName = row.user_id === PUBLIC_USER_ID ? "Public" : row.owner_name || row.owner_email || row.user_id;
+  }
+  return mark;
 }
 
 async function handleMarksCollection(request, url, env) {
@@ -1561,13 +1578,21 @@ async function handleMarksCollection(request, url, env) {
   if (request.method === "GET") {
     const limit = Math.min(parseInt(url.searchParams.get("limit"), 10) || 200, 500);
     const offset = Math.max(parseInt(url.searchParams.get("offset"), 10) || 0, 0);
+    // owners is null for Admin (see markReadOwnerIds) — every real user's marks, no WHERE at all — rather than
+    // everyone else's own + the shared "public" set. JOINed to users for owner_name/owner_email either way (cheap,
+    // and rowToOwnedMark only actually uses them for an Admin viewer) rather than a second query per row.
     const owners = markReadOwnerIds(user);
-    const { results } = await env.DB.prepare(
-      `SELECT * FROM marks WHERE user_id IN (${owners.map(() => "?").join(", ")}) ORDER BY date_time DESC LIMIT ? OFFSET ?`
-    )
-      .bind(...owners, limit, offset)
-      .all();
-    return jsonResponse(results.map(rowToOwnedMark), 200, env);
+    const { results } = await (owners
+      ? env.DB.prepare(
+          `SELECT marks.*, users.name AS owner_name, users.email AS owner_email FROM marks JOIN users ON users.id = marks.user_id
+           WHERE marks.user_id IN (${owners.map(() => "?").join(", ")}) ORDER BY marks.date_time DESC LIMIT ? OFFSET ?`
+        ).bind(...owners, limit, offset)
+      : env.DB.prepare(
+          `SELECT marks.*, users.name AS owner_name, users.email AS owner_email FROM marks JOIN users ON users.id = marks.user_id
+           ORDER BY marks.date_time DESC LIMIT ? OFFSET ?`
+        ).bind(limit, offset)
+    ).all();
+    return jsonResponse(results.map((row) => rowToOwnedMark(row, user)), 200, env);
   }
 
   if (request.method === "POST") {
@@ -1603,11 +1628,13 @@ async function handleMarkItem(request, url, env, id) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
 
-  // Whichever of the caller's accounts holds it (see markOwnerIds); uid is that row's real owner.
+  // Whichever of the caller's accounts holds it (see markOwnerIds; null for Admin means no restriction at all —
+  // any mark, any account); uid is that row's real owner.
   const owners = markOwnerIds(user);
-  const existing = await env.DB.prepare(`SELECT * FROM marks WHERE id = ? AND user_id IN (${owners.map(() => "?").join(", ")})`)
-    .bind(id, ...owners)
-    .first();
+  const existing = await (owners
+    ? env.DB.prepare(`SELECT * FROM marks WHERE id = ? AND user_id IN (${owners.map(() => "?").join(", ")})`).bind(id, ...owners)
+    : env.DB.prepare("SELECT * FROM marks WHERE id = ?").bind(id)
+  ).first();
   if (!existing) return jsonResponse({ error: "Mark not found." }, 404, env);
   const uid = existing.user_id;
 
@@ -1616,8 +1643,19 @@ async function handleMarkItem(request, url, env, id) {
     const validationError = validateMarkInput(body, { partial: true });
     if (validationError) return jsonResponse({ error: validationError }, 400, env);
     const merged = mergeMarkFields(existing, body);
-    // A change of type can change who the mark belongs to (e.g. a Mark edited into a Catch).
-    const newOwner = markOwnerFor(user, merged.type);
+    // A change of type can change who the mark belongs to (e.g. a Mark edited into a Catch) — UNLESS Admin
+    // explicitly picked a different owner from the map's own Owner field (buildMarkPopupEditHtml,
+    // js/marks-core.js), which always wins regardless of type: Oliver's own call, so ANY mark can be
+    // handed to any real account on purpose, not just left to follow the usual type-driven default. Only
+    // Admin can send this — a non-admin's PUT never even reaches an existing row it doesn't already own
+    // (see markOwnerIds above), so there's nothing for them to reassign in the first place.
+    let newOwner = markOwnerFor(user, merged.type);
+    if (user.role === "admin" && typeof body.ownerUserId === "string" && body.ownerUserId.trim()) {
+      const targetId = body.ownerUserId.trim();
+      const target = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(targetId).first();
+      if (!target) return jsonResponse({ error: "ownerUserId not found." }, 400, env);
+      newOwner = target.id;
+    }
     await env.DB.prepare(
       `UPDATE marks SET lat=?, lng=?, name=?, type=?, date_time=?, source=?, source_uuid=?, species=?, bait=?, rig=?,
                         rod=?, berley=?, notes=?, size=?, released=?, weather_condition=?, tide_condition=?, tide_extreme=?, water_condition=?,
@@ -2300,14 +2338,21 @@ async function handlePublicMarkLists(env) {
 async function handlePublicMarks(request, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
-  // Everyone signed in sees their own marks (Catches, Sessions) together with the shared "public" ones (Mark, POI); see markOwnerFor.
+  // Everyone signed in sees their own marks (Catches, Sessions) together with the shared "public" ones (Mark, POI);
+  // Admin sees every real user's marks too, not just their own (owners is null — see markReadOwnerIds) — the Map
+  // page's owner tooltip/reassignment feature needs something besides their own account to actually show.
   const owners = markReadOwnerIds(user);
-  const { results } = await env.DB.prepare(
-    `SELECT * FROM marks WHERE user_id IN (${owners.map(() => "?").join(", ")}) ORDER BY date_time DESC`
-  )
-    .bind(...owners)
-    .all();
-  return new Response(JSON.stringify(results.map(rowToOwnedMark)), {
+  const { results } = await (owners
+    ? env.DB.prepare(
+        `SELECT marks.*, users.name AS owner_name, users.email AS owner_email FROM marks JOIN users ON users.id = marks.user_id
+         WHERE marks.user_id IN (${owners.map(() => "?").join(", ")}) ORDER BY marks.date_time DESC`
+      ).bind(...owners)
+    : env.DB.prepare(
+        `SELECT marks.*, users.name AS owner_name, users.email AS owner_email FROM marks JOIN users ON users.id = marks.user_id
+         ORDER BY marks.date_time DESC`
+      )
+  ).all();
+  return new Response(JSON.stringify(results.map((row) => rowToOwnedMark(row, user))), {
     status: 200,
     headers: {
       "Content-Type": "application/json",

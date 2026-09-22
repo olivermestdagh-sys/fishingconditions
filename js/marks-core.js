@@ -115,9 +115,17 @@ function markStyleFor(mark, state) {
  * the mark's own type field (Catch/Mark/POI/Session), not a literal
  * word — regardless of what state.groupByKey is currently set to,
  * since that's a map-display setting, not something this mark's own
- * identity depends on. */
+ * identity depends on.
+ *
+ * Admin only, appended: " · <owner>" — who the mark actually belongs to
+ * (mark.ownerName, sent only to Admin — see rowToOwnedMark, user-backend.js),
+ * "Public" included, not just another real person's name — Oliver's own
+ * request, so hovering a point on the Map tab says whose it is without
+ * needing to click in. Silently absent for anyone else, or before the
+ * marks/admin-status fetch has resolved (mark.ownerName not set yet). */
 function markTooltipText(mark, state) {
-  return `${escapeHtml(mark.name)} (${String(mark.dateTime || "").slice(0, 10)}) ${escapeHtml(mark.type || "")}`;
+  const ownerSuffix = cachedIsAdmin && mark.ownerName ? ` · ${escapeHtml(mark.ownerName)}` : "";
+  return `${escapeHtml(mark.name)} (${String(mark.dateTime || "").slice(0, 10)}) ${escapeHtml(mark.type || "")}${ownerSuffix}`;
 }
 
 // The set of optional, pick-list-backed fields a mark can carry, alongside
@@ -579,6 +587,10 @@ function buildMarkPopupViewHtml(mark) {
   row("Name", mark.name);
   row("Type", mark.type);
   row("Date/Time", mark.dateTime);
+  // Admin only — who this mark actually belongs to (see markTooltipText's own comment for why/where this
+  // comes from). Absent for anyone else, and for a brand-new draft popup (buildMarkPopupEditHtml is what's
+  // shown for those, never this view — see startNewMarkEntry/startCopiedMarkEntry).
+  if (cachedIsAdmin) row("Owner", mark.ownerName);
   for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
     if (applicable.includes(f.key)) row(f.displayLabel, mark[f.key]);
   }
@@ -619,6 +631,33 @@ function buildMarkPopupViewHtml(mark) {
       ` : ""}
     </div>
   `;
+}
+
+// The Public account's own sentinel id — matches PUBLIC_USER_ID in user-backend.js exactly (not
+// imported; this file has no build step to share it from, same as PERSONAL_MARK_TYPES just above,
+// duplicated for the same reason — see that constant's own comment). Only ever used client-side
+// to pick out (and offer) the "Public (shared)" option in the Owner field below.
+const CLIENT_PUBLIC_USER_ID = "public";
+
+/**
+ * The Owner field's own <option> list — Admin only (see buildMarkPopupEditHtml), one real account
+ * per row of cachedAdminUsers (js/backend.js, refreshed once per page load by loadAndRenderMarks)
+ * plus a fixed "Public (shared)" entry for the shared account every Mark/POI otherwise lives under.
+ * `currentOwnerId` is the mark's OWN real owner (mark.ownerUserId) — whichever option matches it is
+ * pre-selected. If it isn't in the list at all (a stale/failed cachedAdminUsers fetch, or the account
+ * itself has since been removed), an extra "(unknown account)" option is added and pre-selected instead
+ * — so the picker still shows SOMETHING selected and never silently offers to move the mark to the wrong
+ * account just because its real current owner didn't happen to be in the list this page load.
+ */
+function markOwnerOptionsHtml(currentOwnerId) {
+  const options = [
+    { id: CLIENT_PUBLIC_USER_ID, label: "Public (shared)" },
+    ...cachedAdminUsers.map((u) => ({ id: u.id, label: u.name || u.email || u.id })),
+  ];
+  if (!options.some((o) => o.id === currentOwnerId)) options.push({ id: currentOwnerId, label: "(unknown account)" });
+  return options
+    .map((o) => `<option value="${escapeHtml(o.id)}" ${o.id === currentOwnerId ? "selected" : ""}>${escapeHtml(o.label)}</option>`)
+    .join("");
 }
 
 /**
@@ -662,6 +701,10 @@ function buildMarkPopupEditHtml(mark, markLists) {
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:0 0 2px;">Type
           <select name="type" data-mark-type-select style="${MARK_POPUP_INPUT_STYLE}">${markListOptionsHtml(markLists, "Mark Type", mark.type)}</select>
         </label>
+        ${cachedIsAdmin && mark.ownerUserId != null ? `
+        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Owner
+          <select name="ownerUserId" style="${MARK_POPUP_INPUT_STYLE}">${markOwnerOptionsHtml(mark.ownerUserId)}</select>
+        </label>` : ""}
         <div data-species-first-prompt style="display:none;margin:6px 0;padding:6px 8px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:0.8rem;color:#854d0e;">Choose a species first — the rest of the form unlocks once it's set.</div>
         <div data-field-group="${speciesField.key}">${multiCapableControlsHtml(speciesField, markLists, mark.species, "Target species")}
         </div>
@@ -862,8 +905,25 @@ function collectMarkFormValues(form, originalMark) {
   };
   if (originalMark.source) updated.source = originalMark.source;
   // Which set the mark belongs to follows its type for Admin (Catches/Sessions are theirs, Mark/POI shared); the Worker
-  // makes the same call on save. Everyone else's marks are all their own.
-  updated.owner = cachedIsAdmin ? (PERSONAL_MARK_TYPES.includes(type) ? "Mine" : "Public") : "Mine";
+  // makes the same call on save. Everyone else's marks are all their own. An explicit pick from the Owner field
+  // (Admin only — see buildMarkPopupEditHtml/markOwnerOptionsHtml) overrides that on the Worker, same three
+  // "Mine"/"Public"/"Other" buckets rowToOwnedMark computes there — mirrored here so the popup/tooltip read right
+  // immediately after Save, without waiting on a reload to hear the Worker's own version back.
+  const ownerSelect = form.querySelector('[name="ownerUserId"]');
+  if (ownerSelect) {
+    updated.ownerUserId = ownerSelect.value;
+    // "Public" alone — matching the Worker's own rowToOwnedMark exactly — not the picker's own friendlier
+    // "Public (shared)" option label, which only exists to read well inside the <select> itself.
+    if (updated.ownerUserId === CLIENT_PUBLIC_USER_ID) {
+      updated.ownerName = "Public";
+    } else {
+      const chosen = ownerSelect.options[ownerSelect.selectedIndex];
+      updated.ownerName = chosen ? chosen.textContent : updated.ownerUserId;
+    }
+    updated.owner = updated.ownerUserId === CLIENT_PUBLIC_USER_ID ? "Public" : updated.ownerUserId === cachedUserId ? "Mine" : "Other";
+  } else {
+    updated.owner = cachedIsAdmin ? (PERSONAL_MARK_TYPES.includes(type) ? "Mine" : "Public") : "Mine";
+  }
   // The role follows the type (Session Start / Session End); a mark switched out of a session type leaves its pair.
   const role = sessionRoleForType(type);
   if (role) {

@@ -327,6 +327,11 @@ async function loadAndRenderMarks(map, state) {
   } catch (err) {
     console.error("Could not load mark lists (edit dropdowns will be limited):", err);
   }
+  // Admin only (no-ops otherwise) — the real user list behind the Owner field's picker
+  // (buildMarkPopupEditHtml, js/marks-core.js). Cached as a plain global (fetchAdminUsersList,
+  // js/backend.js), not on `state`, for the same reason markLists is threaded everywhere but
+  // this doesn't need to be — see that function's own comment.
+  await fetchAdminUsersList();
   // The Map tab rebuilds its map when the mode changes (Normal/Live/Import)
   // and flags the old state as discarded — nothing left to draw onto.
   if (state._discarded) return;
