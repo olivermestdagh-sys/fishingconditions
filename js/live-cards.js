@@ -182,7 +182,7 @@ function catchCardState(options, ctx) {
   const limits = options.limits || {};
   const species = answers.species || "";
   const lim = limits[species];
-  const start = stepperStartSize(lim, lastCatchSize(ctx.catches || [], species));
+  const start = stepperStartSize(lim);
   const size = answers.size === "small" ? "small" : typeof answers.size === "number" ? answers.size : start;
   const tooSmall = size === "small";
   const counts = ctx.run && species ? speciesCounts(ctx.run, limits, species) : null;

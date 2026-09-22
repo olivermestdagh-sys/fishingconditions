@@ -6,7 +6,7 @@ import fs from "node:fs";
 
 const src = fs.readFileSync(new URL("../js/catch-limits.js", import.meta.url), "utf8");
 const f = new Function(
-  src + "\nreturn { limitsFromMarkLists, catchesFromMarks, catchChain, runCatches, speciesGroupNames, keptCounts, sizeVerdict, recommendFate, stepperStartSize, lastCatchSize, speciesLimitLines, speciesCounts, catchLimitWarnings, CATCH_RUN_GAP_MS };"
+  src + "\nreturn { limitsFromMarkLists, catchesFromMarks, catchChain, runCatches, speciesGroupNames, keptCounts, sizeVerdict, recommendFate, stepperStartSize, speciesLimitLines, speciesCounts, catchLimitWarnings, CATCH_RUN_GAP_MS };"
 )();
 
 const H = 3600000;
@@ -122,17 +122,10 @@ test("a shared bag counts both species", () => {
   assert.equal(f.recommendFate({ lim: limits["Shark (School)"], size: 50, counts }).fate, "Release");
 });
 
-test("stepper start: last size, else Min Size, else 30", () => {
-  assert.equal(f.stepperStartSize(limits.Snapper, 33), 33);
-  assert.equal(f.stepperStartSize(limits.Snapper, null), 28);
-  assert.equal(f.stepperStartSize(limits["Elephant Fish"], null), 30);
-  assert.equal(f.stepperStartSize(undefined, null), 30);
-});
-
-test("last catch size is the most recent catch of the species that has one", () => {
-  const all = [c("Snapper", 5, { size: 31 }), c("Snapper", 9, { size: 35 }), c("Snapper", 12), c("Flathead", 13, { size: 50 })];
-  assert.equal(f.lastCatchSize(all, "Snapper"), 35);
-  assert.equal(f.lastCatchSize(all, "Bream"), null);
+test("stepper start: the species' Min Size, else 20", () => {
+  assert.equal(f.stepperStartSize(limits.Snapper), 28);
+  assert.equal(f.stepperStartSize(limits["Elephant Fish"]), 20, "no Min Size set");
+  assert.equal(f.stepperStartSize(undefined), 20, "no limits at all");
 });
 
 test("species blurb: limits, kept count, shared bag, tones", () => {

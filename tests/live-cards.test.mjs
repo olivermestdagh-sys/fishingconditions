@@ -177,9 +177,8 @@ test("the stepper starts at the min size and shows its verdict; Too small remove
   assert.deepEqual(small.map((s) => s.id), ["species", "size", "rod"]);
 });
 
-test("the stepper starts at the last size caught of that species", () => {
-  const run = [kept("1", "Snapper", 0, 36)];
-  assert.equal(byId(stepsFor({ species: "Snapper" }, run), "size").value, 36);
+test("with no Min Size set, the stepper starts at 20", () => {
+  assert.equal(byId(stepsFor({ species: "Elephant Fish" }, []), "size").value, 20);
 });
 
 test("verdict text: too small, over slot, big, legal, nothing when no limits", () => {
@@ -226,8 +225,7 @@ test("selecting the species starts the size and keep/release answers again in th
   assert.equal(st.fate, "Keep");
   assert.equal(st.released, false);
   const undecided = fns.catchCardState(lopts, { answers: { species: "Snapper" }, run: lrun, catches: lrun });
-  assert.equal(undecided.size, 30, "untouched stepper means its start value (here the last Snapper size)");
-  assert.equal(fns.catchCardState(lopts, { answers: { species: "Snapper" }, run: [], catches: [] }).size, 28, "no earlier catch: the Min Size");
+  assert.equal(undecided.size, 28, "untouched stepper means its start value: Snapper's Min Size");
   const small = fns.catchCardState(lopts, { answers: { species: "Snapper", size: "small", fate: "Keep" }, run: lrun, catches: lrun });
   assert.deepEqual([small.tooSmall, small.released, small.fate], [true, true, "Release"], "Too small always releases");
 });

@@ -8,7 +8,7 @@
 //   catches: [{id, species, size, released, tMs}] (see catchesFromMarks)
 
 const CATCH_RUN_GAP_MS = 8 * 3600000;
-const CATCH_SIZE_DEFAULT_START_CM = 30; // stepper start when a species has no Min Size and none of it has been caught before
+const CATCH_SIZE_DEFAULT_START_CM = 20; // stepper start when a species has no Min Size set
 
 /** Species limits keyed by species name, from the flat mark list rows ({field, value, minSize, ...}). */
 function limitsFromMarkLists(markLists) {
@@ -117,18 +117,9 @@ function recommendFate({ lim, size, counts, tooSmall }) {
   return { fate: "Keep", reason: l.maxQty == null ? "No bag limit set" : "" };
 }
 
-/** Where the size stepper starts: the last size caught of the species, else its Min Size, else a general default. */
-function stepperStartSize(lim, lastSize) {
-  if (lastSize != null && Number.isFinite(lastSize)) return lastSize;
-  if (lim && lim.minSize != null) return lim.minSize;
-  return CATCH_SIZE_DEFAULT_START_CM;
-}
-
-/** The size of the most recent catch of `species` (any run), or null. */
-function lastCatchSize(catches, species) {
-  let best = null;
-  for (const c of catches) if (c.species === species && c.size != null && (!best || c.tMs > best.tMs)) best = c;
-  return best ? best.size : null;
+/** Where the size stepper starts: the species' own Min Size, or CATCH_SIZE_DEFAULT_START_CM if none is set. */
+function stepperStartSize(lim) {
+  return lim && lim.minSize != null ? lim.minSize : CATCH_SIZE_DEFAULT_START_CM;
 }
 
 /**
