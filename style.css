@@ -3676,6 +3676,8 @@ body.live-card-open { overflow: hidden; }
 .live-card-choice.live-card-digit { min-height: 26px; font-size: 1rem; }
 /* Species pictures (Settings): thumbnails on each species and the full-screen viewer. */
 .species-thumb { padding: 0; border: 2px solid rgba(255, 255, 255, 0.7); border-radius: 10px; overflow: hidden; width: 56px; height: 56px; background: var(--grey-200, #e5e7eb); cursor: zoom-in; }
+/* A picture that never loads (see wireImagePictureFallback, js/species-image.js) shows this in its place instead of staying a blank box. */
+.species-image-missing { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; font-size: 0.68rem; opacity: 0.75; text-align: center; padding: 2px; }
 .species-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .species-add-image { padding: 6px 10px; border-radius: 8px; border: 1px dashed currentColor; background: transparent; color: inherit; font-size: 0.75rem; font-weight: 600; cursor: pointer; }
 .species-image-viewer { position: fixed; inset: 0; z-index: 10002; background: rgba(0, 0, 0, 0.97); display: flex; flex-direction: column; color: #fff; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }

@@ -17,6 +17,34 @@ function speciesImageUrl(image) {
   return `${USER_BACKEND_URL}/api/public/species-image/${encodeURIComponent(image.id)}?v=${encodeURIComponent(image.version ?? "")}`;
 }
 
+/**
+ * REAL BUG, FOUND AND FIXED: a picture fetched moments after being uploaded could come back 404 for a few seconds
+ * (confirmed directly against the live Worker: the exact same URL that 404'd went on to return the image fine on a
+ * later request, with nothing about the row itself having changed — read-after-write lag on D1's side, not a client
+ * bug) — every gallery/thumbnail/viewer <img> on this site showed that as a confusing blank box. Wires an <img> to
+ * retry once, a beat later and bypassing any cache, before giving up and swapping in a small "Picture unavailable"
+ * label in its place — so a stale read heals itself instead of looking broken. Call this on every species-picture
+ * <img> right after it's added to the page (its `src` must already be set).
+ */
+function wireImagePictureFallback(img, placeholderText = "Picture unavailable") {
+  let retried = false;
+  img.addEventListener("error", () => {
+    if (!retried) {
+      retried = true;
+      const url = new URL(img.src, location.href);
+      setTimeout(() => {
+        url.searchParams.set("retry", Date.now());
+        img.src = url.href;
+      }, 1500);
+      return;
+    }
+    const span = document.createElement("span");
+    span.className = "species-image-missing";
+    span.textContent = placeholderText;
+    img.replaceWith(span);
+  });
+}
+
 /** Decodes a chosen image file (honouring its rotation). Rejects if the browser can't read it (e.g. HEIC in Chrome). */
 async function decodeImageFile(file) {
   if (typeof createImageBitmap === "function") {

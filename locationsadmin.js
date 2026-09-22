@@ -1164,6 +1164,7 @@ function openSpeciesImageViewer(value, startIndex) {
         <button type="button" data-v="replace">Replace</button>
         <button type="button" data-v="delete" class="danger">Delete</button>
       </div>`;
+    wireImagePictureFallback(overlay.querySelector("img"));
     overlay.querySelector('[data-v="close"]').addEventListener("click", close);
     const prev = overlay.querySelector('[data-v="prev"]');
     const next = overlay.querySelector('[data-v="next"]');
@@ -1384,6 +1385,7 @@ function renderMarkLists() {
   });
   container.querySelectorAll(".species-thumb").forEach((btn) => {
     btn.addEventListener("click", () => openSpeciesImageViewer(btn.dataset.value, Number(btn.dataset.index)));
+    wireImagePictureFallback(btn.querySelector("img")); // a picture just uploaded can briefly 404 — see that function's own comment
   });
   container.querySelectorAll(".species-add-image").forEach((btn) => {
     btn.addEventListener("click", () => runSpeciesImageUpload(btn.dataset.value, null));

@@ -328,6 +328,7 @@ function showGalleryImageConfirm(item, sublabel, { onConfirm }) {
       <button type="button" data-v="cancel">Not this one</button>
     </div>`;
   document.body.appendChild(overlay);
+  wireImagePictureFallback(overlay.querySelector("img"));
   const close = () => {
     document.removeEventListener("keydown", onKey);
     overlay.remove();
@@ -481,6 +482,8 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
         overlay.querySelector(".live-card-grid").scrollTop = scrollTop;
       })
     );
+    // A picture just uploaded can briefly 404 (see wireImagePictureFallback) — every gallery thumbnail gets the same retry/fallback.
+    overlay.querySelectorAll(".live-card-gallery-item img").forEach((img) => wireImagePictureFallback(img));
     // A picture's first tap opens it full screen to confirm, rather than selecting straight away — small thumbnails can
     // be hard to tell apart. "This one" selects the species it belongs to (same as tapping its name) and moves on;
     // "Not this one" just closes the preview, back on the same picture grid.
