@@ -6,7 +6,7 @@ import fs from "node:fs";
 
 const src = fs.readFileSync(new URL("../js/catch-limits.js", import.meta.url), "utf8");
 const f = new Function(
-  src + "\nreturn { limitsFromMarkLists, catchesFromMarks, catchChain, runCatches, speciesGroupNames, keptCounts, sizeVerdict, recommendFate, stepperStartSize, speciesLimitLines, speciesCounts, catchLimitWarnings, CATCH_RUN_GAP_MS };"
+  src + "\nreturn { limitsFromMarkLists, catchesFromMarks, catchChain, runCatches, nextSessionNumber, speciesGroupNames, keptCounts, sizeVerdict, recommendFate, stepperStartSize, speciesLimitLines, speciesCounts, catchLimitWarnings, CATCH_RUN_GAP_MS };"
 )();
 
 const H = 3600000;
@@ -65,6 +65,17 @@ test("runCatches keeps the run's catches and drops earlier trips", () => {
   const all = [c("Snapper", -30), c("Snapper", 0), c("Flathead", 3), c("Snapper", 9)];
   assert.deepEqual(f.runCatches(all, at(10)).map((x) => x.tMs), [at(0), at(3), at(9)]);
   assert.deepEqual(f.runCatches(all, at(40)), []);
+});
+
+test("nextSessionNumber: 1 for a new fishing day, otherwise one more than the current run's starts, following the same 8h chaining as catch counts", () => {
+  assert.equal(f.nextSessionNumber([], at(0)), 1, "no earlier sessions at all");
+  const first = [at(0)]; // one existing Session Start, at hour 0
+  assert.equal(f.nextSessionNumber(first, at(7.99)), 2, "a second start within 8h: same fishing day");
+  assert.equal(f.nextSessionNumber(first, at(8)), 2, "exactly 8 hours still chains");
+  assert.equal(f.nextSessionNumber(first, at(8) + 60000), 1, "a minute more than 8 hours: a new fishing day");
+  const two = [at(0), at(3)];
+  assert.equal(f.nextSessionNumber(two, at(6)), 3, "third session of the same chained day");
+  assert.equal(f.nextSessionNumber(two, at(20)), 1, "well over 8h since the last one: resets");
 });
 
 test("kept counts leave out released fish and add up the shared-limit group", () => {

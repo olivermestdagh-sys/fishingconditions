@@ -3617,6 +3617,13 @@ body.live-card-open { overflow: hidden; }
 .live-card-nav-btn { min-height: 60px; border-radius: 14px; border: 2px solid rgba(255, 255, 255, 0.4); background: transparent; color: #fff; font-size: 1.1rem; font-weight: 700; cursor: pointer; }
 .live-card-nav-btn.live-card-next { background: #fff; color: var(--blue-900, #0b2a4a); border-color: #fff; }
 .live-card-nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+/* "+ Session" hub (js/live-cards.js's showSessionStartFlow): a 2-button nav (Close / Start Session or Back to
+   overview), a single-column Date/Time card, and a small +/-0.1 m fine row under the Water depth stepper. */
+.live-card-nav-2 { grid-template-columns: 1fr 1.4fr; }
+.live-card-grid-datetime { grid-template-columns: 1fr; align-content: start; }
+.live-card-datetime-input { min-height: 52px; padding: 10px 12px; border-radius: 14px; border: 2px solid rgba(255, 255, 255, 0.35); background: rgba(255, 255, 255, 0.08); color: #fff; font-size: 1.1rem; color-scheme: dark; }
+.live-card-stepper-row-fine { display: flex; gap: 10px; }
+.live-card-step-btn-fine { min-height: 52px; flex: 1 1 0; font-size: 1rem; font-weight: 700; }
 .live-card-toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 10002; max-width: 90vw; padding: 12px 18px; border-radius: 12px; background: #16a34a; color: #fff; font-weight: 600; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3); }
 .live-card-toast.error { background: #dc2626; }
 .map-toolbar .live-quick-btn { font-weight: 700; }.live-card-divider { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; margin: 6px 0 2px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.8; }

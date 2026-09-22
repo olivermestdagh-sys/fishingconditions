@@ -1,6 +1,6 @@
 // The catch rules built on each species' limits (Settings > Species: Min Size, Max Size, Max Qty, Big Size, Big Max Qty and the
 // shared-quantity group). Pure: no DOM, no network, no globals. Tested in tests/catch-limits.test.mjs; used by the Live Catch
-// cards (js/live-cards.js, map-live.js) and the mark edit popup (js/marks-core.js).
+// cards (js/live-cards.js, map-live.js), the mark edit popup (js/marks-core.js), and (nextSessionNumber) the Live "+ Session" flow.
 //
 // A "run" is a stretch of fishing: Catch marks chained together while each is within CATCH_RUN_GAP_MS of the next. Counts are of
 // the fish KEPT (not released) in the current run, summed across species that share a Max Qty (qtyGroup).
@@ -61,6 +61,19 @@ function catchChain(timesMs, anchorMs, gapMs = CATCH_RUN_GAP_MS) {
 function runCatches(catches, anchorMs, gapMs = CATCH_RUN_GAP_MS) {
   const chain = catchChain(catches.map((c) => c.tMs), anchorMs, gapMs);
   return chain ? catches.filter((c) => c.tMs >= chain.start && c.tMs <= chain.end) : [];
+}
+
+/**
+ * The next "Session N" number for a new Session Start at anchorMs, following the same chaining rule that resets Catch
+ * bag counts: 1 when it starts a new fishing day (no earlier Session Start within gapMs, chained), otherwise one more
+ * than however many of `startTimesMs` (every existing Session Start's own time) fall in the current chain at or before
+ * anchorMs.
+ */
+function nextSessionNumber(startTimesMs, anchorMs, gapMs = CATCH_RUN_GAP_MS) {
+  const chain = catchChain(startTimesMs, anchorMs, gapMs);
+  if (!chain) return 1;
+  const count = startTimesMs.filter((t) => Number.isFinite(t) && t <= anchorMs && t >= chain.start && t <= chain.end).length;
+  return count + 1;
 }
 
 /** The species whose Max Qty is shared with `species` (itself included), in a stable order. */

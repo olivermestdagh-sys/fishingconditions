@@ -372,6 +372,80 @@ async function startLiveCatch() {
   });
 }
 
+// The existing Session Start marks on the Live map, as plain ms timestamps — for numbering a new one ("Session N Start",
+// js/catch-limits.js's nextSessionNumber) the same way liveCatchContext's `run` numbers the bag. Null until the marks have
+// loaded (nextSessionNumber then falls back to an empty list — "Session 1" — same spirit as liveCatchContext's null run).
+function liveSessionStartTimes() {
+  const state = liveMarkState;
+  if (!state || !state.markerLayer) return null;
+  const times = [];
+  for (const m of state.marksById.values()) {
+    if (!m || m.type !== "Session Start" || !m.dateTime) continue;
+    const t = parseNaive(m.dateTime);
+    if (Number.isFinite(t)) times.push(t);
+  }
+  return times;
+}
+
+async function saveLiveSession(options, answers, defaults, gpsPromise) {
+  const position = await gpsPromise;
+  if (!position) {
+    showLiveToast("Couldn't get your location — session not saved.", true);
+    return;
+  }
+  let tide = {};
+  try {
+    tide = computeQuickMarkDefaults(getRowsForCurrentLoc());
+  } catch {
+    tide = {}; // no tide data for this spot: the save fills what it can from looked-up data
+  }
+  const sessionNumber = nextSessionNumber(liveSessionStartTimes() || [], parseNaive(answers.dateTime));
+  const mark = buildSessionStartFromCards({
+    id: makeMarkId(),
+    lat: position.lat,
+    lng: position.lng,
+    dateTime: answers.dateTime,
+    createdAt: nowAsNaiveString(),
+    sessionGroupId: makeMarkId(),
+    species: answers.species,
+    water: answers.water,
+    rods: answers.rods,
+    berley: answers.berley,
+    waterDepth: answers.waterDepth,
+    sessionNumber,
+  }, defaults, tide);
+  const result = await saveMarkToD1(mark, true);
+  if (!result.success) {
+    showLiveToast("Session not saved: " + result.error, true);
+    return;
+  }
+  addCatchToLiveMap(mark); // draws any mark type, not just Catch
+  showLiveToast(`${mark.name} saved`);
+}
+
+// Tap + Session: the GPS fix starts straight away (that is where the session starts), while the hub is answered.
+async function startLiveSession() {
+  if (activeCardFlow || !liveMap || !liveMarkState) return;
+  const gpsPromise = getFreshGpsPosition();
+  const options = await liveLoadCardOptions();
+  const defaults = getSessionDefaults(options);
+  const initialAnswers = emptySessionStartAnswers(defaults, nowAsNaiveString());
+  const ctx = liveCatchContext();
+  const finish = () => { activeCardFlow = null; };
+  activeCardFlow = showSessionStartFlow({
+    options,
+    defaults,
+    initialAnswers,
+    run: ctx.run,
+    sessionNumberFor: (dateTime) => nextSessionNumber(liveSessionStartTimes() || [], parseNaive(dateTime)),
+    onSave: (answers) => {
+      finish();
+      saveLiveSession(options, answers, defaults, gpsPromise);
+    },
+    onClose: finish,
+  });
+}
+
 // Whether the panel's expanded content (ratings, timings, chart) is
 // currently showing, vs just the collapsed name+distance banner. Reset to
 // false whenever a genuinely NEW location is selected (see
@@ -616,6 +690,7 @@ function liveInitOnce() {
   document.getElementById("btnUpdateTimings").addEventListener("click", updateTimings);
   document.getElementById("btnCloseLiveHoverPanel").addEventListener("click", hideLiveHoverPanel);
   document.getElementById("btnSessionDefaults").addEventListener("click", openSessionDefaults);
+  document.getElementById("btnLiveSession").addEventListener("click", startLiveSession);
   document.getElementById("btnLiveCatch").addEventListener("click", startLiveCatch);
   document.getElementById("liveHoverPanelBanner").addEventListener("click", () => setPanelExpanded(!isPanelExpanded));
   // Wired once, not inside renderForLocation — that function reuses this

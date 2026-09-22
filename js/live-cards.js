@@ -1,11 +1,16 @@
-// Live mode's quick-entry cards (Map tab): the "Session defaults" flow and the "Catch" flow.
-// Both are a stack of full-screen cards with large buttons and Prev / Next / Close.
+// Live mode's quick-entry cards (Map tab): the "Session defaults" flow, the "Catch" flow, and the "+ Session" flow.
+// Session defaults/Catch are a stack of full-screen cards with large buttons and Prev / Next / Close; + Session is a
+// hub card of its own (see showSessionStartFlow) built from the same CSS.
 //   Session defaults: target species, water, berley, active rods, then a rig card and a bait card for each rod.
 //     Saved to the signed-in account (pref "liveSessionDefaults", see js/prefs.js) so they persist across sessions and devices.
 //   Catch: species (the targets, with their limits and how many are kept), size (a +/- stepper with Too small), keep or release
 //     (recommended from the limits), rod. The caller drops a Catch mark at the GPS position using the saved defaults.
+//   + Session: a hub card (target species, date/time, water, rod, berley, water depth, preloaded from Session defaults) with
+//     a card per field to change it. The caller drops a "Session N Start" mark at the GPS position.
 // The first half of this file is pure (no DOM) and is tested in tests/live-cards.test.mjs; it uses the limit rules in
-// js/catch-limits.js (loaded first). showCardFlow below is the only DOM part. Prefs, escapeHtml come from js/prefs.js and js/backend.js.
+// js/catch-limits.js (loaded first). showCardFlow/showSessionStartFlow below are the only DOM parts. Prefs, escapeHtml come
+// from js/prefs.js and js/backend.js; naiveToDatetimeLocal/datetimeLocalToNaive from js/marks-core.js; parseNaive/
+// nowAsNaiveString from js/chart-base.js — fine since only the pure section above the DOM marker is unit-tested.
 
 const LIVE_SESSION_DEFAULTS_KEY = "liveSessionDefaults";
 
@@ -299,6 +304,80 @@ function saveSessionDefaults(defaults) {
   }
 }
 
+// --- "+ Session" flow's pure helpers -------------------------------------------------------------
+// Unlike Session defaults/Catch (a linear stack of cards), "+ Session" is a hub: one card lists six fields
+// (target species, date/time, water, rod, berley, water depth) with their current value, and tapping one opens a
+// card for just that field, then returns to the hub (see showSessionStartFlow below). It drops a Session Start
+// mark named "Session N Start", N from js/catch-limits.js's nextSessionNumber (the same 8h-gap rule that resets
+// Catch bag counts, applied to earlier Session Start times instead of catch times).
+
+/** The four fields with an options list (species/rods stay open after each choice; water/berley return to the hub
+ * as soon as a value is picked). dateTime and waterDepth get their own input widgets, not an options list — see
+ * showSessionStartFlow. */
+const SESSION_START_LIST_FIELDS = [
+  { id: "species", title: "Target species", prompt: "Which species are you targeting?", multi: true },
+  { id: "water", title: "Water", prompt: "What is the water like?", multi: false },
+  { id: "rods", title: "Rod", prompt: "Which rods are you fishing?", multi: true },
+  { id: "berley", title: "Berley", prompt: "Which berley are you using?", multi: false },
+];
+
+/** A fresh "+ Session" draft, preloaded from Session defaults (target species, water, rods, berley) — water depth
+ * starts unset and the time starts at `nowStr` (the caller's "now", so this stays pure/testable). */
+function emptySessionStartAnswers(defaults, nowStr) {
+  return { species: [...defaults.species], water: defaults.water, rods: [...defaults.rods], berley: defaults.berley, waterDepth: null, dateTime: nowStr };
+}
+
+/** The hub's sub-line under a list-backed field button: the current value(s), or "Not set". (Date/Time and Water
+ * depth are formatted by the DOM layer, which alone has the date-formatting helper — see showSessionStartFlow.) */
+function sessionStartFieldValueText(fieldId, answers) {
+  if (fieldId === "species") return answers.species.length ? answers.species.join(", ") : "Not set";
+  if (fieldId === "rods") return answers.rods.length ? answers.rods.join(", ") : "Not set";
+  if (fieldId === "water") return answers.water || "Not set";
+  if (fieldId === "berley") return answers.berley || "Not set";
+  if (fieldId === "waterDepth") return answers.waterDepth != null ? `${answers.waterDepth} m` : "Not set";
+  return "";
+}
+
+/** Applies a button press on one "+ Session" list field (species/rods toggle; water/berley set, or clear on
+ * repress), returning the new answers (the old ones are not changed). */
+function applySessionStartFieldChoice(answers, fieldId, value) {
+  const next = { ...answers, species: [...answers.species], rods: [...answers.rods] };
+  const toggle = (list) => (list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
+  if (fieldId === "species") next.species = toggle(next.species);
+  else if (fieldId === "rods") next.rods = toggle(next.rods);
+  else if (fieldId === "water") next.water = answers.water === value ? "" : value;
+  else if (fieldId === "berley") next.berley = answers.berley === value ? "" : value;
+  return next;
+}
+
+/**
+ * The Session Start mark for the hub's answers at (lat, lng): named "Session N Start" (`sessionNumber`, from
+ * nextSessionNumber), with the selected rods' saved rigs/baits (not independently editable on this hub) and the
+ * chosen water/berley/water depth. `id`, `dateTime`, `createdAt` and `sessionGroupId` are supplied by the caller
+ * (map-live.js) so this stays pure — `dateTime` is the hub's (possibly edited) time, `createdAt` is when it's
+ * actually saved. `tide` ({tideCondition, tideExtreme}) is the tide worked out for `dateTime`.
+ */
+function buildSessionStartFromCards({ id, lat, lng, dateTime, createdAt, sessionGroupId, species, water, rods, berley, waterDepth, sessionNumber }, defaults, tide) {
+  const mark = {
+    id, lat, lng, name: `Session ${sessionNumber} Start`, type: "Session Start", dateTime, createdAt,
+    source: "Manual", sessionRole: "start", sessionGroupId,
+  };
+  if (species && species.length) mark.species = species.join(", ");
+  if (water) mark.waterCondition = water;
+  if (berley) mark.berley = berley;
+  if (waterDepth != null) mark.waterDepth = waterDepth;
+  if (rods && rods.length) {
+    mark.rod = rods.join(", ");
+    const rigs = uniqueStrings(rods.map((r) => (defaults.rodSetups[r] || {}).rig));
+    const baits = uniqueStrings(rods.map((r) => (defaults.rodSetups[r] || {}).bait));
+    if (rigs.length) mark.rig = rigs.join(", ");
+    if (baits.length) mark.bait = baits.join(", ");
+  }
+  if (tide && tide.tideCondition) mark.tideCondition = tide.tideCondition;
+  if (tide && tide.tideExtreme) mark.tideExtreme = tide.tideExtreme;
+  return mark;
+}
+
 // --- DOM: the full-screen card stack ------------------------------------------------------------
 
 /**
@@ -546,4 +625,211 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
 
   render();
   return { close, refresh: render };
+}
+
+/** A short, human date/time for the "+ Session" hub's Date/Time sub-line, e.g. "22 Sep 2026, 14:32". DOM-only (uses
+ * parseNaive, js/chart-base.js) — kept out of the pure section above so that stays dependency-free/testable. */
+function formatNaiveDisplay(naive) {
+  const ms = parseNaive(naive);
+  return Number.isFinite(ms) ? new Date(ms).toLocaleString([], { dateStyle: "medium", timeStyle: "short", hour12: false }) : "";
+}
+
+/**
+ * Shows the "+ Session" hub-and-spoke cards full-screen: a hub card listing the six fields with their current
+ * value, and a card per field to change it — species/rods stay open ("pick any"), water/berley/date-time/water
+ * depth return to the hub as soon as they're set. Unlike showCardFlow's linear Prev/Next stack, tapping a hub
+ * button jumps straight to that field's own card, and every field card's own way back is the hub — a menu, not a
+ * wizard — but it's built from the same CSS (`.live-card-*`) so it reads as the same cards.
+ *   options: {species, water, rods, berley, limits} (see sessionCardOptions)
+ *   defaults: the Session defaults (rig/bait aren't edited here, only carried over at save time by the caller)
+ *   initialAnswers: from emptySessionStartAnswers
+ *   run: the current run's catches (js/catch-limits.js) for the species sublabel, or null — same as Session defaults
+ *   sessionNumberFor(dateTimeNaive): the "Session N" this would be if saved right now with that time
+ *   onSave(answers): "Start Session" was pressed
+ *   onClose(): Close was pressed
+ * Returns {close}.
+ */
+function showSessionStartFlow({ options, defaults, initialAnswers, run, sessionNumberFor, onSave, onClose }) {
+  const overlay = document.createElement("div");
+  overlay.className = "live-card-overlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  document.body.appendChild(overlay);
+  document.body.classList.add("live-card-open");
+  let answers = { ...initialAnswers };
+  let screen = "hub"; // "hub", a SESSION_START_LIST_FIELDS id, "dateTime" or "waterDepth"
+
+  const close = () => {
+    overlay.remove();
+    document.body.classList.remove("live-card-open");
+  };
+  const toHub = () => {
+    screen = "hub";
+    render();
+  };
+  const wireCloseNav = () => {
+    overlay.querySelector('[data-nav="close"]').addEventListener("click", () => {
+      close();
+      if (onClose) onClose();
+    });
+  };
+  // The nav row every screen shares: Close (cancel the whole flow) and a right-hand action, "Start Session" on the
+  // hub, "Back to overview" on every field card.
+  const navHtml = (rightLabel) => `
+    <div class="live-card-nav live-card-nav-2">
+      <button type="button" class="live-card-nav-btn live-card-close" data-nav="close">Close</button>
+      <button type="button" class="live-card-nav-btn live-card-next" data-nav="right">${escapeHtml(rightLabel)}</button>
+    </div>`;
+
+  function render() {
+    if (screen === "hub") return renderHub();
+    if (screen === "dateTime") return renderDateTime();
+    if (screen === "waterDepth") return renderWaterDepth();
+    return renderListField(SESSION_START_LIST_FIELDS.find((f) => f.id === screen));
+  }
+
+  function renderHub() {
+    const n = sessionNumberFor(answers.dateTime);
+    const fields = [
+      { id: "species", title: "Target species", sub: sessionStartFieldValueText("species", answers) },
+      { id: "dateTime", title: "Date/Time", sub: formatNaiveDisplay(answers.dateTime) || "Not set" },
+      { id: "water", title: "Water", sub: sessionStartFieldValueText("water", answers) },
+      { id: "rods", title: "Rod", sub: sessionStartFieldValueText("rods", answers) },
+      { id: "berley", title: "Berley", sub: sessionStartFieldValueText("berley", answers) },
+      { id: "waterDepth", title: "Water depth", sub: sessionStartFieldValueText("waterDepth", answers) },
+    ];
+    overlay.innerHTML = `
+      <div class="live-card">
+        <div class="live-card-head">
+          <h2 class="live-card-title">Start Session</h2>
+          <p class="live-card-prompt">Check the details, then start the session.</p>
+          <p class="live-card-hint">Will be logged as &ldquo;Session ${n} Start&rdquo;.</p>
+        </div>
+        <div class="live-card-grid">
+          ${fields.map((f) => `
+            <button type="button" class="live-card-choice" data-field="${f.id}">
+              <span>${escapeHtml(f.title)}</span>
+              <span class="live-card-choice-sub">${escapeHtml(f.sub)}</span>
+            </button>`).join("")}
+        </div>
+        ${navHtml("Start Session")}
+      </div>`;
+    overlay.querySelectorAll("[data-field]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        screen = btn.dataset.field;
+        render();
+      })
+    );
+    overlay.querySelector('[data-nav="right"]').addEventListener("click", () => {
+      close();
+      onSave(answers);
+    });
+    wireCloseNav();
+  }
+
+  function renderListField(field) {
+    const sublabels = field.id === "species" ? speciesSublabels(options.species, options.limits || {}, run || null) : null;
+    const opts = options[field.id] || [];
+    const selected = field.multi ? answers[field.id] : (answers[field.id] ? [answers[field.id]] : []);
+    const optionButton = (value, i) => {
+      const sub = sublabels && sublabels[value];
+      const tone = sub && sub.tone ? ` tone-${sub.tone}` : "";
+      const lines = sub
+        ? `${sub.line1 ? `<span class="live-card-choice-sub">${escapeHtml(sub.line1)}</span>` : ""}${sub.line2 ? `<span class="live-card-choice-sub">${escapeHtml(sub.line2)}</span>` : ""}`
+        : "";
+      return `<button type="button" class="live-card-choice${selected.includes(value) ? " selected" : ""}${tone}" data-choice="${i}" aria-pressed="${selected.includes(value)}"><span>${escapeHtml(value)}</span>${lines}</button>`;
+    };
+    overlay.innerHTML = `
+      <div class="live-card">
+        <div class="live-card-head">
+          <h2 class="live-card-title">${escapeHtml(field.title)}</h2>
+          <p class="live-card-prompt">${escapeHtml(field.prompt)}${field.multi ? " (pick any)" : ""}</p>
+        </div>
+        <div class="live-card-grid">
+          ${opts.length ? opts.map(optionButton).join("") : `<p class="live-card-empty">Nothing to choose yet — add options for this on the Settings tab.</p>`}
+        </div>
+        ${navHtml("Back to overview")}
+      </div>`;
+    const grid = overlay.querySelector(".live-card-grid");
+    overlay.querySelectorAll("[data-choice]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const value = opts[Number(btn.dataset.choice)];
+        // Multi fields (species/rods) always toggle; single fields (water/berley) only apply a genuinely new value —
+        // pressing the one already chosen just returns to the hub, same as Session defaults' single-choice cards.
+        if (field.multi || !selected.includes(value)) answers = applySessionStartFieldChoice(answers, field.id, value);
+        if (field.multi) {
+          const scrollTop = grid.scrollTop;
+          render();
+          overlay.querySelector(".live-card-grid").scrollTop = scrollTop;
+        } else {
+          toHub();
+        }
+      })
+    );
+    overlay.querySelector('[data-nav="right"]').addEventListener("click", toHub);
+    wireCloseNav();
+  }
+
+  function renderDateTime() {
+    overlay.innerHTML = `
+      <div class="live-card">
+        <div class="live-card-head">
+          <h2 class="live-card-title">Date/Time</h2>
+          <p class="live-card-prompt">When did this session start?</p>
+        </div>
+        <div class="live-card-grid live-card-grid-datetime">
+          <input type="datetime-local" step="1" class="live-card-datetime-input" value="${naiveToDatetimeLocal(answers.dateTime)}" />
+          <button type="button" class="live-card-choice" data-now>Now</button>
+        </div>
+        ${navHtml("Back to overview")}
+      </div>`;
+    const input = overlay.querySelector(".live-card-datetime-input");
+    overlay.querySelector("[data-now]").addEventListener("click", () => {
+      input.value = naiveToDatetimeLocal(nowAsNaiveString());
+    });
+    overlay.querySelector('[data-nav="right"]').addEventListener("click", () => {
+      const v = datetimeLocalToNaive(input.value);
+      if (v) answers = { ...answers, dateTime: v };
+      toHub();
+    });
+    wireCloseNav();
+  }
+
+  function renderWaterDepth() {
+    const value = answers.waterDepth != null ? answers.waterDepth : 0;
+    overlay.innerHTML = `
+      <div class="live-card">
+        <div class="live-card-head">
+          <h2 class="live-card-title">Water depth</h2>
+          <p class="live-card-prompt">How deep is the water here?</p>
+        </div>
+        <div class="live-card-grid live-card-grid-stepper">
+          <div class="live-card-stepper">
+            <div class="live-card-stepper-row">
+              <button type="button" class="live-card-choice live-card-step-btn" data-depth="-1" aria-label="One metre shallower">&minus;</button>
+              <div class="live-card-stepper-value">${escapeHtml(value.toFixed(1))}<span class="live-card-stepper-unit"> m</span></div>
+              <button type="button" class="live-card-choice live-card-step-btn" data-depth="1" aria-label="One metre deeper">+</button>
+            </div>
+            <div class="live-card-stepper-row-fine">
+              <button type="button" class="live-card-choice live-card-step-btn-fine" data-depth="-0.1">&minus; 0.1 m</button>
+              <button type="button" class="live-card-choice live-card-step-btn-fine" data-depth="0.1">+ 0.1 m</button>
+            </div>
+          </div>
+        </div>
+        ${navHtml("Back to overview")}
+      </div>`;
+    overlay.querySelectorAll("[data-depth]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const delta = Number(btn.dataset.depth);
+        const current = answers.waterDepth != null ? answers.waterDepth : 0;
+        answers = { ...answers, waterDepth: Math.max(0, Math.round((current + delta) * 10) / 10) };
+        render();
+      })
+    );
+    overlay.querySelector('[data-nav="right"]').addEventListener("click", toHub);
+    wireCloseNav();
+  }
+
+  render();
+  return { close };
 }
