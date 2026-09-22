@@ -207,14 +207,16 @@ function liveBuildMap(gpsPosition) {
   if (map && gpsPosition) {
     map.setView([gpsPosition.lat, gpsPosition.lng], 13);
   }
-  if (map) loadAndRenderMarks(map, markLayerState);
+  // Not awaited — the map appears straight away; + Session/End Session's numbers and visibility catch up once
+  // this resolves (updateLiveSessionButtons no-ops if Live mode's already been left by then).
+  if (map) loadAndRenderMarks(map, markLayerState).then(() => updateLiveSessionButtons());
   liveMap = map;
   liveMarkState = markLayerState;
   return { map, markLayerState };
 }
 
-// --- Quick-entry cards: Session defaults and Catch (js/live-cards.js) -------------------------------
-// The map and marks layer of the Live map currently showing, so a Catch can be drawn on it once saved.
+// --- Quick-entry cards: Session defaults, + Session/End Session, and Catch (js/live-cards.js) --------
+// The map and marks layer of the Live map currently showing, so a Catch/Session can be drawn on it once saved.
 let liveMap = null;
 let liveMarkState = null;
 let activeCardFlow = null; // the open card stack, if any (only one at a time)
@@ -372,19 +374,66 @@ async function startLiveCatch() {
   });
 }
 
-// The existing Session Start marks on the Live map, as plain ms timestamps — for numbering a new one ("Session N Start",
-// js/catch-limits.js's nextSessionNumber) the same way liveCatchContext's `run` numbers the bag. Null until the marks have
-// loaded (nextSessionNumber then falls back to an empty list — "Session 1" — same spirit as liveCatchContext's null run).
-function liveSessionStartTimes() {
+// The Session Start/End marks currently on the Live map: {starts: [Session Start marks], endedGroupIds: Set of
+// every Session End's sessionGroupId}. Null until the marks have loaded — same null-until-loaded convention as
+// liveCatchContext's `run`.
+function liveSessionMarks() {
   const state = liveMarkState;
   if (!state || !state.markerLayer) return null;
-  const times = [];
+  const starts = [];
+  const endedGroupIds = new Set();
   for (const m of state.marksById.values()) {
-    if (!m || m.type !== "Session Start" || !m.dateTime) continue;
-    const t = parseNaive(m.dateTime);
-    if (Number.isFinite(t)) times.push(t);
+    if (!m) continue;
+    if (m.type === "Session Start" && m.dateTime) starts.push(m);
+    else if (m.type === "Session End" && m.sessionGroupId) endedGroupIds.add(m.sessionGroupId);
   }
-  return times;
+  return { starts, endedGroupIds };
+}
+
+// The existing Session Start marks' own times, as plain ms timestamps — for numbering a new one ("Session N Start",
+// js/catch-limits.js's nextSessionNumber) the same way liveCatchContext's `run` numbers the bag. Null until the marks
+// have loaded (nextSessionNumber then falls back to an empty list — "Session 1" — same spirit as the null run above).
+function liveSessionStartTimes() {
+  const sm = liveSessionMarks();
+  return sm ? sm.starts.map((m) => parseNaive(m.dateTime)).filter(Number.isFinite) : null;
+}
+
+// The currently active session — the most recently started one that has no Session End sharing its sessionGroupId
+// yet: {mark, number}, or null when there isn't one (or the marks haven't loaded). `number` is recomputed with
+// nextSessionNumber over every OTHER start's time, anchored at this one's own time — reconstructs exactly the
+// number it was given when it was created, without trusting its (possibly hand-edited) name.
+function liveActiveSession() {
+  const sm = liveSessionMarks();
+  if (!sm || !sm.starts.length) return null;
+  const sorted = [...sm.starts].sort((a, b) => parseNaive(a.dateTime) - parseNaive(b.dateTime));
+  const latest = sorted[sorted.length - 1];
+  if (!latest.sessionGroupId || sm.endedGroupIds.has(latest.sessionGroupId)) return null;
+  const otherTimes = sorted.slice(0, -1).map((m) => parseNaive(m.dateTime)).filter(Number.isFinite);
+  return { mark: latest, number: nextSessionNumber(otherTimes, parseNaive(latest.dateTime)) };
+}
+
+// Keeps "+ Session"/"End Session…/Move" in step with whatever's actually on the map: the next number to show on
+// + Session, and End Session's own visibility/label from the currently active session (none shown at all until
+// the marks have loaded — never guess "Session 1" before that's actually known, same reasoning as the bag counts
+// staying blank until a run is known). Called once loadAndRenderMarks resolves, and after every save that can
+// change session state (saveLiveSession, saveLiveEndSession).
+function updateLiveSessionButtons() {
+  if (!liveMap || !liveMarkState) return; // not in Live mode (or it's been left) — applyModeChrome already hid both
+  const btnSession = document.getElementById("btnLiveSession");
+  const btnEnd = document.getElementById("btnLiveEndSession");
+  const times = liveSessionStartTimes();
+  if (times == null) {
+    btnEnd.style.display = "none";
+    return; // marks not loaded yet: leave + Session's base "+ Session" text alone rather than guess a number
+  }
+  btnSession.textContent = `+ Session ${nextSessionNumber(times, nowInNaiveEncoding())}`;
+  const active = liveActiveSession();
+  if (active) {
+    btnEnd.textContent = `End Session ${active.number}/Move`;
+    btnEnd.style.display = "";
+  } else {
+    btnEnd.style.display = "none";
+  }
 }
 
 async function saveLiveSession(options, answers, defaults, gpsPromise) {
@@ -398,6 +447,22 @@ async function saveLiveSession(options, answers, defaults, gpsPromise) {
     tide = computeQuickMarkDefaults(getRowsForCurrentLoc());
   } catch {
     tide = {}; // no tide data for this spot: the save fills what it can from looked-up data
+  }
+  // Starting a new session closes out whichever one is still active, first — same values as its own Start, at
+  // this GPS fix, right now. Bail without starting the new one if that fails, so a session is never left silently
+  // un-closed just because the "next" one happened to save.
+  const active = liveActiveSession();
+  let endedMark = null;
+  if (active) {
+    endedMark = buildSessionEndFromStart(active.mark, {
+      id: makeMarkId(), lat: position.lat, lng: position.lng, dateTime: nowAsNaiveString(), createdAt: nowAsNaiveString(),
+    }, active.number);
+    const endResult = await saveMarkToD1(endedMark, true);
+    if (!endResult.success) {
+      showLiveToast(`Couldn't end Session ${active.number}: ` + endResult.error, true);
+      return;
+    }
+    addCatchToLiveMap(endedMark);
   }
   const sessionNumber = nextSessionNumber(liveSessionStartTimes() || [], parseNaive(answers.dateTime));
   const mark = buildSessionStartFromCards({
@@ -420,7 +485,8 @@ async function saveLiveSession(options, answers, defaults, gpsPromise) {
     return;
   }
   addCatchToLiveMap(mark); // draws any mark type, not just Catch
-  showLiveToast(`${mark.name} saved`);
+  updateLiveSessionButtons();
+  showLiveToast(endedMark ? `${endedMark.name} saved; ${mark.name} saved` : `${mark.name} saved`);
 }
 
 // Tap + Session: the GPS fix starts straight away (that is where the session starts), while the hub is answered.
@@ -431,6 +497,7 @@ async function startLiveSession() {
   const defaults = getSessionDefaults(options);
   const initialAnswers = emptySessionStartAnswers(defaults, nowAsNaiveString());
   const ctx = liveCatchContext();
+  const active = liveActiveSession();
   const finish = () => { activeCardFlow = null; };
   activeCardFlow = showSessionStartFlow({
     options,
@@ -438,9 +505,43 @@ async function startLiveSession() {
     initialAnswers,
     run: ctx.run,
     sessionNumberFor: (dateTime) => nextSessionNumber(liveSessionStartTimes() || [], parseNaive(dateTime)),
+    activeSessionNumber: active ? active.number : null,
     onSave: (answers) => {
       finish();
       saveLiveSession(options, answers, defaults, gpsPromise);
+    },
+    onClose: finish,
+  });
+}
+
+// Tap End Session/Move: the GPS fix starts straight away (that is where the session ends), while the confirm is
+// answered. No-ops if there's somehow no active session (the button's hidden without one; stay safe regardless).
+async function startLiveEndSession() {
+  if (activeCardFlow || !liveMap || !liveMarkState) return;
+  const active = liveActiveSession();
+  if (!active) return;
+  const gpsPromise = getFreshGpsPosition();
+  const finish = () => { activeCardFlow = null; };
+  activeCardFlow = showEndSessionConfirm({
+    sessionNumber: active.number,
+    onConfirm: async () => {
+      finish();
+      const position = await gpsPromise;
+      if (!position) {
+        showLiveToast("Couldn't get your location — session not ended.", true);
+        return;
+      }
+      const mark = buildSessionEndFromStart(active.mark, {
+        id: makeMarkId(), lat: position.lat, lng: position.lng, dateTime: nowAsNaiveString(), createdAt: nowAsNaiveString(),
+      }, active.number);
+      const result = await saveMarkToD1(mark, true);
+      if (!result.success) {
+        showLiveToast("Session not ended: " + result.error, true);
+        return;
+      }
+      addCatchToLiveMap(mark);
+      updateLiveSessionButtons();
+      showLiveToast(`${mark.name} saved`);
     },
     onClose: finish,
   });
@@ -691,6 +792,7 @@ function liveInitOnce() {
   document.getElementById("btnCloseLiveHoverPanel").addEventListener("click", hideLiveHoverPanel);
   document.getElementById("btnSessionDefaults").addEventListener("click", openSessionDefaults);
   document.getElementById("btnLiveSession").addEventListener("click", startLiveSession);
+  document.getElementById("btnLiveEndSession").addEventListener("click", startLiveEndSession);
   document.getElementById("btnLiveCatch").addEventListener("click", startLiveCatch);
   document.getElementById("liveHoverPanelBanner").addEventListener("click", () => setPanelExpanded(!isPanelExpanded));
   // Wired once, not inside renderForLocation — that function reuses this

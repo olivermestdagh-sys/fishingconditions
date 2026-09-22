@@ -208,6 +208,9 @@ function applyModeChrome() {
   deviceTools.style.display = cachedIsAdmin && mapMode === "normal" ? "flex" : "none";
   document.getElementById("btnSessionDefaults").style.display = isLive ? "" : "none";
   document.getElementById("btnLiveSession").style.display = isLive && cachedIsSignedIn ? "" : "none";
+  // End Session/Move is never shown just because Live mode is on — only updateLiveSessionButtons (map-live.js)
+  // reveals it, once the marks have actually loaded and confirm there's a session to end.
+  document.getElementById("btnLiveEndSession").style.display = "none";
   document.getElementById("btnLiveCatch").style.display = isLive && cachedIsSignedIn ? "" : "none";
   document.getElementById("importReviewPanel").style.display = isImport ? "flex" : "none";
   document.getElementById("markDetailPanel").style.display = "none";

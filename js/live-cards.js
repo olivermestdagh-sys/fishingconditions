@@ -378,6 +378,29 @@ function buildSessionStartFromCards({ id, lat, lng, dateTime, createdAt, session
   return mark;
 }
 
+/** Fields carried from a Session Start into the Session End that closes it out (the "+ Session" auto-close and the
+ * "End Session/Move" button both use this) — "the same values as the previous Session Start". Everything about
+ * WHERE/WHEN the End record itself is (id/lat/lng/dateTime/createdAt) is the caller's own: ending a session
+ * happens at a different time/place than starting it. */
+const SESSION_END_CARRIED_FIELDS = ["species", "waterCondition", "berley", "waterDepth", "rod", "rig", "bait", "tideCondition", "tideExtreme"];
+
+/**
+ * The Session End mark that closes out `startMark` (a loaded Session Start mark): named "Session N End"
+ * (`sessionNumber` — the number `startMark` itself was given), linked to it by sessionGroupId, at the caller's own
+ * (id, lat, lng, dateTime, createdAt) — every other field is copied straight from startMark, left off when
+ * startMark doesn't have it either.
+ */
+function buildSessionEndFromStart(startMark, { id, lat, lng, dateTime, createdAt }, sessionNumber) {
+  const mark = {
+    id, lat, lng, name: `Session ${sessionNumber} End`, type: "Session End", dateTime, createdAt,
+    source: "Manual", sessionRole: "end", sessionGroupId: startMark.sessionGroupId,
+  };
+  for (const key of SESSION_END_CARRIED_FIELDS) {
+    if (startMark[key] != null && startMark[key] !== "") mark[key] = startMark[key];
+  }
+  return mark;
+}
+
 // --- DOM: the full-screen card stack ------------------------------------------------------------
 
 /**
@@ -649,11 +672,13 @@ function formatNaiveDisplay(naive) {
  *   initialAnswers: from emptySessionStartAnswers
  *   run: the current run's catches (js/catch-limits.js) for the species sublabel, or null — same as Session defaults
  *   sessionNumberFor(dateTimeNaive): the "Session N" this would be if saved right now with that time
+ *   activeSessionNumber: the currently active session's own number, or null — shown as a heads-up that starting
+ *     this one will also close that one out (see saveLiveSession, map-live.js)
  *   onSave(answers): "Start Session" was pressed
  *   onClose(): Close was pressed
  * Returns {close}.
  */
-function showSessionStartFlow({ options, defaults, initialAnswers, run, sessionNumberFor, onSave, onClose }) {
+function showSessionStartFlow({ options, defaults, initialAnswers, run, sessionNumberFor, activeSessionNumber, onSave, onClose }) {
   const overlay = document.createElement("div");
   overlay.className = "live-card-overlay";
   overlay.setAttribute("role", "dialog");
@@ -711,7 +736,7 @@ function showSessionStartFlow({ options, defaults, initialAnswers, run, sessionN
         <div class="live-card-head">
           <h2 class="live-card-title">Start Session</h2>
           <p class="live-card-prompt">Check the details, then start the session.</p>
-          <p class="live-card-hint">Will be logged as &ldquo;Session ${n} Start&rdquo;.</p>
+          <p class="live-card-hint">Will be logged as &ldquo;Session ${n} Start&rdquo;.${activeSessionNumber != null ? ` Starting this will also end Session ${activeSessionNumber}.` : ""}</p>
         </div>
         <div class="live-card-grid">
           ${fields.map((f) => `
@@ -836,5 +861,43 @@ function showSessionStartFlow({ options, defaults, initialAnswers, run, sessionN
   }
 
   render();
+  return { close };
+}
+
+/**
+ * A single full-screen confirm, same visual family as the other Live cards — "End Session N here, to move to the
+ * next location?" with Cancel or "End Session N". Used by the "End Session/Move" button; the caller (map-live.js)
+ * does the actual save on confirm. Returns {close}.
+ */
+function showEndSessionConfirm({ sessionNumber, onConfirm, onClose }) {
+  const overlay = document.createElement("div");
+  overlay.className = "live-card-overlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  document.body.appendChild(overlay);
+  document.body.classList.add("live-card-open");
+  const close = () => {
+    overlay.remove();
+    document.body.classList.remove("live-card-open");
+  };
+  overlay.innerHTML = `
+    <div class="live-card">
+      <div class="live-card-head">
+        <h2 class="live-card-title">End Session ${sessionNumber}?</h2>
+        <p class="live-card-prompt">End Session ${sessionNumber} here, to move to the next location?</p>
+      </div>
+      <div class="live-card-nav live-card-nav-2">
+        <button type="button" class="live-card-nav-btn live-card-close" data-nav="cancel">Cancel</button>
+        <button type="button" class="live-card-nav-btn live-card-next" data-nav="confirm">End Session ${sessionNumber}</button>
+      </div>
+    </div>`;
+  overlay.querySelector('[data-nav="cancel"]').addEventListener("click", () => {
+    close();
+    if (onClose) onClose();
+  });
+  overlay.querySelector('[data-nav="confirm"]').addEventListener("click", () => {
+    close();
+    onConfirm();
+  });
   return { close };
 }

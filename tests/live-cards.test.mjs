@@ -8,7 +8,7 @@ const limitsSrc = fs.readFileSync(new URL("../js/catch-limits.js", import.meta.u
 // Everything above the DOM section is pure; evaluate just that part.
 const pure = src.slice(0, src.indexOf("// --- DOM:"));
 const fns = new Function(
-  limitsSrc + "\n" + pure + "\nreturn { normaliseSessionDefaults, markListValues, sessionCardOptions, buildSessionCardSteps, applySessionCardChoice, buildCatchCardSteps, buildCatchFromCards, emptySessionDefaults, applySizeAction, catchCardState, sizeVerdictText, catchSavedMessage, speciesSublabels, speciesImagesFromMarkLists, allSpeciesImages, emptySessionStartAnswers, sessionStartFieldValueText, applySessionStartFieldChoice, buildSessionStartFromCards };"
+  limitsSrc + "\n" + pure + "\nreturn { normaliseSessionDefaults, markListValues, sessionCardOptions, buildSessionCardSteps, applySessionCardChoice, buildCatchCardSteps, buildCatchFromCards, emptySessionDefaults, applySizeAction, catchCardState, sizeVerdictText, catchSavedMessage, speciesSublabels, speciesImagesFromMarkLists, allSpeciesImages, emptySessionStartAnswers, sessionStartFieldValueText, applySessionStartFieldChoice, buildSessionStartFromCards, buildSessionEndFromStart };"
 )();
 
 const lists = [
@@ -189,6 +189,32 @@ test("Session Start mark leaves unset fields off", () => {
     {}
   );
   assert.deepEqual(m, { id: "m_2", lat: 1, lng: 2, name: "Session 1 Start", type: "Session Start", dateTime: "d", createdAt: "d", source: "Manual", sessionRole: "start", sessionGroupId: "g_2" });
+});
+
+test("Session End mark: closes out a Start with the same field values, its own id/position/time, linked by sessionGroupId", () => {
+  const startMark = {
+    id: "start_1", lat: -33.9, lng: 151.2, name: "Session 1 Start", type: "Session Start", dateTime: "2026-09-22 06:00:00",
+    createdAt: "2026-09-22 06:00:00", source: "Manual", sessionRole: "start", sessionGroupId: "g_1",
+    species: "Bream, Whiting", waterCondition: "Clear", berley: "Pilchard", waterDepth: 4.5,
+    rod: "Light, Heavy", rig: "Paternoster, Running sinker", bait: "Prawn", tideCondition: "Running In", tideExtreme: "HHW",
+  };
+  const m = fns.buildSessionEndFromStart(
+    startMark,
+    { id: "end_1", lat: -33.95, lng: 151.25, dateTime: "2026-09-22 09:15:00", createdAt: "2026-09-22 09:15:05" },
+    1
+  );
+  assert.deepEqual(m, {
+    id: "end_1", lat: -33.95, lng: 151.25, name: "Session 1 End", type: "Session End", dateTime: "2026-09-22 09:15:00",
+    createdAt: "2026-09-22 09:15:05", source: "Manual", sessionRole: "end", sessionGroupId: "g_1",
+    species: "Bream, Whiting", waterCondition: "Clear", berley: "Pilchard", waterDepth: 4.5,
+    rod: "Light, Heavy", rig: "Paternoster, Running sinker", bait: "Prawn", tideCondition: "Running In", tideExtreme: "HHW",
+  });
+});
+
+test("Session End mark leaves off whatever the Start mark didn't have either", () => {
+  const startMark = { id: "start_2", lat: 1, lng: 2, name: "Session 2 Start", type: "Session Start", dateTime: "d", sessionGroupId: "g_2" };
+  const m = fns.buildSessionEndFromStart(startMark, { id: "end_2", lat: 1, lng: 2, dateTime: "e", createdAt: "e" }, 2);
+  assert.deepEqual(m, { id: "end_2", lat: 1, lng: 2, name: "Session 2 End", type: "Session End", dateTime: "e", createdAt: "e", source: "Manual", sessionRole: "end", sessionGroupId: "g_2" });
 });
 
 // --- limits in the Catch flow -------------------------------------------------------------------------------
