@@ -2,21 +2,12 @@
 // Both are a stack of full-screen cards with large buttons and Prev / Next / Close.
 //   Session defaults: target species, water, berley, active rods, then a rig card and a bait card for each rod.
 //     Saved to the signed-in account (pref "liveSessionDefaults", see js/prefs.js) so they persist across sessions and devices.
-//   Catch: species (the targets), size, rod. The caller drops a Catch mark at the GPS position using the saved defaults.
-// The first half of this file is pure (no DOM, no globals) and is tested in tests/live-cards.test.mjs;
-// showCardFlow below is the only DOM part. Prefs, escapeHtml come from js/prefs.js and js/backend.js.
+//   Catch: species (the targets, with their limits and how many are kept), size (a +/- stepper with Too small), keep or release
+//     (recommended from the limits), rod. The caller drops a Catch mark at the GPS position using the saved defaults.
+// The first half of this file is pure (no DOM) and is tested in tests/live-cards.test.mjs; it uses the limit rules in
+// js/catch-limits.js (loaded first). showCardFlow below is the only DOM part. Prefs, escapeHtml come from js/prefs.js and js/backend.js.
 
 const LIVE_SESSION_DEFAULTS_KEY = "liveSessionDefaults";
-// Catch size buttons, in cm. To be refined later — change here only.
-const CATCH_SIZE_MIN_CM = 20;
-const CATCH_SIZE_MAX_CM = 40;
-const CATCH_SIZE_STEP_CM = 1;
-
-function catchSizeOptions() {
-  const sizes = [];
-  for (let cm = CATCH_SIZE_MIN_CM; cm <= CATCH_SIZE_MAX_CM; cm += CATCH_SIZE_STEP_CM) sizes.push(cm);
-  return sizes;
-}
 
 function emptySessionDefaults() {
   return { species: [], water: "", berley: "", rods: [], rodSetups: {} };
@@ -80,7 +71,22 @@ function sessionCardOptions(markLists) {
     rods: markListValues(markLists, "Rod"),
     rigs: markListValues(markLists, "Rig"),
     baits: markListValues(markLists, "Bait"),
+    limits: limitsFromMarkLists(markLists), // per-species limits (js/catch-limits.js), shown under species and used by the Catch flow
   };
+}
+
+/**
+ * The two-line blurb (limits, kept so far) under each species button: {species: {line1, line2, tone}}. `run` is the current
+ * run's catches, or null when they aren't known yet (then limits only, never a misleading 0).
+ */
+function speciesSublabels(speciesList, limits, run) {
+  const out = {};
+  for (const s of speciesList) {
+    const lines = speciesLimitLines(limits[s], run ? speciesCounts(run, limits, s) : null);
+    if (lines.line1 === "No limits set") continue; // no limits: nothing worth saying (not even a count)
+    out[s] = lines;
+  }
+  return out;
 }
 
 /**
@@ -88,9 +94,12 @@ function sessionCardOptions(markLists) {
  * Bait card for each selected rod, in the order the rods are listed. Rebuilt after every choice, because choosing rods
  * changes the cards that follow. A step is {id, title, prompt, multi, options, selected: [values]}.
  */
-function buildSessionCardSteps(options, draft) {
+function buildSessionCardSteps(options, draft, ctx = {}) {
   const steps = [
-    { id: "species", title: "Target species", prompt: "Which species are you targeting?", multi: true, options: options.species, selected: draft.species },
+    {
+      id: "species", title: "Target species", prompt: "Which species are you targeting?", multi: true, options: options.species, selected: draft.species,
+      sublabels: speciesSublabels(options.species, options.limits || {}, ctx.run || null),
+    },
     { id: "water", title: "Water", prompt: "What is the water like?", multi: false, options: options.water, selected: draft.water ? [draft.water] : [] },
     { id: "berley", title: "Berley", prompt: "Which berley are you using?", multi: false, options: options.berley, selected: draft.berley ? [draft.berley] : [] },
     { id: "rods", title: "Active rods", prompt: "Which rods are you fishing?", multi: true, options: options.rods, selected: draft.rods },
@@ -127,10 +136,58 @@ function applySessionCardChoice(draft, stepId, value) {
 }
 
 /**
- * The cards of the Catch flow. Species offers only the session's target species, and the rod card only the session's
- * rods; with none saved they fall back to the full lists (`usedFallback` says so, so the caller can hint at Session defaults).
+ * A press on the size stepper card. `current` is the size answer so far (a number in cm, "small" for Too small, or undefined
+ * if untouched), `action` is "delta:<cm>" (e.g. "delta:-5") or "tooSmall" (pressing it again undoes it), `start` where the
+ * stepper opens. Returns the new size answer.
  */
-function buildCatchCardSteps(options, defaults) {
+function applySizeAction(current, action, start) {
+  if (action === "tooSmall") return current === "small" ? undefined : "small";
+  const m = /^delta:(-?\d+(?:\.\d+)?)$/.exec(action);
+  if (!m) return current;
+  const base = typeof current === "number" ? current : start;
+  return Math.max(0, Math.round((base + Number(m[1])) * 10) / 10);
+}
+
+/**
+ * What the Catch cards add up to so far, from the answers (`answers` = {species, size, fate, rod}; size is a number, "small"
+ * or untouched) and context (`ctx` = {run: this run's catches or null, catches: every catch}). Untouched size means the
+ * stepper's starting value; an untouched Keep/Release means the recommendation. Used by the cards and by the save.
+ */
+function catchCardState(options, ctx) {
+  const answers = ctx.answers || {};
+  const limits = options.limits || {};
+  const species = answers.species || "";
+  const lim = limits[species];
+  const start = stepperStartSize(lim, lastCatchSize(ctx.catches || [], species));
+  const size = answers.size === "small" ? "small" : typeof answers.size === "number" ? answers.size : start;
+  const tooSmall = size === "small";
+  const counts = ctx.run && species ? speciesCounts(ctx.run, limits, species) : null;
+  const rec = recommendFate({ lim, size: tooSmall ? null : size, counts, tooSmall });
+  const fate = tooSmall ? "Release" : answers.fate || rec.fate;
+  return { species, lim, start, size, tooSmall, counts, rec, fate, released: fate === "Release", rod: answers.rod || "" };
+}
+
+/** The line under the stepper number: how the size measures against the species' limits. */
+function sizeVerdictText(lim, size) {
+  if (!lim) return { text: "", tone: "" };
+  const v = sizeVerdict(lim, size);
+  if (v.tooSmall) return { text: `Under the minimum size (${lim.minSize} cm) — release`, tone: "bad" };
+  if (v.overSlot) return { text: `Over the maximum size (${lim.maxSize} cm) — release`, tone: "bad" };
+  if (v.big) return { text: "Big fish", tone: "big" };
+  if (lim.minSize != null || lim.maxSize != null) return { text: "Legal size", tone: "ok" };
+  return { text: "", tone: "" };
+}
+
+/**
+ * The cards of the Catch flow: Species (the session's targets first, then a divider and every other species, each with its
+ * limits and kept count), Size (a +/- stepper with Too small), Keep or Release (skipped for Too small; the recommendation is
+ * pre-selected) and Rod (the session's rods). With no targets or rods saved they fall back to the full lists.
+ * `ctx` = {answers, run, catches} (see catchCardState); all optional.
+ */
+function buildCatchCardSteps(options, defaults, ctx = {}) {
+  const limits = options.limits || {};
+  const answers = ctx.answers || {};
+  const st = catchCardState(options, ctx);
   // Targets first, then a divider, then every other species for a quick pick of something unexpected.
   const others = options.species.filter((s) => !defaults.species.includes(s));
   const speciesList = [...defaults.species, ...others];
@@ -138,13 +195,28 @@ function buildCatchCardSteps(options, defaults) {
   const steps = [
     {
       id: "species", title: "Species", prompt: "What did you catch?", multi: false, required: true, options: speciesList,
+      selected: answers.species ? [answers.species] : [],
+      sublabels: speciesSublabels(speciesList, limits, ctx.run || null),
       dividerAfter: defaults.species.length && others.length ? defaults.species.length : 0, // index of the first "other" species, 0 = no divider
       hint: defaults.species.length ? "" : "No target species set — showing every species. Set them in Session defaults.",
     },
-    { id: "size", title: "Size", prompt: "How big (cm)?", multi: false, required: true, options: catchSizeOptions().map(String) },
+    {
+      id: "size", kind: "stepper", title: "Size", prompt: st.species ? `How big is the ${st.species}?` : "How big?", multi: false, required: false,
+      options: [], selected: [], value: st.tooSmall ? null : st.size, tooSmall: st.tooSmall, minSize: st.lim ? st.lim.minSize : null,
+      verdict: st.tooSmall ? { text: "Too small — will be released", tone: "bad" } : sizeVerdictText(st.lim, st.size),
+    },
   ];
+  if (!st.tooSmall) {
+    steps.push({
+      id: "fate", title: "Keep or release?", prompt: st.species ? `${st.species}, ${st.size} cm` : "", multi: false, required: true, options: ["Keep", "Release"],
+      selected: [st.fate], sublabels: { [st.rec.fate]: { line1: "Recommended", line2: "", tone: "" } }, hint: st.rec.reason,
+    });
+  }
   if (rodList.length) {
-    steps.push({ id: "rod", title: "Rod", prompt: "Which rod?", multi: false, required: true, options: rodList, hint: defaults.rods.length ? "" : "No rods set — showing every rod. Set them in Session defaults." });
+    steps.push({
+      id: "rod", title: "Rod", prompt: "Which rod?", multi: false, required: true, options: rodList, selected: answers.rod ? [answers.rod] : [],
+      hint: defaults.rods.length ? "" : "No rods set — showing every rod. Set them in Session defaults.",
+    });
   }
   return steps;
 }
@@ -154,10 +226,12 @@ function buildCatchCardSteps(options, defaults) {
  * rig and bait and the session's water and berley. `tide` ({tideCondition, tideExtreme}) is the tide worked out for now.
  * Weather, barometer, temperature and wind are left blank here; saving a new mark fills them (see saveMarkToD1).
  */
-function buildCatchFromCards({ id, lat, lng, dateTime, species, size, rod }, defaults, tide) {
+function buildCatchFromCards({ id, lat, lng, dateTime, species, size, rod, tooSmall, released }, defaults, tide) {
   const mark = { id, lat, lng, name: species, type: "Catch", dateTime, createdAt: dateTime, source: "Manual", species };
   const cm = size === "" || size == null ? NaN : Number(size);
-  if (Number.isFinite(cm)) mark.size = cm;
+  if (Number.isFinite(cm) && !tooSmall) mark.size = cm;
+  if (tooSmall) mark.notes = "Too small"; // no size is known; the note tells it apart from other releases
+  if (released || tooSmall) mark.released = true;
   if (rod) {
     mark.rod = rod;
     const setup = defaults.rodSetups[rod] || {};
@@ -169,6 +243,16 @@ function buildCatchFromCards({ id, lat, lng, dateTime, species, size, rod }, def
   if (tide && tide.tideCondition) mark.tideCondition = tide.tideCondition;
   if (tide && tide.tideExtreme) mark.tideExtreme = tide.tideExtreme;
   return mark;
+}
+
+/** The toast after a Catch is saved: what happened to the fish and where the bag stands (`counts` from speciesCounts, or null). */
+function catchSavedMessage(st, counts) {
+  if (st.tooSmall) return `${st.species}: too small, released`;
+  if (!st.released) {
+    const maxQty = st.lim && st.lim.maxQty != null ? ` of ${st.lim.maxQty}` : "";
+    return counts ? `${st.species} kept: ${counts.kept}${maxQty} in this run` : `${st.species} kept`;
+  }
+  return `${st.species} released`;
 }
 
 /** The saved defaults on this device (Prefs keeps localStorage in step with the account). Never throws. */
@@ -222,12 +306,32 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
     const step = steps[index];
     const isLast = index === steps.length - 1;
     const canNext = !step.required || step.selected.length > 0;
-    const buttons = step.options.length
-      ? step.options
-          .map((value, i) => (step.dividerAfter && i === step.dividerAfter ? `<div class="live-card-divider" role="separator">Other species</div>` : "") +
-            `<button type="button" class="live-card-choice${step.selected.includes(value) ? " selected" : ""}" data-choice="${i}" aria-pressed="${step.selected.includes(value)}">${escapeHtml(value)}</button>`)
-          .join("")
-      : `<p class="live-card-empty">Nothing to choose yet — add options for this on the Settings tab.</p>`;
+    const optionButton = (value, i) => {
+      const sub = step.sublabels && step.sublabels[value];
+      const tone = sub && sub.tone ? ` tone-${sub.tone}` : "";
+      const lines = sub
+        ? `${sub.line1 ? `<span class="live-card-choice-sub">${escapeHtml(sub.line1)}</span>` : ""}${sub.line2 ? `<span class="live-card-choice-sub">${escapeHtml(sub.line2)}</span>` : ""}`
+        : "";
+      return `<button type="button" class="live-card-choice${step.selected.includes(value) ? " selected" : ""}${tone}" data-choice="${i}" aria-pressed="${step.selected.includes(value)}"><span>${escapeHtml(value)}</span>${lines}</button>`;
+    };
+    const stepperHtml = () => {
+      const verdict = step.verdict || { text: "", tone: "" };
+      const deltas = [-10, -5, -1, 1, 5, 10];
+      return `
+        <div class="live-card-stepper">
+          <div class="live-card-stepper-value${step.tooSmall ? " small" : ""}">${step.tooSmall ? "Too small" : `${escapeHtml(step.value)} cm`}</div>
+          <div class="live-card-stepper-verdict${verdict.tone ? ` tone-${verdict.tone}` : ""}">${escapeHtml(verdict.text) || "&nbsp;"}</div>
+          <div class="live-card-stepper-btns">
+            ${deltas.map((d) => `<button type="button" class="live-card-choice" data-stepper="delta:${d}">${d > 0 ? "+" : "&minus;"}${Math.abs(d)}</button>`).join("")}
+          </div>
+          ${step.minSize != null ? `<button type="button" class="live-card-choice live-card-toosmall${step.tooSmall ? " selected" : ""}" data-stepper="tooSmall" aria-pressed="${step.tooSmall}">Too small (under ${escapeHtml(step.minSize)} cm)</button>` : ""}
+        </div>`;
+    };
+    const buttons = step.kind === "stepper"
+      ? stepperHtml()
+      : step.options.length
+        ? step.options.map((value, i) => (step.dividerAfter && i === step.dividerAfter ? `<div class="live-card-divider" role="separator">Other species</div>` : "") + optionButton(value, i)).join("")
+        : `<p class="live-card-empty">Nothing to choose yet — add options for this on the Settings tab.</p>`;
     overlay.innerHTML = `
       <div class="live-card">
         <div class="live-card-head">
@@ -251,6 +355,13 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
         const scrollTop = grid.scrollTop;
         render();
         overlay.querySelector(".live-card-grid").scrollTop = scrollTop;
+      })
+    );
+    // The size stepper's buttons pass an action ("delta:-5", "tooSmall") instead of an option value.
+    overlay.querySelectorAll("[data-stepper]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        onChoose(step, btn.dataset.stepper);
+        render();
       })
     );
     overlay.querySelector('[data-nav="prev"]').addEventListener("click", () => {

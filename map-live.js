@@ -238,13 +238,24 @@ async function liveLoadCardOptions() {
   return sessionCardOptions(lists);
 }
 
+// The Catch marks on the Live map as plain {id, species, size, released, tMs}, and the current run of them (catches chained
+// within 8 hours of each other up to now: js/catch-limits.js). `run` is null until the marks have loaded, so the cards show
+// limits only rather than a misleading count of 0.
+function liveCatchContext() {
+  const state = liveMarkState;
+  const loaded = !!(state && state.markerLayer);
+  const catches = catchesFromMarks(loaded ? state.marksById.values() : [], parseNaive);
+  return { catches, run: loaded ? runCatches(catches, nowInNaiveEncoding()) : null };
+}
+
 async function openSessionDefaults() {
   if (activeCardFlow) return;
   const options = await liveLoadCardOptions();
   let draft = getSessionDefaults(options);
+  const ctx = liveCatchContext();
   const finish = () => { activeCardFlow = null; };
   activeCardFlow = showCardFlow({
-    getSteps: () => buildSessionCardSteps(options, draft),
+    getSteps: () => buildSessionCardSteps(options, draft, ctx),
     // Saved on every press, so closing part-way loses nothing.
     onChoose: (step, value) => {
       draft = applySessionCardChoice(draft, step.id, value);
@@ -290,7 +301,8 @@ function addCatchToLiveMap(mark) {
   state.markersById.set(mark.id, marker);
 }
 
-async function saveLiveCatch(answers, defaults, gpsPromise) {
+async function saveLiveCatch(options, answers, defaults, gpsPromise, ctx) {
+  const st = catchCardState(options, { ...ctx, answers }); // the same reading of the answers the cards showed
   const position = await gpsPromise;
   if (!position) {
     showLiveToast("Couldn't get your location — catch not saved.", true);
@@ -307,9 +319,11 @@ async function saveLiveCatch(answers, defaults, gpsPromise) {
     lat: position.lat,
     lng: position.lng,
     dateTime: nowAsNaiveString(),
-    species: answers.species,
-    size: answers.size,
-    rod: answers.rod,
+    species: st.species,
+    size: st.tooSmall ? null : st.size,
+    rod: st.rod,
+    tooSmall: st.tooSmall,
+    released: st.released,
   }, defaults, tide);
   const result = await saveMarkToD1(mark, true);
   if (!result.success) {
@@ -318,7 +332,10 @@ async function saveLiveCatch(answers, defaults, gpsPromise) {
   }
   saveLastMarkFieldValues(mark);
   addCatchToLiveMap(mark);
-  showLiveToast("Catch saved");
+  // Say where the bag stands now (the new catch is on the map, so it is part of the run).
+  const after = liveCatchContext();
+  const counts = after.run ? speciesCounts(after.run, options.limits || {}, st.species) : null;
+  showLiveToast(catchSavedMessage(st, counts));
 }
 
 // Tap Catch: the GPS fix starts straight away (that is where the fish was), while the cards are answered.
@@ -328,14 +345,27 @@ async function startLiveCatch() {
   const options = await liveLoadCardOptions();
   const defaults = getSessionDefaults(options);
   const answers = {};
+  const ctx = liveCatchContext();
   const finish = () => { activeCardFlow = null; };
   activeCardFlow = showCardFlow({
-    getSteps: () => buildCatchCardSteps(options, defaults).map((s) => ({ ...s, selected: answers[s.id] ? [answers[s.id]] : [] })),
-    onChoose: (step, value) => { answers[step.id] = answers[step.id] === value ? "" : value; },
+    getSteps: () => buildCatchCardSteps(options, defaults, { ...ctx, answers }),
+    onChoose: (step, value) => {
+      if (step.id === "size") {
+        answers.size = applySizeAction(answers.size, value, catchCardState(options, { ...ctx, answers }).start);
+      } else if (step.id === "species") {
+        // A different species means a different size range and bag: start those cards again.
+        if (answers.species !== value) { delete answers.size; delete answers.fate; }
+        answers.species = answers.species === value ? "" : value;
+      } else if (step.id === "fate") {
+        answers.fate = value;
+      } else {
+        answers[step.id] = answers[step.id] === value ? "" : value;
+      }
+    },
     onDone: () => {
       activeCardFlow.close();
       finish();
-      saveLiveCatch(answers, defaults, gpsPromise);
+      saveLiveCatch(options, answers, defaults, gpsPromise, ctx);
     },
     onClose: finish,
     doneLabel: "Save catch",

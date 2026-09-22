@@ -3620,3 +3620,20 @@ body.live-card-open { overflow: hidden; }
 .live-card-toast.error { background: #dc2626; }
 .map-toolbar .live-quick-btn { font-weight: 700; }.live-card-divider { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; margin: 6px 0 2px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.8; }
 .live-card-divider::before, .live-card-divider::after { content: ""; flex: 1; height: 2px; background: rgba(255, 255, 255, 0.4); }
+/* Catch cards with limits: option sub-lines, tones, the size stepper. */
+.live-card-choice { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.live-card-choice-sub { font-size: 0.72rem; font-weight: 500; opacity: 0.85; line-height: 1.25; }
+.live-card-choice.tone-warn { border-color: #fbbf24; }
+.live-card-choice.tone-full { border-color: #f87171; background: rgba(220, 38, 38, 0.28); }
+.live-card-choice.selected.tone-warn, .live-card-choice.selected.tone-full { background: #16a34a; border-color: #bbf7d0; }
+.live-card-stepper { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 12px; }
+.live-card-stepper-value { text-align: center; font-size: 3.6rem; font-weight: 800; line-height: 1.1; padding-top: 6px; }
+.live-card-stepper-value.small { color: #fca5a5; font-size: 2.6rem; }
+.live-card-stepper-verdict { text-align: center; min-height: 1.5em; font-weight: 600; }
+.live-card-stepper-verdict.tone-ok { color: #86efac; }
+.live-card-stepper-verdict.tone-big { color: #fde68a; }
+.live-card-stepper-verdict.tone-bad { color: #fca5a5; }
+.live-card-stepper-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.live-card-stepper-btns .live-card-choice { min-height: 68px; font-size: 1.5rem; }
+.live-card-toosmall { min-height: 64px; }
+.mark-limit-warning { margin: 6px 0; padding: 6px 8px; border-radius: 6px; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; font-size: 0.8rem; }

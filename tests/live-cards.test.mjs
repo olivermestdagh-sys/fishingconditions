@@ -4,10 +4,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const src = fs.readFileSync(new URL("../js/live-cards.js", import.meta.url), "utf8");
+const limitsSrc = fs.readFileSync(new URL("../js/catch-limits.js", import.meta.url), "utf8"); // live-cards uses its rules (loaded first on the page)
 // Everything above the DOM section is pure; evaluate just that part.
 const pure = src.slice(0, src.indexOf("// --- DOM:"));
 const fns = new Function(
-  pure + "\nreturn { catchSizeOptions, normaliseSessionDefaults, markListValues, sessionCardOptions, buildSessionCardSteps, applySessionCardChoice, buildCatchCardSteps, buildCatchFromCards, emptySessionDefaults };"
+  limitsSrc + "\n" + pure + "\nreturn { normaliseSessionDefaults, markListValues, sessionCardOptions, buildSessionCardSteps, applySessionCardChoice, buildCatchCardSteps, buildCatchFromCards, emptySessionDefaults, applySizeAction, catchCardState, sizeVerdictText, catchSavedMessage, speciesSublabels };"
 )();
 
 const lists = [
@@ -18,13 +19,6 @@ const lists = [
   { field: "Bait", value: "Prawn" }, { field: "Bait", value: "Squid" },
 ];
 const options = fns.sessionCardOptions(lists);
-
-test("size buttons run 20 to 40 cm", () => {
-  const sizes = fns.catchSizeOptions();
-  assert.equal(sizes[0], 20);
-  assert.equal(sizes[sizes.length - 1], 40);
-  assert.equal(sizes.length, 21);
-});
 
 test("option lists come from the mark list rows, in order, without duplicates", () => {
   assert.deepEqual(options.species, ["Bream", "Whiting"]);
@@ -90,12 +84,13 @@ test("deselecting a rod discards its rig and bait; the input draft is never muta
 test("catch cards: only target species and session rods; fall back to the full lists with a hint", () => {
   const defaults = { ...fns.emptySessionDefaults(), species: ["Whiting"], rods: ["Heavy"], rodSetups: { Heavy: { rig: "", bait: "" } } };
   const steps = fns.buildCatchCardSteps(options, defaults);
-  assert.deepEqual(steps.map((s) => s.id), ["species", "size", "rod"]);
+  assert.deepEqual(steps.map((s) => s.id), ["species", "size", "fate", "rod"]);
   // targets first, then a divider position, then every other species
   assert.deepEqual(steps[0].options, ["Whiting", "Bream"]);
   assert.equal(steps[0].dividerAfter, 1);
-  assert.deepEqual(steps[2].options, ["Heavy"]);
-  assert.ok(steps.every((s) => s.required));
+  assert.deepEqual(steps[3].options, ["Heavy"]);
+  assert.ok([steps[0], steps[2], steps[3]].every((s) => s.required), "species, keep/release and rod need an answer; the stepper always has a value");
+  assert.equal(steps[1].kind, "stepper");
   const fallback = fns.buildCatchCardSteps(options, fns.emptySessionDefaults());
   assert.deepEqual(fallback[0].options, options.species);
   assert.equal(fallback[0].dividerAfter, 0);
@@ -124,4 +119,124 @@ test("catch mark: type Catch, rig/bait from the rod, water and berley from the s
 test("catch mark leaves unset fields off", () => {
   const m = fns.buildCatchFromCards({ id: "m_2", lat: 1, lng: 2, dateTime: "d", species: "Bream", size: "", rod: "" }, fns.emptySessionDefaults(), {});
   for (const k of ["size", "rod", "rig", "bait", "waterCondition", "berley", "tideCondition", "tideExtreme"]) assert.ok(!(k in m), k);
+});
+
+// --- limits in the Catch flow -------------------------------------------------------------------------------
+const H = 3600000;
+const T0 = Date.UTC(2026, 8, 22, 6, 0, 0);
+const limitLists = [
+  { field: "Species", value: "Snapper", minSize: 28, maxQty: 10, bigSize: 40, bigMaxQty: 3 },
+  { field: "Species", value: "Shark (School)", minSize: 45, maxQty: 2, qtyGroup: "G" },
+  { field: "Species", value: "Shark (Gummy)", minSize: 45, maxQty: 2, qtyGroup: "G" },
+  { field: "Species", value: "Elephant Fish" },
+  { field: "Rod", value: "Light" },
+];
+const lopts = fns.sessionCardOptions(limitLists);
+const ldefaults = { ...fns.emptySessionDefaults(), species: ["Snapper"], rods: ["Light"], rodSetups: { Light: { rig: "", bait: "" } } };
+const kept = (id, species, hours, size = null, released = false) => ({ id, species, size, released, tMs: T0 + hours * H });
+const lrun = [kept("1", "Snapper", 0, 41), kept("2", "Snapper", 1, 30), kept("3", "Shark (School)", 2)];
+const stepsFor = (answers, run = lrun) => fns.buildCatchCardSteps(lopts, ldefaults, { answers, run, catches: run });
+const byId = (steps, id) => steps.find((s) => s.id === id);
+
+test("size stepper actions: steps from where it starts, never below 0, Too small toggles", () => {
+  assert.equal(fns.applySizeAction(undefined, "delta:5", 28), 33);
+  assert.equal(fns.applySizeAction(33, "delta:-1", 28), 32);
+  assert.equal(fns.applySizeAction(3, "delta:-10", 28), 0);
+  assert.equal(fns.applySizeAction(33.5, "delta:1", 28), 34.5);
+  assert.equal(fns.applySizeAction(33, "tooSmall", 28), "small");
+  assert.equal(fns.applySizeAction("small", "tooSmall", 28), undefined, "pressing Too small again undoes it");
+  assert.equal(fns.applySizeAction("small", "delta:1", 28), 29, "stepping after Too small goes numeric from the start size");
+  assert.equal(fns.applySizeAction(33, "nonsense", 28), 33);
+});
+
+test("the stepper starts at the min size and shows its verdict; Too small removes the keep/release card", () => {
+  const steps = stepsFor({ species: "Snapper" }, []);
+  const size = byId(steps, "size");
+  assert.equal(size.value, 28, "no earlier size for this species: starts at its Min Size");
+  assert.equal(size.minSize, 28);
+  assert.equal(size.verdict.text, "Legal size");
+  assert.ok(byId(steps, "fate"));
+  const small = stepsFor({ species: "Snapper", size: "small" });
+  assert.equal(byId(small, "size").tooSmall, true);
+  assert.equal(byId(small, "size").value, null);
+  assert.equal(byId(small, "fate"), undefined, "Too small decides Release itself");
+  assert.deepEqual(small.map((s) => s.id), ["species", "size", "rod"]);
+});
+
+test("the stepper starts at the last size caught of that species", () => {
+  const run = [kept("1", "Snapper", 0, 36)];
+  assert.equal(byId(stepsFor({ species: "Snapper" }, run), "size").value, 36);
+});
+
+test("verdict text: too small, over slot, big, legal, nothing when no limits", () => {
+  const lim = { minSize: 28, maxSize: 60, bigSize: 40 };
+  assert.match(fns.sizeVerdictText(lim, 20).text, /Under the minimum size \(28 cm\)/);
+  assert.equal(fns.sizeVerdictText(lim, 20).tone, "bad");
+  assert.match(fns.sizeVerdictText(lim, 61).text, /Over the maximum size \(60 cm\)/);
+  assert.deepEqual(fns.sizeVerdictText(lim, 45), { text: "Big fish", tone: "big" });
+  assert.deepEqual(fns.sizeVerdictText(lim, 30), { text: "Legal size", tone: "ok" });
+  assert.deepEqual(fns.sizeVerdictText(undefined, 30), { text: "", tone: "" });
+  assert.deepEqual(fns.sizeVerdictText({ maxQty: 5 }, 30), { text: "", tone: "" });
+});
+
+test("keep/release card: recommendation pre-selected with its reason, the person can override", () => {
+  let fate = byId(stepsFor({ species: "Snapper", size: 35 }), "fate");
+  assert.deepEqual(fate.selected, ["Keep"]);
+  assert.match(fate.hint, /makes 3 of 10/);
+  assert.equal(fate.sublabels.Keep.line1, "Recommended");
+  fate = byId(stepsFor({ species: "Snapper", size: 35, fate: "Release" }), "fate");
+  assert.deepEqual(fate.selected, ["Release"], "an override is kept");
+  const bag = Array.from({ length: 10 }, (_, i) => kept(`b${i}`, "Snapper", i * 0.1, 30));
+  fate = byId(stepsFor({ species: "Snapper", size: 35 }, bag), "fate");
+  assert.deepEqual(fate.selected, ["Release"]);
+  assert.match(fate.hint, /Bag full: 10 of 10 kept/);
+  fate = byId(stepsFor({ species: "Snapper", size: 20 }), "fate");
+  assert.deepEqual(fate.selected, ["Release"], "under the minimum size");
+});
+
+test("species cards show limits and how many are kept, once the run is known", () => {
+  const species = byId(stepsFor({}), "species");
+  assert.deepEqual(species.sublabels.Snapper, { line1: "Min 28 cm · Max qty 10 · Big 40+ cm (3)", line2: "Kept 2/10 · big 1/3", tone: "" });
+  assert.equal(species.sublabels["Shark (School)"].line2, "Kept 1/2 (shared with Shark (Gummy))");
+  assert.equal(species.sublabels["Shark (School)"].tone, "warn");
+  assert.equal(species.sublabels["Elephant Fish"], undefined, "no limits and nothing to say");
+  const unknown = byId(fns.buildCatchCardSteps(lopts, ldefaults, { answers: {}, run: null }), "species");
+  assert.equal(unknown.sublabels.Snapper.line2, "", "before the marks load: limits only");
+  const session = fns.buildSessionCardSteps(lopts, fns.emptySessionDefaults(), { run: lrun });
+  assert.equal(session[0].sublabels.Snapper.line2, "Kept 2/10 · big 1/3", "the same blurb while choosing targets");
+});
+
+test("selecting the species starts the size and keep/release answers again in the flow's state reading", () => {
+  const st = fns.catchCardState(lopts, { answers: { species: "Snapper", size: 44 }, run: lrun, catches: lrun });
+  assert.equal(st.size, 44);
+  assert.equal(st.fate, "Keep");
+  assert.equal(st.released, false);
+  const undecided = fns.catchCardState(lopts, { answers: { species: "Snapper" }, run: lrun, catches: lrun });
+  assert.equal(undecided.size, 30, "untouched stepper means its start value (here the last Snapper size)");
+  assert.equal(fns.catchCardState(lopts, { answers: { species: "Snapper" }, run: [], catches: [] }).size, 28, "no earlier catch: the Min Size");
+  const small = fns.catchCardState(lopts, { answers: { species: "Snapper", size: "small", fate: "Keep" }, run: lrun, catches: lrun });
+  assert.deepEqual([small.tooSmall, small.released, small.fate], [true, true, "Release"], "Too small always releases");
+});
+
+test("catch mark: released fish, and Too small (no size, a note, released)", () => {
+  const base = { id: "m_9", lat: 1, lng: 2, dateTime: "d", species: "Snapper", rod: "" };
+  const kept1 = fns.buildCatchFromCards({ ...base, size: 35, released: false }, fns.emptySessionDefaults(), {});
+  assert.ok(!("released" in kept1));
+  assert.equal(kept1.size, 35);
+  const rel = fns.buildCatchFromCards({ ...base, size: 35, released: true }, fns.emptySessionDefaults(), {});
+  assert.equal(rel.released, true);
+  assert.equal(rel.size, 35);
+  const small = fns.buildCatchFromCards({ ...base, size: null, tooSmall: true, released: true }, fns.emptySessionDefaults(), {});
+  assert.equal(small.released, true);
+  assert.equal(small.notes, "Too small");
+  assert.ok(!("size" in small));
+});
+
+test("saved-catch message says what happened and where the bag stands", () => {
+  const lim = { maxQty: 10 };
+  assert.equal(fns.catchSavedMessage({ species: "Snapper", tooSmall: true, released: true, lim }, null), "Snapper: too small, released");
+  assert.equal(fns.catchSavedMessage({ species: "Snapper", tooSmall: false, released: true, lim }, null), "Snapper released");
+  assert.equal(fns.catchSavedMessage({ species: "Snapper", tooSmall: false, released: false, lim }, { kept: 3 }), "Snapper kept: 3 of 10 in this run");
+  assert.equal(fns.catchSavedMessage({ species: "Bream", tooSmall: false, released: false, lim: {} }, { kept: 2 }), "Bream kept: 2 in this run");
+  assert.equal(fns.catchSavedMessage({ species: "Bream", tooSmall: false, released: false, lim: {} }, null), "Bream kept");
 });

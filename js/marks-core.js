@@ -732,6 +732,7 @@ function buildMarkPopupEditHtml(mark, markLists) {
             Released
           </label>
         </div>
+        <div data-limit-warning class="mark-limit-warning" role="status" style="display:none;"></div>
         <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Source
           <input type="text" readonly value="${escapeHtml(mark.source || "—")}"
             style="${MARK_POPUP_INPUT_STYLE}background:var(--grey-100);color:var(--grey-500);cursor:not-allowed;" />
@@ -1188,6 +1189,34 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
   if (form) {
     const typeSelect = form.querySelector("[data-mark-type-select]");
     const speciesSelect = form.querySelector('[name="species"]');
+
+    // A Catch that breaks a limit (kept but under the min size, over the max size, over the bag or the big-fish limit) gets
+    // a warning under the form, refreshed as the species, size, date/time or Released change. Needs js/catch-limits.js
+    // and the loaded marks (options.state), so it is quietly absent on pages without them.
+    const warnEl = form.querySelector("[data-limit-warning]");
+    const refreshLimitWarning = () => {
+      if (!warnEl) return;
+      let messages = [];
+      if (typeof catchLimitWarnings === "function" && options.state && typeSelect && typeSelect.value === "Catch") {
+        const species = form.querySelector('[name="species"]').value;
+        const sizeRaw = form.querySelector('[name="size"]').value;
+        const tMs = parseNaive(datetimeLocalToNaive(form.querySelector('[name="dateTime"]').value));
+        if (species && Number.isFinite(tMs)) {
+          const limits = limitsFromMarkLists(options.state.markLists || []);
+          const catches = catchesFromMarks(options.state.marksById.values(), parseNaive);
+          messages = catchLimitWarnings(
+            { id: mark.id, species, size: sizeRaw === "" ? null : Number(sizeRaw), released: form.querySelector('[name="released"]').checked, tMs },
+            limits,
+            catches
+          );
+        }
+      }
+      warnEl.textContent = messages.join(" ");
+      warnEl.style.display = messages.length ? "" : "none";
+    };
+    form.addEventListener("input", refreshLimitWarning);
+    form.addEventListener("change", refreshLimitWarning);
+    if (typeSelect) refreshLimitWarning();
     if (typeSelect) {
       applyMarkFieldVisibility(form, typeSelect.value);
       applyMultiControlModes(form, typeSelect.value);
