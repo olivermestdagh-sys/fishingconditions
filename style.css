@@ -3653,17 +3653,22 @@ body.live-card-open { overflow: hidden; }
 .live-card-choice.live-card-digit { min-height: 38px; padding: 2px; font-size: 1.15rem; }
 /* Size stepper, second layout: two digit columns (10s: 1-12, 1s: 0-9) that share the remaining height so every number is visible. */
 .live-card-grid-stepper { align-content: stretch; grid-template-rows: minmax(0, 1fr); overflow-y: auto; }
-.live-card-grid-gallery { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-/* REAL BUG, FOUND AND FIXED: aspect-ratio on the <img> itself (a replaced element) inside this flex-column button,
-   width:100% of a CSS Grid fr-track, overflowed its own box in real Chrome (confirmed directly: a 180x180 image sat
-   inside a 72px-tall button) — the two-pass grid/flex intrinsic-sizing calculation for a REPLACED element's
-   aspect-ratio doesn't reliably feed back into the grid row's auto height. A synthetic single-image test didn't
-   catch it; a real page with many real (non-square) pictures did. Fix: put the fixed ratio on the button itself
-   (a plain, non-replaced element — the well-supported, spec'd case for a Grid item's own aspect-ratio setting its
-   row's height) and let the image just grow to fill whatever's left after the caption, via flex, not aspect-ratio. */
-.live-card-gallery-item { padding: 4px; gap: 4px; aspect-ratio: 3 / 4; overflow: hidden; }
-.live-card-gallery-item img { flex: 1 1 auto; min-height: 0; width: 100%; object-fit: contain; background: rgba(255, 255, 255, 0.08); border-radius: 8px; }
-.live-card-gallery-item span { flex: 0 0 auto; font-size: 0.72rem; font-weight: 600; text-align: center; }
+/* align-items: start (not the grid default "stretch") — each cell sizes to its OWN picture's natural height rather
+   than every cell in a row being stretched to match its tallest row-mate. */
+.live-card-grid-gallery { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+/* REAL BUG, FOUND AND FIXED (twice): first, aspect-ratio on the <img> itself didn't reliably feed into the grid
+   row's height (fixed by moving the ratio to the button). Then, on real devices, the *box* the picture sat in was
+   confirmed correctly sized (measured directly in the browser: img element 180x228 inside a 192x256 button) yet the
+   PICTURE ITSELF still visibly overflowed past it — object-fit:contain was computing the right box without actually
+   scaling the drawn content to fit it, on a size arrived at via flex-grow rather than a size the image carries
+   itself. Real fix: give up trying to fit the picture INTO a box at all — no aspect-ratio, no object-fit, nothing
+   flex-grown. Just a plain image at its own natural proportions (width 100%, height auto), so what's drawn and
+   what's laid out are the same calculation; the button (ordinary flex-column content sizing, no fixed ratio) just
+   grows to whatever that picture turns out to be. Cells are no longer a uniform size — different pictures are
+   different shapes — but nothing can overflow a box it was never forced into in the first place. */
+.live-card-gallery-item { padding: 4px; gap: 4px; }
+.live-card-gallery-item img { width: 100%; height: auto; display: block; border-radius: 8px; }
+.live-card-gallery-item span { font-size: 0.72rem; font-weight: 600; text-align: center; }
 .live-card-stepper { min-height: 100%; }
 .live-card-digit-cols { flex: 1 1 auto; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; min-height: 0; }
 .live-card-digit-col { min-height: 0; }
