@@ -145,13 +145,12 @@ function applySizeAction(current, action, start) {
   const base = typeof current === "number" ? current : start;
   const step = /^delta:(-?\d+(?:\.\d+)?)$/.exec(action);
   if (step) return Math.max(0, Math.round((base + Number(step[1])) * 10) / 10);
-  // "digit:<place>:<n>": set just the hundreds (100), tens (10) or ones (1) digit of the whole-cm size, e.g. 38 + "digit:10:4" = 48
-  const digit = /^digit:(100|10|1):(\d)$/.exec(action);
-  if (digit) {
-    const place = Number(digit[1]);
-    const whole = Math.floor(base);
-    return whole - (Math.floor(whole / place) % 10) * place + Number(digit[2]) * place;
-  }
+  // "tens:<n>" sets the tens (n = 1..12, so 10..120 cm) and keeps the ones digit: 38 + "tens:4" = 48, 38 + "tens:12" = 128.
+  // "ones:<n>" sets the ones digit (0..9) and keeps the tens: 38 + "ones:5" = 35. Both work in whole cm.
+  const tens = /^tens:(\d{1,2})$/.exec(action);
+  if (tens) return Number(tens[1]) * 10 + (Math.floor(base) % 10);
+  const ones = /^ones:(\d)$/.exec(action);
+  if (ones) return Math.floor(base / 10) * 10 + Number(ones[1]);
   return current;
 }
 
@@ -306,6 +305,16 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
     document.body.classList.remove("live-card-open");
   };
 
+  // On to the next card, or done when this is the last one.
+  function advance() {
+    if (index >= getSteps().length - 1) {
+      onDone();
+      return;
+    }
+    index += 1;
+    render();
+  }
+
   function render() {
     const steps = getSteps();
     if (index >= steps.length) index = steps.length - 1;
@@ -323,14 +332,17 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
     };
     const stepperHtml = () => {
       const verdict = step.verdict || { text: "", tone: "" };
-      // The digit columns highlight the current size's hundreds, tens and ones (nothing while Too small is chosen).
+      // Two columns set the size directly: 10s (1..12 = 10..120 cm) and 1s (0..9). The current size's buttons are
+      // highlighted (nothing while Too small is chosen).
       const whole = step.tooSmall || step.value == null ? null : Math.floor(step.value);
-      const column = (caption, place, digits) => `
+      const column = (caption, action, numbers, isCurrent) => `
         <div class="live-card-digit-col">
           <div class="live-card-digit-caption">${caption}</div>
-          ${digits.map((n) => `<button type="button" class="live-card-choice live-card-digit${whole != null && Math.floor(whole / place) % 10 === n ? " selected" : ""}" data-stepper="digit:${place}:${n}">${n}</button>`).join("")}
+          <div class="live-card-digit-buttons">
+            ${numbers.map((n) => `<button type="button" class="live-card-choice live-card-digit${whole != null && isCurrent(n) ? " selected" : ""}" data-stepper="${action}:${n}">${n}</button>`).join("")}
+          </div>
         </div>`;
-      const range = (to) => Array.from({ length: to + 1 }, (_, i) => i);
+      const range = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
       return `
         <div class="live-card-stepper">
           <div class="live-card-stepper-row">
@@ -341,9 +353,8 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
           <div class="live-card-stepper-verdict${verdict.tone ? ` tone-${verdict.tone}` : ""}">${escapeHtml(verdict.text) || "&nbsp;"}</div>
           ${step.minSize != null ? `<button type="button" class="live-card-choice live-card-toosmall${step.tooSmall ? " selected" : ""}" data-stepper="tooSmall" aria-pressed="${step.tooSmall}">Too small (under ${escapeHtml(step.minSize)} cm)</button>` : ""}
           <div class="live-card-digit-cols">
-            ${column("100s", 100, range(2))}
-            ${column("10s", 10, range(9))}
-            ${column("1s", 1, range(9))}
+            ${column("10s", "tens", range(1, 12), (n) => Math.floor(whole / 10) === n)}
+            ${column("1s", "ones", range(0, 9), (n) => whole % 10 === n)}
           </div>
         </div>`;
     };
@@ -360,7 +371,7 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
           <p class="live-card-prompt">${escapeHtml(step.prompt)}${step.multi ? " (pick any)" : ""}</p>
           ${step.hint ? `<p class="live-card-hint">${escapeHtml(step.hint)}</p>` : ""}
         </div>
-        <div class="live-card-grid">${buttons}</div>
+        <div class="live-card-grid${step.kind === "stepper" ? " live-card-grid-stepper" : ""}">${buttons}</div>
         <div class="live-card-nav">
           <button type="button" class="live-card-nav-btn" data-nav="prev"${index === 0 ? " disabled" : ""}>Prev</button>
           <button type="button" class="live-card-nav-btn live-card-close" data-nav="close">Close</button>
@@ -369,19 +380,30 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
       </div>`;
     const grid = overlay.querySelector(".live-card-grid");
     grid.scrollTop = 0;
+    // Choosing on a single-choice card moves straight on to the next card (or finishes, on the last one). Pressing the value
+    // that is already chosen just moves on rather than clearing it. Multi-choice cards ("pick any") stay put.
     overlay.querySelectorAll("[data-choice]").forEach((btn) =>
       btn.addEventListener("click", () => {
-        onChoose(step, step.options[Number(btn.dataset.choice)]);
+        const value = step.options[Number(btn.dataset.choice)];
+        if (!step.multi) {
+          if (!step.selected.includes(value)) onChoose(step, value);
+          advance();
+          return;
+        }
+        onChoose(step, value);
         const scrollTop = grid.scrollTop;
         render();
         overlay.querySelector(".live-card-grid").scrollTop = scrollTop;
       })
     );
-    // The size stepper's buttons pass an action ("delta:-5", "tooSmall") instead of an option value.
+    // The size stepper's buttons pass an action ("delta:1", "tens:4", "ones:2", "tooSmall") instead of an option value.
+    // Only Too small moves on (when it has just been chosen); the number buttons stay so the size can be adjusted.
     overlay.querySelectorAll("[data-stepper]").forEach((btn) =>
       btn.addEventListener("click", () => {
         onChoose(step, btn.dataset.stepper);
-        render();
+        const now = getSteps()[index];
+        if (btn.dataset.stepper === "tooSmall" && now && now.tooSmall) advance();
+        else render();
       })
     );
     overlay.querySelector('[data-nav="prev"]').addEventListener("click", () => {

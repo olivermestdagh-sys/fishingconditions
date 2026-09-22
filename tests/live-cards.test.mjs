@@ -149,17 +149,19 @@ test("size stepper actions: steps from where it starts, never below 0, Too small
   assert.equal(fns.applySizeAction(33, "nonsense", 28), 33);
 });
 
-test("digit buttons replace just that place of the size", () => {
-  assert.equal(fns.applySizeAction(38, "digit:10:4", 30), 48);
-  assert.equal(fns.applySizeAction(38, "digit:1:9", 30), 39);
-  assert.equal(fns.applySizeAction(38, "digit:100:1", 30), 138);
-  assert.equal(fns.applySizeAction(138, "digit:100:0", 30), 38);
-  assert.equal(fns.applySizeAction(138, "digit:10:0", 30), 108);
-  assert.equal(fns.applySizeAction(undefined, "digit:1:5", 28), 25, "untouched: works from the start size");
-  assert.equal(fns.applySizeAction("small", "digit:10:4", 28), 48, "after Too small it goes numeric from the start size");
-  assert.equal(fns.applySizeAction(33.5, "digit:1:9", 28), 39, "the digit buttons work in whole cm");
-  assert.equal(fns.applySizeAction(38, "digit:1000:1", 30), 38, "an unknown place is ignored");
-  assert.equal(fns.applySizeAction(38, "digit:10:12", 30), 38, "a two-digit value is ignored");
+test("tens and ones buttons set that part of the size and keep the other", () => {
+  assert.equal(fns.applySizeAction(38, "tens:4", 30), 48);
+  assert.equal(fns.applySizeAction(38, "tens:12", 30), 128, "12 tens = 120 cm");
+  assert.equal(fns.applySizeAction(38, "tens:10", 30), 108);
+  assert.equal(fns.applySizeAction(38, "ones:5", 30), 35);
+  assert.equal(fns.applySizeAction(128, "ones:0", 30), 120);
+  assert.equal(fns.applySizeAction(undefined, "ones:5", 28), 25, "untouched: works from the start size");
+  assert.equal(fns.applySizeAction(undefined, "tens:4", 28), 48, "the ones digit of the start size is kept");
+  assert.equal(fns.applySizeAction("small", "tens:4", 28), 48, "after Too small it goes numeric from the start size");
+  assert.equal(fns.applySizeAction(33.5, "ones:9", 28), 39, "the digit buttons work in whole cm");
+  assert.equal(fns.applySizeAction(38, "tens:", 30), 38, "malformed actions are ignored");
+  assert.equal(fns.applySizeAction(38, "ones:12", 30), 38);
+  assert.equal(fns.applySizeAction(38, "digit:10:4", 30), 38, "the old hundreds/tens/ones action no longer exists");
 });
 test("the stepper starts at the min size and shows its verdict; Too small removes the keep/release card", () => {
   const steps = stepsFor({ species: "Snapper" }, []);
