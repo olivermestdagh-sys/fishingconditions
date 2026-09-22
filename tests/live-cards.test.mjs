@@ -149,6 +149,18 @@ test("size stepper actions: steps from where it starts, never below 0, Too small
   assert.equal(fns.applySizeAction(33, "nonsense", 28), 33);
 });
 
+test("digit buttons replace just that place of the size", () => {
+  assert.equal(fns.applySizeAction(38, "digit:10:4", 30), 48);
+  assert.equal(fns.applySizeAction(38, "digit:1:9", 30), 39);
+  assert.equal(fns.applySizeAction(38, "digit:100:1", 30), 138);
+  assert.equal(fns.applySizeAction(138, "digit:100:0", 30), 38);
+  assert.equal(fns.applySizeAction(138, "digit:10:0", 30), 108);
+  assert.equal(fns.applySizeAction(undefined, "digit:1:5", 28), 25, "untouched: works from the start size");
+  assert.equal(fns.applySizeAction("small", "digit:10:4", 28), 48, "after Too small it goes numeric from the start size");
+  assert.equal(fns.applySizeAction(33.5, "digit:1:9", 28), 39, "the digit buttons work in whole cm");
+  assert.equal(fns.applySizeAction(38, "digit:1000:1", 30), 38, "an unknown place is ignored");
+  assert.equal(fns.applySizeAction(38, "digit:10:12", 30), 38, "a two-digit value is ignored");
+});
 test("the stepper starts at the min size and shows its verdict; Too small removes the keep/release card", () => {
   const steps = stepsFor({ species: "Snapper" }, []);
   const size = byId(steps, "size");

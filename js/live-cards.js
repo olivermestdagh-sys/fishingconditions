@@ -142,10 +142,17 @@ function applySessionCardChoice(draft, stepId, value) {
  */
 function applySizeAction(current, action, start) {
   if (action === "tooSmall") return current === "small" ? undefined : "small";
-  const m = /^delta:(-?\d+(?:\.\d+)?)$/.exec(action);
-  if (!m) return current;
   const base = typeof current === "number" ? current : start;
-  return Math.max(0, Math.round((base + Number(m[1])) * 10) / 10);
+  const step = /^delta:(-?\d+(?:\.\d+)?)$/.exec(action);
+  if (step) return Math.max(0, Math.round((base + Number(step[1])) * 10) / 10);
+  // "digit:<place>:<n>": set just the hundreds (100), tens (10) or ones (1) digit of the whole-cm size, e.g. 38 + "digit:10:4" = 48
+  const digit = /^digit:(100|10|1):(\d)$/.exec(action);
+  if (digit) {
+    const place = Number(digit[1]);
+    const whole = Math.floor(base);
+    return whole - (Math.floor(whole / place) % 10) * place + Number(digit[2]) * place;
+  }
+  return current;
 }
 
 /**
@@ -316,15 +323,28 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
     };
     const stepperHtml = () => {
       const verdict = step.verdict || { text: "", tone: "" };
-      const deltas = [-10, -5, -1, 1, 5, 10];
+      // The digit columns highlight the current size's hundreds, tens and ones (nothing while Too small is chosen).
+      const whole = step.tooSmall || step.value == null ? null : Math.floor(step.value);
+      const column = (caption, place, digits) => `
+        <div class="live-card-digit-col">
+          <div class="live-card-digit-caption">${caption}</div>
+          ${digits.map((n) => `<button type="button" class="live-card-choice live-card-digit${whole != null && Math.floor(whole / place) % 10 === n ? " selected" : ""}" data-stepper="digit:${place}:${n}">${n}</button>`).join("")}
+        </div>`;
+      const range = (to) => Array.from({ length: to + 1 }, (_, i) => i);
       return `
         <div class="live-card-stepper">
-          <div class="live-card-stepper-value${step.tooSmall ? " small" : ""}">${step.tooSmall ? "Too small" : `${escapeHtml(step.value)} cm`}</div>
-          <div class="live-card-stepper-verdict${verdict.tone ? ` tone-${verdict.tone}` : ""}">${escapeHtml(verdict.text) || "&nbsp;"}</div>
-          <div class="live-card-stepper-btns">
-            ${deltas.map((d) => `<button type="button" class="live-card-choice" data-stepper="delta:${d}">${d > 0 ? "+" : "&minus;"}${Math.abs(d)}</button>`).join("")}
+          <div class="live-card-stepper-row">
+            <button type="button" class="live-card-choice live-card-step-btn" data-stepper="delta:-1" aria-label="One cm smaller">&minus;</button>
+            <div class="live-card-stepper-value${step.tooSmall ? " small" : ""}">${step.tooSmall ? "Too small" : `${escapeHtml(step.value)}<span class="live-card-stepper-unit"> cm</span>`}</div>
+            <button type="button" class="live-card-choice live-card-step-btn" data-stepper="delta:1" aria-label="One cm bigger">+</button>
           </div>
+          <div class="live-card-stepper-verdict${verdict.tone ? ` tone-${verdict.tone}` : ""}">${escapeHtml(verdict.text) || "&nbsp;"}</div>
           ${step.minSize != null ? `<button type="button" class="live-card-choice live-card-toosmall${step.tooSmall ? " selected" : ""}" data-stepper="tooSmall" aria-pressed="${step.tooSmall}">Too small (under ${escapeHtml(step.minSize)} cm)</button>` : ""}
+          <div class="live-card-digit-cols">
+            ${column("100s", 100, range(2))}
+            ${column("10s", 10, range(9))}
+            ${column("1s", 1, range(9))}
+          </div>
         </div>`;
     };
     const buttons = step.kind === "stepper"

@@ -3633,7 +3633,20 @@ body.live-card-open { overflow: hidden; }
 .live-card-stepper-verdict.tone-ok { color: #86efac; }
 .live-card-stepper-verdict.tone-big { color: #fde68a; }
 .live-card-stepper-verdict.tone-bad { color: #fca5a5; }
-.live-card-stepper-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.live-card-stepper-btns .live-card-choice { min-height: 68px; font-size: 1.5rem; }
 .live-card-toosmall { min-height: 64px; }
 .mark-limit-warning { margin: 6px 0; padding: 6px 8px; border-radius: 6px; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; font-size: 0.8rem; }
+/* Size stepper: - number + row, Too small, then 100s / 10s / 1s digit columns. */
+.live-card-stepper { gap: 10px; }
+.live-card-stepper-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) 76px; gap: 10px; align-items: center; }
+.live-card-step-btn { min-height: 76px; font-size: 2.2rem; font-weight: 700; }
+.live-card-stepper-value { padding-top: 0; }
+.live-card-stepper-unit { font-size: 1.3rem; font-weight: 600; opacity: 0.8; }
+.live-card-digit-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; }
+.live-card-digit-col { display: flex; flex-direction: column; gap: 6px; }
+.live-card-digit-caption { text-align: center; font-size: 0.8rem; opacity: 0.8; }
+.live-card-choice.live-card-digit { min-height: 44px; padding: 4px; font-size: 1.25rem; }.live-card-stepper { gap: 8px; }
+.live-card-step-btn { min-height: 64px; }
+.live-card-stepper-value { font-size: 3.2rem; }
+.live-card-toosmall { min-height: 52px; }
+.live-card-digit-col { gap: 4px; }
+.live-card-choice.live-card-digit { min-height: 38px; padding: 2px; font-size: 1.15rem; }
