@@ -302,6 +302,52 @@ function saveSessionDefaults(defaults) {
 // --- DOM: the full-screen card stack ------------------------------------------------------------
 
 /**
+ * The full-screen "is this the one?" check shown after the first tap on a picture in the Species card's image gallery
+ * (showCardFlow below). Reuses the Settings picture viewer's own CSS skeleton (`.species-image-viewer*`, see
+ * openSpeciesImageViewer in locationsadmin.js) — same full-screen dark layout with the picture centered and scaled to
+ * fit — just with "This one" / "Not this one" instead of Replace/Delete. `sublabel`, when given, is the species' own
+ * limits/kept-so-far blurb (the same text already shown under its name on the plain list) — worth having right here,
+ * since it can be exactly what decides "keep it or try another picture". `onConfirm` runs on "This one"; the backdrop,
+ * ×, Escape and "Not this one" all just close it back to the gallery grid.
+ */
+function showGalleryImageConfirm(item, sublabel, { onConfirm }) {
+  const overlay = document.createElement("div");
+  overlay.className = "species-image-viewer";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.innerHTML = `
+    <div class="species-image-viewer-top">
+      <span>${escapeHtml(item.species)}${sublabel && sublabel.line2 ? ` · ${escapeHtml(sublabel.line2)}` : ""}</span>
+      <button type="button" data-v="close" aria-label="Close">&times;</button>
+    </div>
+    <div class="species-image-viewer-stage">
+      <img src="${escapeHtml(speciesImageUrl(item))}" alt="${escapeHtml(item.species)}" />
+    </div>
+    <div class="species-image-viewer-actions">
+      <button type="button" class="primary" data-v="confirm">This one</button>
+      <button type="button" data-v="cancel">Not this one</button>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => {
+    document.removeEventListener("keydown", onKey);
+    overlay.remove();
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape") close();
+  };
+  document.addEventListener("keydown", onKey);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.classList.contains("species-image-viewer-stage")) close();
+  });
+  overlay.querySelector('[data-v="close"]').addEventListener("click", close);
+  overlay.querySelector('[data-v="cancel"]').addEventListener("click", close);
+  overlay.querySelector('[data-v="confirm"]').addEventListener("click", () => {
+    close();
+    onConfirm();
+  });
+}
+
+/**
  * Shows the cards full-screen. Options:
  *   getSteps(): the current steps (called after every choice, since choosing can change later cards)
  *   onChoose(step, value): a button was pressed
@@ -435,12 +481,18 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
         overlay.querySelector(".live-card-grid").scrollTop = scrollTop;
       })
     );
-    // Choosing a picture selects the species it belongs to, exactly like tapping its name would, then moves straight on.
+    // A picture's first tap opens it full screen to confirm, rather than selecting straight away — small thumbnails can
+    // be hard to tell apart. "This one" selects the species it belongs to (same as tapping its name) and moves on;
+    // "Not this one" just closes the preview, back on the same picture grid.
     overlay.querySelectorAll("[data-gallery]").forEach((btn) =>
       btn.addEventListener("click", () => {
         const item = step.images[Number(btn.dataset.gallery)];
-        onChoose(step, item.species);
-        advance();
+        showGalleryImageConfirm(item, step.sublabels && step.sublabels[item.species], {
+          onConfirm: () => {
+            onChoose(step, item.species);
+            advance();
+          },
+        });
       })
     );
     const galleryToggleBtn = overlay.querySelector("[data-gallery-toggle]");

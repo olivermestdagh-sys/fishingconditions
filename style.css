@@ -3680,3 +3680,4 @@ body.live-card-open { overflow: hidden; }
 .species-image-viewer-actions { display: flex; justify-content: center; gap: 12px; padding: 12px 14px 16px; }
 .species-image-viewer-actions button { min-width: 120px; padding: 12px 18px; border-radius: 10px; border: 2px solid rgba(255, 255, 255, 0.6); background: transparent; color: #fff; font-size: 1rem; font-weight: 700; cursor: pointer; }
 .species-image-viewer-actions button.danger { border-color: #f87171; color: #fca5a5; }
+.species-image-viewer-actions button.primary { background: #16a34a; border-color: #bbf7d0; }
