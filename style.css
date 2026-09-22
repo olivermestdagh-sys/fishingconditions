@@ -3608,6 +3608,7 @@ body.live-card-open { overflow: hidden; }
 .live-card-title { margin: 2px 0 0; font-size: 1.6rem; color: #fff; }
 .live-card-prompt { margin: 4px 0 10px; font-size: 1rem; opacity: 0.9; }
 .live-card-hint { margin: 0 0 10px; font-size: 0.85rem; color: #fde68a; }
+.live-card-gallery-toggle { display: block; margin: 0 0 6px; padding: 6px 4px; background: none; border: none; color: #93c5fd; font-size: 0.85rem; font-weight: 600; text-decoration: underline; cursor: pointer; }
 .live-card-grid { flex: 1 1 auto; overflow-y: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-content: start; padding: 2px 0 10px; -webkit-overflow-scrolling: touch; }
 .live-card-choice { min-height: 64px; padding: 10px 8px; border-radius: 14px; border: 2px solid rgba(255, 255, 255, 0.35); background: rgba(255, 255, 255, 0.08); color: #fff; font-size: 1.15rem; font-weight: 600; cursor: pointer; overflow-wrap: anywhere; }
 .live-card-choice.selected { background: #16a34a; border-color: #bbf7d0; }
@@ -3652,6 +3653,10 @@ body.live-card-open { overflow: hidden; }
 .live-card-choice.live-card-digit { min-height: 38px; padding: 2px; font-size: 1.15rem; }
 /* Size stepper, second layout: two digit columns (10s: 1-12, 1s: 0-9) that share the remaining height so every number is visible. */
 .live-card-grid-stepper { align-content: stretch; grid-template-rows: minmax(0, 1fr); overflow-y: auto; }
+.live-card-grid-gallery { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.live-card-gallery-item { padding: 4px; gap: 4px; }
+.live-card-gallery-item img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 8px; }
+.live-card-gallery-item span { font-size: 0.72rem; font-weight: 600; text-align: center; }
 .live-card-stepper { min-height: 100%; }
 .live-card-digit-cols { flex: 1 1 auto; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; min-height: 0; }
 .live-card-digit-col { min-height: 0; }
@@ -3663,8 +3668,8 @@ body.live-card-open { overflow: hidden; }
 .live-card-digit-buttons { gap: 3px; }
 .live-card-choice.live-card-digit { min-height: 26px; font-size: 1rem; }
 /* Species pictures (Settings): thumbnails on each species and the full-screen viewer. */
-.species-thumb { padding: 0; border: 2px solid rgba(255, 255, 255, 0.7); border-radius: 10px; overflow: hidden; width: 52px; height: 52px; background: var(--grey-200, #e5e7eb); cursor: zoom-in; }
-.species-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.species-thumb { padding: 0; border: 2px solid rgba(255, 255, 255, 0.7); border-radius: 10px; overflow: hidden; width: 56px; height: 56px; background: var(--grey-200, #e5e7eb); cursor: zoom-in; }
+.species-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .species-add-image { padding: 6px 10px; border-radius: 8px; border: 1px dashed currentColor; background: transparent; color: inherit; font-size: 0.75rem; font-weight: 600; cursor: pointer; }
 .species-image-viewer { position: fixed; inset: 0; z-index: 10002; background: rgba(0, 0, 0, 0.97); display: flex; flex-direction: column; color: #fff; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
 .species-image-viewer-top { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; font-weight: 600; }

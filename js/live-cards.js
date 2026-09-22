@@ -62,6 +62,23 @@ function markListValues(markLists, field) {
   return uniqueStrings((markLists || []).filter((row) => row && row.field === field).map((row) => row.value));
 }
 
+/** Each species' pictures ({id, version}, see js/species-image.js), keyed by species name. Species with none are left out. */
+function speciesImagesFromMarkLists(markLists) {
+  const out = {};
+  for (const row of markLists || []) {
+    if (!row || row.field !== "Species" || !Array.isArray(row.images) || !row.images.length) continue;
+    out[row.value] = row.images.map((img) => ({ id: img.id, version: img.version ?? null }));
+  }
+  return out;
+}
+
+/** Every species picture, flattened to {species, id, version} — what the Catch flow's "Select by image" gallery lists. */
+function allSpeciesImages(imagesBySpecies) {
+  const out = [];
+  for (const [species, images] of Object.entries(imagesBySpecies || {})) for (const img of images) out.push({ species, id: img.id, version: img.version });
+  return out;
+}
+
 /** Everything the cards can offer, keyed the way normaliseSessionDefaults expects. */
 function sessionCardOptions(markLists) {
   return {
@@ -72,6 +89,7 @@ function sessionCardOptions(markLists) {
     rigs: markListValues(markLists, "Rig"),
     baits: markListValues(markLists, "Bait"),
     limits: limitsFromMarkLists(markLists), // per-species limits (js/catch-limits.js), shown under species and used by the Catch flow
+    images: speciesImagesFromMarkLists(markLists), // species pictures (js/species-image.js), used by the Catch flow's "Select by image"
   };
 }
 
@@ -205,6 +223,7 @@ function buildCatchCardSteps(options, defaults, ctx = {}) {
       sublabels: speciesSublabels(speciesList, limits, ctx.run || null),
       dividerAfter: defaults.species.length && others.length ? defaults.species.length : 0, // index of the first "other" species, 0 = no divider
       hint: defaults.species.length ? "" : "No target species set — showing every species. Set them in Session defaults.",
+      images: allSpeciesImages(options.images), // every species picture, for "Select by image" — not just the targets
     },
     {
       id: "size", kind: "stepper", title: "Size", prompt: st.species ? `How big is the ${st.species}?` : "How big?", multi: false, required: false,
@@ -299,6 +318,10 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
   document.body.appendChild(overlay);
   document.body.classList.add("live-card-open");
   let index = 0;
+  // The species card's "Select by image" gallery: whether it is showing, reset whenever a different card comes into view
+  // (so returning to Species later starts back on the plain list).
+  let gallery = false;
+  let galleryStepId = null;
 
   const close = () => {
     overlay.remove();
@@ -320,8 +343,17 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
     if (index >= steps.length) index = steps.length - 1;
     if (index < 0) index = 0;
     const step = steps[index];
+    if (step.id !== galleryStepId) {
+      gallery = false;
+      galleryStepId = step.id;
+    }
     const isLast = index === steps.length - 1;
     const canNext = !step.required || step.selected.length > 0;
+    const galleryButton = (item, i) => `
+      <button type="button" class="live-card-choice live-card-gallery-item" data-gallery="${i}">
+        <img src="${escapeHtml(speciesImageUrl(item))}" alt="${escapeHtml(item.species)}" loading="lazy" />
+        <span>${escapeHtml(item.species)}</span>
+      </button>`;
     const optionButton = (value, i) => {
       const sub = step.sublabels && step.sublabels[value];
       const tone = sub && sub.tone ? ` tone-${sub.tone}` : "";
@@ -358,11 +390,17 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
           </div>
         </div>`;
     };
+    const hasGallery = Array.isArray(step.images) && step.images.length > 0;
     const buttons = step.kind === "stepper"
       ? stepperHtml()
-      : step.options.length
-        ? step.options.map((value, i) => (step.dividerAfter && i === step.dividerAfter ? `<div class="live-card-divider" role="separator">Other species</div>` : "") + optionButton(value, i)).join("")
-        : `<p class="live-card-empty">Nothing to choose yet — add options for this on the Settings tab.</p>`;
+      : gallery
+        ? step.images.map(galleryButton).join("")
+        : step.options.length
+          ? step.options.map((value, i) => (step.dividerAfter && i === step.dividerAfter ? `<div class="live-card-divider" role="separator">Other species</div>` : "") + optionButton(value, i)).join("")
+          : `<p class="live-card-empty">Nothing to choose yet — add options for this on the Settings tab.</p>`;
+    const galleryToggleHtml = hasGallery
+      ? `<button type="button" class="live-card-gallery-toggle" data-gallery-toggle>${gallery ? "&larr; Back to the list" : "Select by image &rarr;"}</button>`
+      : "";
     overlay.innerHTML = `
       <div class="live-card">
         <div class="live-card-head">
@@ -370,8 +408,9 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
           <h2 class="live-card-title">${escapeHtml(step.title)}</h2>
           <p class="live-card-prompt">${escapeHtml(step.prompt)}${step.multi ? " (pick any)" : ""}</p>
           ${step.hint ? `<p class="live-card-hint">${escapeHtml(step.hint)}</p>` : ""}
+          ${galleryToggleHtml}
         </div>
-        <div class="live-card-grid${step.kind === "stepper" ? " live-card-grid-stepper" : ""}">${buttons}</div>
+        <div class="live-card-grid${step.kind === "stepper" ? " live-card-grid-stepper" : ""}${gallery ? " live-card-grid-gallery" : ""}">${buttons}</div>
         <div class="live-card-nav">
           <button type="button" class="live-card-nav-btn" data-nav="prev"${index === 0 ? " disabled" : ""}>Prev</button>
           <button type="button" class="live-card-nav-btn live-card-close" data-nav="close">Close</button>
@@ -396,6 +435,21 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
         overlay.querySelector(".live-card-grid").scrollTop = scrollTop;
       })
     );
+    // Choosing a picture selects the species it belongs to, exactly like tapping its name would, then moves straight on.
+    overlay.querySelectorAll("[data-gallery]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const item = step.images[Number(btn.dataset.gallery)];
+        onChoose(step, item.species);
+        advance();
+      })
+    );
+    const galleryToggleBtn = overlay.querySelector("[data-gallery-toggle]");
+    if (galleryToggleBtn) {
+      galleryToggleBtn.addEventListener("click", () => {
+        gallery = !gallery;
+        render();
+      });
+    }
     // The size stepper's buttons pass an action ("delta:1", "tens:4", "ones:2", "tooSmall") instead of an option value.
     // Only Too small moves on (when it has just been chosen); the number buttons stay so the size can be adjusted.
     overlay.querySelectorAll("[data-stepper]").forEach((btn) =>

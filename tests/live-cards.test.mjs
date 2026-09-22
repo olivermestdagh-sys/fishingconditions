@@ -8,7 +8,7 @@ const limitsSrc = fs.readFileSync(new URL("../js/catch-limits.js", import.meta.u
 // Everything above the DOM section is pure; evaluate just that part.
 const pure = src.slice(0, src.indexOf("// --- DOM:"));
 const fns = new Function(
-  limitsSrc + "\n" + pure + "\nreturn { normaliseSessionDefaults, markListValues, sessionCardOptions, buildSessionCardSteps, applySessionCardChoice, buildCatchCardSteps, buildCatchFromCards, emptySessionDefaults, applySizeAction, catchCardState, sizeVerdictText, catchSavedMessage, speciesSublabels };"
+  limitsSrc + "\n" + pure + "\nreturn { normaliseSessionDefaults, markListValues, sessionCardOptions, buildSessionCardSteps, applySessionCardChoice, buildCatchCardSteps, buildCatchFromCards, emptySessionDefaults, applySizeAction, catchCardState, sizeVerdictText, catchSavedMessage, speciesSublabels, speciesImagesFromMarkLists, allSpeciesImages };"
 )();
 
 const lists = [
@@ -253,4 +253,46 @@ test("saved-catch message says what happened and where the bag stands", () => {
   assert.equal(fns.catchSavedMessage({ species: "Snapper", tooSmall: false, released: false, lim }, { kept: 3 }), "Snapper kept: 3 of 10 in this run");
   assert.equal(fns.catchSavedMessage({ species: "Bream", tooSmall: false, released: false, lim: {} }, { kept: 2 }), "Bream kept: 2 in this run");
   assert.equal(fns.catchSavedMessage({ species: "Bream", tooSmall: false, released: false, lim: {} }, null), "Bream kept");
+});
+
+// --- species pictures ("Select by image" on the Catch species card) ---------------------------------------------------
+const imageLists = [
+  ...limitLists,
+  { field: "Species", value: "Bream" }, // no images
+];
+imageLists.find((r) => r.value === "Snapper").images = [{ id: "img-1", version: 10 }, { id: "img-2", version: 20 }];
+imageLists.find((r) => r.value === "Shark (Gummy)").images = [{ id: "img-3", version: 30 }];
+
+test("species images are keyed by species, in the row's own order; species with none are left out", () => {
+  const images = fns.speciesImagesFromMarkLists(imageLists);
+  assert.deepEqual(images.Snapper, [{ id: "img-1", version: 10 }, { id: "img-2", version: 20 }]);
+  assert.deepEqual(images["Shark (Gummy)"], [{ id: "img-3", version: 30 }]);
+  assert.ok(!("Bream" in images) && !("Shark (School)" in images) && !("Elephant Fish" in images));
+});
+
+test("allSpeciesImages flattens every species' pictures, each tagged with its species", () => {
+  const flat = fns.allSpeciesImages(fns.speciesImagesFromMarkLists(imageLists));
+  assert.deepEqual(
+    flat.sort((a, b) => a.id.localeCompare(b.id)),
+    [{ species: "Snapper", id: "img-1", version: 10 }, { species: "Snapper", id: "img-2", version: 20 }, { species: "Shark (Gummy)", id: "img-3", version: 30 }]
+      .sort((a, b) => a.id.localeCompare(b.id))
+  );
+  assert.deepEqual(fns.allSpeciesImages({}), []);
+  assert.deepEqual(fns.allSpeciesImages(undefined), []);
+});
+
+test("the Catch species card lists every species' pictures, not just the session's targets", () => {
+  const iopts = fns.sessionCardOptions(imageLists);
+  // Snapper is the only target; Shark (Gummy) has pictures too and isn't targeted, but should still be pickable by image.
+  const idefaults = { ...fns.emptySessionDefaults(), species: ["Snapper"] };
+  const species = byId(fns.buildCatchCardSteps(iopts, idefaults, { answers: {}, run: null }), "species");
+  const speciesNamesWithImages = species.images.map((i) => i.species).sort();
+  assert.deepEqual([...new Set(speciesNamesWithImages)], ["Shark (Gummy)", "Snapper"]);
+  assert.equal(species.images.length, 3);
+});
+
+test("Session defaults' species card has no image gallery — 'Select by image' is Catch-only", () => {
+  const iopts = fns.sessionCardOptions(imageLists);
+  const session = fns.buildSessionCardSteps(iopts, fns.emptySessionDefaults(), { run: null });
+  assert.equal(byId(session, "species").images, undefined);
 });
