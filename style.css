@@ -3655,7 +3655,7 @@ body.live-card-open { overflow: hidden; }
 .live-card-grid-stepper { align-content: stretch; grid-template-rows: minmax(0, 1fr); overflow-y: auto; }
 .live-card-grid-gallery { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .live-card-gallery-item { padding: 4px; gap: 4px; }
-.live-card-gallery-item img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 8px; }
+.live-card-gallery-item img { width: 100%; aspect-ratio: 1 / 1; object-fit: contain; background: rgba(255, 255, 255, 0.08); border-radius: 8px; }
 .live-card-gallery-item span { font-size: 0.72rem; font-weight: 600; text-align: center; }
 .live-card-stepper { min-height: 100%; }
 .live-card-digit-cols { flex: 1 1 auto; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; min-height: 0; }
