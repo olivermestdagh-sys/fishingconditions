@@ -299,9 +299,18 @@ function showMarkFilterModal(state) {
       MARK_LIST_FIELDS.map(({ key, label }) => sectionHtml(key, label, state.markLists.filter((r) => r.field === label).map((r) => r.value))).join("") +
       MARK_FILTER_ONLY_FIELDS.filter((f) => f.key !== "owner").map(filterOnlySection).join("");
 
+    // Colour by sits at the top of the dialog (it used to be its own select on the map) — applied when the dialog closes.
+    const colourByHtml = `
+      <label style="display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:0.8rem;font-weight:600;">Colour by
+        <select data-group-by style="padding:5px 8px;border-radius:8px;border:1px solid var(--grey-200);font:inherit;font-weight:400;">
+          ${MARK_LIST_FIELDS.map(({ key, label }) => `<option value="${key}"${key === state.groupByKey ? " selected" : ""}>${label}</option>`).join("")}
+        </select>
+      </label>`;
+
     overlay.innerHTML = `
       <div class="ww-candidate-dialog">
         <button type="button" class="ww-candidate-close" aria-label="Close">&times;</button>
+        ${colourByHtml}
         <h3 style="margin:0 0 4px;">Filter marks</h3>
         <p class="footnote" style="margin:0 0 12px;">Tap once to require it, tap again to exclude it, tap again to clear.</p>
         ${sectionsHtml || `<p class="footnote" style="margin:0;">No pick-list options set up yet — add some on the Settings tab first.</p>`}
@@ -348,6 +357,10 @@ function showMarkFilterModal(state) {
 
     overlay.querySelectorAll(".mark-filter-chip").forEach((chip) => {
       chip.addEventListener("click", () => cycleChip(chip));
+    });
+
+    overlay.querySelector("[data-group-by]").addEventListener("change", (e) => {
+      state.groupByKey = e.target.value;
     });
 
     // Open/close a group. The summary of applied filters only shows while it's closed (open, the chips themselves show it).
@@ -411,15 +424,9 @@ function showMarkFilterModal(state) {
  */
 function initMarkControls(map, state) {
   const bar = document.getElementById("markControlsBar");
-  if (!bar) return; // page doesn't have the controls markup (shouldn't happen on Location/Live, defensive)
-  bar.style.display = "block";
-
-  const select = document.getElementById("markGroupBySelect");
-  select.innerHTML = MARK_LIST_FIELDS.map(({ key, label }) => `<option value="${key}"${key === state.groupByKey ? " selected" : ""}>${label}</option>`).join("");
-  select.addEventListener("change", () => {
-    state.groupByKey = select.value;
-    refresh();
-  });
+  const filterBtn = document.getElementById("markFilterBtn");
+  if (!bar || !filterBtn) return; // page doesn't have the controls markup (shouldn't happen on Location/Live, defensive)
+  filterBtn.style.display = "";
 
   const chipsContainer = document.getElementById("markActiveFilterChips");
   const badge = document.getElementById("markFilterBadge");
@@ -428,15 +435,17 @@ function initMarkControls(map, state) {
     applyMarkFiltersAndGrouping(map, state);
     renderActiveFilterChips(chipsContainer, state, refresh);
     const activeCount = Object.entries(state.filters).reduce((n, [key, f]) => n + (!f ? 0 : key === "dateTime" ? (f.from ? 1 : 0) + (f.to ? 1 : 0) : f.include.size + f.exclude.size), 0);
-    badge.style.display = activeCount > 0 ? "flex" : "none";
-    badge.textContent = String(activeCount);
+    badge.textContent = activeCount > 0 ? `(${activeCount})` : "";
+    bar.style.display = activeCount > 0 ? "block" : "none"; // the floating chip row only when there's something to show
     saveMarkViewSettings(state);
   }
 
-  document.getElementById("markFilterBtn").addEventListener("click", async () => {
+  // onclick, not addEventListener: this runs again every time marks reload (each mode switch), and the button
+  // must act on the newest state only, not stack a handler per load.
+  filterBtn.onclick = async () => {
     await showMarkFilterModal(state);
     refresh();
-  });
+  };
 
   refresh(); // respects whatever was restored from localStorage on load
 }

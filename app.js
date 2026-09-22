@@ -175,6 +175,7 @@ function teardownMode() {
   if (mapMode === "live") liveExit();
   if (mapMode === "import") syncDetachMap();
   document.getElementById("markControlsBar").style.display = "none";
+  document.getElementById("markFilterBtn").style.display = "none";
   document.getElementById("exportStatus").textContent = "";
 }
 
