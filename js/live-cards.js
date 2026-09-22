@@ -627,11 +627,15 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
   return { close, refresh: render };
 }
 
-/** A short, human date/time for the "+ Session" hub's Date/Time sub-line, e.g. "22 Sep 2026, 14:32". DOM-only (uses
- * parseNaive, js/chart-base.js) — kept out of the pure section above so that stays dependency-free/testable. */
+/** A short, human date/time for the "+ Session" hub's Date/Time sub-line, e.g. "22 Sep 2026, 14:32". parseNaive
+ * (js/chart-base.js) treats the naive "YYYY-MM-DD HH:MM:SS" wall-clock string as UTC purely for arithmetic — so
+ * formatting it back has to stay pinned to UTC too, or toLocaleString silently re-applies the browser's real
+ * timezone offset on top and the displayed time drifts from what's actually in `answers.dateTime` (and from what
+ * the Date/Time card itself shows via naiveToDatetimeLocal, which never leaves the naive string at all). Kept out
+ * of the pure section above so that stays dependency-free/testable. */
 function formatNaiveDisplay(naive) {
   const ms = parseNaive(naive);
-  return Number.isFinite(ms) ? new Date(ms).toLocaleString([], { dateStyle: "medium", timeStyle: "short", hour12: false }) : "";
+  return Number.isFinite(ms) ? new Date(ms).toLocaleString([], { dateStyle: "medium", timeStyle: "short", hour12: false, timeZone: "UTC" }) : "";
 }
 
 /**
