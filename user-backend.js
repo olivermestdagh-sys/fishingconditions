@@ -247,6 +247,10 @@ export default {
       if (markListMatch) {
         return handleMarkListItem(request, url, env, markListMatch[1]);
       }
+      const markListImageMatch = url.pathname.match(/^\/api\/marklists\/([^/]+)\/images(?:\/([^/]+))?$/);
+      if (markListImageMatch) {
+        return handleMarkListImages(request, url, env, markListImageMatch[1], markListImageMatch[2]);
+      }
       if (url.pathname === "/api/marks") {
         return handleMarksCollection(request, url, env);
       }
@@ -279,6 +283,10 @@ export default {
       // it replaces. Read-only; there is no public write path anywhere.
       if (url.pathname === "/api/public/marklists" && request.method === "GET") {
         return handlePublicMarkLists(env);
+      }
+      const speciesImageMatch = url.pathname.match(/^\/api\/public\/species-image\/([^/]+)$/);
+      if (speciesImageMatch && request.method === "GET") {
+        return handlePublicSpeciesImage(speciesImageMatch[1], env);
       }
       if (url.pathname === "/api/public/marks" && request.method === "GET") {
         return handlePublicMarks(request, env);
@@ -1306,6 +1314,7 @@ async function handleMarkListItem(request, url, env, id) {
     if (LOCKED_MARK_LIST_FIELDS.includes(existing.field)) {
       return jsonResponse({ error: `${existing.field} values can't be deleted — they're kept for shaping and colouring.` }, 409, env);
     }
+    await env.DB.prepare("DELETE FROM species_images WHERE list_id = ?").bind(id).run(); // its pictures go with it
     await env.DB.prepare("DELETE FROM user_mark_lists WHERE id = ? AND user_id = ?").bind(id, uid).run();
     if (existing.qty_group) {
       // A combined group left with a single species is no group.
@@ -1319,6 +1328,102 @@ async function handleMarkListItem(request, url, env, id) {
   }
 
   return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+// --- Species images: several pictures per Species list entry (bytes in species_images, an index on the list row) ---
+const MAX_SPECIES_IMAGES = 12;
+const MAX_SPECIES_IMAGE_BYTES = 700 * 1024; // the browser shrinks pictures to about 60-150 KB first
+const SPECIES_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+/** The image_index column ("[{id, v}, ...]" text) as an array; never throws. */
+function parseImageIndex(text) {
+  try {
+    const list = JSON.parse(text || "[]");
+    return Array.isArray(list) ? list.filter((i) => i && typeof i.id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+function base64ToBytes(text) {
+  const binary = atob(text);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/**
+ * Add (POST .../images), replace (PUT .../images/:imageId) or remove (DELETE .../images/:imageId) one picture of a Species
+ * list entry. Same sign-in and ownership rules as editing the entry itself. The body of an add/replace is the raw image
+ * (Content-Type jpeg/png/webp); the table row and the entry's image_index change together in one batch. Returns the updated
+ * list row, which lists the pictures as images: [{id, version}].
+ */
+async function handleMarkListImages(request, url, env, listId, imageId) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  const list = await env.DB.prepare("SELECT * FROM user_mark_lists WHERE id = ? AND user_id = ?").bind(listId, uid).first();
+  if (!list) return jsonResponse({ error: "Mark list entry not found." }, 404, env);
+  if (list.field !== "Species") return jsonResponse({ error: "Only species can have images." }, 400, env);
+
+  const index = parseImageIndex(list.image_index);
+  const saveIndex = (next) => env.DB.prepare("UPDATE user_mark_lists SET image_index = ? WHERE id = ? AND user_id = ?").bind(next.length ? JSON.stringify(next) : null, listId, uid);
+  let status = 200;
+
+  if (request.method === "DELETE" && imageId) {
+    if (!index.some((i) => i.id === imageId)) return jsonResponse({ error: "Image not found." }, 404, env);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM species_images WHERE id = ? AND list_id = ?").bind(imageId, listId),
+      saveIndex(index.filter((i) => i.id !== imageId)),
+    ]);
+  } else if ((request.method === "POST" && !imageId) || (request.method === "PUT" && imageId)) {
+    const type = (request.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
+    if (!SPECIES_IMAGE_TYPES.includes(type)) return jsonResponse({ error: "The image must be a JPEG, PNG or WebP." }, 400, env);
+    if (request.method === "POST" && index.length >= MAX_SPECIES_IMAGES) {
+      return jsonResponse({ error: `A species can have at most ${MAX_SPECIES_IMAGES} images.` }, 409, env);
+    }
+    if (request.method === "PUT" && !index.some((i) => i.id === imageId)) return jsonResponse({ error: "Image not found." }, 404, env);
+    if (Number(request.headers.get("Content-Length")) > MAX_SPECIES_IMAGE_BYTES) return jsonResponse({ error: "That image is too large." }, 413, env);
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    if (bytes.length === 0) return jsonResponse({ error: "The image is empty." }, 400, env);
+    if (bytes.length > MAX_SPECIES_IMAGE_BYTES) return jsonResponse({ error: "That image is too large." }, 413, env);
+    const id = imageId || crypto.randomUUID();
+    const now = Date.now();
+    const next = imageId ? index.map((i) => (i.id === imageId ? { id, v: now } : i)) : [...index, { id, v: now }];
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO species_images (id, list_id, content_type, data, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET content_type = excluded.content_type, data = excluded.data, updated_at = excluded.updated_at`
+      ).bind(id, listId, type, bytesToBase64(bytes), now),
+      saveIndex(next),
+    ]);
+    status = request.method === "POST" ? 201 : 200;
+  } else {
+    return jsonResponse({ error: "Method not allowed." }, 405, env);
+  }
+
+  const updated = await env.DB.prepare("SELECT * FROM user_mark_lists WHERE id = ?").bind(listId).first();
+  return jsonResponse(rowToMarkList(updated), status, env);
+}
+
+/** One species picture, for <img> tags anywhere (public, like the species list itself). The URL carries ?v=<version>, so it can be cached for good. */
+async function handlePublicSpeciesImage(imageId, env) {
+  const row = await env.DB.prepare("SELECT content_type, data FROM species_images WHERE id = ?").bind(imageId).first();
+  const open = { "Access-Control-Allow-Origin": "*", "Cross-Origin-Resource-Policy": "cross-origin" };
+  if (!row) return new Response("Not found", { status: 404, headers: open });
+  return new Response(base64ToBytes(row.data), {
+    status: 200,
+    headers: { ...open, "Content-Type": row.content_type, "Cache-Control": "public, max-age=31536000, immutable" },
+  });
 }
 
 function rowToMarkList(row) {
@@ -1338,6 +1443,7 @@ function rowToMarkList(row) {
     bigMaxQty: row.big_max_qty ?? null,
     bigSize: row.big_size ?? null,
     qtyGroup: row.qty_group ?? null,
+    images: parseImageIndex(row.image_index).map((i) => ({ id: i.id, version: i.v ?? null })),
   };
 }
 

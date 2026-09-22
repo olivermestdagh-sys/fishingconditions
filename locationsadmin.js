@@ -1069,6 +1069,129 @@ const SPECIES_LIMIT_FIELDS = [
 ];
 
 // Species whose Max Qty is one combined limit share a `qtyGroup` (see planSpeciesLinks, user-backend.js).
+// --- Species pictures (several per species; see js/species-image.js and handleMarkListImages in user-backend.js) ---
+
+function speciesEntry(value) {
+  return markLists.find((r) => r.field === "Species" && r.value === value);
+}
+
+/** The pictures row on a species: a thumbnail per picture (tap to maximise) and an Add Image button. */
+function speciesImagesHtml(entry) {
+  const images = entry.images || [];
+  const thumbs = images
+    .map((img, i) => `<button type="button" class="species-thumb" data-value="${escapeHtml(entry.value)}" data-index="${i}" aria-label="View picture ${i + 1} of ${escapeHtml(entry.value)}"><img src="${escapeHtml(speciesImageUrl(img))}" alt="${escapeHtml(entry.value)}" loading="lazy" /></button>`)
+    .join("");
+  const add = images.length < SPECIES_IMAGE_MAX_COUNT ? `<button type="button" class="species-add-image" data-value="${escapeHtml(entry.value)}">Add Image</button>` : "";
+  return `<div class="mark-list-images" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">${thumbs}${add}</div>`;
+}
+
+/**
+ * Asks for a picture file, shrinks and uploads it: as a new picture of the species, or in place of `imageId`. Updates the
+ * species in place and redraws the list. Resolves to true when it saved, false if cancelled or it failed (the status line
+ * says why).
+ */
+async function runSpeciesImageUpload(value, imageId) {
+  const entry = speciesEntry(value);
+  if (!entry || !entry.id) return false;
+  const file = await pickImageFile();
+  if (!file) return false;
+  setMarkListsSaveStatus("Uploading image…", false);
+  try {
+    const blob = await fileToJpegBlob(file);
+    Object.assign(entry, await uploadSpeciesImage(entry.id, blob, imageId, effectiveUserIdParam()));
+    setMarkListsSaveStatus("", false);
+    renderMarkLists();
+    return true;
+  } catch (err) {
+    console.error("Failed to upload species image:", err);
+    setMarkListsSaveStatus(err.message === "unreadable" ? "Couldn't read that image — try a JPEG or PNG." : "Upload failed: " + err.message, true);
+    return false;
+  }
+}
+
+let speciesImageViewerClose = null; // closes the open viewer, if any
+
+/** Full-screen viewer for one species' pictures: previous/next (when there are several), Replace, Delete and Close. */
+function openSpeciesImageViewer(value, startIndex) {
+  if (speciesImageViewerClose) speciesImageViewerClose();
+  const overlay = document.createElement("div");
+  overlay.className = "species-image-viewer";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  document.body.appendChild(overlay);
+  let index = startIndex;
+
+  const close = () => {
+    document.removeEventListener("keydown", onKey);
+    overlay.remove();
+    speciesImageViewerClose = null;
+  };
+  speciesImageViewerClose = close;
+  const onKey = (e) => {
+    if (e.key === "Escape") close();
+    else if (e.key === "ArrowLeft") step(-1);
+    else if (e.key === "ArrowRight") step(1);
+  };
+  document.addEventListener("keydown", onKey);
+  const step = (d) => {
+    const count = (speciesEntry(value) || {}).images ? speciesEntry(value).images.length : 0;
+    if (count > 1) {
+      index = (index + d + count) % count;
+      render();
+    }
+  };
+
+  function render() {
+    const entry = speciesEntry(value);
+    const images = entry && entry.images ? entry.images : [];
+    if (!images.length) {
+      close();
+      return;
+    }
+    index = Math.min(Math.max(index, 0), images.length - 1);
+    const many = images.length > 1;
+    overlay.innerHTML = `
+      <div class="species-image-viewer-top">
+        <span>${escapeHtml(value)}${many ? ` · ${index + 1} / ${images.length}` : ""}</span>
+        <button type="button" data-v="close" aria-label="Close">&times;</button>
+      </div>
+      <div class="species-image-viewer-stage">
+        ${many ? `<button type="button" class="species-image-nav" data-v="prev" aria-label="Previous picture">&lsaquo;</button>` : ""}
+        <img src="${escapeHtml(speciesImageUrl(images[index]))}" alt="${escapeHtml(value)}" />
+        ${many ? `<button type="button" class="species-image-nav" data-v="next" aria-label="Next picture">&rsaquo;</button>` : ""}
+      </div>
+      <div class="species-image-viewer-actions">
+        <button type="button" data-v="replace">Replace</button>
+        <button type="button" data-v="delete" class="danger">Delete</button>
+      </div>`;
+    overlay.querySelector('[data-v="close"]').addEventListener("click", close);
+    const prev = overlay.querySelector('[data-v="prev"]');
+    const next = overlay.querySelector('[data-v="next"]');
+    if (prev) prev.addEventListener("click", () => step(-1));
+    if (next) next.addEventListener("click", () => step(1));
+    overlay.querySelector('[data-v="replace"]').addEventListener("click", async () => {
+      if (await runSpeciesImageUpload(value, images[index].id)) render();
+    });
+    overlay.querySelector('[data-v="delete"]').addEventListener("click", async () => {
+      if (!confirm(`Delete this picture of ${value}?`)) return;
+      try {
+        Object.assign(entry, await deleteSpeciesImage(entry.id, images[index].id, effectiveUserIdParam()));
+        setMarkListsSaveStatus("", false);
+        renderMarkLists();
+        render(); // shows the next picture, or closes when that was the last
+      } catch (err) {
+        console.error("Failed to delete species image:", err);
+        setMarkListsSaveStatus("Couldn't delete the picture: " + err.message, true);
+      }
+    });
+  }
+  // Tapping the dark area around the picture closes the viewer.
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.classList.contains("species-image-viewer-stage")) close();
+  });
+  render();
+}
+
 let speciesLinksOpenFor = null; // which species' "Combined with" list is open, kept across the re-render a change causes
 
 /** The other species combined with this one, in list order. */
@@ -1215,7 +1338,7 @@ function renderMarkLists() {
           style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>`;
       // Species also carry their regulation limits, edited on a second line inside the chip.
       const limitsHtml = key === "species"
-        ? `<div class="mark-list-limits" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;margin-top:2px;">${SPECIES_LIMIT_FIELDS.map((f) => `
+        ? `${speciesImagesHtml(v)}<div class="mark-list-limits" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;margin-top:2px;">${SPECIES_LIMIT_FIELDS.map((f) => `
             <label style="display:flex;flex-direction:column;font-size:0.65rem;gap:1px;">${f.label}
               <input type="number" class="mark-list-limit-input" data-limit-prop="${f.prop}" data-value="${escAttr}" value="${v[f.prop] ?? ""}"
                 min="0" step="${f.integer ? "1" : "any"}" inputmode="${f.integer ? "numeric" : "decimal"}" title="${f.title}"
@@ -1258,6 +1381,12 @@ function renderMarkLists() {
   });
   container.querySelectorAll(".mark-list-limit-input").forEach((input) => {
     input.addEventListener("input", (e) => onSetSpeciesLimit(e.currentTarget));
+  });
+  container.querySelectorAll(".species-thumb").forEach((btn) => {
+    btn.addEventListener("click", () => openSpeciesImageViewer(btn.dataset.value, Number(btn.dataset.index)));
+  });
+  container.querySelectorAll(".species-add-image").forEach((btn) => {
+    btn.addEventListener("click", () => runSpeciesImageUpload(btn.dataset.value, null));
   });
   container.querySelectorAll(".mark-list-links").forEach((details) => {
     details.addEventListener("toggle", () => {

@@ -219,11 +219,23 @@ CREATE TABLE IF NOT EXISTS user_mark_lists (
   big_max_qty INTEGER,               -- how many "big" fish (at least big_size) count within the limit
   big_size REAL,                     -- length, cm, from which a fish counts as "big"
   qty_group TEXT,                    -- species rows sharing a value share ONE combined max_qty (e.g. School + Gummy shark); NULL = not combined
+  image_index TEXT,                  -- Species rows only: JSON [{"id":"<species_images.id>","v":<updated_at ms>}, ...] in display order; NULL = no images
   created_at INTEGER NOT NULL,
   UNIQUE (user_id, field, value)
 );
 
 CREATE INDEX IF NOT EXISTS idx_uml_user_field ON user_mark_lists(user_id, field);
+
+-- The pictures of a species (Settings > Species). Bytes are kept apart from user_mark_lists so the list stays light; the
+-- list row carries only image_index. `data` is the base64 of a JPEG/PNG/WebP the browser has already shrunk (<= ~700 KB).
+CREATE TABLE IF NOT EXISTS species_images (
+  id TEXT PRIMARY KEY,
+  list_id TEXT NOT NULL REFERENCES user_mark_lists(id) ON DELETE CASCADE,
+  content_type TEXT NOT NULL,
+  data TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_species_images_list ON species_images(list_id);
 
 -- A user's own logged fishing marks (catches and points of interest).
 -- Columns mirror data/marks.json's own record shape field-for-field
