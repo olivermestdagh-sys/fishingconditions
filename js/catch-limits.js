@@ -124,7 +124,8 @@ function stepperStartSize(lim) {
 
 /**
  * The two blurb lines shown under a species: its limits, and how many are kept so far ("" when counts are unknown), and
- * a tone: "full" (bag reached), "warn" (one left) or "".
+ * a tone: "full" (bag reached), "warn" (one left) or "" — left "" for a species sharing its Max Qty with others, since the
+ * frame would otherwise flag one species' card for a bag that isn't only its own.
  */
 function speciesLimitLines(lim, counts) {
   const l = lim || {};
@@ -139,7 +140,7 @@ function speciesLimitLines(lim, counts) {
   const kept = l.maxQty != null ? `Kept ${counts.kept}/${l.maxQty}` : `Kept ${counts.kept}`;
   const big = l.bigSize != null && l.bigMaxQty != null ? ` · big ${counts.big}/${l.bigMaxQty}` : "";
   let tone = "";
-  if (l.maxQty != null) tone = counts.kept >= l.maxQty ? "full" : counts.kept === l.maxQty - 1 ? "warn" : "";
+  if (l.maxQty != null && counts.names.length === 1) tone = counts.kept >= l.maxQty ? "full" : counts.kept === l.maxQty - 1 ? "warn" : "";
   return { line1, line2: kept + shared + big, tone };
 }
 

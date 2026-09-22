@@ -211,7 +211,7 @@ test("species cards show limits and how many are kept, once the run is known", (
   const species = byId(stepsFor({}), "species");
   assert.deepEqual(species.sublabels.Snapper, { line1: "Min 28 cm · Max qty 10 · Big 40+ cm (3)", line2: "Kept 2/10 · big 1/3", tone: "" });
   assert.equal(species.sublabels["Shark (School)"].line2, "Kept 1/2 (shared with Shark (Gummy))");
-  assert.equal(species.sublabels["Shark (School)"].tone, "warn");
+  assert.equal(species.sublabels["Shark (School)"].tone, "", "shared quantity: no frame colour");
   assert.equal(species.sublabels["Elephant Fish"], undefined, "no limits and nothing to say");
   const unknown = byId(fns.buildCatchCardSteps(lopts, ldefaults, { answers: {}, run: null }), "species");
   assert.equal(unknown.sublabels.Snapper.line2, "", "before the marks load: limits only");

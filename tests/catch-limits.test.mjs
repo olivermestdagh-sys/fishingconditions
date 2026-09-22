@@ -136,9 +136,9 @@ test("species blurb: limits, kept count, shared bag, tones", () => {
   assert.equal(snapper.tone, "");
   const school = f.speciesLimitLines(limits["Shark (School)"], f.speciesCounts(run, limits, "Shark (School)"));
   assert.equal(school.line2, "Kept 1/2 (shared with Shark (Gummy))");
-  assert.equal(school.tone, "warn", "one left");
+  assert.equal(school.tone, "", "shared quantity: no frame colour even with one left");
   const full = f.speciesLimitLines(limits["Shark (Gummy)"], f.speciesCounts([...run, c("Shark (Gummy)", 3)], limits, "Shark (Gummy)"));
-  assert.equal(full.tone, "full");
+  assert.equal(full.tone, "", "shared quantity: no frame colour even when full");
   assert.deepEqual(f.speciesLimitLines(limits["Elephant Fish"], f.speciesCounts(run, limits, "Elephant Fish")), { line1: "No limits set", line2: "Kept 0", tone: "" });
   assert.deepEqual(f.speciesLimitLines(limits.Snapper, null), { line1: "Min 28 cm · Max qty 10 · Big 40+ cm (3)", line2: "", tone: "" }, "counts unknown: limits only");
 });
