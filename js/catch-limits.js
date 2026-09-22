@@ -63,17 +63,31 @@ function runCatches(catches, anchorMs, gapMs = CATCH_RUN_GAP_MS) {
   return chain ? catches.filter((c) => c.tMs >= chain.start && c.tMs <= chain.end) : [];
 }
 
+/** The number in a Session Start/End mark's own name ("Session 3 Start"/"Session 3 End" -> 3), or null when the
+ * name doesn't match that shape (e.g. hand-renamed) — nextSessionNumber (below) needs each session's own already-
+ * assigned number, not just a count of how many currently exist. */
+function sessionNumberFromName(name) {
+  const m = /^Session (\d+) (?:Start|End)$/i.exec(String(name || "").trim());
+  return m ? Number(m[1]) : null;
+}
+
 /**
- * The next "Session N" number for a new Session Start at anchorMs, following the same chaining rule that resets Catch
- * bag counts: 1 when it starts a new fishing day (no earlier Session Start within gapMs, chained), otherwise one more
- * than however many of `startTimesMs` (every existing Session Start's own time) fall in the current chain at or before
- * anchorMs.
+ * The next "Session N" number for a new Session Start at anchorMs, following the same chaining rule that resets
+ * Catch bag counts: 1 when it starts a new fishing day (no earlier Session Start within gapMs, chained), otherwise
+ * one more than the HIGHEST number already used by a Session Start in the current chain — not a count of how many
+ * exist, since deleting a session from the middle of a chain (its Start+End pair) must not let a later survivor's
+ * number collide with an earlier one still standing (e.g. sessions 1/2/3 created, 2 deleted: the next one in the
+ * same chain must be 4, not 3 again).
+ * `starts`: [{tMs, number}] — every existing Session Start's own time and the number it was actually given (see
+ * sessionNumberFromName). Entries with a non-finite tMs or number are ignored.
  */
-function nextSessionNumber(startTimesMs, anchorMs, gapMs = CATCH_RUN_GAP_MS) {
-  const chain = catchChain(startTimesMs, anchorMs, gapMs);
+function nextSessionNumber(starts, anchorMs, gapMs = CATCH_RUN_GAP_MS) {
+  const valid = (starts || []).filter((s) => s && Number.isFinite(s.tMs) && Number.isFinite(s.number));
+  const chain = catchChain(valid.map((s) => s.tMs), anchorMs, gapMs);
   if (!chain) return 1;
-  const count = startTimesMs.filter((t) => Number.isFinite(t) && t <= anchorMs && t >= chain.start && t <= chain.end).length;
-  return count + 1;
+  const inChain = valid.filter((s) => s.tMs <= anchorMs && s.tMs >= chain.start && s.tMs <= chain.end);
+  const maxNumber = inChain.reduce((max, s) => Math.max(max, s.number), 0);
+  return maxNumber + 1;
 }
 
 /** The species whose Max Qty is shared with `species` (itself included), in a stable order. */

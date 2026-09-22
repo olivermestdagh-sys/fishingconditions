@@ -254,9 +254,12 @@ function buildCatchCardSteps(options, defaults, ctx = {}) {
 /**
  * The Catch mark for the three card answers at (lat, lng): type Catch, named after the species, with the rod's saved
  * rig and bait and the session's water and berley. `tide` ({tideCondition, tideExtreme}) is the tide worked out for now.
- * Weather, barometer, temperature and wind are left blank here; saving a new mark fills them (see saveMarkToD1).
+ * `lastWaterDepth` (nullable) is the last value actually saved anywhere (js/marks-core.js's getLastMarkFieldValues) —
+ * Water Depth has no card of its own here, so it's carried forward silently, the same way tide is looked up rather
+ * than asked about. Weather, barometer, temperature and wind are left blank here; saving a new mark fills them (see
+ * saveMarkToD1).
  */
-function buildCatchFromCards({ id, lat, lng, dateTime, species, size, rod, tooSmall, released }, defaults, tide) {
+function buildCatchFromCards({ id, lat, lng, dateTime, species, size, rod, tooSmall, released }, defaults, tide, lastWaterDepth) {
   const mark = { id, lat, lng, name: species, type: "Catch", dateTime, createdAt: dateTime, source: "Manual", species };
   const cm = size === "" || size == null ? NaN : Number(size);
   if (Number.isFinite(cm) && !tooSmall) mark.size = cm;
@@ -270,6 +273,7 @@ function buildCatchFromCards({ id, lat, lng, dateTime, species, size, rod, tooSm
   }
   if (defaults.water) mark.waterCondition = defaults.water;
   if (defaults.berley) mark.berley = defaults.berley;
+  if (lastWaterDepth != null) mark.waterDepth = lastWaterDepth;
   if (tide && tide.tideCondition) mark.tideCondition = tide.tideCondition;
   if (tide && tide.tideExtreme) mark.tideExtreme = tide.tideExtreme;
   return mark;
@@ -321,10 +325,12 @@ const SESSION_START_LIST_FIELDS = [
   { id: "berley", title: "Berley", prompt: "Which berley are you using?", multi: false },
 ];
 
-/** A fresh "+ Session" draft, preloaded from Session defaults (target species, water, rods, berley) — water depth
- * starts unset and the time starts at `nowStr` (the caller's "now", so this stays pure/testable). */
-function emptySessionStartAnswers(defaults, nowStr) {
-  return { species: [...defaults.species], water: defaults.water, rods: [...defaults.rods], berley: defaults.berley, waterDepth: null, dateTime: nowStr };
+/** A fresh "+ Session" draft, preloaded from Session defaults (target species, water, rods, berley) plus the last
+ * water depth actually saved anywhere (`lastWaterDepth`, nullable — js/marks-core.js's getLastMarkFieldValues; no
+ * card of its own here to choose it from, so it's carried forward the same way a Catch's is). The time starts at
+ * `nowStr` (the caller's "now", so this stays pure/testable). */
+function emptySessionStartAnswers(defaults, nowStr, lastWaterDepth = null) {
+  return { species: [...defaults.species], water: defaults.water, rods: [...defaults.rods], berley: defaults.berley, waterDepth: lastWaterDepth, dateTime: nowStr };
 }
 
 /** The hub's sub-line under a list-backed field button: the current value(s), or "Not set". (Date/Time and Water

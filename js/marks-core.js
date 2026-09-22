@@ -227,7 +227,7 @@ function typeAllowsMultipleValues(type, key) {
 
 const MARK_LAST_VALUES_STORAGE_KEY = "markLastFieldValues";
 
-/** Reads the {type, species, waterCondition, bait, rig, rod, berley} object
+/** Reads the {type, species, waterCondition, bait, rig, rod, berley, waterDepth} object
  * of whatever value was actually saved for each field LAST — see
  * saveLastMarkFieldValues. Never throws; a missing/corrupt entry just means
  * no defaults for that field, same as any other blank-optional-field case. */
@@ -256,6 +256,10 @@ function saveLastMarkFieldValues(mark) {
       if (isSessionType(mark.type) && typeAllowsMultipleValues(mark.type, f.key)) continue; // a Session's multi-value lists (targets, gear) aren't defaults for the next catch
       if (mark[f.key]) current[f.key] = mark[f.key];
     }
+    // Water Depth isn't list-driven (no MARK_POPUP_OPTIONAL_FIELDS entry, always hand-entered — see that field's
+    // own comment), but it's still worth remembering the same way: once it's set on a Session Start, End or Catch,
+    // the next one of those starts from it too, rather than blank every time (Oliver's own request).
+    if (mark.waterDepth != null) current.waterDepth = mark.waterDepth;
     Prefs.set(MARK_LAST_VALUES_STORAGE_KEY, JSON.stringify(current));
   } catch {
     // localStorage can throw in rare cases (private browsing quirks, storage

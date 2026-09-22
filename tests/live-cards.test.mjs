@@ -118,7 +118,14 @@ test("catch mark: type Catch, rig/bait from the rod, water and berley from the s
 
 test("catch mark leaves unset fields off", () => {
   const m = fns.buildCatchFromCards({ id: "m_2", lat: 1, lng: 2, dateTime: "d", species: "Bream", size: "", rod: "" }, fns.emptySessionDefaults(), {});
-  for (const k of ["size", "rod", "rig", "bait", "waterCondition", "berley", "tideCondition", "tideExtreme"]) assert.ok(!(k in m), k);
+  for (const k of ["size", "rod", "rig", "bait", "waterCondition", "berley", "tideCondition", "tideExtreme", "waterDepth"]) assert.ok(!(k in m), k);
+});
+
+test("catch mark carries the last water depth actually saved anywhere, silently (no card of its own)", () => {
+  const m = fns.buildCatchFromCards({ id: "m_3", lat: 1, lng: 2, dateTime: "d", species: "Bream", size: "", rod: "" }, fns.emptySessionDefaults(), {}, 4.5);
+  assert.equal(m.waterDepth, 4.5);
+  const none = fns.buildCatchFromCards({ id: "m_4", lat: 1, lng: 2, dateTime: "d", species: "Bream", size: "", rod: "" }, fns.emptySessionDefaults(), {}, null);
+  assert.ok(!("waterDepth" in none));
 });
 
 // --- "+ Session" flow ----------------------------------------------------------------------------------------
@@ -127,6 +134,9 @@ test("+ Session answers are preloaded from Session defaults; water depth and the
   const defaults = { species: ["Bream", "Whiting"], water: "Clear", berley: "Pilchard", rods: ["Light"], rodSetups: { Light: { rig: "Paternoster", bait: "Prawn" } } };
   const a = fns.emptySessionStartAnswers(defaults, "2026-09-22 06:30:00");
   assert.deepEqual(a, { species: ["Bream", "Whiting"], water: "Clear", rods: ["Light"], berley: "Pilchard", waterDepth: null, dateTime: "2026-09-22 06:30:00" });
+  // preloaded from the last water depth actually saved anywhere, when there is one
+  const withDepth = fns.emptySessionStartAnswers(defaults, "2026-09-22 06:30:00", 3.2);
+  assert.equal(withDepth.waterDepth, 3.2);
   // it's a copy, not the same arrays as defaults
   a.species.push("Gone");
   assert.deepEqual(defaults.species, ["Bream", "Whiting"]);

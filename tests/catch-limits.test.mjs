@@ -6,7 +6,7 @@ import fs from "node:fs";
 
 const src = fs.readFileSync(new URL("../js/catch-limits.js", import.meta.url), "utf8");
 const f = new Function(
-  src + "\nreturn { limitsFromMarkLists, catchesFromMarks, catchChain, runCatches, nextSessionNumber, speciesGroupNames, keptCounts, sizeVerdict, recommendFate, stepperStartSize, speciesLimitLines, speciesCounts, catchLimitWarnings, CATCH_RUN_GAP_MS };"
+  src + "\nreturn { limitsFromMarkLists, catchesFromMarks, catchChain, runCatches, sessionNumberFromName, nextSessionNumber, speciesGroupNames, keptCounts, sizeVerdict, recommendFate, stepperStartSize, speciesLimitLines, speciesCounts, catchLimitWarnings, CATCH_RUN_GAP_MS };"
 )();
 
 const H = 3600000;
@@ -67,15 +67,34 @@ test("runCatches keeps the run's catches and drops earlier trips", () => {
   assert.deepEqual(f.runCatches(all, at(40)), []);
 });
 
-test("nextSessionNumber: 1 for a new fishing day, otherwise one more than the current run's starts, following the same 8h chaining as catch counts", () => {
+test("sessionNumberFromName reads a session's own number; null for anything else", () => {
+  assert.equal(f.sessionNumberFromName("Session 3 Start"), 3);
+  assert.equal(f.sessionNumberFromName("Session 12 End"), 12);
+  assert.equal(f.sessionNumberFromName("session 3 start"), 3, "case-insensitive");
+  assert.equal(f.sessionNumberFromName("Session 3"), null);
+  assert.equal(f.sessionNumberFromName("Bream"), null);
+  assert.equal(f.sessionNumberFromName(""), null);
+  assert.equal(f.sessionNumberFromName(undefined), null);
+});
+
+test("nextSessionNumber: 1 for a new fishing day, otherwise one more than the HIGHEST number already used in the current chain, following the same 8h chaining as catch counts", () => {
   assert.equal(f.nextSessionNumber([], at(0)), 1, "no earlier sessions at all");
-  const first = [at(0)]; // one existing Session Start, at hour 0
+  const first = [{ tMs: at(0), number: 1 }]; // one existing Session Start, at hour 0, "Session 1"
   assert.equal(f.nextSessionNumber(first, at(7.99)), 2, "a second start within 8h: same fishing day");
   assert.equal(f.nextSessionNumber(first, at(8)), 2, "exactly 8 hours still chains");
   assert.equal(f.nextSessionNumber(first, at(8) + 60000), 1, "a minute more than 8 hours: a new fishing day");
-  const two = [at(0), at(3)];
+  const two = [{ tMs: at(0), number: 1 }, { tMs: at(3), number: 2 }];
   assert.equal(f.nextSessionNumber(two, at(6)), 3, "third session of the same chained day");
   assert.equal(f.nextSessionNumber(two, at(20)), 1, "well over 8h since the last one: resets");
+  // The bug this guards: sessions 1, 2, 3 all created (chained, 3h apart); session 2's pair is then deleted,
+  // leaving 1 and 3 still on the map. The next one must be 4 (one more than the highest survivor, 3) — counting
+  // the two SURVIVING sessions and adding one (giving 3 again, colliding with the session still on the map) was
+  // the actual bug reported.
+  const afterDeletingTwo = [{ tMs: at(0), number: 1 }, { tMs: at(6), number: 3 }];
+  assert.equal(f.nextSessionNumber(afterDeletingTwo, at(9)), 4, "resumes from the highest surviving number, not a recount");
+  // Entries with an unreadable number (a hand-renamed mark) are ignored rather than breaking the chain/max.
+  const withUnreadable = [{ tMs: at(0), number: 1 }, { tMs: at(2), number: NaN }];
+  assert.equal(f.nextSessionNumber(withUnreadable, at(4)), 2);
 });
 
 test("kept counts leave out released fish and add up the shared-limit group", () => {
