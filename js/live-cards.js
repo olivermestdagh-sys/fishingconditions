@@ -673,12 +673,16 @@ function showSessionStartFlow({ options, defaults, initialAnswers, run, sessionN
       if (onClose) onClose();
     });
   };
-  // The nav row every screen shares: Close (cancel the whole flow) and a right-hand action, "Start Session" on the
-  // hub, "Back to overview" on every field card.
+  // The hub's nav has Close/Cancel (cancel the whole flow) alongside its right-hand action, "Start Session" — only
+  // the hub can cancel the flow outright. Every field card just has its one way back, "Back to overview".
   const navHtml = (rightLabel) => `
     <div class="live-card-nav live-card-nav-2">
-      <button type="button" class="live-card-nav-btn live-card-close" data-nav="close">Close</button>
+      <button type="button" class="live-card-nav-btn live-card-close" data-nav="close">Close/Cancel</button>
       <button type="button" class="live-card-nav-btn live-card-next" data-nav="right">${escapeHtml(rightLabel)}</button>
+    </div>`;
+  const fieldNavHtml = () => `
+    <div class="live-card-nav live-card-nav-1">
+      <button type="button" class="live-card-nav-btn live-card-next" data-nav="right">Back to overview</button>
     </div>`;
 
   function render() {
@@ -748,7 +752,7 @@ function showSessionStartFlow({ options, defaults, initialAnswers, run, sessionN
         <div class="live-card-grid">
           ${opts.length ? opts.map(optionButton).join("") : `<p class="live-card-empty">Nothing to choose yet — add options for this on the Settings tab.</p>`}
         </div>
-        ${navHtml("Back to overview")}
+        ${fieldNavHtml()}
       </div>`;
     const grid = overlay.querySelector(".live-card-grid");
     overlay.querySelectorAll("[data-choice]").forEach((btn) =>
@@ -767,7 +771,6 @@ function showSessionStartFlow({ options, defaults, initialAnswers, run, sessionN
       })
     );
     overlay.querySelector('[data-nav="right"]').addEventListener("click", toHub);
-    wireCloseNav();
   }
 
   function renderDateTime() {
@@ -781,7 +784,7 @@ function showSessionStartFlow({ options, defaults, initialAnswers, run, sessionN
           <input type="datetime-local" step="1" class="live-card-datetime-input" value="${naiveToDatetimeLocal(answers.dateTime)}" />
           <button type="button" class="live-card-choice" data-now>Now</button>
         </div>
-        ${navHtml("Back to overview")}
+        ${fieldNavHtml()}
       </div>`;
     const input = overlay.querySelector(".live-card-datetime-input");
     overlay.querySelector("[data-now]").addEventListener("click", () => {
@@ -792,7 +795,6 @@ function showSessionStartFlow({ options, defaults, initialAnswers, run, sessionN
       if (v) answers = { ...answers, dateTime: v };
       toHub();
     });
-    wireCloseNav();
   }
 
   function renderWaterDepth() {
@@ -816,7 +818,7 @@ function showSessionStartFlow({ options, defaults, initialAnswers, run, sessionN
             </div>
           </div>
         </div>
-        ${navHtml("Back to overview")}
+        ${fieldNavHtml()}
       </div>`;
     overlay.querySelectorAll("[data-depth]").forEach((btn) =>
       btn.addEventListener("click", () => {
@@ -827,7 +829,6 @@ function showSessionStartFlow({ options, defaults, initialAnswers, run, sessionN
       })
     );
     overlay.querySelector('[data-nav="right"]').addEventListener("click", toHub);
-    wireCloseNav();
   }
 
   render();

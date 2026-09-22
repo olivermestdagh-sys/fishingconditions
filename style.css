@@ -3620,6 +3620,7 @@ body.live-card-open { overflow: hidden; }
 /* "+ Session" hub (js/live-cards.js's showSessionStartFlow): a 2-button nav (Close / Start Session or Back to
    overview), a single-column Date/Time card, and a small +/-0.1 m fine row under the Water depth stepper. */
 .live-card-nav-2 { grid-template-columns: 1fr 1.4fr; }
+.live-card-nav-1 { grid-template-columns: 1fr; }
 .live-card-grid-datetime { grid-template-columns: 1fr; align-content: start; }
 .live-card-datetime-input { min-height: 52px; padding: 10px 12px; border-radius: 14px; border: 2px solid rgba(255, 255, 255, 0.35); background: rgba(255, 255, 255, 0.08); color: #fff; font-size: 1.1rem; color-scheme: dark; }
 .live-card-stepper-row-fine { display: flex; gap: 10px; }
