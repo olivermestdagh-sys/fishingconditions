@@ -1649,7 +1649,10 @@ async function handleMarkItem(request, url, env, id) {
     // handed to any real account on purpose, not just left to follow the usual type-driven default. Only
     // Admin can send this — a non-admin's PUT never even reaches an existing row it doesn't already own
     // (see markOwnerIds above), so there's nothing for them to reassign in the first place.
-    let newOwner = markOwnerFor(user, merged.type);
+    // Only an actual type change re-derives the owner — an edit that leaves the type alone (e.g. the map's bulk
+    // edit, which sends just the touched fields) keeps the mark where it is, so Admin editing someone else's
+    // Catch doesn't quietly move it into Admin's own account.
+    let newOwner = merged.type !== existing.type ? markOwnerFor(user, merged.type) : uid;
     if (user.role === "admin" && typeof body.ownerUserId === "string" && body.ownerUserId.trim()) {
       const targetId = body.ownerUserId.trim();
       const target = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(targetId).first();

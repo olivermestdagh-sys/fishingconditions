@@ -800,6 +800,26 @@ function bulkEditNumericFieldHtml(key, label, step, min) {
     </div>`;
 }
 
+/** Admin-only Owner picker for the bulk-edit form — the same account list the single-mark Owner field offers
+ * (Public plus every real user, see markOwnerOptionsHtml, js/marks-core.js), behind the usual "No change"
+ * sentinel. No "(clear)": every mark has to belong to some account. */
+function bulkEditOwnerFieldHtml() {
+  if (!cachedIsAdmin) return "";
+  const options = [
+    { id: CLIENT_PUBLIC_USER_ID, label: "Public (shared)" },
+    ...cachedAdminUsers.map((u) => ({ id: u.id, label: u.name || u.email || u.id })),
+  ];
+  return `
+    <div style="margin-bottom:8px;">
+      <label style="display:block;font-size:0.8rem;font-weight:600;margin-bottom:2px;">Owner
+        <select name="ownerUserId" style="${MARK_POPUP_INPUT_STYLE}">
+          <option value="__nochange__" selected>— No change —</option>
+          ${options.map((o) => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.label)}</option>`).join("")}
+        </select>
+      </label>
+    </div>`;
+}
+
 function renderBulkEditForm(map, state) {
   const panel = document.getElementById("markDetailPanel");
   if (!panel) return;
@@ -810,6 +830,7 @@ function renderBulkEditForm(map, state) {
       <div style="font-weight:700;margin-bottom:6px;">Bulk edit ${count} mark${count === 1 ? "" : "s"}</div>
       <p class="footnote" style="margin:0 0 10px;">Only fields you change here get updated — anything left as "No change" stays exactly as it is on every mark.</p>
       <form data-bulk-edit-form-el onsubmit="return false;">
+        ${bulkEditOwnerFieldHtml()}
         ${picklistFieldsHtml}
         ${bulkEditNumericFieldHtml("size", "Size (cm)", "1", "0")}
         ${bulkEditNumericFieldHtml("barometer", "Barometer (hPa)", "0.1", "0")}
@@ -880,7 +901,18 @@ function collectBulkEditFormValues(form) {
   if (released !== "__nochange__") updates.released = released === "1";
   const notes = form.querySelector('[name="notes"]').value;
   if (notes !== "") updates.notes = notes;
+  const ownerSelect = form.querySelector('[name="ownerUserId"]'); // Admin only — see bulkEditOwnerFieldHtml
+  if (ownerSelect && ownerSelect.value !== "__nochange__") updates.ownerUserId = ownerSelect.value;
   return updates;
+}
+
+/** The owner/ownerName pair a reassigned mark should show straight away — same Mine/Public/Other buckets and
+ * "Public" name the single-mark save sets (collectMarkFormValues, js/marks-core.js). */
+function bulkOwnerFields(form, ownerUserId) {
+  if (ownerUserId === CLIENT_PUBLIC_USER_ID) return { owner: "Public", ownerName: "Public" };
+  const select = form.querySelector('[name="ownerUserId"]');
+  const chosen = select && select.options[select.selectedIndex];
+  return { owner: ownerUserId === cachedUserId ? "Mine" : "Other", ownerName: chosen ? chosen.textContent : ownerUserId };
 }
 
 /** Saves the same partial-update body to every selected mark — one PUT
@@ -914,7 +946,10 @@ async function handleBulkEditSave(map, state) {
     if (result.success) {
       succeeded++;
       const mark = state.marksById.get(markId);
-      if (mark) Object.assign(mark, updates); // keeps local state in sync so a later popup-open shows the fresh values without a full reload
+      if (mark) {
+        Object.assign(mark, updates); // keeps local state in sync so a later popup-open shows the fresh values without a full reload
+        if (updates.ownerUserId) Object.assign(mark, bulkOwnerFields(form, updates.ownerUserId));
+      }
     } else {
       failures.push({ markId, error: result.error });
     }

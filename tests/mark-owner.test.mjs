@@ -139,6 +139,7 @@ test("Admin can edit and delete another real user's own mark, now that they can 
   const env = makeEnv("admin", marks);
   const put = await call(env, "PUT", "/api/marks/c1", { name: "renamed" });
   assert.equal(put.status, 200);
+  assert.equal(env.log.updates[0].owner, "someone-else"); // an edit that leaves the type alone doesn't move it to Admin
   const del = await call(env, "DELETE", "/api/marks/c1");
   assert.equal(del.status, 204);
 });
