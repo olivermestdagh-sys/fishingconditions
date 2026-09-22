@@ -401,6 +401,17 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
         <img src="${escapeHtml(speciesImageUrl(item))}" alt="${escapeHtml(item.species)}" loading="lazy" />
         <span>${escapeHtml(item.species)}</span>
       </button>`;
+    // REAL BUG, FOUND AND FIXED: laid out as a CSS Grid (3 columns, implicit rows), a taller picture in one column
+    // made that whole ROW taller — including the other two columns' cells in it — pushing everything below down by
+    // an amount that didn't match what was actually drawn there, so a card could end up overlapped by the one below
+    // it. A grid row's height can never depend on just ONE column; it's shared across the row by definition. Fixed
+    // by giving up on rows entirely: three independent, plain top-to-bottom stacks (one per column), each card's
+    // position simply following the one above it in its OWN stack — nothing about column 2 can ever affect column 1.
+    const galleryHtml = () => {
+      const cols = [[], [], []];
+      step.images.forEach((item, i) => cols[i % cols.length].push(galleryButton(item, i)));
+      return `<div class="live-card-gallery-cols">${cols.map((col) => `<div class="live-card-gallery-col">${col.join("")}</div>`).join("")}</div>`;
+    };
     const optionButton = (value, i) => {
       const sub = step.sublabels && step.sublabels[value];
       const tone = sub && sub.tone ? ` tone-${sub.tone}` : "";
@@ -441,7 +452,7 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
     const buttons = step.kind === "stepper"
       ? stepperHtml()
       : gallery
-        ? step.images.map(galleryButton).join("")
+        ? galleryHtml()
         : step.options.length
           ? step.options.map((value, i) => (step.dividerAfter && i === step.dividerAfter ? `<div class="live-card-divider" role="separator">Other species</div>` : "") + optionButton(value, i)).join("")
           : `<p class="live-card-empty">Nothing to choose yet — add options for this on the Settings tab.</p>`;

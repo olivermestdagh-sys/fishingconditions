@@ -3653,20 +3653,19 @@ body.live-card-open { overflow: hidden; }
 .live-card-choice.live-card-digit { min-height: 38px; padding: 2px; font-size: 1.15rem; }
 /* Size stepper, second layout: two digit columns (10s: 1-12, 1s: 0-9) that share the remaining height so every number is visible. */
 .live-card-grid-stepper { align-content: stretch; grid-template-rows: minmax(0, 1fr); overflow-y: auto; }
-/* align-items: start (not the grid default "stretch") — each cell sizes to its OWN picture's natural height rather
-   than every cell in a row being stretched to match its tallest row-mate. */
-.live-card-grid-gallery { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
-/* REAL BUG, FOUND AND FIXED (twice): first, aspect-ratio on the <img> itself didn't reliably feed into the grid
-   row's height (fixed by moving the ratio to the button). Then, on real devices, the *box* the picture sat in was
-   confirmed correctly sized (measured directly in the browser: img element 180x228 inside a 192x256 button) yet the
-   PICTURE ITSELF still visibly overflowed past it — object-fit:contain was computing the right box without actually
-   scaling the drawn content to fit it, on a size arrived at via flex-grow rather than a size the image carries
-   itself. Real fix: give up trying to fit the picture INTO a box at all — no aspect-ratio, no object-fit, nothing
-   flex-grown. Just a plain image at its own natural proportions (width 100%, height auto), so what's drawn and
-   what's laid out are the same calculation; the button (ordinary flex-column content sizing, no fixed ratio) just
-   grows to whatever that picture turns out to be. Cells are no longer a uniform size — different pictures are
-   different shapes — but nothing can overflow a box it was never forced into in the first place. */
-.live-card-gallery-item { padding: 4px; gap: 4px; }
+/* REAL BUG, FOUND AND FIXED (third round on this element — see js/live-cards.js's own comment on galleryHtml for the
+   full story). Rounds one and two fixed how big each PICTURE rendered; this one is about POSITION. As a CSS Grid (3
+   columns, implicit rows), a taller picture in one column made its whole ROW taller everywhere — including the
+   OTHER two columns' cells in that same row — so a card several rows down could end up overlapped by the one below
+   it: the row heights just didn't match what those columns actually needed. Fixed in the markup, not CSS alone: no
+   more grid/rows at all for this card. Three independent top-to-bottom stacks (js/live-cards.js's galleryHtml),
+   each card's position simply following the one above it in its OWN stack — nothing in column 2 can ever move
+   anything in column 1. `display: block` here overrides the shared .live-card-grid's own `display: grid`, since the
+   three columns are now plain flex stacks below, not this container's grid columns. */
+.live-card-grid-gallery { display: block; }
+.live-card-gallery-cols { display: flex; align-items: flex-start; gap: 10px; }
+.live-card-gallery-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.live-card-gallery-item { padding: 4px; gap: 4px; margin: 0; }
 .live-card-gallery-item img { width: 100%; height: auto; display: block; border-radius: 8px; }
 .live-card-gallery-item span { font-size: 0.72rem; font-weight: 600; text-align: center; }
 .live-card-stepper { min-height: 100%; }
