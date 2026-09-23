@@ -2717,29 +2717,6 @@ main.wide {
   border: none;
 }
 
-/* Leaflet's own popup content (the type-choice buttons on a Location
-   tab marker with more than one type — see app.js) needs its OWN
-   button styling, since Leaflet popups render outside this site's normal
-   card/button component tree — matches .btn-secondary closely enough to
-   look native rather than injecting a whole shared class here. */
-.map-popup-type-btn {
-  display: block;
-  width: 100%;
-  margin-bottom: 4px;
-  padding: 5px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--grey-200);
-  background: var(--white);
-  color: var(--blue-900);
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.map-popup-type-btn:last-child {
-  margin-bottom: 0;
-}
-
 /* Fishing-mark popups (view/edit — see buildMarkPopupViewHtml/
    buildMarkPopupEditHtml, charts.js) can run to a dozen-plus fields in edit
    mode, easily taller than the available viewport on mobile — Leaflet's
@@ -2747,8 +2724,7 @@ main.wide {
    partly off-screen with no way to reach the Save button underneath.
    Scoped to this popup's own className (set in loadAndRenderMarks) rather
    than every .leaflet-popup-content on the site, so it doesn't affect the
-   short, single-purpose popups used elsewhere (e.g. .map-popup-type-btn's
-   own popup above). */
+   short, single-purpose popups used elsewhere. */
 .mark-popup-leaflet .leaflet-popup-content {
   max-height: 60vh;
   overflow-y: auto;
@@ -3347,6 +3323,10 @@ main.wide {
   align-self: center;
 }
 .location-edit-gear-btn[hidden] { display: none; }
+/* Kayak / Land based pills after the name and gear, for a location usable for both (renderLocationTypePills, app.js). */
+.location-type-pills { display: flex; flex-wrap: wrap; gap: 4px; align-self: center; }
+.location-type-pills:empty { display: none; }
+.location-type-pills .mark-pill { font-size: 0.72rem; padding: 3px 10px; }
 
 /* Location editor dialog — reuses the mark edit form's sections and pills (.mark-edit-group, .mark-pill). */
 .loc-editor { max-width: 460px; width: 100%; }

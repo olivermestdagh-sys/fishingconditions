@@ -315,9 +315,9 @@ function hideLocationHoverPanel() {
  * Builds the Location tab's map (renderLeafletLocationMap, charts.js) —
  * one marker per distinct location NAME, since lat/lng is the same
  * regardless of which type variant it is. A location with only one type
- * selects directly on click; one with both Kayak and Land based entries
- * opens a small popup to choose between them instead, since a single
- * marker can't otherwise say which of the two the person meant.
+ * selects directly on click; one with several types (Kayak and Land based)
+ * opens its Kayak graph (or its first type, if it has no Kayak entry) — the
+ * other types are pills next to the graph's name (renderLocationTypePills).
  */
 function renderLocationMap() {
   const byName = new Map();
@@ -331,18 +331,9 @@ function renderLocationMap() {
     const { lat, lng } = variants[0];
     const types = variants.map((v) => v.type);
     const iconKind = types.includes("Kayak") && types.includes("Land based") ? "both" : types.includes("Land based") ? "landBased" : "kayak";
-    if (variants.length === 1) {
-      const key = locationKey(variants[0].name, variants[0].type);
-      points.push({ lat, lng, label: displayNameFor(variants[0]), iconKind, onClick: () => selectLocationByKey(key) });
-    } else {
-      const popupHtml = `
-        <div style="font-weight:600;margin-bottom:6px;">${displayNameFor(variants[0])}</div>
-        ${variants
-          .map((v) => `<button type="button" class="map-popup-type-btn" data-map-key="${locationKey(v.name, v.type)}">${v.type}</button>`)
-          .join("")}
-      `;
-      points.push({ lat, lng, label: displayNameFor(variants[0]), iconKind, popupHtml });
-    }
+    const first = variants.find((v) => v.type === "Kayak") || variants[0];
+    const key = locationKey(first.name, first.type);
+    points.push({ lat, lng, label: displayNameFor(first), iconKind, onClick: () => selectLocationByKey(key) });
   }
 
   const markLayerState = createMarkLayerState();
@@ -360,18 +351,6 @@ function renderLocationMap() {
   // somewhere to read marksById/markersById/markLists from once this
   // finishes loading them, without a second callback.
   loadAndRenderMarks(map, markLayerState);
-  // Popup content only exists in the DOM once a popup actually opens (up
-  // until then it's just an HTML string Leaflet is holding onto), so its
-  // buttons have to be wired here rather than up front.
-  map.on("popupopen", (e) => {
-    const popupEl = e.popup.getElement();
-    popupEl.querySelectorAll("[data-map-key]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        selectLocationByKey(btn.dataset.mapKey);
-        map.closePopup();
-      });
-    });
-  });
 }
 
 /**
@@ -401,6 +380,7 @@ async function onLocationMapClickForPreview(lat, lng) {
     showLocationHoverPanel();
     document.getElementById("hoverPanelLocationName").textContent = "Preview";
     setLocationEditGear(null); // a preview isn't a saved location — nothing to edit
+  renderLocationTypePills(null);
     showPreviewNote(false);
     showPreviewControls(false);
     hideAddPermanentButton();
@@ -434,6 +414,7 @@ async function previewLocationOnMap(candidate, clickLat, clickLng) {
   showLocationHoverPanel();
   document.getElementById("hoverPanelLocationName").textContent = `${candidate.name} (preview)`;
   setLocationEditGear(null); // a preview isn't a saved location — nothing to edit
+    renderLocationTypePills(null);
   showPreviewNote(true);
   showPreviewControls(false);
   document.getElementById("locationChartFrame").style.display = "none";
@@ -690,6 +671,30 @@ function renderTileSessions(rows) {
   for (const s of sessions) box.appendChild(buildSessionChipElement(s));
 }
 
+/** Pills after the graph panel's name (and gear) for a location usable for several types — Kayak first — with the
+ * shown one selected; tapping another switches the graph to it. Empty (hidden) for a single-type location or a
+ * preview (loc null). */
+function renderLocationTypePills(loc) {
+  const box = document.getElementById("hoverPanelTypePills");
+  const variants = loc ? state.data.locations.filter((l) => l.name === loc.name) : [];
+  if (variants.length < 2) {
+    box.innerHTML = "";
+    return;
+  }
+  variants.sort((a, b) => (a.type === "Kayak" ? -1 : b.type === "Kayak" ? 1 : 0));
+  box.innerHTML = variants
+    .map((v) => {
+      const on = v.type === loc.type;
+      return `<button type="button" class="loc-chip mark-pill${on ? " is-on" : ""}" aria-pressed="${on}" data-type-key="${escapeHtml(locationKey(v.name, v.type))}">${escapeHtml(v.type)}</button>`;
+    })
+    .join("");
+  box.querySelectorAll("[data-type-key]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.getAttribute("aria-pressed") !== "true") selectLocationByKey(btn.dataset.typeKey);
+    });
+  });
+}
+
 /** The gear after the graph panel's location name (Admin only): runs `handler` on a click; null hides it. */
 function setLocationEditGear(handler) {
   const btn = document.getElementById("hoverPanelEditLocationBtn");
@@ -708,6 +713,7 @@ function renderLocation(key) {
     ? `<div class="loc-tile-type">${escapeHtml(loc.type)}</div><div>Shore ${escapeHtml(loc.shore || "–")}</div>`
     : "";
   if (loc && locationPill) locationPill.setPhoto(loc.type);
+  renderLocationTypePills(loc);
   // Admin: the gear after the name edits this location (js/location-editor.js); after each save the live config is
   // merged back in and this same graph redrawn, so the change shows straight away.
   setLocationEditGear(
