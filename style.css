@@ -187,6 +187,14 @@ main {
   height: 100%;
 }
 
+/* Chrome draws faint white lines along map-tile edges whenever tiles land on part-pixels — any browser zoom other
+   than 100%, or a map that starts a fraction of a pixel down the page (the heading/toolbar heights above it depend
+   on fonts and width). "plus-lighter" adds each tile's edge pixels to its neighbour's instead of letting the
+   background show through, which hides the seams. The map tiles are opaque, so nothing else changes. */
+.leaflet-tile-container img.leaflet-tile {
+  mix-blend-mode: plus-lighter;
+}
+
 /* Wraps the map + the mark detail panel (below) in a flex row so the
    panel sits permanently to the right of the map rather than floating
    over it — real, reported friction: a Leaflet popup positioned right
