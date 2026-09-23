@@ -829,6 +829,14 @@ main {
   margin-bottom: 16px;
 }
 
+/* What signing in lets you do (Settings' sign-in card). */
+.footnote.signin-benefits {
+  margin: 0 0 10px;
+  padding-left: 20px;
+  text-align: left;
+}
+.signin-benefits li { margin-bottom: 4px; }
+
 .summary-top {
   display: flex;
   justify-content: space-between;
