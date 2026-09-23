@@ -1541,6 +1541,12 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         if (!("windSpeed" in updated)) delete mark.windSpeed;
         saveLastMarkFieldValues(mark); // every successful save, create or edit — see that function's own comment
 
+        // An edit (not a brand-new mark, which would otherwise vanish the moment it's saved if the current filters
+        // don't cover it) re-applies the map filters, same as bulk edit — see refreshAfterEdit's calls below.
+        const wasEdit = !options.isNew;
+        const refreshAfterEdit = () => {
+          if (wasEdit && options.state && options.state.refreshMarkControls) options.state.refreshMarkControls();
+        };
         if (options.isNew && options.state) {
           options.state.marksById.set(mark.id, mark);
           options.state.markersById.set(mark.id, marker);
@@ -1603,6 +1609,8 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
             });
           }
           if (options.state) options.state.markersById.set(mark.id, marker);
+          refreshAfterEdit();
+          if (!options.state.markerLayer.hasLayer(marker)) return; // the edit filtered it off the map — nothing to reopen
           // showMarkerOnceVisible (not zoomToShowLayer directly, and not a
           // plain openPopup) — the freshly re-created marker could easily
           // land inside a cluster if other marks sit nearby, in which
@@ -1631,6 +1639,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         marker.bindTooltip(markTooltipText(mark, options.state), { direction: "top" });
         const style = markStyleFor(mark, options.state);
         marker.setStyle({ color: style.color, fillColor: style.fillColor, radius: style.radius, weight: style.weight });
+        refreshAfterEdit(); // if the edit no longer matches the filters, the marker (and its popup) leave the map
       } else {
         statusEl.textContent = "Save failed: " + result.error;
         statusEl.style.color = "#dc2626";
