@@ -5,7 +5,7 @@
 // setupFullscreenToggle, requestGpsPosition, currentGpsPosition and the marks functions come from js/*.js
 // (loaded before this file); isMobileDevice and `state` come from app.js.
 
-const SETTINGS_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev/api/public/settings";
+const SETTINGS_URL = `${USER_BACKEND_URL}/api/public/settings`;
 // The user-backend endpoint that returns the signed-in user's Routes key (null when signed out). Their homes come from js/homes.js.
 const TIMINGS_STORAGE_KEY = "liveHomeTimings";
 

@@ -33,7 +33,7 @@
 const isMobileDevice = Math.min(window.innerWidth, window.innerHeight) <= 900;
 
 const DATA_URL = "data/conditions.json";
-const SETTINGS_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev/api/public/settings";
+const SETTINGS_URL = `${USER_BACKEND_URL}/api/public/settings`;
 // Points at the live, unauthenticated user-backend endpoint (D1, Public's
 // own row) rather than the static config/settings.json file it used to —
 // same migration pattern as MARK_LISTS_FILE_PATH/MARKS_FILE_PATH

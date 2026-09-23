@@ -58,7 +58,7 @@ if ("serviceWorker" in navigator) {
 // this is exactly what caused that bug).
 // ---------------------------------------------------------------------
 
-const USER_BACKEND_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev";
+const USER_BACKEND_URL = "https://fishingconditions-users.olies-fishing.workers.dev";
 
 // --- Sign-in that survives blocked third-party cookies ------------------------------------------------------
 // The Worker's session cookie belongs to a different address from this site, so phone browsers increasingly
@@ -475,7 +475,7 @@ function defaultTypeConfig(type) {
 // of thousands of rows; until then a flat file keeps the whole architecture
 // (and the deploy-by-drag-and-drop workflow) one consistent shape.
 
-const MARKS_FILE_PATH = "https://fishingconditions-users.oliver-mestdagh.workers.dev/api/public/marks";
+const MARKS_FILE_PATH = `${USER_BACKEND_URL}/api/public/marks`;
 // Points at the live, unauthenticated user-backend endpoint (D1, Public's
 // own rows, reattributed there from the Admin's own account by a one-time
 // migration — see handlePublicMarks's own comment for why) rather than the
@@ -493,7 +493,7 @@ const MARKS_FILE_PATH = "https://fishingconditions-users.oliver-mestdagh.workers
 // busting `?_=${Date.now()}` and `cache:"no-store"` on those calls are
 // harmless no-ops against a live API rather than a static file, not worth
 // removing just for tidiness.
-const MARK_LISTS_FILE_PATH = "https://fishingconditions-users.oliver-mestdagh.workers.dev/api/public/marklists";
+const MARK_LISTS_FILE_PATH = `${USER_BACKEND_URL}/api/public/marklists`;
 
 /**
  * Public's own mark-list vocabulary, UNIONED with the signed-in Admin's
@@ -799,7 +799,7 @@ function makeMarkId() {
 // "https://" is required; a bare hostname here is a relative path as far
 // as fetch() is concerned, not an absolute URL, and would silently 404
 // against this site's own origin instead of ever reaching the Worker.
-const WILLYWEATHER_SEARCH_WORKER_URL = "https://fishingconditions-search.oliver-mestdagh.workers.dev";
+const WILLYWEATHER_SEARCH_WORKER_URL = "https://fishingconditions-search.olies-fishing.workers.dev";
 
 /**
  * Calls the willyweather-search Worker's coordinate-search endpoint.

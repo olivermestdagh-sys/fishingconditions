@@ -19,7 +19,7 @@ GH_REPO_NAME = "fishingconditions"
 GH_REPO_OWNER = "olivermestdagh-sys"
 GH_WORKFLOW_FILE = "update.yml"
 GOOGLE_CLIENT_ID = "980249471001-mspp2fvr1ovomu1068u9o2nvvr6tam3e.apps.googleusercontent.com"
-GOOGLE_REDIRECT_URI = "https://fishingconditions-users.oliver-mestdagh.workers.dev/auth/callback"
+GOOGLE_REDIRECT_URI = "https://fishingconditions-users.olies-fishing.workers.dev/auth/callback"
 
 # Secrets (not stored here; already set on the deployed worker, kept on deploy):
 #   GH_ACTIONS_TOKEN, GOOGLE_CLIENT_SECRET, PIPELINE_API_TOKEN

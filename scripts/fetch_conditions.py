@@ -6,7 +6,7 @@ the Excel workbook's Power Query "Conditions" query, so the numbers and
 column meanings should match exactly.
 
 Run with:
-    WILLYWEATHER_API_KEY=xxxx PIPELINE_WORKER_URL=https://fishingconditions-users.oliver-mestdagh.workers.dev PIPELINE_API_TOKEN=xxxx python3 fetch_conditions.py
+    WILLYWEATHER_API_KEY=xxxx PIPELINE_WORKER_URL=https://fishingconditions-users.olies-fishing.workers.dev PIPELINE_API_TOKEN=xxxx python3 fetch_conditions.py
 
 Environment variables:
     WILLYWEATHER_API_KEY  (required) - your WillyWeather API key
