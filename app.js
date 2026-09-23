@@ -400,7 +400,7 @@ async function onLocationMapClickForPreview(lat, lng) {
   if (!candidates || candidates.length === 0) {
     showLocationHoverPanel();
     document.getElementById("hoverPanelLocationName").textContent = "Preview";
-    if (locationPill) locationPill.setGear(null); // a preview isn't a saved location — nothing to edit
+    setLocationEditGear(null); // a preview isn't a saved location — nothing to edit
     showPreviewNote(false);
     showPreviewControls(false);
     hideAddPermanentButton();
@@ -433,7 +433,7 @@ async function onLocationMapClickForPreview(lat, lng) {
 async function previewLocationOnMap(candidate, clickLat, clickLng) {
   showLocationHoverPanel();
   document.getElementById("hoverPanelLocationName").textContent = `${candidate.name} (preview)`;
-  if (locationPill) locationPill.setGear(null); // a preview isn't a saved location — nothing to edit
+  setLocationEditGear(null); // a preview isn't a saved location — nothing to edit
   showPreviewNote(true);
   showPreviewControls(false);
   document.getElementById("locationChartFrame").style.display = "none";
@@ -690,6 +690,13 @@ function renderTileSessions(rows) {
   for (const s of sessions) box.appendChild(buildSessionChipElement(s));
 }
 
+/** The gear after the graph panel's location name (Admin only): runs `handler` on a click; null hides it. */
+function setLocationEditGear(handler) {
+  const btn = document.getElementById("hoverPanelEditLocationBtn");
+  btn.hidden = !handler;
+  btn.onclick = handler || null;
+}
+
 let locationPill = null; // floating name pill + details tile on the graph (mountLocationPill, js/week-tools.js)
 
 function renderLocation(key) {
@@ -703,19 +710,17 @@ function renderLocation(key) {
   if (loc && locationPill) locationPill.setPhoto(loc.type);
   // Admin: the gear after the name edits this location (js/location-editor.js); after each save the live config is
   // merged back in and this same graph redrawn, so the change shows straight away.
-  if (locationPill) {
-    locationPill.setGear(
-      loc && cachedIsAdmin
-        ? () =>
-            openLocationEditor(loc.name, {
-              onChanged: async () => {
-                await mergeLiveLocationConfig(state.data.locations);
-                renderLocation(key);
-              },
-            })
-        : null
-    );
-  }
+  setLocationEditGear(
+    loc && cachedIsAdmin
+      ? () =>
+          openLocationEditor(loc.name, {
+            onChanged: async () => {
+              await mergeLiveLocationConfig(state.data.locations);
+              renderLocation(key);
+            },
+          })
+      : null
+  );
   renderTileSessions(rows);
   // A real, saved location's own graph — not a preview (see
   // previewLocationOnMap) — so the preview note/badge/controls never

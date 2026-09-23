@@ -3331,8 +3331,8 @@ main.wide {
   background: var(--blue-900);
   color: var(--white);
 }
-/* Gear after the location name (Map page, Admin only) — opens the location editor (js/location-editor.js). */
-.loc-pill-gear-btn {
+/* Gear after the graph panel's location name (Map page, Admin only) — opens the location editor (js/location-editor.js). */
+.location-edit-gear-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3344,8 +3344,9 @@ main.wide {
   background: var(--blue-100, #eaf2fb);
   color: var(--blue-900);
   cursor: pointer;
+  align-self: center;
 }
-.loc-pill-gear-btn[hidden] { display: none; }
+.location-edit-gear-btn[hidden] { display: none; }
 
 /* Location editor dialog — reuses the mark edit form's sections and pills (.mark-edit-group, .mark-pill). */
 .loc-editor { max-width: 460px; width: 100%; }
