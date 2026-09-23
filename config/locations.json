@@ -1,5 +1,6 @@
 [
   {
+    "ownerId": "public",
     "name": "Balnarring Beach, VIC 3926",
     "displayName": "Balnarring Beach",
     "shore": "NW",
@@ -38,6 +39,7 @@
     ]
   },
   {
+    "ownerId": "18da2c24-f0ea-4a61-91d8-77591b4a2df2",
     "name": "Betka Beach VIC",
     "displayName": "Betka Beach VIC",
     "shore": "N",
@@ -67,6 +69,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Cape Woolamai Beach",
     "displayName": "Cape Woolamai Beach",
     "shore": "NE",
@@ -96,6 +99,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Corinella Boat Ramp, VIC",
     "displayName": "Corinella Boat Ramp",
     "shore": "E",
@@ -125,6 +129,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Coronet Bay, VIC 3984",
     "displayName": "Coronet Bay",
     "shore": "E",
@@ -154,6 +159,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Gunnamatta Beach, VIC",
     "displayName": "Gunnamatta Beach",
     "shore": "N",
@@ -183,6 +189,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Hastings Jetty, VIC",
     "displayName": "Hastings Jetty",
     "shore": "W",
@@ -212,6 +219,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Kilcunda, VIC 3995",
     "displayName": "Kilcunda",
     "shore": "N",
@@ -241,6 +249,7 @@
     ]
   },
   {
+    "ownerId": "18da2c24-f0ea-4a61-91d8-77591b4a2df2",
     "name": "Lakes Entrance Beach VIC",
     "displayName": "Lakes Entrance Beach",
     "shore": "NE",
@@ -270,6 +279,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Lang Lang Boat Ramp, VIC",
     "displayName": "Lang Lang Boat Ramp",
     "shore": "E",
@@ -309,6 +319,7 @@
     ]
   },
   {
+    "ownerId": "18da2c24-f0ea-4a61-91d8-77591b4a2df2",
     "name": "Mallacoota",
     "displayName": "Mallacoota",
     "shore": "S",
@@ -338,6 +349,7 @@
     ]
   },
   {
+    "ownerId": "18da2c24-f0ea-4a61-91d8-77591b4a2df2",
     "name": "Metung, VIC 3904",
     "displayName": "Metung",
     "shore": "W",
@@ -367,6 +379,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Mornington Pier, VIC",
     "displayName": "Mornington Pier",
     "shore": "E",
@@ -396,6 +409,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Patterson River Entrance, VIC",
     "displayName": "Patterson River Entrance",
     "shore": "E",
@@ -425,6 +439,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Point Leo",
     "displayName": "Point Leo",
     "shore": "NW",
@@ -454,6 +469,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Point Leo Surf Beach",
     "displayName": "Point Leo Surf Beach",
     "shore": "N",
@@ -483,6 +499,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Quail Island",
     "displayName": "Warneet (Quail Island)",
     "shore": "NNE",
@@ -510,6 +527,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Rosebud Pier, VIC",
     "displayName": "Rosebud Pier",
     "shore": "E",
@@ -539,6 +557,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Safety Beach Boat Ramp, VIC",
     "displayName": "Safety Beach Boat Ramp",
     "shore": "E",
@@ -568,6 +587,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Somers Beach",
     "displayName": "Somers Beach",
     "shore": "N",
@@ -597,6 +617,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Sorrento Pier, VIC",
     "displayName": "Sorrento Pier",
     "shore": "SW",
@@ -626,6 +647,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Stony Point Boat Ramp, VIC",
     "displayName": "Stony Point Boat Ramp",
     "shore": "W",
@@ -655,6 +677,7 @@
     ]
   },
   {
+    "ownerId": "18da2c24-f0ea-4a61-91d8-77591b4a2df2",
     "name": "Terranora Creek - Kennedy Drive Boat Ramp",
     "displayName": "Terranora Creek - Kennedy Drive Boat Ramp",
     "shore": "NE",
@@ -682,6 +705,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Warneet Boat Ramp, VIC",
     "displayName": "Warneet Boat Ramp",
     "shore": "N",
@@ -711,6 +735,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "West Head",
     "displayName": "Flinders",
     "shore": "W",
@@ -740,6 +765,7 @@
     ]
   },
   {
+    "ownerId": "public",
     "name": "Williamstown Beach, VIC",
     "displayName": "Williamstown Beach",
     "shore": "N",
