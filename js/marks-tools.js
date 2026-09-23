@@ -440,6 +440,8 @@ function initMarkControls(map, state) {
     saveMarkViewSettings(state);
   }
 
+  state.refreshMarkControls = refresh; // so other edits (e.g. handleBulkEditSave) can re-apply the filters too
+
   // onclick, not addEventListener: this runs again every time marks reload (each mode switch), and the button
   // must act on the newest state only, not stack a handler per load.
   filterBtn.onclick = async () => {
@@ -969,7 +971,16 @@ async function handleBulkEditSave(map, state) {
     statusEl.textContent = `Saved to all ${succeeded} mark${succeeded === 1 ? "" : "s"}.`;
     statusEl.style.color = "#16a34a";
     clearMarkSelection(map, state);
+    // The edited values can change which marks pass the filters and what colour they get — re-apply both now.
+    if (state.refreshMarkControls) state.refreshMarkControls();
   } else {
+    // Same re-apply, then put back the selection highlight it restyled over (the selection stays for a retry).
+    if (state.refreshMarkControls) state.refreshMarkControls();
+    for (const id of state.selectedMarkIds) {
+      const marker = state.markersById.get(id);
+      const mark = state.marksById.get(id);
+      if (marker && mark) applyMarkSelectionVisual(marker, mark, state, true);
+    }
     statusEl.textContent = `Saved to ${succeeded} of ${markIds.length} — ${failures.length} failed: ${failures.map((f) => f.error).join("; ")}`;
     statusEl.style.color = "#dc2626";
   }
