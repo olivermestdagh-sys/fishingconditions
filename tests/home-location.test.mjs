@@ -1,78 +1,99 @@
-// The home location belongs to the signed-in user: setting it writes their own row, never the shared "public" one.
+// Homes (user_homes): a signed-in user can have as many as they like, only ever their own — run against a real
+// SQLite engine with the real schema behind a small D1-style adapter.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 
 const tmp = path.join(os.tmpdir(), `ub-home-test-${process.pid}.mjs`);
 fs.copyFileSync(new URL("../user-backend.js", import.meta.url), tmp);
 const worker = (await import(pathToFileURL(tmp).href)).default;
-
+const schema = fs.readFileSync(new URL("../schema-v2.sql", import.meta.url), "utf8");
 const SITE = "https://site.example";
-function makeEnv(role, id) {
-  const updates = [];
-  return {
-    updates,
-    ALLOWED_ORIGIN: SITE,
-    DB: {
-      prepare(sql) {
-        let args = [];
-        return {
-          bind(...a) { args = a; return this; },
-          async first() {
-            if (/FROM sessions/.test(sql)) return role ? { id, role } : null;
-            if (/FROM site_settings/.test(sql)) return { value: "SITE-KEY" };
-            if (/home_lat/.test(sql)) return { home_lat: -37.9, home_lng: 145.2 };
-            return null;
-          },
-          async run() {
-            if (/UPDATE users SET home_lat/.test(sql)) updates.push(args);
-            return {};
-          },
-        };
-      },
+
+function makeDb() {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec(schema);
+  const now = Date.now();
+  const user = sqlite.prepare("INSERT INTO users (id, google_sub, email, role, created_at) VALUES (?, ?, ?, ?, ?)");
+  user.run("public", "g-public", "p@x", "public", now);
+  user.run("admin1", "g-admin", "o@x", "admin", now);
+  user.run("basic1", "g-basic", "c@x", "basic", now);
+  sqlite.prepare("INSERT INTO sessions VALUES (?, ?, ?)").run("s-admin", "admin1", now + 3600000);
+  sqlite.prepare("INSERT INTO sessions VALUES (?, ?, ?)").run("s-basic", "basic1", now + 3600000);
+  sqlite.prepare("INSERT INTO site_settings (key, value, updated_at) VALUES ('google_routes_api_key', 'SITE-KEY', 0)").run();
+  const d1 = {
+    prepare(sql) {
+      let args = [];
+      const stmt = {
+        bind(...a) {
+          args = a;
+          return stmt;
+        },
+        async first() {
+          return sqlite.prepare(sql).get(...args) || null;
+        },
+        async all() {
+          return { results: sqlite.prepare(sql).all(...args) };
+        },
+        async run() {
+          return { meta: { changes: Number(sqlite.prepare(sql).run(...args).changes) } };
+        },
+      };
+      return stmt;
     },
   };
+  return { sqlite, env: { ALLOWED_ORIGIN: SITE, DB: d1 } };
 }
-const put = (env, body) =>
+
+const req = (env, session, method, p, body) =>
   worker.fetch(
-    new Request("https://worker.example/api/admin/home-location", { method: "PUT", headers: { Cookie: "session=s", Origin: SITE, "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+    new Request(`https://worker.example${p}`, {
+      method,
+      headers: { "Content-Type": "application/json", Origin: SITE, ...(session ? { Cookie: `session=${session}` } : {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
     env
   );
-const getSettings = (env, cookie = true) =>
-  worker.fetch(new Request("https://worker.example/api/public/settings", { headers: cookie ? { Cookie: "session=s" } : {} }), env);
 
-test("Admin setting a home location writes their own row, not the shared public one", async () => {
-  const env = makeEnv("admin", "admin-id");
-  const res = await put(env, { lat: -38.1, lng: 145.3 });
-  assert.equal(res.status, 200);
-  assert.deepEqual(env.updates, [[-38.1, 145.3, "admin-id"]]);
+test("a user can add several homes, list them and delete one; the settings response carries them all", async () => {
+  const { env } = makeDb();
+  const a = await (await req(env, "s-basic", "POST", "/api/homes", { lat: -38.1, lng: 145.3 })).json();
+  const b = await (await req(env, "s-basic", "POST", "/api/homes", { lat: -37.5, lng: 144.9 })).json();
+  assert.deepEqual((await (await req(env, "s-basic", "GET", "/api/homes")).json()).map((h) => h.id), [a.id, b.id]);
+  const settings = await (await req(env, "s-basic", "GET", "/api/public/settings")).json();
+  assert.deepEqual(settings.homes, [a, b]);
+  assert.equal(settings.homeLat, -38.1); // the first, for older pages
+  assert.equal(settings.googleRoutesApiKey, "SITE-KEY");
+  assert.equal((await req(env, "s-basic", "DELETE", `/api/homes/${a.id}`)).status, 204);
+  assert.deepEqual(await (await req(env, "s-basic", "GET", "/api/homes")).json(), [b]);
 });
 
-test("a normal signed-in user can set their own home location (and only theirs)", async () => {
-  const env = makeEnv("basic", "user-77");
-  assert.equal((await put(env, { lat: -38.1, lng: 145.3 })).status, 200);
-  assert.deepEqual(env.updates, [[-38.1, 145.3, "user-77"]]);
+test("homes are only ever the signed-in user's own", async () => {
+  const { env } = makeDb();
+  const mine = await (await req(env, "s-basic", "POST", "/api/homes", { lat: -38.1, lng: 145.3 })).json();
+  assert.deepEqual(await (await req(env, "s-admin", "GET", "/api/homes")).json(), []); // Admin sees only their own
+  assert.equal((await req(env, "s-admin", "DELETE", `/api/homes/${mine.id}`)).status, 404); // and can't delete someone else's
+  assert.equal((await (await req(env, "s-basic", "GET", "/api/homes")).json()).length, 1);
 });
 
-test("setting a home location needs a sign-in and valid numbers", async () => {
-  assert.equal((await put(makeEnv(null), { lat: -38.1, lng: 145.3 })).status, 401);
-  assert.equal((await put(makeEnv("basic", "user-77"), { lat: "x", lng: 145.3 })).status, 400);
+test("adding a home needs a sign-in and valid numbers", async () => {
+  const { env } = makeDb();
+  assert.equal((await req(env, null, "POST", "/api/homes", { lat: -38.1, lng: 145.3 })).status, 401);
+  assert.equal((await req(env, "s-basic", "POST", "/api/homes", { lat: "x", lng: 145.3 })).status, 400);
 });
 
-test("the old admin path still works as an alias", async () => {
-  const env = makeEnv("basic", "user-77");
-  const res = await worker.fetch(
-    new Request("https://worker.example/api/admin/home-location", { method: "PUT", headers: { Cookie: "session=s", Origin: SITE, "Content-Type": "application/json" }, body: JSON.stringify({ lat: -38.1, lng: 145.3 }) }),
-    env
-  );
-  assert.equal(res.status, 200);
+test("the old set-home paths now add another home", async () => {
+  const { env } = makeDb();
+  assert.equal((await req(env, "s-basic", "PUT", "/api/home-location", { lat: -38.1, lng: 145.3 })).status, 200);
+  assert.equal((await req(env, "s-basic", "PUT", "/api/admin/home-location", { lat: -37.5, lng: 144.9 })).status, 200);
+  assert.equal((await (await req(env, "s-basic", "GET", "/api/homes")).json()).length, 2);
 });
 
-test("every signed-in user gets the site-wide Routes key; a signed-out visitor gets nothing", async () => {
-  assert.equal((await (await getSettings(makeEnv("admin", "admin-id"))).json()).googleRoutesApiKey, "SITE-KEY");
-  assert.equal((await (await getSettings(makeEnv("basic", "user-77"))).json()).googleRoutesApiKey, "SITE-KEY");
-  assert.deepEqual(await (await getSettings(makeEnv(null), false)).json(), { homeLat: null, homeLng: null, googleRoutesApiKey: null });
+test("a signed-out visitor gets no homes and no Routes key", async () => {
+  const { env } = makeDb();
+  assert.deepEqual(await (await req(env, null, "GET", "/api/public/settings")).json(), { homes: [], homeLat: null, homeLng: null, googleRoutesApiKey: null });
 });

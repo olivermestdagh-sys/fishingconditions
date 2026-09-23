@@ -39,6 +39,8 @@
   <button type="button" id="markFilterBtn" class="btn-secondary map-filter-btn" style="display:none;" title="Filters and Colour by" aria-label="Filters and Colour by">
     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg><span id="markFilterBadge" class="mark-filter-badge"></span>
   </button>
+  <button type="button" id="btnAddHome" class="btn-secondary map-home-btn" style="display:none;" title="Add a home — then tap the map where it is" aria-label="Add a home" aria-pressed="false"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M10 3 L18 10 L15.5 10 L15.5 18 L4.5 18 L4.5 10 L2 10 Z" fill="currentColor"/><rect x="8.3" y="12.5" width="3.4" height="5.5" fill="var(--white, #fff)"/><circle cx="18.5" cy="17.5" r="5" fill="var(--white, #fff)"/><path d="M18.5 14.6 V20.4 M15.6 17.5 H21.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+  <span id="homeAddHint" class="map-toolbar-status" style="display:none;">Tap the map where your home is</span>
   <button type="button" id="btnSessionDefaults" class="btn-primary live-quick-btn" style="display:none;">Session defaults</button>
   <button type="button" id="btnLiveSession" class="btn-primary live-quick-btn" style="display:none;">+ Session</button>
   <button type="button" id="btnLiveEndSession" class="btn-primary live-quick-btn" style="display:none;">End Session/Move</button>
@@ -215,6 +217,7 @@
 <script src="js/marks-layer.js"></script>
 <script src="js/marks-tools.js"></script>
 <script src="js/backend.js"></script>
+<script src="js/homes.js"></script>
 <script src="js/prefs.js"></script>
 <script src="js/catch-limits.js"></script>
 <script src="js/species-image.js"></script>

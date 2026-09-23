@@ -16,16 +16,10 @@ const GROUPS_FILE_PATH = "config/location_groups.json"; // no longer read/writte
 // entire file for a while (see README's "A serious bug, found and fixed"
 // note) until caught by a real page-load test.
 
-// Home address — a single site-wide lat/lng, now stored on Public's own
-// D1 row (users.home_lat/home_lng — see schema-v2.sql) alongside
-// google_routes_api_key, rather than config/settings.json. Set via the
-// map ("Add Home" button below), read once on load so its pin can show
-// immediately if already set — see loadHomeLocation/saveHomeLocation.
-// This is the LAST piece of this page that used to need the GitHub
-// token — see README's "Home address and Refresh data now" section for
-// the full story of what replaced it and why.
-let homeLat = null;
-let homeLng = null;
+// The signed-in person's homes (user_homes — as many as they like; the Worker's /api/homes). Shown as house pins on
+// this page's map; "Add Home" below adds another. Deleting one is on the Map page (click its pin). See
+// loadHomeLocation/saveHomeLocation.
+let myHomesList = []; // [{id, lat, lng}]
 
 // TYPE_TIME_FIELDS and defaultTypeConfig also now live in charts.js —
 // same reasoning, the preview's "Add as permanent location" flow needed
@@ -719,12 +713,10 @@ async function loadHomeLocation() {
   try {
     const res = await fetch(`${USER_BACKEND_URL}/api/public/settings`, { cache: "no-store", credentials: "include" });
     const settings = res.ok ? await res.json() : {};
-    homeLat = settings.homeLat ?? null;
-    homeLng = settings.homeLng ?? null;
+    myHomesList = settings.homes || [];
   } catch (err) {
-    console.error("Could not load home location:", err);
-    homeLat = null;
-    homeLng = null;
+    console.error("Could not load homes:", err);
+    myHomesList = [];
   }
 }
 
@@ -1990,9 +1982,7 @@ function renderSettingsLocationMap() {
   });
   // Home isn't a fishing location — no edit card to jump to, so its
   // onClick is a no-op rather than pointing at a row that doesn't exist.
-  if (homeLat != null && homeLng != null) {
-    points.push({ lat: homeLat, lng: homeLng, label: "Home", iconKind: "home", onClick: () => {} });
-  }
+  for (const home of myHomesList) points.push({ lat: home.lat, lng: home.lng, label: "Home", iconKind: "home", onClick: () => {} });
   renderLeafletLocationMap("settingsLocationMap", points, { onMapClick: onSettingsMapClick });
   document.getElementById("settingsLocationMap").classList.toggle("map-click-armed", addLocationClickArmed || addHomeClickArmed);
 }
@@ -2112,24 +2102,12 @@ async function onSettingsMapClick(lat, lng) {
   }
 }
 
-/**
- * Writes the clicked point to config/settings.json as homeLat/homeLng,
- * preserving whatever else is already in that file (googleRoutesApiKey)
- * — reads the file fresh immediately before writing (same "re-check the
- * sha right before a write, in case it changed elsewhere" reasoning as
- * onSaveGroups/onSave below), merges in the new coordinates, and writes
- * the whole file back. Updates the map immediately on success so the
- * house pin appears without needing a reload.
- */
-/**
- * Writes the clicked point to D1 (the signed-in user's own home_lat/home_lng —
- * PUT /api/home-location) rather than committing to config/settings.json. Updates the map immediately on success so the
- * house pin appears without needing a reload.
- */
+/** Adds a home at the clicked point (POST /api/homes — a person can have as many as they like) and shows its pin
+ * straight away. */
 async function saveHomeLocation(lat, lng) {
   try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/home-location`, {
-      method: "PUT",
+    const res = await fetch(`${USER_BACKEND_URL}/api/homes`, {
+      method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ lat, lng }),
@@ -2138,8 +2116,7 @@ async function saveHomeLocation(lat, lng) {
       const errBody = await res.json().catch(() => ({}));
       throw new Error(errBody.error || `status ${res.status}`);
     }
-    homeLat = lat;
-    homeLng = lng;
+    myHomesList = [...myHomesList, await res.json()];
     renderSettingsLocationMap();
   } catch (err) {
     alert(`Could not save home location: ${err.message}`);

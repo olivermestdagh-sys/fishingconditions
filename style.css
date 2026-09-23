@@ -2904,6 +2904,19 @@ main.wide {
 .mark-filter-badge {
   font-weight: 700;
 }
+/* House-with-+ in the Map toolbar (js/homes.js): arms the next map click to add a home. */
+.map-toolbar .map-home-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+}
+.map-toolbar .map-home-btn.active {
+  background: var(--blue-700);
+  border-color: var(--blue-700);
+  color: var(--white);
+}
+.home-popup-title { font-weight: 600; margin-bottom: 6px; }
+.home-popup-status { margin-top: 4px; font-size: 0.8rem; }
 .mark-filter-badge:empty {
   display: none;
 }

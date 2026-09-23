@@ -6,7 +6,7 @@
 // (loaded before this file); isMobileDevice and `state` come from app.js.
 
 const SETTINGS_URL = "https://fishingconditions-users.oliver-mestdagh.workers.dev/api/public/settings";
-// The user-backend endpoint that returns the signed-in user's own home and Routes key (all null when signed out): {googleRoutesApiKey, homeLat, homeLng}.
+// The user-backend endpoint that returns the signed-in user's Routes key (null when signed out). Their homes come from js/homes.js.
 const TIMINGS_STORAGE_KEY = "liveHomeTimings";
 
 // Same convention as Week Ahead's PIXELS_PER_HOUR — a readable, un-squashed width per hour of data,
@@ -20,8 +20,6 @@ let currentType = null;
 let currentLoc = null;
 let stopFishingTime = null;
 // Home address — a single lat/lng set on the Settings tab's map ("Add Home"), loaded from the settings endpoint.
-let homeLat = null;
-let homeLng = null;
 
 // timeToMinutes comes from js/week-tools.js (identical).
 
@@ -67,8 +65,11 @@ async function updateTimings() {
     setTimingsStatus("Match a location first.", true);
     return;
   }
-  if (homeLat == null || homeLng == null) {
-    setTimingsStatus('No home address set yet — add one on the <a href="locations.html">Settings</a> tab first ("Add Home" on the map).', true);
+  // Drives to whichever of their homes is closest to this fishing spot (js/homes.js).
+  await loadMyHomes();
+  const home = nearestHome(currentLoc.lat, currentLoc.lng);
+  if (!home) {
+    setTimingsStatus("No home set yet — add one with the house button at the top of the map.", true);
     return;
   }
   const homeByStr = document.getElementById("homeByTime").value;
@@ -95,7 +96,7 @@ async function updateTimings() {
 
   // This location's own saved lat/lng to the saved home lat/lng, NOT the
   // device's current GPS position (that's the SEPARATE "back to car" segment below).
-  const driveMinutes = await getDriveTimeBetweenCoords(currentLoc.lat, currentLoc.lng, homeLat, homeLng);
+  const driveMinutes = await getDriveTimeBetweenCoords(currentLoc.lat, currentLoc.lng, home.lat, home.lng);
   if (driveMinutes == null) {
     setTimingsStatus("Couldn't calculate drive time — check that the Routes API key is set up.", true);
     return;
@@ -210,6 +211,7 @@ function liveBuildMap(gpsPosition) {
   // Not awaited — the map appears straight away; + Session/End Session's numbers and visibility catch up once
   // this resolves (updateLiveSessionButtons no-ops if Live mode's already been left by then).
   if (map) loadAndRenderMarks(map, markLayerState).then(() => updateLiveSessionButtons());
+  if (map) renderHomeMarkers(map); // the signed-in person's homes (js/homes.js)
   liveMap = map;
   liveMarkState = markLayerState;
   return { map, markLayerState };
@@ -829,8 +831,6 @@ function liveLoadSettings() {
         if (settingsRes.ok) {
           const settings = await settingsRes.json();
           googleRoutesApiKey = settings.googleRoutesApiKey || null;
-          homeLat = settings.homeLat ?? null;
-          homeLng = settings.homeLng ?? null;
         }
       } catch (err) {
         console.error("Could not load settings:", err);

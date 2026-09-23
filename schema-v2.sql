@@ -71,6 +71,18 @@ CREATE TABLE IF NOT EXISTS users (
   created_at INTEGER NOT NULL
 );
 
+-- A user's homes — as many as they like (the Map's home button). Live's "Home By" drives to whichever is closest to
+-- the fishing spot. Replaces users.home_lat/home_lng (kept, no longer read) — each user's existing home was copied in.
+CREATE TABLE IF NOT EXISTS user_homes (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  lat REAL NOT NULL,
+  lng REAL NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_homes_user ON user_homes(user_id);
+
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

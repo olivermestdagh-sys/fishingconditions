@@ -105,6 +105,7 @@ async function init() {
 
   liveInitOnce();
   wireMapToolbar();
+  initHomesToolbar(); // the house-with-+ button (js/homes.js)
   // A review that was loaded but never finished or cancelled (Import mode,
   // see map-sync.js/sync.js) survives leaving this tab: it's restored here,
   // and the map stays in Import mode until the person imports or cancels.
@@ -182,6 +183,7 @@ function teardownMode() {
   if (mapMode === "live") liveExit();
   if (mapMode === "import") syncDetachMap();
   document.getElementById("markControlsBar").style.display = "none";
+  detachHomes();
   document.getElementById("markFilterBtn").style.display = "none";
   document.getElementById("exportStatus").textContent = "";
 }
@@ -349,6 +351,7 @@ function renderLocationMap() {
     onMapClick: (lat, lng) => handleMapClickForMarks(map, lat, lng, markLayerState, onLocationMapClickForPreview),
   });
   if (!map) return;
+  renderHomeMarkers(map); // the signed-in person's homes (js/homes.js)
   // Fishing marks (data/marks.json) — an extra layer over the tracked-location
   // pins above, only for whoever has a GitHub connection set up (see
   // loadAndRenderMarks's own comment for exactly what that does and doesn't

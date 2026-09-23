@@ -314,6 +314,13 @@ export default {
       if ((url.pathname === "/api/home-location" || url.pathname === "/api/admin/home-location") && request.method === "PUT") {
         return handleHomeLocation(request, env);
       }
+      if (url.pathname === "/api/homes") {
+        return handleHomes(request, env);
+      }
+      const homeMatch = url.pathname.match(/^\/api\/homes\/([^/]+)$/);
+      if (homeMatch && request.method === "DELETE") {
+        return handleHomeDelete(request, env, homeMatch[1]);
+      }
       if (url.pathname === "/api/admin/refresh-data-now" && request.method === "POST") {
         const user = await requireUser(request, env);
         if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
@@ -2312,16 +2319,15 @@ async function handlePublicSettings(request, env) {
   // Anonymous visitors get 200 with all nulls, so the pages still load and
   // simply skip home-based drive times.
   const user = await requireUser(request, env);
-  const row = user
-    ? await env.DB.prepare("SELECT home_lat, home_lng FROM users WHERE id = ?").bind(user.id).first()
-    : null;
+  const homes = user ? await listHomes(env, user.id) : [];
   const keyRow = user
     ? await env.DB.prepare("SELECT value FROM site_settings WHERE key = ?").bind(SITE_ROUTES_KEY_SETTING).first()
     : null;
   return new Response(
     JSON.stringify({
-      homeLat: row ? row.home_lat : null,
-      homeLng: row ? row.home_lng : null,
+      homes, // every home of theirs — Live's "Home By" uses whichever is closest to the fishing spot
+      homeLat: homes.length ? homes[0].lat : null, // the first one, for any older page still reading a single home
+      homeLng: homes.length ? homes[0].lng : null,
       googleRoutesApiKey: keyRow ? keyRow.value : null,
     }),
     {
@@ -2335,26 +2341,52 @@ async function handlePublicSettings(request, env) {
   );
 }
 
-/**
- * Sets the signed-in user's own home address (their users.home_lat/home_lng,
- * the row handlePublicSettings reads back) — replaces locationsadmin.js's
- * old saveHomeLocation, which committed to config/settings.json via the
- * GitHub Contents API. Any signed-in user can set their own; it never touches
- * anyone else's row (no ?userId=). The old /api/admin/home-location path
- * still works, as an alias.
- */
+// --- Homes: a user can have as many as they like (user_homes). Only ever their own. ---------------------------------
+
+async function listHomes(env, userId) {
+  const { results } = await env.DB.prepare("SELECT id, lat, lng FROM user_homes WHERE user_id = ? ORDER BY created_at ASC").bind(userId).all();
+  return results.map((r) => ({ id: r.id, lat: r.lat, lng: r.lng }));
+}
+
+async function addHome(env, userId, body) {
+  if (!body || typeof body.lat !== "number" || typeof body.lng !== "number" || !Number.isFinite(body.lat) || !Number.isFinite(body.lng)) {
+    return { error: "lat and lng must both be numbers." };
+  }
+  const id = crypto.randomUUID();
+  await env.DB.prepare("INSERT INTO user_homes (id, user_id, lat, lng, created_at) VALUES (?, ?, ?, ?, ?)").bind(id, userId, body.lat, body.lng, Date.now()).run();
+  return { home: { id, lat: body.lat, lng: body.lng } };
+}
+
+/** GET /api/homes — the signed-in user's homes; POST {lat, lng} adds one. */
+async function handleHomes(request, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  if (request.method === "GET") return jsonResponse(await listHomes(env, user.id), 200, env);
+  if (request.method === "POST") {
+    const result = await addHome(env, user.id, await readJsonBody(request));
+    if (result.error) return jsonResponse({ error: result.error }, 400, env);
+    return jsonResponse(result.home, 201, env);
+  }
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+/** DELETE /api/homes/:id — one of the signed-in user's own homes. */
+async function handleHomeDelete(request, env, id) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const { meta } = await env.DB.prepare("DELETE FROM user_homes WHERE id = ? AND user_id = ?").bind(id, user.id).run();
+  if (!meta || !meta.changes) return jsonResponse({ error: "Home not found." }, 404, env);
+  return new Response(null, { status: 204, headers: corsHeaders(env) });
+}
+
+/** PUT /api/home-location {lat, lng} (and the old /api/admin/home-location alias) — older pages' "set home": it now
+ * adds another home rather than replacing one. Returns the new home plus the old single-home fields. */
 async function handleHomeLocation(request, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
-
-  const body = await readJsonBody(request);
-  if (typeof body.lat !== "number" || typeof body.lng !== "number") {
-    return jsonResponse({ error: "lat and lng must both be numbers." }, 400, env);
-  }
-  await env.DB.prepare("UPDATE users SET home_lat = ?, home_lng = ? WHERE id = ?")
-    .bind(body.lat, body.lng, user.id)
-    .run();
-  return jsonResponse({ homeLat: body.lat, homeLng: body.lng }, 200, env);
+  const result = await addHome(env, user.id, await readJsonBody(request));
+  if (result.error) return jsonResponse({ error: result.error }, 400, env);
+  return jsonResponse({ ...result.home, homeLat: result.home.lat, homeLng: result.home.lng }, 200, env);
 }
 
 /**

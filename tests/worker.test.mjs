@@ -25,7 +25,6 @@ function makeEnv(role, id) {
           async first() {
             if (/FROM sessions/.test(sql)) return role ? { id, role } : null;
             if (/FROM site_settings/.test(sql)) return { value: "SITE-KEY" };
-            if (/home_lat/.test(sql)) return { home_lat: -37.9, home_lng: 145.2 };
             return null;
           },
           async all() {
@@ -63,7 +62,7 @@ test("anonymous visitors get no marks", async () => {
 test("anonymous visitors get no home location or API key", async () => {
   const r = await call(makeEnv(null), "GET", "/api/public/settings");
   assert.equal(r.status, 200);
-  assert.deepEqual(await r.json(), { homeLat: null, homeLng: null, googleRoutesApiKey: null });
+  assert.deepEqual(await r.json(), { homes: [], homeLat: null, homeLng: null, googleRoutesApiKey: null });
 });
 test("Admin is served their own marks and settings (home location is the signed-in user's; the Routes key is site-wide)", async () => {
   const env = makeEnv("admin", "admin-id");
