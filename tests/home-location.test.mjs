@@ -104,6 +104,13 @@ test("a home keeps a name (its closest town): given when added, or set later on 
   assert.deepEqual((await (await req(env, "s-basic", "GET", "/api/homes")).json()).map((h) => h.name), ["Narre Warren", "Sorrento"]);
 });
 
+test("browsers are allowed to send PATCH (renaming a home) — it must be in the CORS allowed methods", async () => {
+  const { env } = makeDb();
+  const res = await worker.fetch(new Request("https://worker.example/api/homes/x", { method: "OPTIONS", headers: { Origin: SITE, "Access-Control-Request-Method": "PATCH" } }), env);
+  const methods = (res.headers.get("access-control-allow-methods") || "").split(",").map((m) => m.trim());
+  assert.ok(methods.includes("PATCH"), methods.join(", "));
+});
+
 test("a signed-out visitor gets no homes and no Routes key", async () => {
   const { env } = makeDb();
   assert.deepEqual(await (await req(env, null, "GET", "/api/public/settings")).json(), { homes: [], homeLat: null, homeLng: null, googleRoutesApiKey: null });
