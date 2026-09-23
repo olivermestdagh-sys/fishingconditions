@@ -12,12 +12,15 @@
 // Which sections are open — kept across openings, like the filter dialog's.
 const locEdOpenGroups = new Set();
 
-function locEdParseHM(value) {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(String(value || ""));
-  return m ? { h: Number(m[1]), m: Number(m[2]) } : { h: 0, m: 0 };
+// Timings are stored as "HH:MM" (what Week Ahead's timeToMinutes and the pipeline read) but edited as a single
+// number of minutes — the hours were hardly ever used. 0-1439, the most "HH:MM" holds within a day.
+function locEdHmToMinutes(value) {
+  const m = String(value || "").match(/^(\d{1,2}):(\d{1,2})$/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
 }
-function locEdFormatHM(h, m) {
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+function locEdMinutesToHm(minutes) {
+  const total = Math.min(1439, Math.max(0, Math.floor(Number(minutes) || 0)));
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
 /** Finds the Map location `name` among the Admin's own tracked locations and Public's, and returns it in the
@@ -213,19 +216,14 @@ async function openLocationEditor(name, { onChanged } = {}) {
   }
   function typeSection(t, i) {
     const fields = TYPE_TIME_FIELDS[t.type] || TYPE_TIME_FIELDS[t.behavesLike] || [];
-    const summary = fields.map((f) => `${f.label} ${t[f.key] || "00:00"}`);
+    const summary = fields.map((f) => `${f.label} ${locEdHmToMinutes(t[f.key])} min`);
     if (t.behavesLike === "Kayak" && t.minTideHeight != null) summary.push(`Min tide ${t.minTideHeight} m`);
     const body =
       `<div class="loc-editor-hm-grid">${fields
-        .map((f) => {
-          const { h, m } = locEdParseHM(t[f.key]);
-          return `<label class="mark-edit-field">${escapeHtml(f.label)}
-            <span class="hm-pair">
-              <input type="number" min="0" max="23" step="1" inputmode="numeric" data-loced-hm="${i}:${f.key}:h" value="${h}" aria-label="${escapeHtml(f.label)} hours" />
-              <span class="hm-sep">:</span>
-              <input type="number" min="0" max="59" step="1" inputmode="numeric" data-loced-hm="${i}:${f.key}:m" value="${String(m).padStart(2, "0")}" aria-label="${escapeHtml(f.label)} minutes" />
-            </span></label>`;
-        })
+        .map(
+          (f) => `<label class="mark-edit-field">${escapeHtml(f.label)} (min)
+            <input type="number" min="0" max="1439" step="1" inputmode="numeric" data-loced-min="${i}:${f.key}" value="${locEdHmToMinutes(t[f.key])}" style="${MARK_POPUP_INPUT_STYLE}" /></label>`
+        )
         .join("")}</div>` +
       (t.behavesLike === "Kayak"
         ? `<label class="mark-edit-field">Minimum tide height for access (m) — blank if not applicable
@@ -384,14 +382,10 @@ async function openLocationEditor(name, { onChanged } = {}) {
       const type = loc.types[Number(t.dataset.locedMintide)];
       type.minTideHeight = t.value === "" ? null : parseFloat(t.value);
       debounce(`type:${type._accessId}`, () => saveType(type));
-    } else if (t.dataset.locedHm) {
-      const [i, key, part] = t.dataset.locedHm.split(":");
+    } else if (t.dataset.locedMin) {
+      const [i, key] = t.dataset.locedMin.split(":");
       const type = loc.types[Number(i)];
-      const current = locEdParseHM(type[key]);
-      const raw = Math.max(0, Math.floor(Number(t.value) || 0));
-      if (part === "h") current.h = Math.min(23, raw);
-      else current.m = Math.min(59, raw);
-      type[key] = locEdFormatHM(current.h, current.m);
+      type[key] = locEdMinutesToHm(t.value);
       debounce(`type:${type._accessId}`, () => saveType(type));
     }
   });

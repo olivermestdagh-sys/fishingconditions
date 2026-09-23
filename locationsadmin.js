@@ -215,14 +215,15 @@ async function loadLocationCoords() {
   }
 }
 
-function parseHM(value) {
+// Timings are stored as "HH:MM" (what Week Ahead's timeToMinutes and the pipeline read) but edited as a single
+// number of minutes — the hours were hardly ever used. 0-1439, the most "HH:MM" holds within a day.
+function hmToMinutes(value) {
   const m = String(value || "").match(/^(\d{1,2}):(\d{1,2})$/);
-  if (!m) return { h: 0, m: 0 };
-  return { h: Math.min(23, Number(m[1])), m: Math.min(59, Number(m[2])) };
+  return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
 }
-
-function formatHM(h, m) {
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+function minutesToHm(minutes) {
+  const total = Math.min(1439, Math.max(0, Math.floor(Number(minutes) || 0)));
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
 
@@ -2299,23 +2300,16 @@ function renderTypeSection(loc, typeConfig, locIdx, typeIdx) {
     <div class="loc-type-section">
       <div class="loc-type-section-header">
         ${typeIconSvg(typeConfig.behavesLike, 15)}
-        <label class="loc-edit-label" style="margin:0;">${typeConfig.type.replace(/</g, "&lt;")} timings (duration, hours : minutes)</label>
+        <label class="loc-edit-label" style="margin:0;">${typeConfig.type.replace(/</g, "&lt;")} timings (minutes)</label>
         <button type="button" data-remove-type data-idx="${locIdx}" data-typeidx="${typeIdx}" class="btn-secondary" style="margin-left:auto;font-size:0.75rem;padding:3px 8px;">Remove type</button>
       </div>
       <div class="loc-time-grid">
-        ${fields.map((f) => {
-          const { h, m } = parseHM(typeConfig[f.key]);
-          return `
+        ${fields.map((f) => `
           <div>
-            <label class="loc-edit-label">${f.label}</label>
-            <div class="hm-pair">
-              <input type="number" min="0" max="23" step="1" inputmode="numeric" data-hmfield="${f.key}" data-hmpart="h" data-idx="${locIdx}" data-typeidx="${typeIdx}" value="${h}" aria-label="${f.label} hours" />
-              <span class="hm-sep">:</span>
-              <input type="number" min="0" max="59" step="1" inputmode="numeric" data-hmfield="${f.key}" data-hmpart="m" data-idx="${locIdx}" data-typeidx="${typeIdx}" value="${String(m).padStart(2, "0")}" aria-label="${f.label} minutes" />
-            </div>
+            <label class="loc-edit-label">${f.label} (min)</label>
+            <input type="number" min="0" max="1439" step="1" inputmode="numeric" class="minutes-input" data-minfield="${f.key}" data-idx="${locIdx}" data-typeidx="${typeIdx}" value="${hmToMinutes(typeConfig[f.key])}" aria-label="${f.label} in minutes" />
           </div>
-        `;
-        }).join("")}
+        `).join("")}
       </div>
 
       ${typeConfig.behavesLike === "Kayak" ? `
@@ -2828,18 +2822,11 @@ function wireRowListeners(list) {
     });
   });
 
-  list.querySelectorAll("input[data-hmfield]").forEach((el) => {
+  list.querySelectorAll("input[data-minfield]").forEach((el) => {
     el.addEventListener("input", (e) => {
       const idx = Number(e.target.dataset.idx);
       const typeIdx = Number(e.target.dataset.typeidx);
-      const field = e.target.dataset.hmfield;
-      const part = e.target.dataset.hmpart;
-      const typeConfig = locations[idx].types[typeIdx];
-      const current = parseHM(typeConfig[field]);
-      const raw = Math.max(0, Math.floor(Number(e.target.value) || 0));
-      if (part === "h") current.h = Math.min(23, raw);
-      else current.m = Math.min(59, raw);
-      typeConfig[field] = formatHM(current.h, current.m);
+      locations[idx].types[typeIdx][e.target.dataset.minfield] = minutesToHm(e.target.value);
       scheduleTypeSave(idx, typeIdx);
     });
   });
