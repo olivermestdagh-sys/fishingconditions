@@ -6,8 +6,9 @@
 // Worker endpoints Settings uses (typing is debounced), then `onChanged` lets the page re-read the live config.
 //
 // Admin only: the Map's locations are the Public account's and the Admin's own (see buildLocationList,
-// user-backend.js), so the editor looks the location up in both, by its WillyWeather search name, and edits it in
-// whichever account holds it (?userId=public for Public's).
+// user-backend.js), so the editor looks the location up in every account, by its WillyWeather search name, and
+// edits it in whichever one holds it (?userId=<owner>). Its Owner section hands the location to another account
+// (PUT /api/admin/locations/:id/owner).
 
 // Which sections are open — kept across openings, like the filter dialog's.
 const locEdOpenGroups = new Set();
@@ -23,11 +24,21 @@ function locEdMinutesToHm(minutes) {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
-/** Finds the Map location `name` among the Admin's own tracked locations and Public's, and returns it in the
- * Settings page's shape: place fields, groups, and one entry per type with its access-row id and timings. Also the
- * account's type and group vocabularies, for the pickers. Null when it isn't in either account. */
+/** "Public" or the account's name, for an owner id. */
+function locEdOwnerLabel(ownerId) {
+  if (ownerId === "public") return "Public";
+  const u = cachedAdminUsers.find((x) => x.id === ownerId);
+  return u ? u.name || u.email || ownerId : ownerId;
+}
+
+/** Finds the Map location `name` in the Admin's own account, Public's, then every other account, and returns it in
+ * the Settings page's shape: place fields, groups, and one entry per type with its access-row id and timings. Also
+ * the account's type and group vocabularies, for the pickers. Null when no account has it. */
 async function locEdLoad(name) {
-  for (const param of ["", "?userId=public"]) {
+  if (typeof fetchAdminUsersList === "function" && !cachedAdminUsers.length) await fetchAdminUsersList();
+  const owners = [cachedUserId, "public", ...cachedAdminUsers.map((u) => u.id).filter((id) => id !== cachedUserId)];
+  for (const ownerId of owners) {
+    const param = ownerId === cachedUserId ? "" : `?userId=${encodeURIComponent(ownerId)}`;
     const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations${param}`, { credentials: "include" });
     if (!res.ok) throw new Error(`tracked-locations status ${res.status}`);
     const rows = (await res.json()).filter((r) => r.location.name === name);
@@ -41,7 +52,7 @@ async function locEdLoad(name) {
     const p = rows[0].location;
     return {
       param,
-      accountLabel: param ? "Public" : "your account",
+      ownerId,
       types: await typesRes.json(),
       groups: await groupsRes.json(),
       loc: {
@@ -134,7 +145,7 @@ async function openLocationEditor(name, { onChanged } = {}) {
     bodyEl.innerHTML = `<p class="footnote" style="margin:0;">This location isn't in your account or Public's, so it can't be edited here.</p>`;
     return;
   }
-  const { loc, param } = ctx;
+  let { loc, param } = ctx; // replaced when the Owner changes (see the owner pills below)
 
   async function send(url, method, body) {
     const res = await fetch(`${USER_BACKEND_URL}${url}${param}`, {
@@ -235,13 +246,22 @@ async function openLocationEditor(name, { onChanged } = {}) {
     const activeTypeIds = loc.types.map((t) => t._typeId);
     const groupNames = ctx.groups.map((g) => g.name);
     bodyEl.innerHTML = `
-      <p class="footnote" style="margin:0 0 8px;text-align:left;">Editing ${escapeHtml(ctx.accountLabel)}'s location. Changes save as you make them.</p>
+      <p class="footnote" style="margin:0 0 8px;text-align:left;">Changes save as you make them.</p>
       <label class="mark-edit-field" style="margin-top:0;">Display name
         <input type="text" data-loced-text="displayName" value="${escapeHtml(loc.displayName || "")}" style="${MARK_POPUP_INPUT_STYLE}" /></label>
       <label class="mark-edit-field">WillyWeather search name
         <input type="text" data-loced-text="name" value="${escapeHtml(loc.name || "")}" style="${MARK_POPUP_INPUT_STYLE}" /></label>
       <p class="footnote" style="margin:2px 0 8px;text-align:left;">Changing the search name links the location to a different WillyWeather place from the next data refresh.</p>
       <div class="mark-edit-groups">
+        ${group(
+          "owner",
+          "Owner",
+          [locEdOwnerLabel(ctx.ownerId)],
+          `<div class="mark-pill-row">${["public", ...cachedAdminUsers.map((u) => u.id)]
+            .map((id) => pill("data-loced-owner", id, id === "public" ? "Public (shared)" : locEdOwnerLabel(id), id === ctx.ownerId))
+            .join("")}</div>
+           <p class="footnote" style="margin:6px 0 0;text-align:left;">Only Public's and Admin accounts' locations show on the Map and Week Ahead. Its types and groups move with it.</p>`
+        )}
         ${group("shore", "Shore faces", loc.shore ? [loc.shore] : [], `<div class="mark-pill-row">${SHORE_OPTIONS.map((s) => pill("data-loced-shore", s, s, loc.shore === s)).join("")}</div>`)}
         ${group(
           "groups",
@@ -290,6 +310,32 @@ async function openLocationEditor(name, { onChanged } = {}) {
       else locEdOpenGroups.delete(key);
       toggle.setAttribute("aria-expanded", String(open));
       toggle.nextElementSibling.hidden = !open;
+      return;
+    }
+    const ownerPill = t.closest("[data-loced-owner]");
+    if (ownerPill) {
+      const target = ownerPill.dataset.locedOwner;
+      if (target === ctx.ownerId) return; // one is always chosen
+      const ok = await saved(
+        fetch(`${USER_BACKEND_URL}/api/admin/locations/${loc._id}/owner`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ownerUserId: target }),
+        }).then(async (res) => {
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `status ${res.status}`);
+        }),
+        "the owner"
+      );
+      if (!ok) return;
+      const fresh = await locEdLoad(loc.name);
+      if (fresh) {
+        Object.assign(ctx, fresh);
+        loc = fresh.loc;
+        param = fresh.param;
+      }
+      render();
+      setStatus(`Moved to ${locEdOwnerLabel(ctx.ownerId)}.`);
       return;
     }
     const shore = t.closest("[data-loced-shore]");

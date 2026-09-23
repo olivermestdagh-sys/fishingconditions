@@ -324,6 +324,13 @@ export default {
         if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
         return handleAdminUpdateUser(request, env, user, adminUserMatch[1]);
       }
+      const locationOwnerMatch = url.pathname.match(/^\/api\/admin\/locations\/([^/]+)\/owner$/);
+      if (locationOwnerMatch && request.method === "PUT") {
+        const user = await requireUser(request, env);
+        if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+        if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
+        return handleAdminLocationOwner(request, env, locationOwnerMatch[1]);
+      }
       if (url.pathname === "/api/admin/tiers" && request.method === "GET") {
         const user = await requireUser(request, env);
         if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
@@ -2428,6 +2435,84 @@ function rowToAdminUser(row) {
  * directly. Not blocked: an Admin changing their OWN role, as long as
  * at least one other Admin account would still exist afterward.
  */
+/**
+ * PUT /api/admin/locations/:id/owner {ownerUserId} — Admin only: hands a location to another account (the Map's
+ * location editor, js/location-editor.js). Types and groups are per-account vocabularies, so the old owner's own
+ * entries for the place move with it: each type entry is re-pointed at the new owner's type of the same name
+ * (created if it has none — same name and scoring), and each group membership at the new owner's group of the same
+ * name (also created if missing). If the new owner already tracks the place with that type, theirs is kept and the
+ * old owner's duplicate dropped. Anyone else's own entries for the place are left alone. All in one batch.
+ */
+async function handleAdminLocationOwner(request, env, locationId) {
+  const body = await readJsonBody(request);
+  const target = body && typeof body.ownerUserId === "string" ? body.ownerUserId.trim() : "";
+  if (!target) return jsonResponse({ error: "ownerUserId is required." }, 400, env);
+  const loc = await env.DB.prepare("SELECT id, created_by_user_id FROM locations WHERE id = ?").bind(locationId).first();
+  if (!loc) return jsonResponse({ error: "Location not found." }, 404, env);
+  const targetUser = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(target).first();
+  if (!targetUser) return jsonResponse({ error: "ownerUserId not found." }, 400, env);
+  const from = loc.created_by_user_id;
+  if (from === target) return jsonResponse({ locationId, ownerUserId: target }, 200, env);
+
+  const now = Date.now();
+  const stmts = [];
+  const { results: access } = await env.DB.prepare(
+    `SELECT a.id, a.type_id, t.name AS type_name, t.behaves_like FROM user_location_access a
+     JOIN user_types t ON t.id = a.type_id WHERE a.location_id = ? AND a.user_id = ?`
+  )
+    .bind(locationId, from)
+    .all();
+  const { results: targetTypes } = await env.DB.prepare("SELECT id, name FROM user_types WHERE user_id = ?").bind(target).all();
+  const typeIdByName = new Map(targetTypes.map((t) => [t.name, t.id]));
+  const { results: targetAccess } = await env.DB.prepare("SELECT type_id FROM user_location_access WHERE user_id = ? AND location_id = ?")
+    .bind(target, locationId)
+    .all();
+  const alreadyTracked = new Set(targetAccess.map((a) => a.type_id));
+  for (const a of access) {
+    let typeId = typeIdByName.get(a.type_name);
+    if (!typeId) {
+      typeId = crypto.randomUUID();
+      typeIdByName.set(a.type_name, typeId);
+      stmts.push(
+        env.DB.prepare("INSERT INTO user_types (id, user_id, name, behaves_like, created_at) VALUES (?, ?, ?, ?, ?)").bind(typeId, target, a.type_name, a.behaves_like, now)
+      );
+    }
+    if (alreadyTracked.has(typeId)) {
+      stmts.push(env.DB.prepare("DELETE FROM user_location_access WHERE id = ?").bind(a.id));
+    } else {
+      alreadyTracked.add(typeId);
+      stmts.push(env.DB.prepare("UPDATE user_location_access SET user_id = ?, type_id = ? WHERE id = ?").bind(target, typeId, a.id));
+    }
+  }
+
+  const { results: members } = await env.DB.prepare(
+    `SELECT g.name FROM user_location_group_members m JOIN user_location_groups g ON g.id = m.group_id
+     WHERE m.user_id = ? AND m.location_id = ?`
+  )
+    .bind(from, locationId)
+    .all();
+  if (members.length) {
+    const { results: targetGroups } = await env.DB.prepare("SELECT id, name FROM user_location_groups WHERE user_id = ?").bind(target).all();
+    const groupIdByName = new Map(targetGroups.map((g) => [g.name, g.id]));
+    stmts.push(env.DB.prepare("DELETE FROM user_location_group_members WHERE user_id = ? AND location_id = ?").bind(from, locationId));
+    for (const { name } of members) {
+      let groupId = groupIdByName.get(name);
+      if (!groupId) {
+        groupId = crypto.randomUUID();
+        groupIdByName.set(name, groupId);
+        stmts.push(env.DB.prepare("INSERT INTO user_location_groups (id, user_id, name, created_at) VALUES (?, ?, ?, ?)").bind(groupId, target, name, now));
+      }
+      stmts.push(
+        env.DB.prepare("INSERT OR IGNORE INTO user_location_group_members (user_id, location_id, group_id) VALUES (?, ?, ?)").bind(target, locationId, groupId)
+      );
+    }
+  }
+
+  stmts.push(env.DB.prepare("UPDATE locations SET created_by_user_id = ? WHERE id = ?").bind(target, locationId));
+  await env.DB.batch(stmts);
+  return jsonResponse({ locationId, ownerUserId: target }, 200, env);
+}
+
 async function handleAdminUpdateUser(request, env, callerUser, targetId) {
   if (targetId === PUBLIC_USER_ID) return jsonResponse({ error: "Not a manageable account." }, 400, env);
 
