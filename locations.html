@@ -49,30 +49,6 @@
     </div>
   </section>
 
-  <section id="settingsSection" class="summary-card" style="display:none;">
-    <div class="summary-title" style="margin-bottom:6px;">Check frequency</div>
-    <p class="footnote" style="margin:0 0 12px;text-align:left;">
-      A site-wide setting (not per-account) — how often locations get checked, and
-      the daily window to check them in. Admin-only.
-    </p>
-    <div class="filter-row" style="margin-bottom:10px;">
-      <div style="flex:1;min-width:160px;">
-        <label for="checkFrequency">Check every (minutes)</label>
-        <input type="number" id="checkFrequency" min="15" max="1440" step="15" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
-      </div>
-      <div style="flex:1;min-width:120px;">
-        <label for="windowStart">Active from</label>
-        <input type="time" id="windowStart" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
-      </div>
-      <div style="flex:1;min-width:120px;">
-        <label for="windowEnd">Active until</label>
-        <input type="time" id="windowEnd" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
-      </div>
-    </div>
-    <button id="btnSaveSettings" class="btn-primary">Save</button>
-    <div id="settingsStatus" style="margin-top:10px;font-size:0.85rem;"></div>
-  </section>
-
   <section id="groupsSection" class="summary-card" style="display:none;">
     <div class="summary-title" style="margin-bottom:6px;">Location Groups</div>
     <p class="footnote" style="margin:0 0 12px;text-align:left;">

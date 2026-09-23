@@ -59,17 +59,12 @@
  *   GET  /auth/callback           -> completes login, 302 to the frontend
  *   POST /auth/logout             -> clears the session, 204
  *   GET  /auth/me                 -> { id, email, name } or 401
- *   GET  /api/settings            -> this user's check-frequency settings
- *                                    (creates a default row on first read)
- *   PUT  /api/settings            -> update check-frequency settings
  *
  * NOT YET BUILT (deliberately — this round is the account/CRUD layer
  * only): nothing here actually calls WillyWeather on a user's behalf yet.
  * schedule_state (see schema.sql) exists so that piece doesn't need a
  * schema migration later, but there's no cron sweep reading it yet, and
- * no Stripe/tier-gating on check_frequency_minutes beyond the sane floor
- * enforced below (stops someone setting a 1-minute interval and burning
- * through API budget before that gating exists). Also not built: any
+ * no Stripe/tier-gating. Also not built: any
  * Stripe billing at all — every signed-in user today is functionally on
  * the same untiered plan.
  *
@@ -141,8 +136,6 @@ const LOGIN_CODE_TTL_SECONDS = 120;
 const STATE_COOKIE = "oauth_state";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 const STATE_MAX_AGE_SECONDS = 60 * 10; // 10 minutes — just needs to outlive the Google consent screen
-const MIN_CHECK_FREQUENCY_MINUTES = 15; // floor only, not tier-aware yet — see NOT YET BUILT above
-const MAX_CHECK_FREQUENCY_MINUTES = 1440; // one check a day, the loosest end
 
 // --- v2 (schema-v2.sql) constants ---
 const PUBLIC_USER_ID = "public";
@@ -201,20 +194,16 @@ export default {
       if (url.pathname === "/auth/me" && request.method === "GET") {
         return handleMe(request, env);
       }
-      if (url.pathname === "/api/settings") {
-        return handleSettings(request, url, env);
-      }
       if (url.pathname === "/api/prefs") {
         return handlePrefs(request, env);
       }
 
       // --- v2 endpoints below: the unified locations/types/groups/mark-lists/
-      // marks model (schema-v2.sql). /api/locations and /api/settings (v1)
-      // stay alongside these — /api/locations is fully deprecated (nothing
-      // calls it since account.js was reconciled onto v2 and later retired
-      // entirely — see "Settings and Account merged" further down);
-      // /api/settings (check-frequency) is still genuinely used, just
-      // extended to support the same ?userId= override as everything below.
+      // marks model (schema-v2.sql). /api/locations (v1)
+      // stays alongside these, fully deprecated (nothing calls it since
+      // account.js was reconciled onto v2 and later retired entirely — see
+      // "Settings and Account merged" further down). The old check-frequency
+      // /api/settings endpoint was removed 2026-09-23: nothing ever read it.
       if (url.pathname === "/api/types") {
         return handleTypesCollection(request, url, env);
       }
@@ -520,84 +509,6 @@ async function handleMe(request, env) {
   // frontend needs this to decide whether to show any "edit Public's
   // defaults" affordance at all.
   return jsonResponse({ id: user.id, email: user.email, name: user.name, role: user.role }, 200, env);
-}
-
-// ---------------------------------------------------------------------
-// Settings — one row per user, created lazily on first read so there's
-// no separate "provision defaults on signup" step to keep in sync.
-// ---------------------------------------------------------------------
-
-const GLOBAL_SETTINGS_KEY = "global"; // fixed sentinel row id — check-frequency
-// is no longer a per-user concept; every signed-in Admin reads/writes the
-// SAME one row in user_settings, regardless of who's signed in or
-// whether the "View as Public" toggle is on. Not a real users.id, so no
-// FK concern (user_settings.user_id has no FOREIGN KEY constraint).
-
-async function handleSettings(request, url, env) {
-  const user = await requireUser(request, env);
-  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
-  if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
-
-  if (request.method === "GET") {
-    let row = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(GLOBAL_SETTINGS_KEY).first();
-    if (!row) {
-      await env.DB.prepare("INSERT INTO user_settings (user_id) VALUES (?)").bind(GLOBAL_SETTINGS_KEY).run();
-      row = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(GLOBAL_SETTINGS_KEY).first();
-    }
-    return jsonResponse(rowToSettings(row), 200, env);
-  }
-
-  if (request.method === "PUT") {
-    const body = await readJsonBody(request);
-    const validationError = validateSettingsInput(body);
-    if (validationError) return jsonResponse({ error: validationError }, 400, env);
-
-    const existing = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(GLOBAL_SETTINGS_KEY).first();
-    const merged = {
-      checkFrequencyMinutes: body.checkFrequencyMinutes ?? existing?.check_frequency_minutes ?? 180,
-      activeWindowStart: body.activeWindowStart ?? existing?.active_window_start ?? "05:00",
-      activeWindowEnd: body.activeWindowEnd ?? existing?.active_window_end ?? "20:00",
-    };
-    await env.DB.prepare(
-      `INSERT INTO user_settings (user_id, check_frequency_minutes, active_window_start, active_window_end)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(user_id) DO UPDATE SET
-         check_frequency_minutes = excluded.check_frequency_minutes,
-         active_window_start = excluded.active_window_start,
-         active_window_end = excluded.active_window_end`
-    )
-      .bind(GLOBAL_SETTINGS_KEY, merged.checkFrequencyMinutes, merged.activeWindowStart, merged.activeWindowEnd)
-      .run();
-
-    const updated = await env.DB.prepare("SELECT * FROM user_settings WHERE user_id = ?").bind(GLOBAL_SETTINGS_KEY).first();
-    return jsonResponse(rowToSettings(updated), 200, env);
-  }
-
-  return jsonResponse({ error: "Method not allowed." }, 405, env);
-}
-
-function rowToSettings(row) {
-  return {
-    checkFrequencyMinutes: row.check_frequency_minutes,
-    activeWindowStart: row.active_window_start,
-    activeWindowEnd: row.active_window_end,
-  };
-}
-
-function validateSettingsInput(body) {
-  if (!body || typeof body !== "object") return "Request body must be a JSON object.";
-  if (body.checkFrequencyMinutes !== undefined) {
-    const n = body.checkFrequencyMinutes;
-    if (!Number.isInteger(n) || n < MIN_CHECK_FREQUENCY_MINUTES || n > MAX_CHECK_FREQUENCY_MINUTES) {
-      return `checkFrequencyMinutes must be an integer between ${MIN_CHECK_FREQUENCY_MINUTES} and ${MAX_CHECK_FREQUENCY_MINUTES}.`;
-    }
-  }
-  for (const field of ["activeWindowStart", "activeWindowEnd"]) {
-    if (body[field] !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(body[field])) {
-      return `${field} must be HH:MM (24-hour), e.g. "05:00".`;
-    }
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------

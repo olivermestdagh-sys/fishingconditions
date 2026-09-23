@@ -327,7 +327,6 @@ async function init() {
     window.location.href = `${USER_BACKEND_URL}/auth/login`;
   });
   document.getElementById("btnSignOut").addEventListener("click", onSignOut);
-  document.getElementById("btnSaveSettings").addEventListener("click", saveSettings);
   document.getElementById("btnToggleViewAsPublic").addEventListener("click", onToggleViewAsPublic);
 
   document.getElementById("btnAddByMapClick").addEventListener("click", toggleAddLocationClickMode);
@@ -353,7 +352,7 @@ async function init() {
  * again from onSignOut/onToggleViewAsPublic, since either one changes
  * what every section below should be showing. Location Groups/Fishing
  * Mark Lists/Locations and the user's own Home address are available to ANY
- * signed-in user; Check frequency, Refresh data now, Users, and Tiers are all
+ * signed-in user; Refresh data now, Users, and Tiers are all
  * Admin-only site-wide settings now — none of them affected by
  * viewingAsPublic (there's exactly one of each, not a per-account copy
  * to switch between).
@@ -376,7 +375,6 @@ async function refreshPageForCurrentUser() {
 
   const signedOutCard = document.getElementById("signedOutCard");
   const signedInCard = document.getElementById("signedInCard");
-  const settingsSection = document.getElementById("settingsSection");
   const adminOnlyControls = document.getElementById("adminOnlyControls");
   const usersSection = document.getElementById("usersSection");
   const tiersSection = document.getElementById("tiersSection");
@@ -385,7 +383,6 @@ async function refreshPageForCurrentUser() {
   if (!currentUser) {
     signedOutCard.style.display = "";
     signedInCard.style.display = "none";
-    settingsSection.style.display = "none";
     adminOnlyControls.style.display = "none";
     usersSection.style.display = "none";
     tiersSection.style.display = "none";
@@ -393,7 +390,6 @@ async function refreshPageForCurrentUser() {
   } else {
     signedOutCard.style.display = "none";
     signedInCard.style.display = "";
-    settingsSection.style.display = isAdmin ? "" : "none";
     adminOnlyControls.style.display = isAdmin ? "" : "none";
     usersSection.style.display = isAdmin ? "" : "none";
     tiersSection.style.display = isAdmin ? "" : "none";
@@ -411,7 +407,6 @@ async function refreshPageForCurrentUser() {
     loadLocations(),
     loadLocationCoords(),
     loadHomeLocation(),
-    loadSettings(),
     loadUsers(),
     loadTiers(),
   ]);
@@ -442,59 +437,6 @@ async function onToggleViewAsPublic() {
   viewingAsPublic = !viewingAsPublic;
   localStorage.setItem(VIEWING_AS_PUBLIC_STORAGE_KEY, viewingAsPublic ? "1" : "0");
   await refreshPageForCurrentUser();
-}
-
-// ---------------------------------------------------------------------
-// Check frequency — now a genuinely GLOBAL setting (one row, not
-// per-user), and Admin-only to even see, matching Home address/Refresh
-// data now. handleSettings (user-backend.js) enforces this same
-// Admin-only rule server-side regardless of what this page shows — this
-// is UI convenience, not the real access control.
-// ---------------------------------------------------------------------
-
-async function loadSettings() {
-  if (!isAdmin) return;
-  try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/settings`, { credentials: "include" });
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    const settings = await res.json();
-    document.getElementById("checkFrequency").value = settings.checkFrequencyMinutes;
-    document.getElementById("windowStart").value = settings.activeWindowStart;
-    document.getElementById("windowEnd").value = settings.activeWindowEnd;
-  } catch (err) {
-    console.error("Failed to load settings:", err);
-    setSettingsStatus("Couldn't load settings — try reloading the page.", true);
-  }
-}
-
-async function saveSettings() {
-  const body = {
-    checkFrequencyMinutes: parseInt(document.getElementById("checkFrequency").value, 10),
-    activeWindowStart: document.getElementById("windowStart").value,
-    activeWindowEnd: document.getElementById("windowEnd").value,
-  };
-  try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/settings`, {
-      method: "PUT",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error || `status ${res.status}`);
-    }
-    setSettingsStatus("Saved.", false);
-  } catch (err) {
-    console.error("Failed to save settings:", err);
-    setSettingsStatus(`Couldn't save: ${err.message}`, true);
-  }
-}
-
-function setSettingsStatus(text, isError) {
-  const el = document.getElementById("settingsStatus");
-  el.textContent = text;
-  el.style.color = isError ? "var(--red-600, #c0392b)" : "var(--grey-500)";
 }
 
 // ---------------------------------------------------------------------
