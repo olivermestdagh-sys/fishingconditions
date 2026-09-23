@@ -159,6 +159,27 @@ async function refreshAdminStatus() {
   }
 }
 
+/** How many locations the signed-in person may still create — GET /api/location-quota ({unlimited, max, used}), or
+ * null signed out / unknown. Refreshed by refreshLocationQuota (the Map's init, and after adding a location). */
+let cachedLocationQuota = null;
+async function refreshLocationQuota() {
+  cachedLocationQuota = null;
+  if (!cachedIsSignedIn) return;
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/location-quota`, { credentials: "include" });
+    if (res.ok) cachedLocationQuota = await res.json();
+  } catch (err) {
+    console.error("Could not load the location allowance:", err);
+  }
+}
+/** Whether the signed-in person may add a location: Admin always (it goes to Public — see saveNewLocationToD1),
+ * anyone else while their tier's extra-location allowance has room. The server enforces the same limit. */
+function canAddOwnLocation() {
+  if (cachedIsAdmin) return true;
+  const q = cachedLocationQuota;
+  return !!q && (q.unlimited || q.used < q.max);
+}
+
 /**
  * Every real account (Admin and Basic — Public excluded), Admin only — same GET /api/admin/users
  * locationsadmin.js's own Users panel already calls, cached here as a plain global rather than
@@ -209,8 +230,10 @@ async function fetchAdminUsersList() {
  * function name itself.
  */
 async function saveNewLocationToD1(newLoc) {
+  // Admin adds to Public (as before); anyone else to their own account, within their tier's allowance.
+  const accountParam = cachedIsAdmin ? "?userId=public" : "";
   try {
-    const typesRes = await fetch(`${USER_BACKEND_URL}/api/types?userId=public`, { credentials: "include" });
+    const typesRes = await fetch(`${USER_BACKEND_URL}/api/types${accountParam}`, { credentials: "include" });
     if (!typesRes.ok) throw new Error(`Could not load types (${typesRes.status})`);
     const publicTypes = await typesRes.json();
     const typeName = newLoc.types[0].type;
@@ -237,7 +260,7 @@ async function saveNewLocationToD1(newLoc) {
       body.newTypeBehavesLike = typeName;
     }
 
-    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations?userId=public`, {
+    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations${accountParam}`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },

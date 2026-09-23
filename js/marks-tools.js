@@ -1356,9 +1356,10 @@ async function handleMapClickForMarks(map, lat, lng, state, onLocationPreviewCli
     if (onLocationPreviewClick) onLocationPreviewClick(lat, lng);
     return;
   }
-  // The "show the conditions graph here" choice is an Admin-only preview, so only Admin is asked; anyone else signed
-  // in goes straight to logging a mark.
-  if (onLocationPreviewClick && cachedIsAdmin) {
+  // The "show the conditions graph here" choice (a preview that can be added as a location) is only for someone who
+  // may add one — Admin, or anyone within their tier's allowance (canAddOwnLocation); anyone else signed in goes
+  // straight to logging a mark.
+  if (onLocationPreviewClick && typeof canAddOwnLocation === "function" && canAddOwnLocation()) {
     const choice = await showMapClickChoiceDialog();
     if (choice === "graph") {
       onLocationPreviewClick(lat, lng);

@@ -648,6 +648,7 @@ async function init() {
     // Only Public's and the signed-in person's own locations (locationVisibleToViewer, js/backend.js).
     await refreshAdminStatus();
     allLocations = allLocations.filter(locationVisibleToViewer);
+    await applyMyLocationTimings(allLocations); // a signed-in person's own times on others' locations
   } catch (err) {
     document.getElementById("updated").textContent = "Could not load data — has the site run its first update yet?";
     console.error(err);

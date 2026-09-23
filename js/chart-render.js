@@ -80,6 +80,32 @@ function setUpdatedStamp(el, dt) {
  * endpoint actually returned, and never touches WillyWeather-derived
  * rows. Returns true on success, false if the caller should fall back.
  */
+/**
+ * Overlays the signed-in person's own timings onto locations they don't own: anyone can keep their own Set up / Pack
+ * up / Time to Spot / Time From Spot / minimum tide height for a location they can see (the Map's location editor,
+ * "My times" — js/location-editor.js), stored as their own entry for it. Their own locations already carry their
+ * own values. Matched by the location's search name and type name. Best-effort: signed out or offline, the owner's
+ * values stay.
+ */
+async function applyMyLocationTimings(allLocations) {
+  if (typeof cachedIsSignedIn === "undefined" || !cachedIsSignedIn) return;
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations`, { credentials: "include" });
+    if (!res.ok) return;
+    const mine = (await res.json()).filter((r) => r.location.createdByUserId !== cachedUserId);
+    const PER_TYPE = ["setUp", "packUp", "timeToSpot", "timeFromSpot", "minTideHeight"];
+    for (const row of mine) {
+      for (const loc of allLocations) {
+        if (loc.name !== row.location.name || loc.type !== row.type.name) continue;
+        for (const f of PER_TYPE) loc[f] = row[f];
+        loc.myTimings = true;
+      }
+    }
+  } catch (err) {
+    console.error("Could not load your own location timings:", err);
+  }
+}
+
 async function mergeLiveLocationConfig(allLocations) {
   try {
     const res = await fetch(`${USER_BACKEND_URL}/api/public/locations?_=${Date.now()}`, { cache: "no-store" });

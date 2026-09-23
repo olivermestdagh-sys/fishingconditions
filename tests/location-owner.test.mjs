@@ -123,6 +123,44 @@ test("the location list covers every account, tags each location with its owner,
   assert.deepEqual(byId.L2.types.map((t) => t.setUp), ["00:05"]);
 });
 
+const req = (env, session, method, p, body) =>
+  worker.fetch(
+    new Request(`https://worker.example${p}`, {
+      method,
+      headers: { "Content-Type": "application/json", Origin: SITE, Cookie: `session=${session}` },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
+    env
+  );
+
+test("location quota: Admin unlimited; a Basic user gets their tier's allowance, counting only locations they created", async () => {
+  const { sqlite, env } = makeDb();
+  assert.deepEqual(await (await req(env, "s-admin", "GET", "/api/location-quota")).json(), { unlimited: true, max: null, used: 0 });
+  assert.deepEqual(await (await req(env, "s-basic", "GET", "/api/location-quota")).json(), { unlimited: false, max: 0, used: 0 }); // no tier: none
+  sqlite.prepare("INSERT INTO tiers (id, name, max_extra_locations, created_at) VALUES ('t1', 'Plus', 1, 0)").run();
+  sqlite.prepare("UPDATE users SET tier_id = 't1' WHERE id = 'basic1'").run();
+  // Their own times on Public's location don't count.
+  sqlite.prepare("INSERT INTO user_types (id, user_id, name, behaves_like, created_at) VALUES ('bt-kayak', 'basic1', 'Kayak', 'Kayak', 0)").run();
+  sqlite.prepare("INSERT INTO user_location_access (id, user_id, location_id, type_id, created_at) VALUES ('b2', 'basic1', 'L1', 'bt-kayak', 0)").run();
+  assert.deepEqual(await (await req(env, "s-basic", "GET", "/api/location-quota")).json(), { unlimited: false, max: 1, used: 0 });
+  const newLoc = { name: "Rye Pier", lat: -38, lng: 144, typeId: "bt-kayak" };
+  assert.equal((await req(env, "s-basic", "POST", "/api/tracked-locations", newLoc)).status, 201);
+  assert.deepEqual(await (await req(env, "s-basic", "GET", "/api/location-quota")).json(), { unlimited: false, max: 1, used: 1 });
+  assert.equal((await req(env, "s-basic", "POST", "/api/tracked-locations", { ...newLoc, name: "Sorrento" })).status, 403); // allowance used up
+});
+
+test("removing a location takes the place and everyone's entries on it; only its owner or Admin may", async () => {
+  const { sqlite, env } = makeDb();
+  sqlite.prepare("INSERT INTO user_types (id, user_id, name, behaves_like, created_at) VALUES ('bt-kayak', 'basic1', 'Kayak', 'Kayak', 0)").run();
+  sqlite.prepare("INSERT INTO user_location_access (id, user_id, location_id, type_id, created_at) VALUES ('b2', 'basic1', 'L1', 'bt-kayak', 0)").run();
+  assert.equal((await req(env, "s-basic", "DELETE", "/api/locations/L1")).status, 403); // Public's, not theirs
+  assert.equal((await req(env, "s-admin", "DELETE", "/api/locations/L1")).status, 204);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM locations").get().n, 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM user_location_access").get().n, 0); // basic1's own times went too
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM user_location_group_members").get().n, 0);
+  assert.equal((await req(env, "s-admin", "DELETE", "/api/locations/L1")).status, 404);
+});
+
 test("only Admin can move a location, only to a real account, and only an existing location", async () => {
   const { sqlite, env } = makeDb();
   assert.equal((await put(env, "s-basic", "L1", { ownerUserId: "basic1" })).status, 403);

@@ -225,6 +225,15 @@ export default {
       if (groupMatch) {
         return handleGroupItem(request, url, env, groupMatch[1]);
       }
+      if (url.pathname === "/api/location-quota" && request.method === "GET") {
+        const user = await requireUser(request, env);
+        if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+        return jsonResponse(await locationQuotaFor(env, user), 200, env);
+      }
+      const locationDeleteMatch = url.pathname.match(/^\/api\/locations\/([^/]+)$/);
+      if (locationDeleteMatch && request.method === "DELETE") {
+        return handleLocationDelete(request, env, locationDeleteMatch[1]);
+      }
       const groupMembersMatch = url.pathname.match(/^\/api\/locations\/([^/]+)\/groups$/);
       if (groupMembersMatch && request.method === "PUT") {
         return handleLocationGroupMembership(request, url, env, groupMembersMatch[1]);
@@ -638,6 +647,42 @@ function validateTypeInput(body, { partial }) {
 // own top-of-file comment for the reasoning).
 // ---------------------------------------------------------------------
 
+/**
+ * How many locations this person may create: Admin (and the Public account) without limit; a Basic user up to their
+ * tier's max_extra_locations — a Basic user with no tier at all gets none (fails closed). `used` counts the locations
+ * they created; their own timings on someone else's location never count. GET /api/location-quota returns this so
+ * the Map can offer "Add as permanent location" only while there's room.
+ */
+async function locationQuotaFor(env, user) {
+  const { n: used } = await env.DB.prepare("SELECT COUNT(*) as n FROM locations WHERE created_by_user_id = ?").bind(user.id).first();
+  if (user.role !== "basic") return { unlimited: true, max: null, used };
+  const tier = user.tier_id ? await env.DB.prepare("SELECT max_extra_locations FROM tiers WHERE id = ?").bind(user.tier_id).first() : null;
+  return { unlimited: false, max: tier ? tier.max_extra_locations : 0, used };
+}
+
+/**
+ * DELETE /api/locations/:id — removes a whole location: the place, every account's type entries and timings on it
+ * (including other people's own times), their schedule state and group memberships. Only its creator or Admin.
+ * (Removing one type entry is DELETE /api/tracked-locations/:accessId, which leaves the place while anyone else
+ * still has an entry on it.)
+ */
+async function handleLocationDelete(request, env, locationId) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const loc = await env.DB.prepare("SELECT id, created_by_user_id FROM locations WHERE id = ?").bind(locationId).first();
+  if (!loc) return jsonResponse({ error: "Location not found." }, 404, env);
+  if (user.role !== "admin" && loc.created_by_user_id !== user.id) {
+    return jsonResponse({ error: "Only the location's owner or Admin can remove it." }, 403, env);
+  }
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM schedule_state WHERE user_location_access_id IN (SELECT id FROM user_location_access WHERE location_id = ?)").bind(locationId),
+    env.DB.prepare("DELETE FROM user_location_access WHERE location_id = ?").bind(locationId),
+    env.DB.prepare("DELETE FROM user_location_group_members WHERE location_id = ?").bind(locationId),
+    env.DB.prepare("DELETE FROM locations WHERE id = ?").bind(locationId),
+  ]);
+  return new Response(null, { status: 204, headers: corsHeaders(env) });
+}
+
 async function handleTrackedCollection(request, url, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
@@ -715,29 +760,11 @@ async function handleTrackedCollection(request, url, env) {
     // created — inherited/Public locations never count against it).
     let locationId = body.locationId;
     if (!locationId) {
-      if (user.role === "basic") {
-        // Tier-based cap (replaces the old fixed MAX_BASIC_CREATED_LOCATIONS
-        // constant) — looked up fresh each time rather than cached, since
-        // Admin can change a tier's own cap, or a user's assigned tier, at
-        // any point from the Settings page's Tiers/Users sections. A Basic
-        // user with no tier_id assigned at all (shouldn't normally happen —
-        // see migration-tiers.sql, which assigns one to every existing
-        // Basic user) is treated as zero extra locations allowed, not
-        // unlimited — fails closed rather than open.
-        const tier = user.tier_id
-          ? await env.DB.prepare("SELECT max_extra_locations FROM tiers WHERE id = ?").bind(user.tier_id).first()
-          : null;
-        const maxExtraLocations = tier ? tier.max_extra_locations : 0;
-        const countRow = await env.DB.prepare("SELECT COUNT(*) as n FROM locations WHERE created_by_user_id = ?")
-          .bind(uid)
-          .first();
-        if (countRow.n >= maxExtraLocations) {
-          return jsonResponse(
-            { error: `Your account is limited to ${maxExtraLocations} additional private locations.` },
-            403,
-            env
-          );
-        }
+      // Tier-based cap on how many locations a Basic user may create (see locationQuotaFor) — looked up fresh each
+      // time, since Admin can change a tier's cap or a user's tier at any point.
+      const quota = await locationQuotaFor(env, user);
+      if (!quota.unlimited && quota.used >= quota.max) {
+        return jsonResponse({ error: `Your account is limited to ${quota.max} additional private locations.` }, 403, env);
       }
       locationId = crypto.randomUUID();
       await env.DB.prepare(

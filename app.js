@@ -60,6 +60,7 @@ async function init() {
   // (see cachedIsAdmin's own comment, charts.js, for the trade-off this
   // makes instead: a stale cache across tabs, not a race within one).
   await refreshAdminStatus();
+  await refreshLocationQuota(); // how many more locations this person may add (canAddOwnLocation)
 
   groupRowsByLocation();
   renderUpdatedBanner();
@@ -73,6 +74,7 @@ async function init() {
   state.data.locations = state.data.locations.filter(locationVisibleToViewer);
   const visibleKeys = new Set(state.data.locations.map((l) => locationKey(l.name, l.type)));
   for (const key of Object.keys(state.rowsByLocation)) if (!visibleKeys.has(key)) delete state.rowsByLocation[key];
+  await applyMyLocationTimings(state.data.locations); // a signed-in person's own times on others' locations
 
   document.getElementById("btnCloseHoverPanel").addEventListener("click", hideLocationHoverPanel);
   document.getElementById("previewShoreSelect").addEventListener("change", recalcPreviewCondition);
@@ -385,7 +387,7 @@ async function onLocationMapClickForPreview(lat, lng) {
     showLocationHoverPanel();
     document.getElementById("hoverPanelLocationName").textContent = "Preview";
     setLocationEditGear(null); // a preview isn't a saved location — nothing to edit
-  renderLocationTypePills(null);
+    renderLocationTypePills(null);
     showPreviewNote(false);
     showPreviewControls(false);
     hideAddPermanentButton();
@@ -542,15 +544,10 @@ function showPreviewNote(show) {
   if (el) el.style.display = show ? "block" : "none";
 }
 
-/** True only when this browser is currently signed in as Admin (see
- * cachedIsAdmin/refreshAdminStatus, charts.js) — refreshed once at page
- * load (init, below), read synchronously here since this is called from
- * several places that were never async to begin with. Replaces the old
- * GitHub-connection check for this one feature; every OTHER write-
- * capable feature on this site (marks, Sync) still gates on the GitHub
- * token, unrelated to this. */
+/** Whether this person may preview a clicked spot and add it as a location: Admin (adds to Public), or anyone signed
+ * in while their tier's extra-location allowance has room (canAddOwnLocation, js/backend.js). */
 function canEditLocations() {
-  return cachedIsAdmin;
+  return canAddOwnLocation();
 }
 
 /**
@@ -633,7 +630,13 @@ async function onAddPreviewAsLocation() {
   const result = await saveNewLocationToD1(newLoc);
   if (result.success) {
     btn.textContent = "✓ Added";
-    showPreviewAddStatus("Saved. Trigger a data refresh from Settings (or wait for the next scheduled run) to see it with real scored data.", false);
+    await refreshLocationQuota();
+    showPreviewAddStatus(
+      cachedIsAdmin
+        ? "Saved to Public. Trigger a data refresh from Settings (or wait for the next scheduled run) to see it with real scored data."
+        : "Saved to your account. It shows with real scored data after the next scheduled data run (every 3 hours).",
+      false
+    );
   } else {
     btn.disabled = false;
     btn.textContent = "➕ Add as permanent location";
@@ -721,13 +724,22 @@ function renderLocation(key) {
   renderLocationTypePills(loc);
   // Admin: the gear after the name edits this location (js/location-editor.js); after each save the live config is
   // merged back in and this same graph redrawn, so the change shows straight away.
+  // Anyone signed in: the location's owner or Admin edit the location; anyone else edits their own times for it.
   setLocationEditGear(
-    loc && cachedIsAdmin
+    loc && cachedIsSignedIn
       ? () =>
           openLocationEditor(loc.name, {
             onChanged: async () => {
               await mergeLiveLocationConfig(state.data.locations);
+              await applyMyLocationTimings(state.data.locations);
               renderLocation(key);
+            },
+            onRemoved: () => {
+              hideLocationHoverPanel();
+              state.data.locations = state.data.locations.filter((l) => l.name !== loc.name);
+              for (const k of Object.keys(state.rowsByLocation)) if (k.startsWith(`${loc.name}::`)) delete state.rowsByLocation[k];
+              refreshLocationQuota();
+              setMode(mapMode); // redraws the map without its pin
             },
           })
       : null

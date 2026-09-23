@@ -5,10 +5,11 @@
 // types it's usable for, and each type's timings / minimum tide height. Edits save straight away through the same
 // Worker endpoints Settings uses (typing is debounced), then `onChanged` lets the page re-read the live config.
 //
-// Admin only: the Map's locations are the Public account's and the Admin's own (see buildLocationList,
-// user-backend.js), so the editor looks the location up in every account, by its WillyWeather search name, and
-// edits it in whichever one holds it (?userId=<owner>). Its Owner section hands the location to another account
-// (PUT /api/admin/locations/:id/owner).
+// Anyone signed in gets the gear. The location's owner, or Admin, edit the location itself in the owner's account
+// (?userId=<owner> for Admin editing someone else's), and can remove it; Admin can also hand it to another account
+// (Owner — PUT /api/admin/locations/:id/owner). Anyone else edits "My times": their own Set up / Pack up / Time to
+// Spot / Time From Spot / minimum tide height for it, kept as their own entry for the location (created on their
+// first change) and shown only to them (applyMyLocationTimings, js/chart-render.js).
 
 // Which sections are open — kept across openings, like the filter dialog's.
 const locEdOpenGroups = new Set();
@@ -31,26 +32,44 @@ function locEdOwnerLabel(ownerId) {
   return u ? u.name || u.email || ownerId : ownerId;
 }
 
-/** Finds the Map location `name` in the Admin's own account, Public's, then every other account, and returns it in
- * the Settings page's shape: place fields, groups, and one entry per type with its access-row id and timings. Also
- * the account's type and group vocabularies, for the pickers. Null when no account has it. */
+/** Loads the Map location whose search name is `name`, in the Settings page's shape (place fields, groups, one
+ * entry per type with its access-row id and timings) plus the account's type and group vocabularies. `mode`:
+ * "manage" for its owner or Admin (the owner's own entries), "mine" for anyone else (their own entries where they
+ * have them, the owner's values otherwise). Null when the location isn't found. */
 async function locEdLoad(name) {
-  if (typeof fetchAdminUsersList === "function" && !cachedAdminUsers.length) await fetchAdminUsersList();
-  const owners = [cachedUserId, "public", ...cachedAdminUsers.map((u) => u.id).filter((id) => id !== cachedUserId)];
-  for (const ownerId of owners) {
+  const liveRes = await fetch(`${USER_BACKEND_URL}/api/public/locations?_=${Date.now()}`, { cache: "no-store" });
+  if (!liveRes.ok) throw new Error(`locations status ${liveRes.status}`);
+  const live = (await liveRes.json()).find((l) => l.name === name);
+  if (!live) return null;
+  const ownerId = live.ownerId;
+  const typeOf = (r) => ({
+    _accessId: r.accessId,
+    _typeId: r.type.id,
+    type: r.type.name,
+    behavesLike: r.type.behavesLike,
+    driveTo: r.driveTo,
+    driveBack: r.driveBack,
+    setUp: r.setUp,
+    packUp: r.packUp,
+    timeToSpot: r.timeToSpot,
+    timeFromSpot: r.timeFromSpot,
+    minTideHeight: r.minTideHeight,
+  });
+
+  if (cachedIsAdmin || ownerId === cachedUserId) {
+    if (cachedIsAdmin && typeof fetchAdminUsersList === "function" && !cachedAdminUsers.length) await fetchAdminUsersList();
     const param = ownerId === cachedUserId ? "" : `?userId=${encodeURIComponent(ownerId)}`;
-    const res = await fetch(`${USER_BACKEND_URL}/api/tracked-locations${param}`, { credentials: "include" });
-    if (!res.ok) throw new Error(`tracked-locations status ${res.status}`);
-    const rows = (await res.json()).filter((r) => r.location.name === name);
-    if (!rows.length) continue;
-    const [typesRes, groupsRes] = await Promise.all([
+    const [rowsRes, typesRes, groupsRes] = await Promise.all([
+      fetch(`${USER_BACKEND_URL}/api/tracked-locations${param}`, { credentials: "include" }),
       fetch(`${USER_BACKEND_URL}/api/types${param}`, { credentials: "include" }),
       fetch(`${USER_BACKEND_URL}/api/groups${param}`, { credentials: "include" }),
     ]);
-    if (!typesRes.ok) throw new Error(`types status ${typesRes.status}`);
-    if (!groupsRes.ok) throw new Error(`groups status ${groupsRes.status}`);
+    for (const r of [rowsRes, typesRes, groupsRes]) if (!r.ok) throw new Error(`status ${r.status}`);
+    const rows = (await rowsRes.json()).filter((r) => r.location.id === live.id);
+    if (!rows.length) return null;
     const p = rows[0].location;
     return {
+      mode: "manage",
       param,
       ownerId,
       types: await typesRes.json(),
@@ -63,36 +82,49 @@ async function locEdLoad(name) {
         tidal: p.tidal,
         tideOffset: p.tideOffset,
         locationGroups: rows[0].groups.map((g) => g.name),
-        types: rows.map((r) => ({
-          _accessId: r.accessId,
-          _typeId: r.type.id,
-          type: r.type.name,
-          behavesLike: r.type.behavesLike,
-          driveTo: r.driveTo,
-          driveBack: r.driveBack,
-          setUp: r.setUp,
-          packUp: r.packUp,
-          timeToSpot: r.timeToSpot,
-          timeFromSpot: r.timeFromSpot,
-          minTideHeight: r.minTideHeight,
-        })),
+        types: rows.map(typeOf),
       },
     };
   }
-  return null;
+
+  // "My times": the owner's types, each with this person's own entry where they have one.
+  const [rowsRes, typesRes] = await Promise.all([
+    fetch(`${USER_BACKEND_URL}/api/tracked-locations`, { credentials: "include" }),
+    fetch(`${USER_BACKEND_URL}/api/types`, { credentials: "include" }),
+  ]);
+  for (const r of [rowsRes, typesRes]) if (!r.ok) throw new Error(`status ${r.status}`);
+  const mine = (await rowsRes.json()).filter((r) => r.location.id === live.id);
+  return {
+    mode: "mine",
+    param: "",
+    ownerId,
+    types: await typesRes.json(), // this person's own type vocabulary — their entry uses their type of the same name
+    groups: [],
+    loc: {
+      _id: live.id,
+      name: live.name,
+      displayName: live.displayName,
+      types: (live.types || []).map((ot) => {
+        const my = mine.find((r) => r.type.name === ot.type);
+        const ownerValues = { setUp: ot.setUp, packUp: ot.packUp, timeToSpot: ot.timeToSpot, timeFromSpot: ot.timeFromSpot, minTideHeight: ot.minTideHeight };
+        return my ? { ...typeOf(my), _ownerValues: ownerValues } : { _accessId: null, type: ot.type, behavesLike: ot.behavesLike, ...ownerValues, _ownerValues: ownerValues };
+      }),
+    },
+  };
 }
 
 /**
  * Opens the editor for the Map location whose WillyWeather search name is `name`. `onChanged` runs after every
- * successful save (the Map uses it to re-merge the live location config and redraw the graph).
+ * successful save (the Map uses it to re-merge the live location config and redraw the graph); `onRemoved` after the
+ * location is removed.
  */
-async function openLocationEditor(name, { onChanged } = {}) {
+async function openLocationEditor(name, { onChanged, onRemoved } = {}) {
   const overlay = document.createElement("div");
   overlay.className = "ww-candidate-overlay";
   overlay.innerHTML = `
     <div class="ww-candidate-dialog loc-editor">
       <button type="button" class="ww-candidate-close" aria-label="Close">&times;</button>
-      <h3 style="margin:0 0 8px;">Edit location</h3>
+      <h3 style="margin:0 0 8px;" data-loced-title>Edit location</h3>
       <div data-loced-body><p class="footnote" style="margin:0;">Loading…</p></div>
       <div data-loced-status class="loc-editor-status"></div>
       <button type="button" class="btn-primary" data-loced-done style="width:100%;margin-top:8px;">Done</button>
@@ -142,9 +174,11 @@ async function openLocationEditor(name, { onChanged } = {}) {
     return;
   }
   if (!ctx) {
-    bodyEl.innerHTML = `<p class="footnote" style="margin:0;">This location isn't in your account or Public's, so it can't be edited here.</p>`;
+    bodyEl.innerHTML = `<p class="footnote" style="margin:0;">This location couldn't be found — it may have just been removed.</p>`;
     return;
   }
+  const mineMode = ctx.mode === "mine";
+  if (mineMode) overlay.querySelector("[data-loced-title]").textContent = "My times";
   let { loc, param } = ctx; // replaced when the Owner changes (see the owner pills below)
 
   async function send(url, method, body) {
@@ -184,7 +218,31 @@ async function openLocationEditor(name, { onChanged } = {}) {
       }),
       "the location"
     );
-  const saveType = (t) =>
+  const saveType = (t) => (mineMode ? saveMyType(t) : saveOwnerType(t));
+  function saveMyType(t) {
+    const timings = { driveTo: "00:00", driveBack: "00:00", setUp: t.setUp, packUp: t.packUp, timeToSpot: t.timeToSpot, timeFromSpot: t.timeFromSpot, minTideHeight: t.minTideHeight };
+    if (t._accessId) return saved(send(`/api/tracked-locations/${t._accessId}`, "PUT", timings), `your ${t.type} times`);
+    // Their type of the same name, or a new one in their account (same name and scoring).
+    const myType = ctx.types.find((x) => x.name === t.type);
+    const body = { locationId: loc._id, ...timings, ...(myType ? { typeId: myType.id } : { newTypeName: t.type, newTypeBehavesLike: t.behavesLike }) };
+    t._creating =
+      t._creating ||
+      (async () => {
+        let created = null;
+        const ok = await saved(
+          send("/api/tracked-locations", "POST", body).then((r) => (created = r)),
+          `your ${t.type} times`
+        );
+        if (ok && created) {
+          t._accessId = created.accessId;
+          if (!myType) ctx.types.push({ id: created.type.id, name: created.type.name, behavesLike: created.type.behavesLike });
+          renderKeepingFocus();
+        }
+        t._creating = null;
+      })();
+    return t._creating;
+  }
+  const saveOwnerType = (t) =>
     saved(
       send(`/api/tracked-locations/${t._accessId}`, "PUT", {
         driveTo: t.driveTo,
@@ -240,9 +298,21 @@ async function openLocationEditor(name, { onChanged } = {}) {
         ? `<label class="mark-edit-field">Minimum tide height for access (m) — blank if not applicable
             <input type="number" min="0" step="0.1" inputmode="decimal" data-loced-mintide="${i}" value="${t.minTideHeight != null ? t.minTideHeight : ""}" placeholder="e.g. 1.2" style="${MARK_POPUP_INPUT_STYLE}" /></label>`
         : "");
-    return group(`type:${t.type}`, `${t.type} timings`, summary, body);
+    const mineNote = mineMode
+      ? t._accessId
+        ? `<p class="footnote" style="margin:8px 0 0;text-align:left;">These are your own times.
+             <button type="button" class="btn-secondary" data-loced-reset="${i}" style="padding:2px 8px;font-size:0.75rem;">Use ${escapeHtml(locEdOwnerLabel(ctx.ownerId))}'s times</button></p>`
+        : `<p class="footnote" style="margin:8px 0 0;text-align:left;">Showing ${escapeHtml(locEdOwnerLabel(ctx.ownerId))}'s times — change any to keep your own.</p>`
+      : "";
+    return group(`type:${t.type}`, `${t.type} timings`, summary, body + mineNote);
   }
   function render() {
+    if (mineMode) {
+      bodyEl.innerHTML = `
+        <p class="footnote" style="margin:0 0 8px;text-align:left;">${escapeHtml(loc.displayName || loc.name)} belongs to ${escapeHtml(locEdOwnerLabel(ctx.ownerId))}. Your own times for it apply only to you, on the Map and Week Ahead, and save as you make them.</p>
+        <div class="mark-edit-groups">${loc.types.map(typeSection).join("")}</div>`;
+      return;
+    }
     const activeTypeIds = loc.types.map((t) => t._typeId);
     const groupNames = ctx.groups.map((g) => g.name);
     bodyEl.innerHTML = `
@@ -253,7 +323,7 @@ async function openLocationEditor(name, { onChanged } = {}) {
         <input type="text" data-loced-text="name" value="${escapeHtml(loc.name || "")}" style="${MARK_POPUP_INPUT_STYLE}" /></label>
       <p class="footnote" style="margin:2px 0 8px;text-align:left;">Changing the search name links the location to a different WillyWeather place from the next data refresh.</p>
       <div class="mark-edit-groups">
-        ${group(
+        ${!cachedIsAdmin ? "" : group(
           "owner",
           "Owner",
           [locEdOwnerLabel(ctx.ownerId)],
@@ -294,9 +364,28 @@ async function openLocationEditor(name, { onChanged } = {}) {
            </div>`
         )}
         ${loc.types.map(typeSection).join("")}
+      </div>
+      <div class="loc-editor-remove">
+        <button type="button" class="btn-secondary" data-loced-remove style="color:#dc2626;">Remove location</button>
+        <div data-loced-remove-confirm hidden class="loc-editor-remove-confirm">
+          <div>Remove ${escapeHtml(loc.displayName || loc.name)} and everyone's timings for it? This can't be undone.</div>
+          <button type="button" class="btn-secondary" data-loced-remove-yes style="background:#dc2626;color:#fff;border-color:#dc2626;">Yes, remove</button>
+          <button type="button" class="btn-secondary" data-loced-remove-cancel>Cancel</button>
+        </div>
       </div>`;
   }
   render();
+
+  /** render(), then put the cursor back in the box that was being typed in (matched by its data attribute). */
+  function renderKeepingFocus() {
+    const active = document.activeElement;
+    const attr = active && bodyEl.contains(active) ? ["data-loced-min", "data-loced-mintide"].find((a) => active.hasAttribute(a)) : null;
+    const value = attr && active.getAttribute(attr);
+    render();
+    if (!attr) return;
+    const again = bodyEl.querySelector(`[${attr}="${value}"]`);
+    if (again) again.focus();
+  }
 
   // --- interaction ---------------------------------------------------------------------------------------------
   bodyEl.addEventListener("click", async (e) => {
@@ -310,6 +399,38 @@ async function openLocationEditor(name, { onChanged } = {}) {
       else locEdOpenGroups.delete(key);
       toggle.setAttribute("aria-expanded", String(open));
       toggle.nextElementSibling.hidden = !open;
+      return;
+    }
+    const reset = t.closest("[data-loced-reset]");
+    if (reset) {
+      const type = loc.types[Number(reset.dataset.locedReset)];
+      clearTimeout(timers.get(`type:${reset.dataset.locedReset}`));
+      pending.delete(`type:${reset.dataset.locedReset}`);
+      if (await saved(send(`/api/tracked-locations/${type._accessId}`, "DELETE"), `your ${type.type} times`)) {
+        Object.assign(type, type._ownerValues, { _accessId: null });
+        render();
+      }
+      return;
+    }
+    if (t.closest("[data-loced-remove]")) {
+      bodyEl.querySelector("[data-loced-remove-confirm]").hidden = false;
+      return;
+    }
+    if (t.closest("[data-loced-remove-cancel]")) {
+      bodyEl.querySelector("[data-loced-remove-confirm]").hidden = true;
+      return;
+    }
+    if (t.closest("[data-loced-remove-yes]")) {
+      for (const key of pending.keys()) clearTimeout(timers.get(key));
+      pending.clear(); // nothing left to save to
+      setStatus("Removing…");
+      const res = await fetch(`${USER_BACKEND_URL}/api/locations/${loc._id}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok && res.status !== 404) {
+        setStatus(`Couldn't remove it: ${(await res.json().catch(() => ({}))).error || `status ${res.status}`}`, true);
+        return;
+      }
+      overlay.remove();
+      if (onRemoved) onRemoved();
       return;
     }
     const ownerPill = t.closest("[data-loced-owner]");
@@ -427,12 +548,12 @@ async function openLocationEditor(name, { onChanged } = {}) {
     } else if (t.dataset.locedMintide !== undefined) {
       const type = loc.types[Number(t.dataset.locedMintide)];
       type.minTideHeight = t.value === "" ? null : parseFloat(t.value);
-      debounce(`type:${type._accessId}`, () => saveType(type));
+      debounce(`type:${loc.types.indexOf(type)}`, () => saveType(type));
     } else if (t.dataset.locedMin) {
       const [i, key] = t.dataset.locedMin.split(":");
       const type = loc.types[Number(i)];
       type[key] = locEdMinutesToHm(t.value);
-      debounce(`type:${type._accessId}`, () => saveType(type));
+      debounce(`type:${loc.types.indexOf(type)}`, () => saveType(type));
     }
   });
 }

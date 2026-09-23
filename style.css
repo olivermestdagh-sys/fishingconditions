@@ -3322,6 +3322,21 @@ main.wide {
 .loc-editor-hm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; }
 .loc-editor-newtype { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .loc-editor-status { min-height: 1.2em; margin-top: 8px; font-size: 0.8rem; }
+.loc-editor-remove { margin-top: 12px; }
+.loc-editor-remove-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.loc-editor-remove-confirm[hidden] { display: none; }
+.loc-editor-remove-confirm > div { flex-basis: 100%; }
 .loc-tile {
   position: absolute;
   top: 42px;
