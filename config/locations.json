@@ -143,8 +143,8 @@
     "willyweatherName": "Coronet Bay",
     "willyweatherRegion": "Gippsland",
     "willyweatherState": "VIC",
-    "lat": -38.4348,
-    "lng": 145.4426,
+    "lat": -38.438086,
+    "lng": 145.434115,
     "tideMaxObserved": 2.59,
     "types": [
       {
@@ -173,8 +173,8 @@
     "willyweatherName": "Gunnamatta Beach",
     "willyweatherRegion": "Mornington Peninsula",
     "willyweatherState": "VIC",
-    "lat": -38.457,
-    "lng": 144.8687,
+    "lat": -38.447173,
+    "lng": 144.859478,
     "tideMaxObserved": 1.48,
     "types": [
       {
@@ -203,8 +203,8 @@
     "willyweatherName": "Hastings Jetty",
     "willyweatherRegion": "Mornington Peninsula",
     "willyweatherState": "VIC",
-    "lat": -38.3082,
-    "lng": 145.1991,
+    "lat": -38.309628,
+    "lng": 145.197608,
     "tideMaxObserved": 2.69,
     "types": [
       {
@@ -263,8 +263,8 @@
     "willyweatherName": "Lakes Entrance Beach",
     "willyweatherRegion": "East Gippsland",
     "willyweatherState": "VIC",
-    "lat": -37.8859,
-    "lng": 147.9875,
+    "lat": -37.883535,
+    "lng": 147.995453,
     "tideMaxObserved": 1.15,
     "types": [
       {
@@ -363,8 +363,8 @@
     "willyweatherName": "Metung",
     "willyweatherRegion": "East Gippsland",
     "willyweatherState": "VIC",
-    "lat": -37.8835,
-    "lng": 147.8508,
+    "lat": -37.88015,
+    "lng": 147.858982,
     "tideMaxObserved": null,
     "types": [
       {
@@ -393,8 +393,8 @@
     "willyweatherName": "Mornington Pier",
     "willyweatherRegion": "Mornington Peninsula",
     "willyweatherState": "VIC",
-    "lat": -38.2117,
-    "lng": 145.0349,
+    "lat": -38.214073,
+    "lng": 145.033371,
     "tideMaxObserved": 0.78,
     "types": [
       {
@@ -423,8 +423,8 @@
     "willyweatherName": "Patterson River Entrance",
     "willyweatherRegion": "Melbourne",
     "willyweatherState": "VIC",
-    "lat": -38.0734,
-    "lng": 145.1197,
+    "lat": -38.071167,
+    "lng": 145.12682,
     "tideMaxObserved": 0.74,
     "types": [
       {
@@ -571,8 +571,8 @@
     "willyweatherName": "Safety Beach Boat Ramp",
     "willyweatherRegion": "Mornington Peninsula",
     "willyweatherState": "VIC",
-    "lat": -38.3131,
-    "lng": 144.9911,
+    "lat": -38.311401,
+    "lng": 144.992564,
     "tideMaxObserved": 0.77,
     "types": [
       {
@@ -779,8 +779,8 @@
     "willyweatherName": "Williamstown Beach",
     "willyweatherRegion": "Melbourne",
     "willyweatherState": "VIC",
-    "lat": -37.8674,
-    "lng": 144.8916,
+    "lat": -37.868588,
+    "lng": 144.894519,
     "tideMaxObserved": 0.87,
     "types": [
       {
