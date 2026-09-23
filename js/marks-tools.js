@@ -1116,7 +1116,7 @@ function startNewMarkEntry(map, lat, lng, state, defaults = {}) {
     fillColor: style.fillColor,
     fillOpacity: 0.85,
   }, state.markLists).addTo(state.markerLayer);
-  marker.bindPopup(buildMarkPopupEditHtml(draft, state.markLists), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet", autoPan: false });
+  marker.bindPopup(buildMarkPopupEditHtml(draft, state.markLists), markPopupOptions());
   // showMarkerOnceVisible (not zoomToShowLayer directly, and not a plain
   // openPopup) — a spot just clicked on the map is usually already
   // zoomed in enough that this resolves immediately with no visible
@@ -1200,7 +1200,7 @@ function startCopiedMarkEntry(map, sourceMark, state) {
     fillColor: style.fillColor,
     fillOpacity: 0.85,
   }, state.markLists).addTo(state.markerLayer);
-  marker.bindPopup(buildMarkPopupEditHtml(draft, state.markLists), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet", autoPan: false });
+  marker.bindPopup(buildMarkPopupEditHtml(draft, state.markLists), markPopupOptions());
   // showMarkerOnceVisible — same reasoning as startNewMarkEntry's own
   // copy of this comment: this copy lands at the SAME point as its
   // source mark, which by definition already has at least one mark
@@ -1248,6 +1248,7 @@ async function fillMarkFormFromHistoricalLookup(popupEl, lat, lng, dateTimeNaive
   fillIfBlank("waterTemperature", result.waterTemperature);
   fillIfBlank("windDirection", result.windDirection);
   fillIfBlank("windSpeed", result.windSpeed);
+  syncMarkFormPills(form); // the filled-in pick-lists show as selected pills
 }
 
 /**
@@ -1307,6 +1308,7 @@ async function refreshMarkFormConditionsForNewTime(formEl, lat, lng, dateTimeNai
   overwriteIfResolved("waterTemperature", result.waterTemperature);
   overwriteIfResolved("windDirection", result.windDirection);
   overwriteIfResolved("windSpeed", result.windSpeed);
+  syncMarkFormPills(formEl.closest("form") || formEl.querySelector("[data-mark-form]"));
 }
 
 /**

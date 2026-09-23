@@ -2755,25 +2755,67 @@ main.wide {
   margin-right: 4px;
 }
 
-/* REAL BUG, FOUND AND FIXED: the 60vh cap just above is correct for a
-   FLOATING popup (without it, a tall edit form could render partly
-   off-screen on mobile with no way to reach Save) — but once the same
-   popup is reparented into the fixed #markDetailPanel
-   (attachPopupToDetailPanel, charts.js), that panel already provides
-   its own full-height scroll area (height:100%; overflow-y:auto — see
-   .mark-detail-panel above). Capping the content to 60% of the
-   VIEWPORT height on top of that left the panel's own scrollbar
-   representing only that truncated 60vh box, not the panel's actual
-   full height — reported directly: the scrollbar visibly stopped
-   about three-quarters down the panel, well short of its own bottom.
-   Higher specificity (3 classes vs 2) naturally wins over the rule
-   above without needing !important — this is two stylesheet rules
-   settling by normal cascade rules, not fighting an inline style the
-   way the earlier width fix had to. */
-.mark-detail-panel .mark-popup-leaflet .leaflet-popup-content {
-  max-height: none;
-  overflow-y: visible;
+/* Mark edit form (buildMarkPopupEditHtml, js/marks-core.js): collapsible sections and single/multi-choice pills,
+   laid out like the map's filter dialog. The real <select>s / tick-boxes stay in the form, hidden — the pills
+   drive them (syncMarkFormPills). */
+.mark-edit-field {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 6px 0 2px;
 }
+.mark-edit-groups { margin-top: 8px; }
+.mark-edit-group {
+  margin-bottom: 6px;
+  border: 1px solid var(--grey-200);
+  border-radius: 8px;
+}
+.mark-edit-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 7px 9px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.mark-edit-caret { display: inline-block; width: 0.9em; transition: transform 0.1s; }
+.mark-edit-group-head[aria-expanded="false"] .mark-edit-caret { transform: rotate(-90deg); }
+.mark-edit-group-label { font-size: 0.8rem; font-weight: 600; flex-shrink: 0; }
+.mark-edit-summary { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.mark-edit-group-head[aria-expanded="true"] .mark-edit-summary { display: none; }
+.mark-edit-summary-chip {
+  cursor: default;
+  font-size: 0.72rem;
+  padding: 2px 7px;
+  background: #dbeafe;
+  border-color: #2563eb;
+  color: #1e40af;
+  white-space: normal;
+}
+.mark-edit-group-body { padding: 0 9px 9px; }
+.mark-edit-hidden-controls { display: none; }
+.mark-pill-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.mark-pill { cursor: pointer; white-space: normal; }
+.mark-pill.is-on { background: #dbeafe; border-color: #2563eb; color: #1e40af; }
+.mark-pill[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.mark-edit-source { margin-top: 8px; font-size: 0.75rem; color: var(--grey-500); }
+
+/* GPS coordinates with a Copy button (view and edit popups — markGpsRowHtml, js/marks-core.js). */
+.mark-gps-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  margin: 3px 0 6px;
+}
+.mark-gps-label { font-weight: 600; min-width: 64px; }
+.mark-gps-value { font-variant-numeric: tabular-nums; }
+.mark-gps-copy { padding: 2px 8px; font-size: 0.75rem; margin-left: auto; }
 
 /* PART 1 of 2 (see the .map-has-open-popup rule below for part 2, and
    wireMapPopupZIndexToggle's own comment in charts.js for the full story)

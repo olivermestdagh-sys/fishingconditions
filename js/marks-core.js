@@ -587,6 +587,8 @@ function buildMarkPopupViewHtml(mark) {
   row("Name", mark.name);
   row("Type", mark.type);
   row("Date/Time", mark.dateTime);
+  const gpsRow = markGpsRowHtml(mark);
+  if (gpsRow) rows.push(gpsRow);
   // Admin only — who this mark actually belongs to (see markTooltipText's own comment for why/where this
   // comes from). Absent for anyone else, and for a brand-new draft popup (buildMarkPopupEditHtml is what's
   // shown for those, never this view — see startNewMarkEntry/startCopiedMarkEntry).
@@ -638,6 +640,12 @@ function buildMarkPopupViewHtml(mark) {
 // to pick out (and offer) the "Public (shared)" option in the Owner field below.
 const CLIENT_PUBLIC_USER_ID = "public";
 
+/** Leaflet options for every mark popup: it floats over the map next to its point and is panned into view (its
+ * content scrolls past 60% of the window height — see .mark-popup-leaflet in style.css). */
+function markPopupOptions() {
+  return { maxWidth: 300, autoPan: true, autoPanPadding: [20, 20], className: "mark-popup-leaflet" };
+}
+
 /**
  * The Owner field's own <option> list — Admin only (see buildMarkPopupEditHtml), one real account
  * per row of cachedAdminUsers (js/backend.js, refreshed once per page load by loadAndRenderMarks)
@@ -659,55 +667,245 @@ function markOwnerOptionsHtml(currentOwnerId) {
     .join("");
 }
 
+// Which edit-form sections are open — kept across openings (all start collapsed), like the filter dialog's groups.
+const markEditOpenGroups = new Set();
+
+/** One collapsible section of the mark edit form, styled like the filter dialog's groups (see showMarkFilterModal,
+ * js/marks-tools.js). While closed, its header shows what's set inside (syncMarkFormPills fills that in).
+ * `fieldGroup` makes the whole section a `data-field-group`, so applyMarkFieldVisibility hides it for a type it
+ * doesn't apply to. */
+function markEditGroupHtml(key, label, bodyHtml, fieldGroup) {
+  const open = markEditOpenGroups.has(key);
+  return `
+        <div class="mark-edit-group" data-edit-group="${key}"${fieldGroup ? ` data-field-group="${fieldGroup}"` : ""}>
+          <button type="button" class="mark-edit-group-head" data-edit-toggle="${key}" aria-expanded="${open}">
+            <span class="mark-edit-caret" aria-hidden="true">▾</span>
+            <span class="mark-edit-group-label">${escapeHtml(label)}</span>
+            <span class="mark-edit-summary" data-edit-summary="${key}"></span>
+          </button>
+          <div class="mark-edit-group-body" data-edit-body="${key}"${open ? "" : " hidden"}>${bodyHtml}</div>
+        </div>`;
+}
+
+/** An empty pill row for the <select name="name"> (or a Session's tick-box list) in the same form — the pills are
+ * drawn from that control's own options by syncMarkFormPills, so the hidden control stays the one real value.
+ * `required`: tapping the selected pill keeps it (Type, Owner); otherwise it clears the field. */
+function markPillRowHtml(name, required) {
+  return `<div class="mark-pill-row" data-pills-for="${name}"${required ? ' data-pills-required="1"' : ""}></div>`;
+}
+
+/** "-38.123456, 145.123456" — the form Google Maps and most apps accept when pasted. */
+function markGpsText(mark) {
+  if (mark.lat == null || mark.lng == null) return "";
+  return `${Number(mark.lat).toFixed(6)}, ${Number(mark.lng).toFixed(6)}`;
+}
+
+/** The GPS line with its Copy button (view and edit popups). The click is handled by the document-level listener
+ * below (data-copy-gps), so it works wherever the popup lives. */
+function markGpsRowHtml(mark) {
+  const gps = markGpsText(mark);
+  if (!gps) return "";
+  return `<div class="mark-gps-row"><span class="mark-gps-label">GPS</span><span class="mark-gps-value">${gps}</span>
+    <button type="button" class="btn-secondary mark-gps-copy" data-copy-gps="${gps}" title="Copy the GPS coordinates">Copy</button></div>`;
+}
+
+async function copyTextToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Older browsers / non-secure contexts: the classic hidden-textarea copy.
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:-1000px;opacity:0;";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    ta.remove();
+    return ok;
+  }
+}
+
+/** The pill values and which are selected, for one field of a mark edit form: the hidden <select>'s own options
+ * (so a value added on the fly — see refreshMarkFormConditionsForNewTime — shows too), plus, while a Session's
+ * tick-box list is the active control (applyMultiControlModes), the ticked boxes instead of the select. */
+function markPillState(form, name) {
+  const select = form.querySelector(`select[name="${name}"]`);
+  if (!select) return null;
+  const multiWrap = form.querySelector(`[data-multi-multi="${name}"]`);
+  const multi = !!multiWrap && multiWrap.dataset.active === "1";
+  const boxes = multiWrap ? Array.from(multiWrap.querySelectorAll("[data-multi-check]")) : [];
+  const values = [];
+  for (const o of select.options) if (o.value && !values.includes(o.value)) values.push(o.value);
+  for (const b of boxes) if (!values.includes(b.value)) values.push(b.value);
+  const selected = multi ? boxes.filter((b) => b.checked).map((b) => b.value) : select.value ? [select.value] : [];
+  const labelFor = (v) => {
+    const opt = Array.from(select.options).find((o) => o.value === v);
+    return opt ? opt.textContent : v;
+  };
+  return { select, multi, boxes, values, selected, labelFor, disabled: select.disabled };
+}
+
+/** Redraws every pill row and section summary of a mark edit form from its hidden controls. Called after anything
+ * that may change them: a pill tap, any change/input in the form (document listeners below), the initial render
+ * (wireMarkPopupButtons, sync.js) and the async condition look-ups that fill fields in (js/marks-tools.js). */
+function syncMarkFormPills(form) {
+  if (!form) return;
+  form.querySelectorAll("[data-pills-for]").forEach((row) => {
+    const s = markPillState(form, row.dataset.pillsFor);
+    if (!s) return;
+    row.innerHTML = s.values
+      .map((v) => {
+        const on = s.selected.includes(v);
+        return `<span class="loc-chip mark-pill${on ? " is-on" : ""}" data-pill-value="${escapeHtml(v)}" role="button" aria-pressed="${on}"${s.disabled ? ' aria-disabled="true"' : ""}>${escapeHtml(s.labelFor(v))}</span>`;
+      })
+      .join("");
+  });
+  form.querySelectorAll("[data-edit-summary]").forEach((el) => {
+    const group = el.closest("[data-edit-group]");
+    const body = group && group.querySelector("[data-edit-body]");
+    if (!body) return;
+    const parts = [];
+    body.querySelectorAll("[data-pills-for]").forEach((row) => {
+      const s = markPillState(form, row.dataset.pillsFor);
+      if (s) parts.push(...s.selected.map((v) => s.labelFor(v)));
+    });
+    body.querySelectorAll("input[name]:not([type=checkbox]), textarea[name]").forEach((input) => {
+      const holder = input.closest("[data-field-group]");
+      if (holder && holder !== group && holder.style.display === "none") return; // a field the current type hides
+      const v = (input.value || "").trim();
+      if (!v) return;
+      const unit = input.dataset.unit || "";
+      parts.push(input.tagName === "TEXTAREA" && v.length > 24 ? `${v.slice(0, 24)}…` : `${v}${unit}`);
+    });
+    body.querySelectorAll('input[type=checkbox][name]').forEach((box) => {
+      const holder = box.closest("[data-field-group]");
+      if (holder && holder !== group && holder.style.display === "none") return;
+      if (box.checked) parts.push(box.dataset.summary || box.name);
+    });
+    el.innerHTML = parts.map((p) => `<span class="loc-chip mark-edit-summary-chip">${escapeHtml(p)}</span>`).join("");
+    // A section with nothing left to show for this type (e.g. Measurements on a Mark) disappears entirely.
+    if (!group.dataset.fieldGroup) {
+      const inner = Array.from(body.querySelectorAll("[data-field-group]"));
+      if (inner.length) group.style.display = inner.some((g) => g.style.display !== "none") ? "" : "none";
+    }
+  });
+  // While Species has to be chosen first (applySpeciesGate), its section opens so the prompt can be acted on.
+  const prompt = form.querySelector("[data-species-first-prompt]");
+  if (prompt && prompt.style.display === "block") setMarkEditGroupOpen(form, "species", true);
+}
+
+function setMarkEditGroupOpen(form, key, open) {
+  const head = form.querySelector(`[data-edit-toggle="${key}"]`);
+  const body = form.querySelector(`[data-edit-body="${key}"]`);
+  if (!head || !body) return;
+  if (open) markEditOpenGroups.add(key);
+  else markEditOpenGroups.delete(key);
+  head.setAttribute("aria-expanded", String(open));
+  body.hidden = !open;
+}
+
+// One set of document-level listeners serves every mark edit form, wherever it's rendered (a map popup, the Sync
+// page's review popup) — capture phase for clicks, since Leaflet stops click propagation at the popup itself.
+document.addEventListener(
+  "click",
+  (e) => {
+    const target = e.target instanceof Element ? e.target : null;
+    if (!target) return;
+
+    const copyBtn = target.closest("[data-copy-gps]");
+    if (copyBtn) {
+      e.preventDefault();
+      copyTextToClipboard(copyBtn.dataset.copyGps).then((ok) => {
+        copyBtn.textContent = ok ? "Copied" : "Copy failed";
+        setTimeout(() => (copyBtn.textContent = "Copy"), 1500);
+      });
+      return;
+    }
+
+    const toggle = target.closest("[data-edit-toggle]");
+    if (toggle) {
+      const form = toggle.closest("form");
+      setMarkEditGroupOpen(form, toggle.dataset.editToggle, toggle.getAttribute("aria-expanded") !== "true");
+      return;
+    }
+
+    const pill = target.closest("[data-pill-value]");
+    if (!pill) return;
+    const row = pill.closest("[data-pills-for]");
+    const form = pill.closest("form");
+    const s = row && form && markPillState(form, row.dataset.pillsFor);
+    if (!s || s.disabled) return;
+    const value = pill.dataset.pillValue;
+    if (s.multi) {
+      const box = s.boxes.find((b) => b.value === value);
+      if (box) {
+        box.checked = !box.checked;
+        box.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    } else {
+      const next = s.select.value === value ? (row.dataset.pillsRequired ? value : "") : value;
+      if (next !== s.select.value) {
+        s.select.value = next;
+        s.select.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }
+    syncMarkFormPills(form);
+  },
+  true
+);
+for (const type of ["change", "input"]) {
+  document.addEventListener(type, (e) => {
+    const form = e.target instanceof Element ? e.target.closest("form[data-mark-form]") : null;
+    if (form) syncMarkFormPills(form);
+  });
+}
+
 /**
- * Editable form version of the same popup — one text input (Name), one
- * datetime-local input (Date/Time), a <select> per pick-list field sourced
- * from markLists (falls back to an empty option list, still usable, if
- * mark_lists.json failed to load — see loadAndRenderMarks), a numeric Size
- * (cm) input, a free-text Notes textarea, and a read-only Source field
- * (see collectMarkFormValues — there's no `name` collected from it because
- * there's nothing TO collect: it's carried over from the original mark
- * unconditionally, not editable here at all). Latitude/Longitude are shown
- * but read-only (no `name`, so never collected): repositioning a mark's
- * actual GPS point is a different, more error-prone action (fat-finger a
- * coordinate here and the pin silently jumps oceans) than correcting its
- * details — the pin stays exactly where it was placed.
+ * Editable form version of the same popup, laid out like the filter dialog: Name, Date/Time and the (read-only)
+ * GPS position with its Copy button at the top, then one collapsible section per field — pick-lists as pills —
+ * each showing what's set while closed. Repositioning a mark's GPS point isn't offered here (fat-finger a
+ * coordinate and the pin silently jumps oceans); Source is read-only metadata.
  *
- * Every field beyond Name/Type/Date-Time/Source is wrapped in its own
- * `data-field-group="<key>"` div, always rendered but shown/hidden by
- * applyMarkFieldVisibility (called right below, and again on every Type
- * change — see wireMarkPopupButtons) rather than only including the
- * markup for applicable fields in the first place. Always rendering all
- * of them (just hidden) is what lets switching Type mid-edit reveal/hide
- * fields live without needing to rebuild this HTML from scratch.
+ * Every pick-list still has its real <select> (and, for a Session, its tick-box list — see
+ * multiCapableControlsHtml) in the form, hidden: the pills only drive them (see syncMarkFormPills and the
+ * document listeners above), so collectMarkFormValues, applySpeciesGate, applyMultiControlModes and the
+ * condition look-ups keep working on the same controls as before.
+ *
+ * Every field beyond Name/Type/Date-Time/Source sits in a `data-field-group="<key>"` element, always rendered
+ * but shown/hidden by applyMarkFieldVisibility (called on render and on every Type change — see
+ * wireMarkPopupButtons), so switching Type mid-edit reveals/hides fields live.
  */
 function buildMarkPopupEditHtml(mark, markLists) {
-  // Species is rendered separately, further up (Type, Species, Name — see
-  // the field order below), rather than through this same loop with the
-  // rest — Oliver's own requested order, and also where applySpeciesGate's
-  // own prompt naturally sits right above the one field it's actually
-  // asking for.
-  const otherOptionalFieldsHtml = MARK_POPUP_OPTIONAL_FIELDS.filter((f) => f.key !== "species")
-    .map(
-      (f) => `
-      <div data-field-group="${f.key}">${multiCapableControlsHtml(f, markLists, mark[f.key])}
-      </div>`
-    ).join("");
+  const hiddenSelect = (name, optionsHtml, extra = "") =>
+    `<select name="${name}" ${extra} hidden tabindex="-1" aria-hidden="true">${optionsHtml}</select>`;
+  const pickListGroup = (f, heading) =>
+    markEditGroupHtml(
+      f.key,
+      heading || f.displayLabel,
+      `${markPillRowHtml(f.key)}<div class="mark-edit-hidden-controls">${multiCapableControlsHtml(f, markLists, mark[f.key], heading)}</div>`,
+      f.key
+    );
+  const numberField = (key, label, unit, attrs) => `
+          <div data-field-group="${key}">
+            <label class="mark-edit-field">${label}
+              <input type="number" name="${key}" ${attrs} data-unit="${unit}" value="${mark[key] != null ? mark[key] : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
+            </label>
+          </div>`;
   const speciesField = MARK_POPUP_OPTIONAL_FIELDS.find((f) => f.key === "species");
+  const otherPickLists = MARK_POPUP_OPTIONAL_FIELDS.filter((f) => f.key !== "species").map((f) => pickListGroup(f)).join("");
+  const windOptions = `<option value=""></option>${SHORE_OPTIONS.map((d) => `<option value="${d}" ${mark.windDirection === d ? "selected" : ""}>${d}</option>`).join("")}`;
+
   return `
-    <div data-mark-id="${escapeHtml(mark.id)}" style="min-width:220px;max-width:260px;">
-      <form data-mark-form onsubmit="return false;">
-        <label style="display:block;font-size:0.8rem;font-weight:600;margin:0 0 2px;">Type
-          <select name="type" data-mark-type-select style="${MARK_POPUP_INPUT_STYLE}">${markListOptionsHtml(markLists, "Mark Type", mark.type)}</select>
-        </label>
-        ${cachedIsAdmin && mark.ownerUserId != null ? `
-        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Owner
-          <select name="ownerUserId" style="${MARK_POPUP_INPUT_STYLE}">${markOwnerOptionsHtml(mark.ownerUserId)}</select>
-        </label>` : ""}
-        <div data-species-first-prompt style="display:none;margin:6px 0;padding:6px 8px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:0.8rem;color:#854d0e;">Choose a species first — the rest of the form unlocks once it's set.</div>
-        <div data-field-group="${speciesField.key}">${multiCapableControlsHtml(speciesField, markLists, mark.species, "Target species")}
-        </div>
-        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Name
+    <div data-mark-id="${escapeHtml(mark.id)}" class="mark-edit" style="min-width:230px;max-width:280px;">
+      <form data-mark-form class="mark-edit-form" onsubmit="return false;">
+        <label class="mark-edit-field" style="margin-top:0;">Name
           <input type="text" name="name" value="${escapeHtml(mark.name || "")}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
         <div data-species-name-sync-confirm style="display:none;margin:6px 0;padding:6px 8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:0.8rem;">
@@ -715,74 +913,43 @@ function buildMarkPopupEditHtml(mark, markLists) {
           <button type="button" class="btn-secondary" data-species-name-sync-yes style="padding:2px 8px;font-size:0.8rem;">Yes, change it</button>
           <button type="button" class="btn-secondary" data-species-name-sync-no style="padding:2px 8px;font-size:0.8rem;">No, keep it</button>
         </div>
-        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Date/Time
+        <label class="mark-edit-field">Date/Time
           <input type="datetime-local" name="dateTime" step="1" value="${naiveToDatetimeLocal(mark.dateTime)}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
-        <div style="display:flex;gap:8px;">
-          <label style="display:block;flex:1;min-width:0;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Latitude
-            <input type="text" readonly data-mark-lat value="${mark.lat != null ? Number(mark.lat).toFixed(6) : "—"}"
-              style="${MARK_POPUP_INPUT_STYLE}background:var(--grey-100);color:var(--grey-500);cursor:not-allowed;" />
-          </label>
-          <label style="display:block;flex:1;min-width:0;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Longitude
-            <input type="text" readonly data-mark-lng value="${mark.lng != null ? Number(mark.lng).toFixed(6) : "—"}"
-              style="${MARK_POPUP_INPUT_STYLE}background:var(--grey-100);color:var(--grey-500);cursor:not-allowed;" />
-          </label>
-        </div>
-        ${otherOptionalFieldsHtml}
-        <div data-field-group="size">
-          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Size (cm)
-            <input type="number" name="size" min="0" step="1" value="${mark.size != null ? mark.size : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
-          </label>
-        </div>
-        <div data-field-group="barometer">
-          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Barometer (hPa)
-            <input type="number" name="barometer" min="0" step="0.1" value="${mark.barometer != null ? mark.barometer : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
-          </label>
-        </div>
-        <div data-field-group="temperature">
-          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Temperature (°C)
-            <input type="number" name="temperature" step="0.1" value="${mark.temperature != null ? mark.temperature : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
-          </label>
-        </div>
-        <div data-field-group="waterTemperature">
-          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Water Temp (°C)
-            <input type="number" name="waterTemperature" step="0.1" value="${mark.waterTemperature != null ? mark.waterTemperature : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
-          </label>
-        </div>
-        <div data-field-group="waterDepth">
-          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Water Depth (m)
-            <input type="number" name="waterDepth" min="0" step="0.1" value="${mark.waterDepth != null ? mark.waterDepth : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
-          </label>
-        </div>
-        <div data-field-group="windDirection">
-          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Wind Direction
-            <select name="windDirection" style="${MARK_POPUP_INPUT_STYLE}">
-              <option value=""></option>
-              ${SHORE_OPTIONS.map((d) => `<option value="${d}" ${mark.windDirection === d ? "selected" : ""}>${d}</option>`).join("")}
-            </select>
-          </label>
-        </div>
-        <div data-field-group="windSpeed">
-          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Wind Speed (km/h)
-            <input type="number" name="windSpeed" min="0" step="1" value="${mark.windSpeed != null ? mark.windSpeed : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
-          </label>
-        </div>
-        <div data-field-group="notes">
-          <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Notes
-            <textarea name="notes" rows="2" style="${MARK_POPUP_INPUT_STYLE}resize:vertical;">${escapeHtml(mark.notes || "")}</textarea>
-          </label>
-        </div>
-        <div data-field-group="released">
-          <label style="display:flex;align-items:center;gap:6px;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">
-            <input type="checkbox" name="released" ${mark.released ? "checked" : ""} />
-            Released
-          </label>
+        ${markGpsRowHtml(mark)}
+        <div data-species-first-prompt style="display:none;margin:6px 0;padding:6px 8px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:0.8rem;color:#854d0e;">Choose a species first — the rest of the form unlocks once it's set.</div>
+        <div class="mark-edit-groups">
+        ${markEditGroupHtml("type", "Type", markPillRowHtml("type", true) + hiddenSelect("type", markListOptionsHtml(markLists, "Mark Type", mark.type), "data-mark-type-select"))}
+        ${cachedIsAdmin && mark.ownerUserId != null ? markEditGroupHtml("owner", "Owner", markPillRowHtml("ownerUserId", true) + hiddenSelect("ownerUserId", markOwnerOptionsHtml(mark.ownerUserId))) : ""}
+        ${pickListGroup(speciesField)}
+        ${otherPickLists}
+        ${markEditGroupHtml("windDirection", "Wind Direction", markPillRowHtml("windDirection") + hiddenSelect("windDirection", windOptions), "windDirection")}
+        ${markEditGroupHtml(
+          "measurements",
+          "Measurements",
+          numberField("size", "Size (cm)", " cm", 'min="0" step="1"') +
+            numberField("barometer", "Barometer (hPa)", " hPa", 'min="0" step="0.1"') +
+            numberField("temperature", "Temperature (°C)", "°C", 'step="0.1"') +
+            numberField("waterTemperature", "Water Temp (°C)", "°C water", 'step="0.1"') +
+            numberField("waterDepth", "Water Depth (m)", " m", 'min="0" step="0.1"') +
+            numberField("windSpeed", "Wind Speed (km/h)", " km/h", 'min="0" step="1"') +
+            `
+          <div data-field-group="released">
+            <label class="mark-edit-field" style="display:flex;align-items:center;gap:6px;">
+              <input type="checkbox" name="released" data-summary="Released" ${mark.released ? "checked" : ""} />
+              Released
+            </label>
+          </div>`
+        )}
+        ${markEditGroupHtml(
+          "notes",
+          "Notes",
+          `<textarea name="notes" rows="3" style="${MARK_POPUP_INPUT_STYLE}resize:vertical;">${escapeHtml(mark.notes || "")}</textarea>`,
+          "notes"
+        )}
         </div>
         <div data-limit-warning class="mark-limit-warning" role="status" style="display:none;"></div>
-        <label style="display:block;font-size:0.8rem;font-weight:600;margin:6px 0 2px;">Source
-          <input type="text" readonly value="${escapeHtml(mark.source || "—")}"
-            style="${MARK_POPUP_INPUT_STYLE}background:var(--grey-100);color:var(--grey-500);cursor:not-allowed;" />
-        </label>
+        <div class="mark-edit-source">Source: ${escapeHtml(mark.source || "—")}</div>
       </form>
       <div style="display:flex;gap:8px;margin-top:10px;">
         <button type="button" class="btn-primary" data-mark-save style="padding:4px 10px;font-size:0.85rem;">Save</button>
@@ -1157,24 +1324,15 @@ async function saveMarksBatchToD1(newMarks) {
  * already-existing mark, Cancel included.
  */
 /**
- * Moves a mark popup's own DOM element into the fixed #markDetailPanel
- * (conditions.html/live.html only — real, reported friction: a floating
- * popup positioned right above whatever was clicked could bury the very
- * point, and its neighbours, someone was trying to look at). The SAME
- * node, not a copy, so every listener already wired onto it (or about
- * to be, via wireMarkPopupButtons, called right after this) keeps
- * working untouched — only where it visually lives changes. A page
- * with no such panel (there isn't one everywhere loadAndRenderMarks
- * runs) is left with Leaflet's completely normal floating popup, no
- * different from before.
+ * Runs when a mark popup opens. The popup itself stays a normal floating Leaflet popup next to its point (it used
+ * to be moved into #markDetailPanel; since 2026-09-23 that panel only holds the multi-select summary and bulk
+ * edit). This just closes the page's conditions-graph hover panel, and remembers the map so
+ * closeMarkDetailPanel can close the popup when that panel opens again.
  */
-let markDetailPanelMap = null; // the map whose popup is currently shown in #markDetailPanel, if any — set/cleared below, used by closeMarkDetailPanel
-let markDetailPanelState = null; // that map's own state object, alongside markDetailPanelMap — used by detachDetailPanel to know whether to revert to showing an active selection summary rather than just hiding the panel
+let markDetailPanelMap = null; // the map whose mark popup is currently open, if any — set/cleared below, used by closeMarkDetailPanel
+let markDetailPanelState = null; // that map's own state object, alongside markDetailPanelMap
 
 function attachPopupToDetailPanel(popup, map, state) {
-  const panel = document.getElementById("markDetailPanel");
-  const popupEl = popup.getElement();
-  if (!panel || !popupEl) return;
   // Same mutual-exclusivity fix as closeMarkDetailPanel's own comment,
   // the other direction — opening a mark now closes whichever hover
   // panel this page has, if either is currently showing. Page-specific
@@ -1184,32 +1342,12 @@ function attachPopupToDetailPanel(popup, map, state) {
   // makes it explicit to tools that these are optional per-page hooks)
   if (typeof window.hideLocationHoverPanel === "function") window.hideLocationHoverPanel();
   if (typeof window.hideLiveHoverPanel === "function") window.hideLiveHoverPanel();
-  panel.innerHTML = "";
-  panel.appendChild(popupEl);
-  panel.style.display = "block";
   markDetailPanelMap = map;
   markDetailPanelState = state;
 }
 
-/** Reverses attachPopupToDetailPanel — called on popupclose, whether or
- * not a popup was ever actually moved into the panel in the first
- * place (harmless either way). Leaflet removes the popup's own element
- * from wherever it currently lives when the popup itself closes, so
- * this only needs to manage the PANEL's own visible content, not the
- * popup element's own lifecycle.
- *
- * A plain click opening an individual mark's popup while a multi-mark
- * selection is already active doesn't clear that selection (Oliver's
- * own call) — it just temporarily covers the selection summary the
- * panel was showing. So closing that popup should bring the summary
- * back, not just go blank, as long as the selection is still non-empty. */
+/** Reverses attachPopupToDetailPanel's bookkeeping — called on popupclose. */
 function detachDetailPanel() {
-  const panel = document.getElementById("markDetailPanel");
-  if (markDetailPanelMap && markDetailPanelState && markDetailPanelState.selectedMarkIds.size > 0) {
-    renderSelectionPanel(markDetailPanelMap, markDetailPanelState);
-  } else if (panel) {
-    panel.style.display = "none";
-  }
   markDetailPanelMap = null;
   markDetailPanelState = null;
 }
@@ -1351,6 +1489,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         refreshMarkFormConditionsForNewTime(form, mark.lat, mark.lng, naive);
       });
     }
+    syncMarkFormPills(form);
   }
 
   const editBtn = popupEl.querySelector("[data-mark-edit]");
@@ -1586,7 +1725,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
             fillColor: freshStyle.fillColor,
             fillOpacity: 0.85,
           }, markListsForShape).addTo(options.state.markerLayer);
-          marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet", autoPan: false });
+          marker.bindPopup(buildMarkPopupViewHtml(mark), markPopupOptions());
           marker.unbindTooltip();
           marker.bindTooltip(markTooltipText(mark, options.state), { direction: "top" });
           // Same Ctrl/Cmd-click-to-select wiring loadAndRenderMarks gives

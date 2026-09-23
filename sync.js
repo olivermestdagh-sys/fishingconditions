@@ -1021,7 +1021,7 @@ function openCandidatePopup(idx) {
   const c = candidates[idx];
   if (!c) return;
   if (!reviewMap) return; // only reachable outside Import mode
-  const popup = L.popup({ maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet" })
+  const popup = L.popup(markPopupOptions())
     .setLatLng([c.lat, c.lng])
     .setContent(buildMarkPopupEditHtml(c, markLists))
     .openOn(reviewMap);
@@ -1030,6 +1030,7 @@ function openCandidatePopup(idx) {
   applyMarkFieldVisibility(popupEl, c.type);
   const typeSelect = popupEl.querySelector("[data-mark-type-select]");
   if (typeSelect) typeSelect.addEventListener("change", () => applyMarkFieldVisibility(popupEl, typeSelect.value));
+  syncMarkFormPills(popupEl.querySelector("[data-mark-form]")); // draws the pill rows (see buildMarkPopupEditHtml)
 
   popupEl.querySelector("[data-mark-save]").addEventListener("click", () => {
     const form = popupEl.querySelector("[data-mark-form]");

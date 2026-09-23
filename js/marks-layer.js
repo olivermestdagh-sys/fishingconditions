@@ -387,7 +387,7 @@ async function loadAndRenderMarks(map, state) {
       fillOpacity: 0.85,
     }, state.markLists).addTo(state.markerLayer);
     marker.bindTooltip(markTooltipText(mark, state), { direction: "top" });
-    marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet", autoPan: false });
+    marker.bindPopup(buildMarkPopupViewHtml(mark), markPopupOptions());
     // Ctrl (or Cmd) turns a click into a selection toggle instead of the
     // normal open-the-popup behaviour.
     //

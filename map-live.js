@@ -287,7 +287,7 @@ function addCatchToLiveMap(mark) {
     fillOpacity: 0.85,
   }, state.markLists).addTo(state.markerLayer);
   marker.bindTooltip(markTooltipText(mark, state), { direction: "top" });
-  marker.bindPopup(buildMarkPopupViewHtml(mark), { maxWidth: 260, autoPanPadding: [20, 20], className: "mark-popup-leaflet", autoPan: false });
+  marker.bindPopup(buildMarkPopupViewHtml(mark), markPopupOptions());
   marker._markId = mark.id;
   marker.on("mousedown", (e) => {
     if (isSelectModifierKey(e.originalEvent)) L.DomEvent.stop(e);
