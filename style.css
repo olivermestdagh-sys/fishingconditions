@@ -851,6 +851,10 @@ main {
 .message-reply { margin-top: 6px; padding: 6px 8px; border-left: 3px solid var(--blue-700); background: #f1f5f9; border-radius: 4px; }
 .message-head { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; background: none; border: none; padding: 0; cursor: pointer; text-align: left; font: inherit; color: inherit; }
 .message-preview { font-size: 0.85rem; }
+.message-actions { display: flex; gap: 6px; margin-top: 6px; }
+.message-actions .btn-secondary, .message-delete-own { padding: 2px 10px; font-size: 0.78rem; }
+.message-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.message-delete-own { color: #dc2626; }
 .messages-unread { font-size: 0.72rem; font-weight: 700; color: var(--white); background: var(--blue-700); border-radius: 999px; padding: 1px 7px; margin-left: 6px; vertical-align: middle; }
 .messages-unread[hidden] { display: none; }
 /* The count on the Settings tab (refreshMessagesBadge, js/backend.js). */

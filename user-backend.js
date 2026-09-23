@@ -320,6 +320,10 @@ export default {
       if (url.pathname === "/api/messages") {
         return handleMessages(request, env);
       }
+      const ownMessageMatch = url.pathname.match(/^\/api\/messages\/([^/]+)$/);
+      if (ownMessageMatch && ownMessageMatch[1] !== "unread" && request.method === "DELETE") {
+        return handleOwnMessageDelete(request, env, ownMessageMatch[1]);
+      }
       if (url.pathname === "/api/messages/unread" && request.method === "GET") {
         return handleMessagesUnread(request, env);
       }
@@ -2394,6 +2398,15 @@ async function handleMessages(request, env) {
     return jsonResponse(messageForSender({ id, body: text, created_at: now }), 201, env);
   }
   return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+/** DELETE /api/messages/:id — the sender removes one of their own messages (and any reply to it). */
+async function handleOwnMessageDelete(request, env, id) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const { meta } = await env.DB.prepare("DELETE FROM messages WHERE id = ? AND user_id = ?").bind(id, user.id).run();
+  if (!meta || !meta.changes) return jsonResponse({ error: "Message not found." }, 404, env);
+  return new Response(null, { status: 204, headers: corsHeaders(env) });
 }
 
 /** GET /api/messages/unread — {count}: for Admin, unread incoming messages; for anyone else, replies they haven't

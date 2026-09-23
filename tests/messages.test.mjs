@@ -86,6 +86,17 @@ test("each person sees only their own messages, and never the admin's details", 
   assert.equal((await req(env, "s-basic", "DELETE", `/api/admin/messages/${mine[0].id}`)).status, 403);
 });
 
+test("a sender can delete their own messages, never someone else's", async () => {
+  const { env } = makeDb();
+  const mine = await json(await req(env, "s-basic", "POST", "/api/messages", { body: "delete me" }));
+  const theirs = await json(await req(env, "s-basic2", "POST", "/api/messages", { body: "not yours" }));
+  assert.equal((await req(env, "s-basic", "DELETE", `/api/messages/${theirs.id}`)).status, 404);
+  assert.equal((await req(env, null, "DELETE", `/api/messages/${mine.id}`)).status, 401);
+  assert.equal((await req(env, "s-basic", "DELETE", `/api/messages/${mine.id}`)).status, 204);
+  assert.deepEqual(await json(await req(env, "s-basic", "GET", "/api/messages")), []);
+  assert.equal((await json(await req(env, "s-basic2", "GET", "/api/messages"))).length, 1);
+});
+
 test("Admin reads, replies and deletes; the unread counts follow on both sides", async () => {
   const { env } = makeDb();
   const sent = await json(await req(env, "s-basic", "POST", "/api/messages", { body: "Is Balnarring good in a westerly?" }));

@@ -354,8 +354,9 @@ async function loadMyMessages() {
       ? `<div class="messages-heading">Your messages</div>` +
         messages
           .map(
-            (m) => `<div class="message-item">
-              <div class="message-meta">You · ${escapeHtml(formatMessageDate(m.createdAt))}</div>
+            (m) => `<div class="message-item" data-my-message-id="${escapeHtml(m.id)}">
+              <div class="message-meta message-meta-row">You · ${escapeHtml(formatMessageDate(m.createdAt))}
+                <button type="button" class="btn-secondary message-delete-own" data-delete-my-message>Delete</button></div>
               <div class="message-body">${escapeHtml(m.body)}</div>
               ${
                 m.reply
@@ -402,6 +403,23 @@ async function onSendMessage() {
   }
 }
 
+// Deleting one of your own sent messages (and any reply to it).
+document.getElementById("myMessagesList").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-delete-my-message]");
+  if (!btn) return;
+  const id = btn.closest("[data-my-message-id]").dataset.myMessageId;
+  if (!confirm("Delete this message? This can't be undone.")) return;
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/messages/${encodeURIComponent(id)}`, { method: "DELETE", credentials: "include" });
+    if (!res.ok && res.status !== 404) throw new Error((await res.json().catch(() => ({}))).error || `status ${res.status}`);
+    setContactStatus("Message deleted.");
+    await loadMyMessages();
+    if (isAdmin) await loadAdminMessages();
+  } catch (err) {
+    setContactStatus(`Couldn't delete it: ${err.message}`, true);
+  }
+});
+
 let adminMessages = []; // [{id, body, createdAt, reply, repliedAt, senderName, senderEmail, readAt}]
 const openAdminMessages = new Set(); // which messages are expanded, kept across re-renders
 
@@ -447,6 +465,10 @@ function renderAdminMessages() {
           <span class="message-meta">${m.readAt ? "" : "● "}${escapeHtml(who)} · ${escapeHtml(formatMessageDate(m.createdAt))}${m.reply ? " · replied" : ""}</span>
           <span class="message-preview">${escapeHtml(open ? "" : m.body.slice(0, 90) + (m.body.length > 90 ? "…" : ""))}</span>
         </button>
+        <div class="message-actions">
+          <button type="button" class="btn-secondary" data-message-open-reply>${m.reply ? "Edit reply" : "Reply"}</button>
+          <button type="button" class="btn-secondary" data-message-delete style="color:#dc2626;">Delete</button>
+        </div>
         <div class="message-detail"${open ? "" : " hidden"}>
           <div class="message-body">${escapeHtml(m.body)}</div>
           <label class="message-meta" style="display:block;margin-top:8px;">Your reply (shown to them on Settings)
@@ -455,7 +477,6 @@ function renderAdminMessages() {
           <div class="contact-send-row">
             <button type="button" class="btn-primary" data-message-save-reply>Save reply</button>
             <button type="button" class="btn-secondary" data-message-mark-unread>Mark unread</button>
-            <button type="button" class="btn-secondary" data-message-delete style="color:#dc2626;">Delete</button>
           </div>
         </div>
       </div>`;
@@ -480,8 +501,10 @@ document.getElementById("adminMessagesList").addEventListener("click", async (e)
   const msg = adminMessages.find((m) => m.id === id);
   if (!msg) return;
   try {
-    if (e.target.closest("[data-message-toggle]")) {
-      if (openAdminMessages.has(id)) openAdminMessages.delete(id);
+    const replyBtn = e.target.closest("[data-message-open-reply]");
+    if (e.target.closest("[data-message-toggle]") || replyBtn) {
+      if (replyBtn) openAdminMessages.add(id); // Reply always opens it
+      else if (openAdminMessages.has(id)) openAdminMessages.delete(id);
       else openAdminMessages.add(id);
       if (!msg.readAt && openAdminMessages.has(id)) {
         await adminMessageRequest(id, "PATCH", { read: true }); // opening it marks it read
@@ -489,6 +512,10 @@ document.getElementById("adminMessagesList").addEventListener("click", async (e)
         if (typeof refreshMessagesBadge === "function") refreshMessagesBadge();
       }
       renderAdminMessages();
+      if (replyBtn) {
+        const box = document.querySelector(`#adminMessagesList [data-message-id="${CSS.escape(id)}"] [data-message-reply]`);
+        if (box) box.focus();
+      }
     } else if (e.target.closest("[data-message-save-reply]")) {
       const reply = item.querySelector("[data-message-reply]").value.trim();
       await adminMessageRequest(id, "PATCH", { reply });
