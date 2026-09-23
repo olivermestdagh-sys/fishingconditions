@@ -173,8 +173,8 @@ async function loadTrackedLocationsForLookup() {
     if (live.ok) {
       const list = await live.json();
       if (Array.isArray(list) && list.length > 0) {
-        _trackedLocationsForLookupCache = list;
-        return list;
+        _trackedLocationsForLookupCache = list.filter(locationVisibleToViewer); // Public's and the signed-in person's only
+        return _trackedLocationsForLookupCache;
       }
     }
   } catch (err) {
@@ -182,7 +182,7 @@ async function loadTrackedLocationsForLookup() {
   }
   try {
     const res = await fetch(`config/locations.json?_=${Date.now()}`, { cache: "no-store" });
-    _trackedLocationsForLookupCache = res.ok ? await res.json() : [];
+    _trackedLocationsForLookupCache = res.ok ? (await res.json()).filter(locationVisibleToViewer) : [];
   } catch (err) {
     console.error("Could not load config/locations.json for nearest-location lookup:", err);
     _trackedLocationsForLookupCache = [];

@@ -87,7 +87,7 @@ async function mergeLiveLocationConfig(allLocations) {
     const live = await res.json();
     if (!Array.isArray(live)) return false;
     const byName = new Map(live.map((l) => [l.name, l]));
-    const SHARED = ["displayName", "shore", "tidal", "locationGroup", "locationGroups", "tideOffset", "tideMaxObserved", "lat", "lng"];
+    const SHARED = ["ownerId", "displayName", "shore", "tidal", "locationGroup", "locationGroups", "tideOffset", "tideMaxObserved", "lat", "lng"];
     const PER_TYPE = ["driveTo", "driveBack", "setUp", "packUp", "timeToSpot", "timeFromSpot", "minTideHeight"];
     for (const loc of allLocations) {
       const src = byName.get(loc.name);

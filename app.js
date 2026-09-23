@@ -68,6 +68,11 @@ async function init() {
   // avoids a race where the very first chart render below would happen
   // before tideOffset had been merged in.
   await loadTideOffsets(state.data.locations);
+  // Only Public's and the signed-in person's own locations (locationVisibleToViewer, js/backend.js) — after the live
+  // merge above, which is what supplies each one's owner until the next data run records it in the file.
+  state.data.locations = state.data.locations.filter(locationVisibleToViewer);
+  const visibleKeys = new Set(state.data.locations.map((l) => locationKey(l.name, l.type)));
+  for (const key of Object.keys(state.rowsByLocation)) if (!visibleKeys.has(key)) delete state.rowsByLocation[key];
 
   document.getElementById("btnCloseHoverPanel").addEventListener("click", hideLocationHoverPanel);
   document.getElementById("previewShoreSelect").addEventListener("change", recalcPreviewCondition);

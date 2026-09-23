@@ -645,6 +645,9 @@ async function init() {
     // pipeline), so negligible delay; avoids a race where the very first
     // row renders below could happen before tideOffset had been merged in.
     await loadTideOffsets(allLocations);
+    // Only Public's and the signed-in person's own locations (locationVisibleToViewer, js/backend.js).
+    await refreshAdminStatus();
+    allLocations = allLocations.filter(locationVisibleToViewer);
   } catch (err) {
     document.getElementById("updated").textContent = "Could not load data — has the site run its first update yet?";
     console.error(err);

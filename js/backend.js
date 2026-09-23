@@ -705,6 +705,15 @@ function escapeHtml(str) {
  * sites that need to identify or group a location keep reading loc.name
  * directly, exactly as they did before this existed.
  */
+/** Whether the person viewing may see this tracked location: Public's always, and the signed-in person's own —
+ * never another account's (their forecasts are in the public data file too, the pages just don't show them). A
+ * location with no owner recorded (an older data file) counts as Public's. Needs refreshAdminStatus to have run
+ * for a signed-in person's own to show. */
+function locationVisibleToViewer(loc) {
+  const owner = loc && loc.ownerId;
+  return !owner || owner === "public" || (typeof cachedUserId !== "undefined" && cachedUserId != null && owner === cachedUserId);
+}
+
 function displayNameFor(loc) {
   return (loc && (loc.displayName || loc.name)) || "";
 }

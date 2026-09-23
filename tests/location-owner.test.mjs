@@ -106,6 +106,23 @@ test("moving to the owner it already has changes nothing", async () => {
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM user_location_access WHERE user_id = 'public'").get().n, 2);
 });
 
+test("the location list covers every account, tags each location with its owner, and uses only the owner's own entries", async () => {
+  const { sqlite, env } = makeDb();
+  // A Basic user's own location, plus that user also tracking Public's L1 with their own Kayak type.
+  sqlite.prepare("INSERT INTO locations (id, created_by_user_id, name, lat, lng, created_at) VALUES ('L2', 'basic1', 'Rye Pier', -38, 144, 0)").run();
+  sqlite.prepare("INSERT INTO user_types (id, user_id, name, behaves_like, created_at) VALUES ('bt-kayak', 'basic1', 'Kayak', 'Kayak', 0)").run();
+  sqlite.prepare("INSERT INTO user_location_access (id, user_id, location_id, type_id, set_up, created_at) VALUES ('b1', 'basic1', 'L2', 'bt-kayak', '00:05', 0), ('b2', 'basic1', 'L1', 'bt-kayak', '00:59', 0)").run();
+  const res = await worker.fetch(new Request("https://worker.example/api/public/locations"), env);
+  assert.equal(res.status, 200);
+  const list = await res.json();
+  const byId = Object.fromEntries(list.map((l) => [l.id, l]));
+  assert.equal(byId.L1.ownerId, "public");
+  assert.equal(byId.L2.ownerId, "basic1"); // a Basic user's location is included now, tagged as theirs
+  assert.deepEqual(byId.L1.types.map((t) => [t.type, t.setUp]).sort(), [["Kayak", "00:30"], ["Land based", "00:20"]]); // not basic1's own Kayak entry
+  assert.deepEqual(byId.L1.locationGroups, ["Western Port"]);
+  assert.deepEqual(byId.L2.types.map((t) => t.setUp), ["00:05"]);
+});
+
 test("only Admin can move a location, only to a real account, and only an existing location", async () => {
   const { sqlite, env } = makeDb();
   assert.equal((await put(env, "s-basic", "L1", { ownerUserId: "basic1" })).status, 403);

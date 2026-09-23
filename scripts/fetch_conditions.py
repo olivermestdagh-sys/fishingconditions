@@ -294,6 +294,7 @@ def export_locations_json(locations):
     exportable = []
     for loc in locations:
         exportable.append({
+            "ownerId": loc.get("ownerId"),
             "name": loc.get("name"),
             # Same fallback every other displayName call site already
             # uses (rowToTracked/handlePipelineLocationsList in
@@ -1666,6 +1667,8 @@ def main():
                 # lat/lng, real tide range) come from the location itself;
                 # this type's own timings/settings are spread in after.
                 output_locations.append({
+                    # Whose location it is: the pages show only Public's and the signed-in person's.
+                    "ownerId": loc.get("ownerId"),
                     "name": loc["name"],
                     # Falls back to name until the one-time migration runs
                     # (locationsadmin.js's own "Migrate now" button) or a

@@ -1759,30 +1759,21 @@ async function handlePublicLocations(env) {
 }
 
 async function buildLocationList(env) {
-  // Public's locations PLUS the Admin account's own — the Admin's private
-  // locations otherwise never reach data/conditions.json (the static file
-  // Live/Locations read), so they only ever showed on Settings. Basic
-  // users' locations are deliberately still excluded. NOTE: this makes the
-  // Admin's locations visible on the public site.
-  const { results: adminRows } = await env.DB.prepare("SELECT id FROM users WHERE role = 'admin'").all();
-  const ownerIds = [PUBLIC_USER_ID, ...adminRows.map((r) => r.id)];
-  const ownerPlaceholders = ownerIds.map(() => "?").join(", ");
-
-  const { results: locationRows } = await env.DB.prepare(
-    `SELECT * FROM locations WHERE created_by_user_id IN (${ownerPlaceholders}) ORDER BY name ASC`
-  )
-    .bind(...ownerIds)
-    .all();
+  // Every account's locations — Public's and each user's own — tagged with their owner (`ownerId`), so the data
+  // pipeline fetches forecasts for all of them and the pages show only Public's plus the signed-in person's
+  // (locationVisibleToViewer, js/backend.js). A location's types, timings and groups are its owner's own entries.
+  // NOTE: this list (and data/conditions.json built from it) is public — the pages hide other accounts' locations,
+  // they aren't secret.
+  const { results: locationRows } = await env.DB.prepare("SELECT * FROM locations ORDER BY name ASC").all();
 
   const { results: accessRows } = await env.DB.prepare(
     `SELECT ula.location_id, ula.drive_to, ula.drive_back, ula.set_up, ula.pack_up, ula.time_to_spot, ula.time_from_spot,
             ula.min_tide_height, t.name as type_name, t.behaves_like
      FROM user_location_access ula
      JOIN user_types t ON t.id = ula.type_id
-     WHERE ula.user_id IN (${ownerPlaceholders})`
-  )
-    .bind(...ownerIds)
-    .all();
+     JOIN locations l ON l.id = ula.location_id
+     WHERE ula.user_id = COALESCE(l.created_by_user_id, '${PUBLIC_USER_ID}')`
+  ).all();
   const typesByLocation = new Map();
   for (const row of accessRows) {
     if (!typesByLocation.has(row.location_id)) typesByLocation.set(row.location_id, []);
@@ -1803,10 +1794,9 @@ async function buildLocationList(env) {
     `SELECT m.location_id, g.name as group_name
      FROM user_location_group_members m
      JOIN user_location_groups g ON g.id = m.group_id
-     WHERE m.user_id IN (${ownerPlaceholders})`
-  )
-    .bind(...ownerIds)
-    .all();
+     JOIN locations l ON l.id = m.location_id
+     WHERE m.user_id = COALESCE(l.created_by_user_id, '${PUBLIC_USER_ID}')`
+  ).all();
   const groupsByLocation = new Map();
   for (const row of memberRows) {
     if (!groupsByLocation.has(row.location_id)) groupsByLocation.set(row.location_id, []);
@@ -1817,6 +1807,7 @@ async function buildLocationList(env) {
     const groups = groupsByLocation.get(loc.id) || [];
     return {
       id: loc.id,
+      ownerId: loc.created_by_user_id || PUBLIC_USER_ID, // whose location it is — see locationVisibleToViewer, js/backend.js
       name: loc.name,
       displayName: loc.display_name || loc.name, // same fallback rowToTracked uses, above — see this file's other location handlers for why
       shore: loc.shore,

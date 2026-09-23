@@ -260,7 +260,7 @@ async function openLocationEditor(name, { onChanged } = {}) {
           `<div class="mark-pill-row">${["public", ...cachedAdminUsers.map((u) => u.id)]
             .map((id) => pill("data-loced-owner", id, id === "public" ? "Public (shared)" : locEdOwnerLabel(id), id === ctx.ownerId))
             .join("")}</div>
-           <p class="footnote" style="margin:6px 0 0;text-align:left;">Only Public's and Admin accounts' locations show on the Map and Week Ahead. Its types and groups move with it.</p>`
+           <p class="footnote" style="margin:6px 0 0;text-align:left;">Everyone sees Public's locations plus their own on the Map and Week Ahead — never another account's. Its types and groups move with it.</p>`
         )}
         ${group("shore", "Shore faces", loc.shore ? [loc.shore] : [], `<div class="mark-pill-row">${SHORE_OPTIONS.map((s) => pill("data-loced-shore", s, s, loc.shore === s)).join("")}</div>`)}
         ${group(
