@@ -184,6 +184,7 @@ function teardownMode() {
   if (mapMode === "import") syncDetachMap();
   document.getElementById("markControlsBar").style.display = "none";
   detachHomes();
+  cancelPinMove();
   document.getElementById("markFilterBtn").style.display = "none";
   document.getElementById("exportStatus").textContent = "";
 }
@@ -342,7 +343,15 @@ function renderLocationMap() {
     const iconKind = types.includes("Kayak") && types.includes("Land based") ? "both" : types.includes("Land based") ? "landBased" : "kayak";
     const first = variants.find((v) => v.type === "Kayak") || variants[0];
     const key = locationKey(first.name, first.type);
-    points.push({ lat, lng, label: displayNameFor(first), iconKind, onClick: () => selectLocationByKey(key) });
+    points.push({
+      lat,
+      lng,
+      label: displayNameFor(first),
+      iconKind,
+      // Clicking the pin you're carrying puts it back down (js/location-move.js); otherwise it opens the location.
+      onClick: (e) => (isCarryingPin(e.target) ? cancelPinMove() : selectLocationByKey(key)),
+      onLongPress: (marker) => startPinMove(first, marker, iconKind), // hold 2 s to pick the pin up and move it
+    });
   }
 
   const markLayerState = createMarkLayerState();

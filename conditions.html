@@ -41,6 +41,7 @@
   </button>
   <button type="button" id="btnAddHome" class="btn-secondary map-home-btn" style="display:none;" title="Add a home — then tap the map where it is" aria-label="Add a home" aria-pressed="false"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M10 3 L18 10 L15.5 10 L15.5 18 L4.5 18 L4.5 10 L2 10 Z" fill="currentColor"/><rect x="8.3" y="12.5" width="3.4" height="5.5" fill="var(--white, #fff)"/><circle cx="18.5" cy="17.5" r="5" fill="var(--white, #fff)"/><path d="M18.5 14.6 V20.4 M15.6 17.5 H21.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
   <span id="homeAddHint" class="map-toolbar-status" style="display:none;">Tap the map where your home is</span>
+  <span id="pinMoveHint" class="map-toolbar-status pin-move-hint" style="display:none;"></span>
   <button type="button" id="btnSessionDefaults" class="btn-primary live-quick-btn" style="display:none;">Session defaults</button>
   <button type="button" id="btnLiveSession" class="btn-primary live-quick-btn" style="display:none;">+ Session</button>
   <button type="button" id="btnLiveEndSession" class="btn-primary live-quick-btn" style="display:none;">End Session/Move</button>
@@ -227,6 +228,7 @@
 <script src="js/chart-render.js"></script>
 <script src="js/week-tools.js"></script>
 <script src="js/location-editor.js"></script>
+<script src="js/location-move.js"></script>
 <script src="js/gpx-import.js"></script>
 <script src="sync.js"></script>
 <script src="map-live.js"></script>

@@ -1354,6 +1354,8 @@ async function handleMapClickForMarks(map, lat, lng, state, onLocationPreviewCli
   }
   // The toolbar's "add a home" button arms the next click to place a home instead (js/homes.js).
   if (typeof window.homesConsumeMapClick === "function" && window.homesConsumeMapClick(lat, lng)) return; // an optional per-page hook
+  // A location pin picked up to move puts it down here instead (js/location-move.js).
+  if (typeof window.locationMoveConsumeMapClick === "function" && window.locationMoveConsumeMapClick(lat, lng)) return;
   if (!cachedIsSignedIn) {
     if (onLocationPreviewClick) onLocationPreviewClick(lat, lng);
     return;

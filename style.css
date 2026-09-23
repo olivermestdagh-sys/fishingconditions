@@ -2973,6 +2973,32 @@ main.wide {
   border-color: var(--blue-700);
   color: var(--white);
 }
+/* Moving a location pin (js/location-move.js): while held it grows and glows over the 2 s it takes to pick up;
+   once picked up the cursor is the pin (--pin-cursor, set from the pin's own picture) until it's put down. */
+.location-map-pin.pin-holding svg {
+  transform-origin: 50% 100%;
+  animation: pin-hold 2s linear forwards;
+}
+@keyframes pin-hold {
+  from { transform: scale(1); filter: drop-shadow(0 0 0 rgba(37, 99, 235, 0)); }
+  to { transform: scale(1.3); filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.9)); }
+}
+#locationMap.pin-carrying,
+#locationMap.pin-carrying .leaflet-grab,
+#locationMap.pin-carrying .leaflet-interactive {
+  cursor: var(--pin-cursor, crosshair) !important;
+}
+.pin-move-hint .pin-move-undo {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--blue-700);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .home-popup-title { font-weight: 600; margin-bottom: 6px; }
 .home-popup-status { margin-top: 4px; font-size: 0.8rem; }
 .mark-filter-badge:empty {

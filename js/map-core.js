@@ -261,6 +261,58 @@ function wireMapPopupZIndexToggle(map) {
   });
 }
 
+const PIN_HOLD_MS = 2000;
+
+/** Runs `onFire` when a marker is held down (mouse or touch) for PIN_HOLD_MS without moving more than a few pixels —
+ * moving further (a map pan) or letting go early cancels it. While held, the icon gets .pin-holding (style.css) so
+ * it visibly "charges up". Sets marker._longPressFired so the click from the release can be ignored. */
+function wireMarkerLongPress(marker, onFire) {
+  const el = marker.getElement();
+  if (!el) return;
+  let timer = null;
+  let startX = 0;
+  let startY = 0;
+  const cancel = () => {
+    clearTimeout(timer);
+    timer = null;
+    el.classList.remove("pin-holding");
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", cancel);
+  };
+  const onMove = (e) => {
+    const t = e.touches ? e.touches[0] : e;
+    if (t && Math.hypot(t.clientX - startX, t.clientY - startY) > 8) cancel();
+  };
+  const start = (e) => {
+    if (e.type === "mousedown" && e.button !== 0) return;
+    const t = e.touches ? e.touches[0] : e;
+    startX = t.clientX;
+    startY = t.clientY;
+    marker._longPressFired = false;
+    el.classList.add("pin-holding");
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      el.classList.remove("pin-holding");
+      marker._longPressFired = true;
+      onFire();
+    }, PIN_HOLD_MS);
+    if (e.type === "mousedown") {
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", cancel);
+    }
+  };
+  el.addEventListener("mousedown", start);
+  el.addEventListener("touchstart", start, { passive: true });
+  el.addEventListener("touchmove", onMove, { passive: true });
+  el.addEventListener("touchend", cancel);
+  el.addEventListener("touchcancel", cancel);
+  // A long touch would otherwise bring up the phone's own "save image" style menu.
+  el.addEventListener("contextmenu", (e) => {
+    if (timer || marker._longPressFired) e.preventDefault();
+  });
+}
+
 function renderLeafletLocationMap(containerId, points, opts = {}) {
   const container = document.getElementById(containerId);
   if (!container || typeof L === "undefined") return null;
@@ -296,7 +348,18 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
     const marker = L.marker([p.lat, p.lng], { icon }).addTo(map);
     if (p.label) marker.bindTooltip(p.label, { direction: "top" });
     if (p.popupHtml) marker.bindPopup(p.popupHtml);
-    if (p.onClick) marker.on("click", p.onClick);
+    // A 2-second hold (p.onLongPress — the Map's "pick up a pin to move it", js/location-move.js) swallows the click
+    // its own release would otherwise send, so it doesn't also open the location.
+    if (p.onLongPress) wireMarkerLongPress(marker, () => p.onLongPress(marker));
+    if (p.onClick) {
+      marker.on("click", (e) => {
+        if (marker._longPressFired) {
+          marker._longPressFired = false;
+          return;
+        }
+        p.onClick(e);
+      });
+    }
   }
 
   // Restores the last-viewed position/zoom if one was saved, rather than
