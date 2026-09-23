@@ -72,12 +72,12 @@ const call = (env, method, p, body) =>
   worker.fetch(new Request("https://worker.example" + p, { method, headers, body: body ? JSON.stringify(body) : undefined }), env);
 const mark = (type, extra = {}) => ({ id: "n1", lat: -38, lng: 145, type, dateTime: "2026-01-01 10:00:00", ...extra });
 
-test("Admin's Catches and Sessions are saved to their own account, Mark and POI to the shared one", async () => {
-  for (const [type, owner] of [["Catch", ME], ["Session Start", ME], ["Session End", ME], ["Mark", "public"], ["POI", "public"]]) {
+test("Admin's new marks of every type are saved to their own account, not the shared one", async () => {
+  for (const type of ["Catch", "Session Start", "Session End", "Mark", "POI"]) {
     const env = makeEnv("admin", []);
     const res = await call(env, "POST", "/api/marks?userId=public", mark(type)); // an old client still sends ?userId=public: ignored
     assert.equal(res.status, 201, type);
-    assert.equal(env.log.inserts[0].owner, owner, type);
+    assert.equal(env.log.inserts[0].owner, ME, type);
   }
 });
 
@@ -123,15 +123,15 @@ test("Admin sees every real user's marks too, each tagged with its real owner an
   }
 });
 
-test("Admin can edit and delete a shared mark; ownership follows the type when it changes", async () => {
+test("Admin can edit and delete a shared mark; changing its type doesn't change its owner", async () => {
   const marks = [{ id: "m1", user_id: "public", type: "Mark", lat: 1, lng: 2, date_time: "2026-01-01 00:00:00" }];
   const env = makeEnv("admin", marks);
   const put = await call(env, "PUT", "/api/marks/m1", { type: "Catch" });
   assert.equal(put.status, 200);
-  assert.deepEqual(env.log.updates[0], { id: "m1", owner: ME, from: "public" }); // a Mark edited into a Catch moves to their account
+  assert.deepEqual(env.log.updates[0], { id: "m1", owner: "public", from: "public" }); // still shared — only the Owner field moves it
   const del = await call(env, "DELETE", "/api/marks/m1");
   assert.equal(del.status, 204);
-  assert.deepEqual(env.log.deletes[0], { id: "m1", owner: ME });
+  assert.deepEqual(env.log.deletes[0], { id: "m1", owner: "public" });
 });
 
 test("Admin can edit and delete another real user's own mark, now that they can see it at all", async () => {

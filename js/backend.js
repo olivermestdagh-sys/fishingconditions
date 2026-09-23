@@ -599,17 +599,13 @@ const MARK_FILTER_ONLY_FIELDS = [
 // shared set everyone sees) or — reachable by Admin only, who can now see every real user's marks (see
 // markReadOwnerIds, user-backend.js), not just their own + Public — "Other" for a different real user's own mark.
 // The Worker says so on every mark it sends (`mark.owner`; rowToOwnedMark there computes the exact same three
-// buckets). For a mark not yet saved, or edited into another type, it is worked out the same way the Worker's own
-// default does (PERSONAL_MARK_TYPES, markOwnerFor there): Admin's Catches and Sessions are theirs and their
-// Mark/POI are shared; anyone else's marks are all their own. Used by the map's Mark Owner filter and to decide
+// buckets). A mark not yet saved is "Mine", the same default the Worker's own markOwnerFor applies: a new mark
+// belongs to whoever creates it, whatever its type. Used by the map's Mark Owner filter and to decide
 // who may edit a mark. (Its real per-account identity — an actual name, not just this three-way bucket — is a
 // separate pair of fields, mark.ownerUserId/mark.ownerName, Admin only: see buildMarkPopupEditHtml's Owner field
 // and markTooltipText, js/marks-core.js.)
-const PERSONAL_MARK_TYPES = ["Catch", "Session Start", "Session End"];
 function markOwnerLabel(mark) {
-  if (mark.owner) return mark.owner;
-  if (typeof cachedIsAdmin !== "undefined" && !cachedIsAdmin) return "Mine";
-  return PERSONAL_MARK_TYPES.includes(mark.type) ? "Mine" : "Public";
+  return mark.owner || "Mine";
 }
 /** Whether the signed-in person may edit or delete this mark: Admin any, everyone else only their own (the shared ones are read-only for them). */
 function canEditMark(mark) {

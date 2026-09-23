@@ -634,8 +634,7 @@ function buildMarkPopupViewHtml(mark) {
 }
 
 // The Public account's own sentinel id — matches PUBLIC_USER_ID in user-backend.js exactly (not
-// imported; this file has no build step to share it from, same as PERSONAL_MARK_TYPES just above,
-// duplicated for the same reason — see that constant's own comment). Only ever used client-side
+// imported; this file has no build step to share it from). Only ever used client-side
 // to pick out (and offer) the "Public (shared)" option in the Owner field below.
 const CLIENT_PUBLIC_USER_ID = "public";
 
@@ -904,8 +903,8 @@ function collectMarkFormValues(form, originalMark) {
     createdAt: originalMark.createdAt,
   };
   if (originalMark.source) updated.source = originalMark.source;
-  // Which set the mark belongs to follows its type for Admin (Catches/Sessions are theirs, Mark/POI shared); the Worker
-  // makes the same call on save. Everyone else's marks are all their own. An explicit pick from the Owner field
+  // A mark stays with its current owner (a new one belongs to whoever creates it); the Worker makes the same call on
+  // save. An explicit pick from the Owner field
   // (Admin only — see buildMarkPopupEditHtml/markOwnerOptionsHtml) overrides that on the Worker, same three
   // "Mine"/"Public"/"Other" buckets rowToOwnedMark computes there — mirrored here so the popup/tooltip read right
   // immediately after Save, without waiting on a reload to hear the Worker's own version back.
@@ -922,7 +921,7 @@ function collectMarkFormValues(form, originalMark) {
     }
     updated.owner = updated.ownerUserId === CLIENT_PUBLIC_USER_ID ? "Public" : updated.ownerUserId === cachedUserId ? "Mine" : "Other";
   } else {
-    updated.owner = cachedIsAdmin ? (PERSONAL_MARK_TYPES.includes(type) ? "Mine" : "Public") : "Mine";
+    updated.owner = originalMark.owner || "Mine";
   }
   // The role follows the type (Session Start / Session End); a mark switched out of a session type leaves its pair.
   const role = sessionRoleForType(type);
@@ -1000,8 +999,8 @@ function collectMarkFormValues(form, originalMark) {
 
 /**
  * Writes one mark to D1 via POST or PUT /api/marks (the Worker decides whose
- * account it belongs to from its type — Catches/Sessions are the signed-in
- * person's own, Mark/POI the shared set; see markOwnerFor in user-backend.js) — replaces saveMarkToGitHub's read-sha/modify/write-
+ * account it belongs to: a new mark is the signed-in person's own, whatever its type;
+ * see markOwnerFor in user-backend.js) — replaces saveMarkToGitHub's read-sha/modify/write-
  * whole-file pattern with a single REST call per save. `isNew` (passed by
  * the caller — see wireMarkPopupButtons's own options.isNew) decides
  * POST vs PUT directly, rather than this function re-deriving it by

@@ -1529,14 +1529,10 @@ function planSpeciesLinks({ rows, editedId, linkedValues, maxQty, newGroupId }) 
 // notes for how many currently exist.
 // ---------------------------------------------------------------------
 
-// Who owns a mark. Catches and Sessions are the signed-in person's own record, so they live in their own account;
-// Mark and POI points are the shared set kept under the "public" account, which only Admin can write to. So the owner
-// follows the mark's type (the client no longer picks it, and a mark edited to another type changes owner with it).
-const PERSONAL_MARK_TYPES = ["Catch", "Session Start", "Session End"];
-
-function markOwnerFor(user, type) {
-  if (user.role !== "admin") return user.id;
-  return PERSONAL_MARK_TYPES.includes(type) ? user.id : PUBLIC_USER_ID;
+// Who owns a new mark: whoever creates it, whatever its type (since 2026-09-23 — Admin's Mark/POI points used to go
+// to the shared "public" account). Admin can still hand any mark to Public or another user with the Owner field.
+function markOwnerFor(user) {
+  return user.id;
 }
 
 /** The accounts whose marks a caller can SEE: their own plus the shared "public" ones — except Admin, who (as of
@@ -1613,7 +1609,7 @@ async function handleMarksCollection(request, url, env) {
     const id = typeof body.id === "string" && body.id.trim() ? body.id.trim() : crypto.randomUUID();
     const now = Date.now();
     try {
-      await insertOrUpdateMark(env, id, markOwnerFor(user, body.type), body, now);
+      await insertOrUpdateMark(env, id, markOwnerFor(user), body, now);
     } catch (err) {
       return jsonResponse({ error: "A mark with that id already exists." }, 409, env);
     }
@@ -1643,16 +1639,11 @@ async function handleMarkItem(request, url, env, id) {
     const validationError = validateMarkInput(body, { partial: true });
     if (validationError) return jsonResponse({ error: validationError }, 400, env);
     const merged = mergeMarkFields(existing, body);
-    // A change of type can change who the mark belongs to (e.g. a Mark edited into a Catch) — UNLESS Admin
-    // explicitly picked a different owner from the map's own Owner field (buildMarkPopupEditHtml,
-    // js/marks-core.js), which always wins regardless of type: Oliver's own call, so ANY mark can be
-    // handed to any real account on purpose, not just left to follow the usual type-driven default. Only
-    // Admin can send this — a non-admin's PUT never even reaches an existing row it doesn't already own
-    // (see markOwnerIds above), so there's nothing for them to reassign in the first place.
-    // Only an actual type change re-derives the owner — an edit that leaves the type alone (e.g. the map's bulk
-    // edit, which sends just the touched fields) keeps the mark where it is, so Admin editing someone else's
-    // Catch doesn't quietly move it into Admin's own account.
-    let newOwner = merged.type !== existing.type ? markOwnerFor(user, merged.type) : uid;
+    // An edit keeps the mark with its current owner, whatever changes (type included) — UNLESS Admin explicitly
+    // picked a different owner from the map's Owner field (buildMarkPopupEditHtml / bulk edit, js/marks-*.js),
+    // which always wins. Only Admin can send this — a non-admin's PUT never even reaches an existing row it
+    // doesn't already own (see markOwnerIds above), so there's nothing for them to reassign in the first place.
+    let newOwner = uid;
     if (user.role === "admin" && typeof body.ownerUserId === "string" && body.ownerUserId.trim()) {
       const targetId = body.ownerUserId.trim();
       const target = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(targetId).first();
