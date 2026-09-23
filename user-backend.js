@@ -317,6 +317,19 @@ export default {
       if (url.pathname === "/api/homes") {
         return handleHomes(request, env);
       }
+      if (url.pathname === "/api/messages") {
+        return handleMessages(request, env);
+      }
+      if (url.pathname === "/api/messages/unread" && request.method === "GET") {
+        return handleMessagesUnread(request, env);
+      }
+      if (url.pathname === "/api/admin/messages" && request.method === "GET") {
+        return handleAdminMessages(request, env);
+      }
+      const adminMessageMatch = url.pathname.match(/^\/api\/admin\/messages\/([^/]+)$/);
+      if (adminMessageMatch && (request.method === "PATCH" || request.method === "DELETE")) {
+        return handleAdminMessageItem(request, env, adminMessageMatch[1]);
+      }
       const homeMatch = url.pathname.match(/^\/api\/homes\/([^/]+)$/);
       if (homeMatch && request.method === "DELETE") {
         return handleHomeDelete(request, env, homeMatch[1]);
@@ -2343,6 +2356,104 @@ async function handlePublicSettings(request, env) {
       },
     }
   );
+}
+
+// --- Messages to the site's owner (messages table). Signed-in users send; Admin reads and replies. Nobody's email is
+// shown to a non-admin — the sender only ever sees their own messages and the replies to them. -----------------------
+
+const MESSAGE_MAX_LENGTH = 2000;
+const MESSAGES_PER_HOUR = 5;
+
+/** A message as its sender sees it (no admin details at all). */
+function messageForSender(r) {
+  return { id: r.id, body: r.body, createdAt: r.created_at, reply: r.reply ?? null, repliedAt: r.replied_at ?? null };
+}
+
+/** GET /api/messages — the signed-in person's own messages and any replies (newest first; their new replies count as
+ * seen from now on). POST {body} — sends one, at most MESSAGES_PER_HOUR an hour. */
+async function handleMessages(request, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  if (request.method === "GET") {
+    const { results } = await env.DB.prepare("SELECT * FROM messages WHERE user_id = ? ORDER BY created_at DESC").bind(user.id).all();
+    await env.DB.prepare("UPDATE messages SET reply_seen_at = ? WHERE user_id = ? AND reply IS NOT NULL AND reply_seen_at IS NULL")
+      .bind(Date.now(), user.id)
+      .run();
+    return jsonResponse(results.map(messageForSender), 200, env);
+  }
+  if (request.method === "POST") {
+    const body = await readJsonBody(request);
+    const text = body && typeof body.body === "string" ? body.body.trim() : "";
+    if (!text) return jsonResponse({ error: "Write a message first." }, 400, env);
+    if (text.length > MESSAGE_MAX_LENGTH) return jsonResponse({ error: `Messages can be at most ${MESSAGE_MAX_LENGTH} characters.` }, 400, env);
+    const now = Date.now();
+    const { n } = await env.DB.prepare("SELECT COUNT(*) as n FROM messages WHERE user_id = ? AND created_at > ?").bind(user.id, now - 3600000).first();
+    if (n >= MESSAGES_PER_HOUR) return jsonResponse({ error: "You've sent several messages in the last hour — please try again later." }, 429, env);
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO messages (id, user_id, body, created_at) VALUES (?, ?, ?, ?)").bind(id, user.id, text, now).run();
+    return jsonResponse(messageForSender({ id, body: text, created_at: now }), 201, env);
+  }
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+/** GET /api/messages/unread — {count}: for Admin, unread incoming messages; for anyone else, replies they haven't
+ * seen yet. Drives the badge on the Settings tab (js/backend.js). */
+async function handleMessagesUnread(request, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const row =
+    user.role === "admin"
+      ? await env.DB.prepare("SELECT COUNT(*) as n FROM messages WHERE read_at IS NULL").first()
+      : await env.DB.prepare("SELECT COUNT(*) as n FROM messages WHERE user_id = ? AND reply IS NOT NULL AND reply_seen_at IS NULL").bind(user.id).first();
+  return jsonResponse({ count: row.n }, 200, env);
+}
+
+/** GET /api/admin/messages — every message, newest first, with who sent it. Admin only. */
+async function handleAdminMessages(request, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
+  const { results } = await env.DB.prepare(
+    `SELECT m.*, u.name AS sender_name, u.email AS sender_email FROM messages m LEFT JOIN users u ON u.id = m.user_id
+     ORDER BY m.created_at DESC`
+  ).all();
+  return jsonResponse(
+    results.map((r) => ({
+      ...messageForSender(r),
+      senderName: r.sender_name ?? null,
+      senderEmail: r.sender_email ?? null,
+      readAt: r.read_at ?? null,
+    })),
+    200,
+    env
+  );
+}
+
+/** PATCH /api/admin/messages/:id {read?, reply?} — mark read/unread and/or save a reply (an empty reply removes it);
+ * DELETE removes the message. Admin only. */
+async function handleAdminMessageItem(request, env, id) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  if (user.role !== "admin") return jsonResponse({ error: "Admin only." }, 403, env);
+  const existing = await env.DB.prepare("SELECT id FROM messages WHERE id = ?").bind(id).first();
+  if (!existing) return jsonResponse({ error: "Message not found." }, 404, env);
+  if (request.method === "DELETE") {
+    await env.DB.prepare("DELETE FROM messages WHERE id = ?").bind(id).run();
+    return new Response(null, { status: 204, headers: corsHeaders(env) });
+  }
+  const body = (await readJsonBody(request)) || {};
+  const now = Date.now();
+  if (body.read !== undefined) {
+    await env.DB.prepare("UPDATE messages SET read_at = ? WHERE id = ?").bind(body.read ? now : null, id).run();
+  }
+  if (body.reply !== undefined) {
+    const reply = typeof body.reply === "string" ? body.reply.trim() : "";
+    if (reply.length > MESSAGE_MAX_LENGTH) return jsonResponse({ error: `Replies can be at most ${MESSAGE_MAX_LENGTH} characters.` }, 400, env);
+    await env.DB.prepare("UPDATE messages SET reply = ?, replied_at = ?, reply_seen_at = NULL, read_at = COALESCE(read_at, ?) WHERE id = ?")
+      .bind(reply || null, reply ? now : null, now, id)
+      .run();
+  }
+  return jsonResponse({ id }, 200, env);
 }
 
 // --- Homes: a user can have as many as they like (user_homes). Only ever their own. ---------------------------------

@@ -84,6 +84,21 @@ CREATE TABLE IF NOT EXISTS user_homes (
 
 CREATE INDEX IF NOT EXISTS idx_user_homes_user ON user_homes(user_id);
 
+-- Messages to the site's owner (Settings' Contact card) — signed-in users only; the owner reads and answers them in
+-- Settings' Admin-only Messages card. The owner's email address is never shown; replies are shown on the site.
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,  -- the sender
+  body TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  read_at INTEGER,          -- when Admin opened it (null = unread)
+  reply TEXT,               -- Admin's answer, shown to the sender on Settings
+  replied_at INTEGER,
+  reply_seen_at INTEGER     -- when the sender saw the reply (null = a new reply)
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id);
+
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

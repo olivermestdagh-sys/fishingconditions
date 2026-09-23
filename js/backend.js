@@ -138,6 +138,34 @@ let cachedIsAdmin = false; // refreshed once via refreshAdminStatus() at page
                            // here until this page's own next load.
 let cachedIsSignedIn = false; // set by the same refreshAdminStatus() call: anyone signed in, admin or not
 let cachedUserId = null; // the signed-in person's own real users.id (or null, signed out) — set by the same call; used to tell "Mine" apart from someone else's mark now that Admin can see everyone's (see markOwnerOptionsHtml/collectMarkFormValues, js/marks-core.js)
+/** A small count on the Settings tab: unread messages for Admin, new replies for anyone else (GET
+ * /api/messages/unread — see Settings' Contact and Messages cards). Hidden at zero, signed out or offline. */
+async function refreshMessagesBadge() {
+  const link = document.querySelector('.tabnav a[href="locations.html"]');
+  if (!link) return;
+  let count = 0;
+  if (cachedIsSignedIn) {
+    try {
+      const res = await fetch(`${USER_BACKEND_URL}/api/messages/unread`, { credentials: "include" });
+      if (res.ok) count = (await res.json()).count || 0;
+    } catch {
+      count = 0;
+    }
+  }
+  let badge = link.querySelector(".tab-badge");
+  if (!count) {
+    if (badge) badge.remove();
+    return;
+  }
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "tab-badge";
+    link.appendChild(badge);
+  }
+  badge.textContent = String(count);
+  badge.title = cachedIsAdmin ? `${count} unread message${count === 1 ? "" : "s"}` : `${count} new repl${count === 1 ? "y" : "ies"}`;
+}
+
 async function refreshAdminStatus() {
   try {
     const res = await fetch(`${USER_BACKEND_URL}/auth/me`, { credentials: "include" });
@@ -151,6 +179,7 @@ async function refreshAdminStatus() {
     cachedIsSignedIn = true;
     cachedIsAdmin = user.role === "admin";
     cachedUserId = user.id;
+    refreshMessagesBadge(); // not awaited — the page doesn't wait on the badge
   } catch (err) {
     console.error("Admin status check failed:", err);
     cachedIsAdmin = false;

@@ -183,6 +183,7 @@ async function init() {
   // curated set, so there's even less reason to default them open.
   makeCollapsible(document.getElementById("groupsSection"), "settingsCollapsed:groups", true);
   makeCollapsible(document.getElementById("markListsSection"), "settingsCollapsed:markLists", true);
+  makeCollapsible(document.getElementById("adminMessagesSection"), "settingsCollapsed:adminMessages", false);
   makeCollapsible(document.getElementById("usersSection"), "settingsCollapsed:users", true);
   makeCollapsible(document.getElementById("tiersSection"), "settingsCollapsed:tiers", true);
 
@@ -204,6 +205,10 @@ async function init() {
   document.getElementById("btnAddMarkShapeFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Shape Format", "newMarkShapeFormatInput"));
   document.getElementById("btnAddMarkColorFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Colour Format", "newMarkColorFormatInput"));
   document.getElementById("btnAddTier").addEventListener("click", onAddTier);
+  document.getElementById("btnSendMessage").addEventListener("click", onSendMessage);
+  document.getElementById("contactMessageInput").addEventListener("input", (e) => {
+    document.getElementById("contactCharCount").textContent = `${e.target.value.length} / 2000`;
+  });
 
   await refreshPageForCurrentUser();
 }
@@ -221,6 +226,12 @@ async function init() {
 async function refreshPageForCurrentUser() {
   currentUser = await checkSignedIn();
   isAdmin = !!currentUser && currentUser.role === "admin";
+  // This page signs in through checkSignedIn rather than refreshAdminStatus (js/backend.js), so fill in the shared
+  // sign-in state those helpers read (the Settings-tab message badge, home names).
+  cachedIsSignedIn = !!currentUser;
+  cachedIsAdmin = isAdmin;
+  cachedUserId = currentUser ? currentUser.id : null;
+  refreshMessagesBadge();
   if (!isAdmin) {
     viewingAsPublic = false; // can't be mid-toggle if sign-out happened, or a Basic account somehow reached this state
   } else if (!hasRestoredViewingAsPublic) {
@@ -238,6 +249,8 @@ async function refreshPageForCurrentUser() {
   const signedInCard = document.getElementById("signedInCard");
   const adminDataSection = document.getElementById("adminDataSection");
   const usersSection = document.getElementById("usersSection");
+  const contactSection = document.getElementById("contactSection");
+  const adminMessagesSection = document.getElementById("adminMessagesSection");
   const tiersSection = document.getElementById("tiersSection");
   const toggleBtn = document.getElementById("btnToggleViewAsPublic");
 
@@ -247,6 +260,8 @@ async function refreshPageForCurrentUser() {
     adminDataSection.style.display = "none";
     usersSection.style.display = "none";
     tiersSection.style.display = "none";
+    contactSection.style.display = "none";
+    adminMessagesSection.style.display = "none";
     setStatus("");
   } else {
     signedOutCard.style.display = "none";
@@ -254,6 +269,8 @@ async function refreshPageForCurrentUser() {
     adminDataSection.style.display = isAdmin ? "" : "none";
     usersSection.style.display = isAdmin ? "" : "none";
     tiersSection.style.display = isAdmin ? "" : "none";
+    contactSection.style.display = "";
+    adminMessagesSection.style.display = isAdmin ? "" : "none";
     toggleBtn.style.display = isAdmin ? "" : "none";
     toggleBtn.textContent = viewingAsPublic ? "← Back to my account" : "View as Public →";
     document.getElementById("whoAmI").textContent = viewingAsPublic
@@ -267,6 +284,8 @@ async function refreshPageForCurrentUser() {
     loadMarkLists(),
     loadUsers(),
     loadTiers(),
+    loadMyMessages(),
+    loadAdminMessages(),
   ]);
 }
 
@@ -306,6 +325,195 @@ async function onToggleViewAsPublic() {
 // the site with zero Admin accounts; that error surfaces here as a
 // normal save-failed message, same as any other rejected save.
 // ---------------------------------------------------------------------
+
+// --- Contact (any signed-in user) and Messages (Admin) ----------------------------------------------------------------
+// Messages to the site's owner live in the Worker's messages table (/api/messages, /api/admin/messages). The owner's
+// email is never shown — the sender sees their own messages and the replies to them, here.
+
+function formatMessageDate(ms) {
+  return new Date(ms).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function setContactStatus(text, isError) {
+  const el = document.getElementById("contactStatus");
+  el.textContent = text;
+  el.style.color = isError ? "#dc2626" : "var(--grey-500)";
+}
+
+async function loadMyMessages() {
+  const list = document.getElementById("myMessagesList");
+  if (!currentUser) {
+    list.innerHTML = "";
+    return;
+  }
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/messages`, { credentials: "include" });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const messages = await res.json();
+    list.innerHTML = messages.length
+      ? `<div class="messages-heading">Your messages</div>` +
+        messages
+          .map(
+            (m) => `<div class="message-item">
+              <div class="message-meta">You · ${escapeHtml(formatMessageDate(m.createdAt))}</div>
+              <div class="message-body">${escapeHtml(m.body)}</div>
+              ${
+                m.reply
+                  ? `<div class="message-reply"><div class="message-meta">Reply · ${escapeHtml(formatMessageDate(m.repliedAt))}</div><div class="message-body">${escapeHtml(m.reply)}</div></div>`
+                  : `<div class="message-meta">No reply yet</div>`
+              }
+            </div>`
+          )
+          .join("")
+      : "";
+    if (typeof refreshMessagesBadge === "function") refreshMessagesBadge(); // their new replies count as seen now
+  } catch (err) {
+    console.error("Could not load your messages:", err);
+  }
+}
+
+async function onSendMessage() {
+  const input = document.getElementById("contactMessageInput");
+  const btn = document.getElementById("btnSendMessage");
+  const body = input.value.trim();
+  if (!body) {
+    setContactStatus("Write a message first.", true);
+    return;
+  }
+  btn.disabled = true;
+  setContactStatus("Sending…");
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/messages`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `status ${res.status}`);
+    input.value = "";
+    document.getElementById("contactCharCount").textContent = "0 / 2000";
+    setContactStatus("Sent — thanks! The reply will show here.");
+    await loadMyMessages();
+    if (isAdmin) await loadAdminMessages();
+  } catch (err) {
+    setContactStatus(`Couldn't send it: ${err.message}`, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+let adminMessages = []; // [{id, body, createdAt, reply, repliedAt, senderName, senderEmail, readAt}]
+const openAdminMessages = new Set(); // which messages are expanded, kept across re-renders
+
+async function loadAdminMessages() {
+  if (!isAdmin) {
+    adminMessages = [];
+    return;
+  }
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/admin/messages`, { credentials: "include" });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    adminMessages = await res.json();
+  } catch (err) {
+    console.error("Could not load messages:", err);
+    adminMessages = [];
+    setAdminMessagesStatus("Couldn't load messages — try reloading the page.", true);
+  }
+  renderAdminMessages();
+}
+
+function setAdminMessagesStatus(text, isError) {
+  const el = document.getElementById("adminMessagesStatus");
+  el.textContent = text;
+  el.style.color = isError ? "#dc2626" : "var(--grey-500)";
+}
+
+function renderAdminMessages() {
+  const list = document.getElementById("adminMessagesList");
+  const unread = adminMessages.filter((m) => !m.readAt).length;
+  const badge = document.getElementById("adminMessagesUnread");
+  badge.hidden = unread === 0;
+  badge.textContent = `${unread} new`;
+  if (!adminMessages.length) {
+    list.innerHTML = `<p class="footnote" style="margin:0;text-align:left;">No messages yet.</p>`;
+    return;
+  }
+  list.innerHTML = adminMessages
+    .map((m) => {
+      const open = openAdminMessages.has(m.id);
+      const who = m.senderName ? `${m.senderName} (${m.senderEmail || "no email"})` : m.senderEmail || "Unknown sender";
+      return `<div class="message-item${m.readAt ? "" : " is-unread"}" data-message-id="${escapeHtml(m.id)}">
+        <button type="button" class="message-head" data-message-toggle aria-expanded="${open}">
+          <span class="message-meta">${m.readAt ? "" : "● "}${escapeHtml(who)} · ${escapeHtml(formatMessageDate(m.createdAt))}${m.reply ? " · replied" : ""}</span>
+          <span class="message-preview">${escapeHtml(open ? "" : m.body.slice(0, 90) + (m.body.length > 90 ? "…" : ""))}</span>
+        </button>
+        <div class="message-detail"${open ? "" : " hidden"}>
+          <div class="message-body">${escapeHtml(m.body)}</div>
+          <label class="message-meta" style="display:block;margin-top:8px;">Your reply (shown to them on Settings)
+            <textarea rows="3" maxlength="2000" class="contact-textarea" data-message-reply>${escapeHtml(m.reply || "")}</textarea>
+          </label>
+          <div class="contact-send-row">
+            <button type="button" class="btn-primary" data-message-save-reply>Save reply</button>
+            <button type="button" class="btn-secondary" data-message-mark-unread>Mark unread</button>
+            <button type="button" class="btn-secondary" data-message-delete style="color:#dc2626;">Delete</button>
+          </div>
+        </div>
+      </div>`;
+    })
+    .join("");
+}
+
+async function adminMessageRequest(id, method, body) {
+  const res = await fetch(`${USER_BACKEND_URL}/api/admin/messages/${encodeURIComponent(id)}`, {
+    method,
+    credentials: "include",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok && res.status !== 404) throw new Error((await res.json().catch(() => ({}))).error || `status ${res.status}`);
+}
+
+document.getElementById("adminMessagesList").addEventListener("click", async (e) => {
+  const item = e.target.closest("[data-message-id]");
+  if (!item) return;
+  const id = item.dataset.messageId;
+  const msg = adminMessages.find((m) => m.id === id);
+  if (!msg) return;
+  try {
+    if (e.target.closest("[data-message-toggle]")) {
+      if (openAdminMessages.has(id)) openAdminMessages.delete(id);
+      else openAdminMessages.add(id);
+      if (!msg.readAt && openAdminMessages.has(id)) {
+        await adminMessageRequest(id, "PATCH", { read: true }); // opening it marks it read
+        msg.readAt = Date.now();
+        if (typeof refreshMessagesBadge === "function") refreshMessagesBadge();
+      }
+      renderAdminMessages();
+    } else if (e.target.closest("[data-message-save-reply]")) {
+      const reply = item.querySelector("[data-message-reply]").value.trim();
+      await adminMessageRequest(id, "PATCH", { reply });
+      msg.reply = reply || null;
+      msg.repliedAt = reply ? Date.now() : null;
+      setAdminMessagesStatus(reply ? "Reply saved — they'll see it on their Settings page." : "Reply removed.");
+      renderAdminMessages();
+    } else if (e.target.closest("[data-message-mark-unread]")) {
+      await adminMessageRequest(id, "PATCH", { read: false });
+      msg.readAt = null;
+      openAdminMessages.delete(id);
+      if (typeof refreshMessagesBadge === "function") refreshMessagesBadge();
+      renderAdminMessages();
+    } else if (e.target.closest("[data-message-delete]")) {
+      if (!confirm("Delete this message? This can't be undone.")) return;
+      await adminMessageRequest(id, "DELETE");
+      adminMessages = adminMessages.filter((m) => m.id !== id);
+      openAdminMessages.delete(id);
+      if (typeof refreshMessagesBadge === "function") refreshMessagesBadge();
+      renderAdminMessages();
+    }
+  } catch (err) {
+    setAdminMessagesStatus(`Couldn't do that: ${err.message}`, true);
+  }
+});
 
 let users = []; // [{id, email, name, role, tierId, tierName, createdAt}]
 

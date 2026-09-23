@@ -38,6 +38,7 @@
       <li>Set your own set-up, pack-up and travel times for any location, and — if your plan includes extra locations — add locations of your own.</li>
       <li>Keep your own location groups and fishing mark lists here in Settings.</li>
       <li>Have your Week Ahead filters, favourites, planned trips and other settings follow you to every device.</li>
+      <li>Send a message to the site's owner, and read the replies here.</li>
     </ul>
     <p class="footnote" style="margin:0 0 12px;text-align:left;">Without signing in you can still browse the Week Ahead and Map conditions for the shared locations.</p>
     <button id="btnSignIn" class="btn-primary">Sign in with Google</button>
@@ -51,6 +52,19 @@
       <button id="btnSignOut" class="btn-secondary">Sign out</button>
       <button id="btnToggleViewAsPublic" class="btn-secondary" style="display:none;">View as Public →</button>
     </div>
+  </section>
+
+  <!-- Any signed-in user: send the site's owner a message; replies show underneath (the owner's email is never shown). -->
+  <section id="contactSection" class="summary-card" style="display:none;">
+    <div class="summary-title" style="margin-bottom:6px;">Contact</div>
+    <p class="footnote" style="margin:0 0 8px;text-align:left;">Questions, ideas or a problem with the site? Send a message — the reply will appear here.</p>
+    <textarea id="contactMessageInput" rows="4" maxlength="2000" placeholder="Your message…" class="contact-textarea"></textarea>
+    <div class="contact-send-row">
+      <button type="button" id="btnSendMessage" class="btn-primary">Send</button>
+      <span id="contactCharCount" class="footnote contact-count">0 / 2000</span>
+    </div>
+    <div id="contactStatus" class="contact-status"></div>
+    <div id="myMessagesList" class="messages-list"></div>
   </section>
 
   <section id="groupsSection" class="summary-card" style="display:none;">
@@ -131,6 +145,14 @@
     </p>
     <button id="btnRefreshDataNow" class="btn-primary">Refresh data now</button>
     <div id="saveStatus" style="margin-top:10px;font-size:0.85rem;"></div>
+  </section>
+
+  <!-- Admin only: messages people have sent from the Contact card. -->
+  <section id="adminMessagesSection" class="summary-card" style="display:none;">
+    <div class="summary-title" style="margin-bottom:6px;">Messages <span id="adminMessagesUnread" class="messages-unread" hidden></span></div>
+    <p class="footnote" style="margin:0 0 10px;text-align:left;">Sent from the Contact card by signed-in users. Your reply shows to them on this page.</p>
+    <div id="adminMessagesList" class="messages-list"></div>
+    <div id="adminMessagesStatus" class="contact-status"></div>
   </section>
 
   <section id="usersSection" class="summary-card" style="display:none;">

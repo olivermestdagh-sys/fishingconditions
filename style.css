@@ -829,6 +829,33 @@ main {
   margin-bottom: 16px;
 }
 
+/* Settings: Contact (any signed-in user) and Messages (Admin) cards — locationsadmin.js. */
+.contact-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--grey-200);
+  font: inherit;
+  resize: vertical;
+}
+.contact-send-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.contact-count { margin: 0; }
+.contact-status { margin-top: 6px; font-size: 0.85rem; min-height: 1em; }
+.messages-list { margin-top: 10px; text-align: left; }
+.messages-heading { font-size: 0.8rem; font-weight: 700; margin: 6px 0; }
+.message-item { border: 1px solid var(--grey-200); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+.message-item.is-unread { border-color: var(--blue-700); }
+.message-meta { font-size: 0.75rem; color: var(--grey-500); }
+.message-body { white-space: pre-wrap; font-size: 0.9rem; margin: 2px 0 4px; }
+.message-reply { margin-top: 6px; padding: 6px 8px; border-left: 3px solid var(--blue-700); background: #f1f5f9; border-radius: 4px; }
+.message-head { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; background: none; border: none; padding: 0; cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.message-preview { font-size: 0.85rem; }
+.messages-unread { font-size: 0.72rem; font-weight: 700; color: var(--white); background: var(--blue-700); border-radius: 999px; padding: 1px 7px; margin-left: 6px; vertical-align: middle; }
+.messages-unread[hidden] { display: none; }
+/* The count on the Settings tab (refreshMessagesBadge, js/backend.js). */
+.tab-badge { display: inline-block; min-width: 16px; margin-left: 5px; padding: 0 5px; border-radius: 999px; background: #dc2626; color: #fff; font-size: 0.68rem; font-weight: 700; line-height: 16px; text-align: center; vertical-align: middle; }
+
 /* What signing in lets you do (Settings' sign-in card). */
 .footnote.signin-benefits {
   margin: 0 0 10px;
