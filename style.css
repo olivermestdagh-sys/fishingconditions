@@ -3331,6 +3331,27 @@ main.wide {
   background: var(--blue-900);
   color: var(--white);
 }
+/* Gear after the location name (Map page, Admin only) — opens the location editor (js/location-editor.js). */
+.loc-pill-gear-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: var(--blue-100, #eaf2fb);
+  color: var(--blue-900);
+  cursor: pointer;
+}
+.loc-pill-gear-btn[hidden] { display: none; }
+
+/* Location editor dialog — reuses the mark edit form's sections and pills (.mark-edit-group, .mark-pill). */
+.loc-editor { max-width: 460px; width: 100%; }
+.loc-editor-hm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; }
+.loc-editor-newtype { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.loc-editor-status { min-height: 1.2em; margin-top: 8px; font-size: 0.8rem; }
 .loc-tile {
   position: absolute;
   top: 42px;
