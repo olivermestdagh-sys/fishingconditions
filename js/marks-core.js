@@ -851,6 +851,8 @@ document.addEventListener(
       }
     } else {
       const next = s.select.value === value ? (row.dataset.pillsRequired ? value : "") : value;
+      // Keep a Session's tick-box list in step, so switching the Type to a Session carries this choice, not a stale one.
+      s.boxes.forEach((b) => (b.checked = b.value === next));
       if (next !== s.select.value) {
         s.select.value = next;
         s.select.dispatchEvent(new Event("change", { bubbles: true }));
