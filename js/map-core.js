@@ -267,8 +267,13 @@ const PIN_HOLD_MS = 2000;
  * moving further (a map pan) or letting go early cancels it. While held, the icon gets .pin-holding (style.css) so
  * it visibly "charges up". Sets marker._longPressFired so the click from the release can be ignored. */
 function wireMarkerLongPress(marker, onFire) {
+  // Leaflet only creates a marker's element once the map is ready (setView), which is after the markers are built —
+  // so wire it up when it's actually added.
   const el = marker.getElement();
-  if (!el) return;
+  if (!el) {
+    marker.once("add", () => wireMarkerLongPress(marker, onFire));
+    return;
+  }
   let timer = null;
   let startX = 0;
   let startY = 0;
