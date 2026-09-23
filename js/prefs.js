@@ -3,7 +3,7 @@
 // Existing code keeps reading localStorage directly (synchronously); it writes through Prefs.set / Prefs.remove instead, and each page awaits Prefs.load() at the start of its init. The decisions are pure functions (tested in tests/prefs.test.mjs).
 //
 // Which settings sync (must match SYNCED_PREF_KEYS in user-backend.js):
-//   Week Ahead filters, thresholds, favourites (pins), planned sessions, Live "home by" time, the last-viewed location, the map's colour-by/filters, the last-used mark values and the Live session defaults (target species, water, berley, rods and their rig/bait).
+//   Week Ahead filters, thresholds, favourites (pins), planned sessions, Live "home by" time, the last-viewed location, the map's colour-by/filters, the last-used mark values, the Live session defaults (target species, water, berley, rods and their rig/bait) and where Week Ahead's trip times are calculated from (tripOrigin).
 // Not synced: map position/zoom, collapsed panels, caches and credentials.
 //
 // Conflicts: the account wins. The first time a device meets an account, values the account has never saved are uploaded from the device once. A change made on this device that hasn't reached the server yet ("pending") wins for that key. If a different person signs in on the same device, the previous person's synced values are cleared first, so they are never uploaded into the wrong account.
@@ -21,6 +21,7 @@ const SYNCED_PREF_KEYS = [
   "markViewSettings",
   "markLastFieldValues",
   "liveSessionDefaults",
+  "tripOrigin",
 ];
 const PREFS_OWNER_KEY = "prefsOwner"; // which account this device's synced values belong to
 const PREFS_PENDING_KEY = "prefsPending"; // keys changed here that the server hasn't confirmed yet

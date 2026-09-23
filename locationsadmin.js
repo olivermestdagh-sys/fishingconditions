@@ -2110,7 +2110,7 @@ async function saveHomeLocation(lat, lng) {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lat, lng }),
+      body: JSON.stringify({ lat, lng, name: await homeTownName(lat, lng) }), // labelled by its closest town
     });
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));

@@ -652,6 +652,48 @@ async function getDriveTimeBetweenCoords(originLat, originLng, destLat, destLng)
   }
 }
 
+// Where Week Ahead's planned trips ("+ Fishing times" / "+ Home to home") are driven from: "gps" (the device's current
+// position) or one of the signed-in person's homes (its id). One choice for every row, remembered and synced per
+// account (Prefs key "tripOrigin"); picked with the "From" select in front of each row's buttons (week.js).
+const TRIP_ORIGIN_STORAGE_KEY = "tripOrigin";
+
+/** The origin in use: the saved choice while it's still valid, else the first home, else GPS. */
+function currentTripOrigin() {
+  let saved = null;
+  try {
+    saved = localStorage.getItem(TRIP_ORIGIN_STORAGE_KEY);
+  } catch {
+    saved = null;
+  }
+  if (saved === "gps" || myHomes.some((h) => h.id === saved)) return saved;
+  return myHomes.length ? myHomes[0].id : "gps";
+}
+
+function setTripOrigin(origin) {
+  Prefs.set(TRIP_ORIGIN_STORAGE_KEY, origin);
+}
+
+/** "GPS", or the chosen home's town — for the From select and planned-trip chips. */
+function tripOriginLabel(origin) {
+  if (origin === "gps") return "GPS";
+  return homeLabel(myHomes.find((h) => h.id === origin));
+}
+
+/** Drive time (minutes) to a location from the chosen origin — the device's position (getDriveTimeMinutes) or the
+ * chosen home (getDriveTimeBetweenCoords, cached per home and destination). */
+const homeDriveTimeCache = {};
+async function getTripDriveMinutes(destLat, destLng, origin = currentTripOrigin()) {
+  if (destLat == null || destLng == null) return null;
+  const home = origin === "gps" ? null : myHomes.find((h) => h.id === origin);
+  if (!home) return getDriveTimeMinutes(destLat, destLng);
+  const key = `${home.id}|${destLat},${destLng}`;
+  if (!(key in homeDriveTimeCache)) {
+    const minutes = await getDriveTimeBetweenCoords(home.lat, home.lng, destLat, destLng);
+    homeDriveTimeCache[key] = minutes == null ? null : Math.round(minutes);
+  }
+  return homeDriveTimeCache[key];
+}
+
 // Time-of-day / duration arithmetic, all working in minutes-since-midnight.
 // Intermediate results are kept unwrapped (can go negative or past 1440) so a
 // chain of subtractions that crosses midnight still produces a sensible answer —

@@ -321,6 +321,9 @@ export default {
       if (homeMatch && request.method === "DELETE") {
         return handleHomeDelete(request, env, homeMatch[1]);
       }
+      if (homeMatch && request.method === "PATCH") {
+        return handleHomeRename(request, env, homeMatch[1]);
+      }
       if (url.pathname === "/api/admin/refresh-data-now" && request.method === "POST") {
         const user = await requireUser(request, env);
         if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
@@ -1918,6 +1921,7 @@ const SYNCED_PREF_KEYS = new Set([
   "markViewSettings",
   "markLastFieldValues",
   "liveSessionDefaults",
+  "tripOrigin",
 ]);
 const PREF_MAX_VALUE_LENGTH = 64 * 1024;
 
@@ -2344,20 +2348,40 @@ async function handlePublicSettings(request, env) {
 // --- Homes: a user can have as many as they like (user_homes). Only ever their own. ---------------------------------
 
 async function listHomes(env, userId) {
-  const { results } = await env.DB.prepare("SELECT id, lat, lng FROM user_homes WHERE user_id = ? ORDER BY created_at ASC").bind(userId).all();
-  return results.map((r) => ({ id: r.id, lat: r.lat, lng: r.lng }));
+  const { results } = await env.DB.prepare("SELECT id, lat, lng, name FROM user_homes WHERE user_id = ? ORDER BY created_at ASC").bind(userId).all();
+  return results.map((r) => ({ id: r.id, lat: r.lat, lng: r.lng, name: r.name ?? null }));
 }
 
 async function addHome(env, userId, body) {
   if (!body || typeof body.lat !== "number" || typeof body.lng !== "number" || !Number.isFinite(body.lat) || !Number.isFinite(body.lng)) {
     return { error: "lat and lng must both be numbers." };
   }
+  const name = cleanHomeName(body.name);
   const id = crypto.randomUUID();
-  await env.DB.prepare("INSERT INTO user_homes (id, user_id, lat, lng, created_at) VALUES (?, ?, ?, ?, ?)").bind(id, userId, body.lat, body.lng, Date.now()).run();
-  return { home: { id, lat: body.lat, lng: body.lng } };
+  await env.DB.prepare("INSERT INTO user_homes (id, user_id, lat, lng, name, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(id, userId, body.lat, body.lng, name, Date.now())
+    .run();
+  return { home: { id, lat: body.lat, lng: body.lng, name } };
 }
 
-/** GET /api/homes — the signed-in user's homes; POST {lat, lng} adds one. */
+/** A home's label — the closest town, looked up by the page (WillyWeather's nearest place). Trimmed, at most 80
+ * characters; anything else becomes null. */
+function cleanHomeName(name) {
+  return typeof name === "string" && name.trim() ? name.trim().slice(0, 80) : null;
+}
+
+/** PATCH /api/homes/:id {name} — sets the label of one of the signed-in user's own homes. */
+async function handleHomeRename(request, env, id) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const body = await readJsonBody(request);
+  const name = cleanHomeName(body && body.name);
+  const { meta } = await env.DB.prepare("UPDATE user_homes SET name = ? WHERE id = ? AND user_id = ?").bind(name, id, user.id).run();
+  if (!meta || !meta.changes) return jsonResponse({ error: "Home not found." }, 404, env);
+  return jsonResponse({ id, name }, 200, env);
+}
+
+/** GET /api/homes — the signed-in user's homes; POST {lat, lng, name?} adds one. */
 async function handleHomes(request, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);

@@ -159,6 +159,92 @@ async function refreshAdminStatus() {
   }
 }
 
+// --- Homes (shared by the Map — js/homes.js — and Week Ahead): anything worked out from "home" uses whichever of the
+// signed-in person's homes is closest to where the trip is going (nearestHome).
+let myHomes = []; // [{id, lat, lng}] — the signed-in person's own
+let myHomesPromise = null;
+let homesMap = null; // the map the pins are on (null in Import mode, or signed out)
+let homesLayer = null;
+let homeAddArmed = false;
+
+/** The signed-in person's homes, fetched once per page (or again with `force`); [] when signed out. */
+function loadMyHomes(force) {
+  if (typeof cachedIsSignedIn === "undefined" || !cachedIsSignedIn) {
+    myHomes = [];
+    return Promise.resolve(myHomes);
+  }
+  if (!myHomesPromise || force) {
+    myHomesPromise = (async () => {
+      try {
+        const res = await fetch(`${USER_BACKEND_URL}/api/homes`, { credentials: "include" });
+        myHomes = res.ok ? await res.json() : [];
+      } catch (err) {
+        console.error("Could not load your homes:", err);
+        myHomes = [];
+      }
+      return myHomes;
+    })();
+  }
+  return myHomesPromise;
+}
+
+/** Of `homes` (default: the loaded ones), the one closest to lat/lng as the crow flies — null when there are none. */
+function nearestHome(lat, lng, homes = myHomes) {
+  let best = null;
+  let bestD = Infinity;
+  const rad = Math.PI / 180;
+  for (const h of homes || []) {
+    const x = (h.lng - lng) * rad * Math.cos(((h.lat + lat) / 2) * rad);
+    const y = (h.lat - lat) * rad;
+    const d = x * x + y * y;
+    if (d < bestD) {
+      bestD = d;
+      best = h;
+    }
+  }
+  return best;
+}
+
+
+/** The closest town to a point — WillyWeather's nearest place, via the search Worker (fetchWillyWeatherCandidates);
+ * null when it can't be found. Used to label homes. */
+async function homeTownName(lat, lng) {
+  const candidates = await fetchWillyWeatherCandidates(lat, lng);
+  return candidates && candidates[0] && candidates[0].name ? candidates[0].name : null;
+}
+
+/** A home's label: its town, or "Home" until one is known. */
+function homeLabel(home) {
+  return (home && home.name) || "Home";
+}
+
+/** Looks up and saves a town name for any of the signed-in person's homes that has none yet (homes added before
+ * names existed, or when the look-up failed). Resolves once done; `onNamed` runs if any name was filled in. */
+async function ensureHomeNames(onNamed) {
+  await loadMyHomes();
+  let named = false;
+  for (const home of myHomes) {
+    if (home.name) continue;
+    const name = await homeTownName(home.lat, home.lng);
+    if (!name) continue;
+    try {
+      const res = await fetch(`${USER_BACKEND_URL}/api/homes/${encodeURIComponent(home.id)}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        home.name = name;
+        named = true;
+      }
+    } catch (err) {
+      console.error("Could not save a home's name:", err);
+    }
+  }
+  if (named && onNamed) onNamed();
+}
+
 /** How many locations the signed-in person may still create — GET /api/location-quota ({unlimited, max, used}), or
  * null signed out / unknown. Refreshed by refreshLocationQuota (the Map's init, and after adding a location). */
 let cachedLocationQuota = null;

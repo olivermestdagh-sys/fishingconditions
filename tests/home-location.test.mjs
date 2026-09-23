@@ -93,6 +93,17 @@ test("the old set-home paths now add another home", async () => {
   assert.equal((await (await req(env, "s-basic", "GET", "/api/homes")).json()).length, 2);
 });
 
+test("a home keeps a name (its closest town): given when added, or set later on your own homes only", async () => {
+  const { env } = makeDb();
+  const named = await (await req(env, "s-basic", "POST", "/api/homes", { lat: -38.1, lng: 145.3, name: "  Narre Warren  " })).json();
+  assert.equal(named.name, "Narre Warren"); // trimmed
+  const unnamed = await (await req(env, "s-basic", "POST", "/api/homes", { lat: -38.4, lng: 144.8 })).json();
+  assert.equal(unnamed.name, null);
+  assert.equal((await req(env, "s-basic", "PATCH", `/api/homes/${unnamed.id}`, { name: "Sorrento" })).status, 200);
+  assert.equal((await req(env, "s-admin", "PATCH", `/api/homes/${unnamed.id}`, { name: "Hijacked" })).status, 404); // not theirs
+  assert.deepEqual((await (await req(env, "s-basic", "GET", "/api/homes")).json()).map((h) => h.name), ["Narre Warren", "Sorrento"]);
+});
+
 test("a signed-out visitor gets no homes and no Routes key", async () => {
   const { env } = makeDb();
   assert.deepEqual(await (await req(env, null, "GET", "/api/public/settings")).json(), { homes: [], homeLat: null, homeLng: null, googleRoutesApiKey: null });

@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS user_homes (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   lat REAL NOT NULL,
   lng REAL NOT NULL,
+  name TEXT,                        -- the closest town (WillyWeather's nearest place), for labels like "From: Narre Warren"
   created_at INTEGER NOT NULL
 );
 

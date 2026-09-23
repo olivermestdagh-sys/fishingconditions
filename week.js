@@ -496,12 +496,14 @@ function wireSessionRangeSelect(chart, canvas, loc, dragPreview) {
  * labels on an unrelated row below the one actually being planned.
  */
 async function computeAndStoreSession(loc, dragStartMs, dragEndMs, mode) {
-  const driveMinutes = await getDriveTimeMinutes(loc.lat, loc.lng);
+  const origin = currentTripOrigin(); // the "From" choice — GPS or one of their homes
+  const driveMinutes = await getTripDriveMinutes(loc.lat, loc.lng, origin);
   const schedule = computeScheduleFromDragRangeMs(mode, dragStartMs, dragEndMs, loc, driveMinutes);
   const record = {
     id: `${loc.name}|${loc.type}|${dragStartMs}|${Date.now()}`,
     locationName: loc.name,
     locationType: loc.type,
+    originLabel: tripOriginLabel(origin), // shown on the chip: where its drive time was worked out from
     ...schedule,
   };
   computedSessions.push(record);
@@ -647,6 +649,8 @@ async function init() {
     await loadTideOffsets(allLocations);
     // Only Public's and the signed-in person's own locations (locationVisibleToViewer, js/backend.js).
     await refreshAdminStatus();
+    await loadMyHomes(); // for the From select (GPS or a home) and trip drive times
+    ensureHomeNames(refreshTripOriginSelects); // label homes by their town, if any still has no name
     allLocations = allLocations.filter(locationVisibleToViewer);
     await applyMyLocationTimings(allLocations); // a signed-in person's own times on others' locations
   } catch (err) {
@@ -1282,6 +1286,7 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
   // time, since which one makes sense can genuinely differ per session.
   const addBtnsRow = document.createElement("div");
   addBtnsRow.className = "weeknew-add-buttons-row";
+  addBtnsRow.appendChild(buildTripOriginSelect());
   for (const { mode, label } of [
     { mode: "fishing", label: "+ Fishing times" },
     { mode: "onsite", label: "+ Home to home" },
@@ -1414,14 +1419,42 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
  * the chart itself (buildComputedSessionMarkersPlugin); repeating icons
  * in this already-narrow sidebar column would mean wrapping constantly.
  */
+/** The "From" select in front of a row's "+ Fishing times" / "+ Home to home" buttons: GPS or one of the signed-in
+ * person's homes (by town). One choice for every row — changing any row's select saves it and updates them all. */
+function buildTripOriginSelect() {
+  const select = document.createElement("select");
+  select.className = "weeknew-trip-origin";
+  select.setAttribute("aria-label", "Work out trip times from");
+  select.title = "Where drive times are worked out from";
+  fillTripOriginSelect(select);
+  select.addEventListener("change", () => {
+    setTripOrigin(select.value);
+    refreshTripOriginSelects();
+  });
+  return select;
+}
+
+function fillTripOriginSelect(select) {
+  const origin = currentTripOrigin();
+  const options = [...myHomes.map((h) => ({ value: h.id, label: homeLabel(h) })), { value: "gps", label: "GPS" }];
+  select.innerHTML = options.map((o) => `<option value="${escapeHtml(o.value)}">From: ${escapeHtml(o.label)}</option>`).join("");
+  select.value = origin;
+}
+
+/** Re-labels and re-selects every row's From select (after a change, or once home names have been looked up). */
+function refreshTripOriginSelects() {
+  document.querySelectorAll(".weeknew-trip-origin").forEach(fillTripOriginSelect);
+}
+
 function buildComputedSessionChip(record) {
   const chip = document.createElement("div");
   chip.className = "weeknew-computed-session";
   const fmt = (ms) => fmtNaive(ms, { hour: "2-digit", minute: "2-digit", hour12: false });
   const parts = SCHEDULE_INSTANT_DISPLAY.filter(({ key }) => record[key] != null).map(({ key, label }) => `${label} ${fmt(record[key])}`);
   const modeLabel = record.mode === "fishing" ? "Fishing time" : "Home to home";
+  const fromLabel = record.originLabel ? ` · from ${escapeHtml(record.originLabel)}` : "";
   chip.innerHTML = `
-    <div class="weeknew-session-time">${modeLabel}</div>
+    <div class="weeknew-session-time">${modeLabel}${fromLabel}</div>
     <div class="weeknew-computed-session-line">${parts.join(" · ")}</div>
     ${record.driveTimeUnavailable ? `<div class="weeknew-computed-session-note">Drive time unavailable — showing what could be calculated without it.</div>` : ""}
     <button type="button" class="weeknew-computed-session-remove" aria-label="Remove this planned session">×</button>
