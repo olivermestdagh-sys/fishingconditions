@@ -216,6 +216,7 @@ function renderActiveFilterChips(container, state, onChange) {
  */
 // Which filter groups are expanded in the dialog below — kept across openings (all start collapsed).
 const markFilterOpenGroups = new Set();
+const COLOUR_BY_GROUP = "__colourBy"; // the Colour By group's key in that set — can't clash with a real field key
 
 function showMarkFilterModal(state) {
   return new Promise((resolve) => {
@@ -256,6 +257,10 @@ function showMarkFilterModal(state) {
     }
     // The applied filters of one group as small chips (green = required, red = excluded, blue = a date bound).
     function summaryHtmlFor(key) {
+      if (key === COLOUR_BY_GROUP) {
+        const field = MARK_LIST_FIELDS.find((x) => x.key === state.groupByKey) || MARK_LIST_FIELDS[0];
+        return summaryChip(field.label, "range");
+      }
       const f = state.filters[key];
       if (!f) return "";
       const esc = (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -299,20 +304,23 @@ function showMarkFilterModal(state) {
       MARK_LIST_FIELDS.map(({ key, label }) => sectionHtml(key, label, state.markLists.filter((r) => r.field === label).map((r) => r.value))).join("") +
       MARK_FILTER_ONLY_FIELDS.filter((f) => f.key !== "owner").map(filterOnlySection).join("");
 
-    // Colour by sits at the top of the dialog (it used to be its own select on the map) — applied when the dialog closes.
-    const colourByHtml = `
-      <label style="display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:0.8rem;font-weight:600;">Colour by
-        <select data-group-by style="padding:5px 8px;border-radius:8px;border:1px solid var(--grey-200);font:inherit;font-weight:400;">
-          ${MARK_LIST_FIELDS.map(({ key, label }) => `<option value="${key}"${key === state.groupByKey ? " selected" : ""}>${label}</option>`).join("")}
-        </select>
-      </label>`;
+    // Colour By: a group like the filters, but its pills pick exactly ONE field (tapping the selected one keeps it —
+    // one is always active). Not a filter, so it never counts toward the gear's number; applied when the dialog closes.
+    const colourByHtml = groupHtml(
+      COLOUR_BY_GROUP,
+      "Colour By",
+      `<div style="display:flex;flex-wrap:wrap;gap:6px;">${MARK_LIST_FIELDS.map(({ key, label }) => {
+        const on = key === state.groupByKey;
+        return `<span class="loc-chip mark-colour-by-chip" data-colour-by="${key}" aria-pressed="${on}" style="cursor:pointer;${on ? chipStyleFor("range") : ""}">${label}</span>`;
+      }).join("")}</div>`
+    );
 
     overlay.innerHTML = `
       <div class="ww-candidate-dialog">
         <button type="button" class="ww-candidate-close" aria-label="Close">&times;</button>
+        <h3 style="margin:0 0 8px;">Filter marks</h3>
         ${colourByHtml}
-        <h3 style="margin:0 0 4px;">Filter marks</h3>
-        <p class="footnote" style="margin:0 0 12px;">Tap once to require it, tap again to exclude it, tap again to clear.</p>
+        <p class="footnote" style="margin:0 0 12px;">Filters: tap once to require it, tap again to exclude it, tap again to clear.</p>
         ${sectionsHtml || `<p class="footnote" style="margin:0;">No pick-list options set up yet — add some on the Settings tab first.</p>`}
         <div style="display:flex;gap:8px;margin-top:6px;">
           <button type="button" id="markFilterClearAll" class="btn-secondary" style="flex:1;">Clear all</button>
@@ -359,8 +367,16 @@ function showMarkFilterModal(state) {
       chip.addEventListener("click", () => cycleChip(chip));
     });
 
-    overlay.querySelector("[data-group-by]").addEventListener("change", (e) => {
-      state.groupByKey = e.target.value;
+    overlay.querySelectorAll("[data-colour-by]").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        state.groupByKey = chip.dataset.colourBy;
+        overlay.querySelectorAll("[data-colour-by]").forEach((c) => {
+          const on = c === chip;
+          c.setAttribute("aria-pressed", String(on));
+          c.style.cssText = `cursor:pointer;${on ? chipStyleFor("range") : ""}`;
+        });
+        refreshSummary(COLOUR_BY_GROUP);
+      });
     });
 
     // Open/close a group. The summary of applied filters only shows while it's closed (open, the chips themselves show it).
@@ -405,6 +421,7 @@ function showMarkFilterModal(state) {
       });
       dateInputs.forEach((input) => (input.value = ""));
       overlay.querySelectorAll("[data-summary]").forEach((el) => (el.innerHTML = ""));
+      refreshSummary(COLOUR_BY_GROUP); // Colour By isn't a filter: Clear all leaves it as it is
     });
     overlay.querySelector("#markFilterDone").addEventListener("click", cleanup);
     overlay.querySelector(".ww-candidate-close").addEventListener("click", cleanup);
