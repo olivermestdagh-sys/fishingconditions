@@ -838,6 +838,13 @@ document.addEventListener(
 
     const pill = target.closest("[data-pill-value]");
     if (!pill) return;
+    // Stop this click here, before doing anything else: syncMarkFormPills below replaces the whole row's
+    // innerHTML — including the pill actually clicked — and Leaflet's own click-propagation guard on the popup
+    // (disableClickPropagation) walks up from e.target via parentNode to find it; once that target is detached
+    // from the row it was just replaced out of, the walk hits a dead end before ever reaching the popup, so
+    // Leaflet treats the click as a genuine outside click and closes the whole popup. Real, reported bug: tapping
+    // any pill on a brand-new mark's form closed it outright, leaving an unstyled marker with nothing saved.
+    e.stopPropagation();
     const row = pill.closest("[data-pills-for]");
     const form = pill.closest("form");
     const s = row && form && markPillState(form, row.dataset.pillsFor);
