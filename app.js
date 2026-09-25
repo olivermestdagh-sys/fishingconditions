@@ -219,6 +219,7 @@ function applyModeChrome() {
   deviceTools.style.display = cachedIsAdmin && mapMode === "normal" ? "flex" : "none";
   document.getElementById("btnSessionDefaults").style.display = isLive ? "" : "none";
   document.getElementById("btnLiveSession").style.display = isLive && cachedIsSignedIn ? "" : "none";
+  document.getElementById("btnRefreshLiveGps").style.display = isLive ? "" : "none";
   // End Session/Move and +Catch are never shown just because Live mode is on — only updateLiveSessionButtons
   // (map-live.js) reveals them, once the marks have actually loaded and confirm there's an active session (+Catch
   // only makes sense once a session's actually underway to log a catch against).

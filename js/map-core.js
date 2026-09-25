@@ -351,6 +351,11 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
     // function's own comment for why.
     const icon = p.iconKind === "currentPosition" ? buildCurrentPositionDivIcon() : buildMapPinDivIcon(p.iconKind || "kayak");
     const marker = L.marker([p.lat, p.lng], { icon }).addTo(map);
+    // Lets a caller keep hold of one specific marker it cares about (currently just Live mode's own "You are
+    // here" pin, so it can be repositioned in place later without rebuilding the whole map — see
+    // liveRefreshGpsPosition, map-live.js). Every other caller leaves opts.onMarkerCreated unset, so this is a
+    // pure no-op for them.
+    if (opts.onMarkerCreated) opts.onMarkerCreated(p, marker);
     if (p.label) marker.bindTooltip(p.label, { direction: "top" });
     if (p.popupHtml) marker.bindPopup(p.popupHtml);
     // A 2-second hold (p.onLongPress — the Map's "pick up a pin to move it", js/location-move.js) swallows the click

@@ -192,16 +192,22 @@ function liveBuildMap(gpsPosition) {
       // (js/marks-core.js). A plain map click always starts blank; guessing
       // conditions for an arbitrary clicked point would be guessing about
       // somewhere the person isn't necessarily standing.
+      //
+      // Reads the shared currentGpsPosition at click time, NOT the gpsPosition parameter this closure was built
+      // with — liveRefreshGpsPosition (below) moves this same marker in place on a fresh fix without rebuilding
+      // the map, so the parameter captured here goes stale the moment that happens; currentGpsPosition never does.
       onClick: () => {
         const defaults = { ...getLastMarkFieldValues(), ...computeQuickMarkDefaults(getRowsForCurrentLoc()) };
-        handleMapClickForMarks(map, gpsPosition.lat, gpsPosition.lng, markLayerState, null, defaults);
+        handleMapClickForMarks(map, currentGpsPosition.lat, currentGpsPosition.lng, markLayerState, null, defaults);
       },
     });
   }
 
+  liveGpsMarker = null; // this rebuild discards whatever marker instance liveGpsMarker was pointing at
   const map = renderLeafletLocationMap("locationMap", points, {
     persistView: false, // Live sets its own view; don't overwrite where Normal mode reopens
     onMapClick: (lat, lng) => handleMapClickForMarks(map, lat, lng, markLayerState, null),
+    onMarkerCreated: (p, marker) => { if (p.iconKind === "currentPosition") liveGpsMarker = marker; },
   });
   // Live's whole point is "where am I right now", so it always opens
   // centered on the device's actual position when that's available.
@@ -221,6 +227,7 @@ function liveBuildMap(gpsPosition) {
 // The map and marks layer of the Live map currently showing, so a Catch/Session can be drawn on it once saved.
 let liveMap = null;
 let liveMarkState = null;
+let liveGpsMarker = null; // the "You are here" Leaflet marker itself — see liveRefreshGpsPosition below
 let activeCardFlow = null; // the open card stack, if any (only one at a time)
 
 function showLiveToast(text, isError) {
@@ -812,6 +819,14 @@ function liveInitOnce() {
   document.getElementById("btnLiveEndSession").addEventListener("click", startLiveEndSession);
   document.getElementById("btnLiveCatch").addEventListener("click", startLiveCatch);
   document.getElementById("liveHoverPanelBanner").addEventListener("click", () => setPanelExpanded(!isPanelExpanded));
+  // Manual backup for whichever device/browser doesn't fire the visibilitychange refresh below reliably — same
+  // function either way, so there's nothing to keep in sync between the two triggers.
+  document.getElementById("btnRefreshLiveGps").addEventListener("click", liveRefreshGpsPosition);
+  // The automatic trigger itself — see liveRefreshGpsPosition's own comment for why this is scoped here (not
+  // folded into app.js's unrelated syncAppHeight visibilitychange listener) and why resume-only, not a timer.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) liveRefreshGpsPosition();
+  });
   // Wired once, not inside renderForLocation — that function reuses this
   // same persistent <canvas> across every re-render (destroying and
   // recreating the Chart.js instance each time, never the canvas element),
@@ -885,6 +900,7 @@ function liveExit() {
   }
   liveMap = null;
   liveMarkState = null;
+  liveGpsMarker = null;
   if (liveChart) {
     liveChart.destroy();
     liveChart = null;
@@ -896,4 +912,49 @@ function liveExit() {
   currentType = null;
   currentLoc = null;
   stopFishingTime = null;
+}
+
+/**
+ * Oliver's own request: out fishing with Live mode open, locking and later unlocking the phone left the "You are
+ * here" marker frozen at wherever it was when Live mode was last entered — nothing was ever wired to notice the
+ * phone coming back. Re-fetches position and updates the marker/panel IN PLACE (see liveGpsMarker/onMarkerCreated
+ * in liveBuildMap) rather than rebuilding the whole map, which would reset zoom/pan and close any open popup for
+ * what should be an invisible correction. Runs from two triggers, both wired in liveInitOnce below: the page
+ * becoming visible again (phone unlock/app-switch-back), and a manual refresh button as a backup for whichever
+ * device/browser doesn't fire that event reliably.
+ *
+ * Deliberately resume/tap-triggered only, never a running timer — Oliver's own call: this fixes "I looked away
+ * and back", not "keep silently polling GPS the whole time the screen's on".
+ */
+let liveGpsRefreshInFlight = false;
+async function liveRefreshGpsPosition() {
+  if (mapMode !== "live" || !liveMap || liveGpsRefreshInFlight) return;
+  liveGpsRefreshInFlight = true;
+  setGpsStatus("Refreshing your location…");
+  try {
+    // getFreshGpsPosition (uncached, this file) — NOT requestGpsPosition (js/week-tools.js), whose fix is
+    // memoized and shared with Week Ahead's own home-detection prompt; this refresh must never touch that cache.
+    const fresh = await getFreshGpsPosition();
+    if (mapMode !== "live" || !liveMap) return; // left Live mode while the fix was in flight
+    if (!fresh) {
+      // Denied/timed out — keep showing the last-known position rather than clearing it; the same silent
+      // tolerance liveEnter itself already has for a missing fix.
+      setGpsStatus("");
+      return;
+    }
+    currentGpsPosition = fresh;
+    if (liveGpsMarker) liveGpsMarker.setLatLng([fresh.lat, fresh.lng]);
+    const match = findNearestLocation(liveData.locations || [], fresh.lat, fresh.lng);
+    if (match && match.location.name !== currentLocationName) {
+      // Moved far enough (paddled/walked) to now be closer to a different tracked spot — switch to it, keeping
+      // whichever type (Kayak/Land based) was already selected rather than resetting to Kayak.
+      selectLocationAndType(match.location.name, currentType || "Kayak");
+    } else if (currentLoc) {
+      // Same spot: just correct the distance readout, no need to touch anything else about the open panel.
+      updateDistanceDisplay(currentLoc);
+    }
+    setGpsStatus("");
+  } finally {
+    liveGpsRefreshInFlight = false;
+  }
 }
