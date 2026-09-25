@@ -1035,6 +1035,17 @@ function openCandidatePopup(idx) {
   popupEl.querySelector("[data-mark-save]").addEventListener("click", () => {
     const form = popupEl.querySelector("[data-mark-form]");
     const updated = collectMarkFormValues(form, c);
+    // Same guard the main map's own Save button re-checks (js/marks-core.js) — collectMarkFormValues turns an
+    // unparseable GPS field into null rather than guessing, so this candidate's own real position never gets
+    // silently overwritten by a typo.
+    if (updated.lat == null || updated.lng == null) {
+      const statusEl = popupEl.querySelector("[data-mark-save-status]");
+      if (statusEl) {
+        statusEl.textContent = "Enter a valid GPS coordinate (lat, lng).";
+        statusEl.style.color = "#dc2626";
+      }
+      return;
+    }
     Object.assign(c, updated);
     reviewMap.closePopup(popup);
     renderReviewList();

@@ -706,13 +706,42 @@ function markGpsText(mark) {
   return `${Number(mark.lat).toFixed(6)}, ${Number(mark.lng).toFixed(6)}`;
 }
 
-/** The GPS line with its Copy button (view and edit popups). The click is handled by the document-level listener
- * below (data-copy-gps), so it works wherever the popup lives. */
+/** The read-only GPS line with its Copy button — the VIEW popup only (see buildMarkPopupViewHtml); the edit form
+ * uses markGpsFieldHtml/parseGpsFieldValue below instead, since a mark's own position can be changed there. The
+ * click is handled by the document-level listener below (data-copy-gps), so it works wherever the popup lives. */
 function markGpsRowHtml(mark) {
   const gps = markGpsText(mark);
   if (!gps) return "";
   return `<div class="mark-gps-row"><span class="mark-gps-label">GPS</span><span class="mark-gps-value">${gps}</span>
     <button type="button" class="btn-secondary mark-gps-copy" data-copy-gps="${gps}" title="Copy the GPS coordinates">Copy</button></div>`;
+}
+
+/** Oliver's own request: a mark's GPS position can be corrected by hand, on the edit form, rather than being fixed
+ * forever at wherever it was first clicked or saved from. One text field in the same "lat, lng" shape as
+ * markGpsText/parseGpsFieldValue (paste-friendly — the same format Google Maps and most apps hand back), not two
+ * separate number inputs, so a coordinate copied from elsewhere can be pasted straight in without splitting it up
+ * first. Copy still sits right next to it, but reads the field's own CURRENT (possibly just-edited) value at click
+ * time (see the data-copy-gps handler below) rather than the value the popup happened to render with. */
+function markGpsFieldHtml(mark) {
+  const gps = markGpsText(mark);
+  return `<div class="mark-gps-row" style="align-items:flex-end;">
+    <label class="mark-edit-field" style="flex:1;margin:0;">GPS
+      <input type="text" name="gps" value="${escapeHtml(gps)}" placeholder="-38.123456, 145.123456" style="${MARK_POPUP_INPUT_STYLE}" />
+    </label>
+    <button type="button" class="btn-secondary mark-gps-copy" data-copy-gps="${escapeHtml(gps)}" title="Copy the GPS coordinates">Copy</button>
+  </div>`;
+}
+
+/** The reverse of markGpsText: "lat, lng" (any reasonable whitespace around the comma) back into {lat, lng}, or
+ * null if it isn't two valid numbers within real coordinate ranges — a typo'd or partly-deleted value should block
+ * Save (see its own check in the save handler below), never silently save a nonsense or out-of-range position. */
+function parseGpsFieldValue(text) {
+  const m = String(text || "").trim().match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lng = Number(m[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
 }
 
 async function copyTextToClipboard(text) {
@@ -831,7 +860,13 @@ document.addEventListener(
     const copyBtn = target.closest("[data-copy-gps]");
     if (copyBtn) {
       e.preventDefault();
-      copyTextToClipboard(copyBtn.dataset.copyGps).then((ok) => {
+      // The edit form's own GPS field sits right next to this button (markGpsFieldHtml) — copy whatever's
+      // CURRENTLY typed there, not the value the popup happened to render with, so editing the coordinate first
+      // and then copying it doesn't hand back the stale original. The view popup has no such field (markGpsRowHtml
+      // is read-only there), so it falls back to the static value the button itself was rendered with.
+      const liveInput = copyBtn.closest(".mark-gps-row")?.querySelector('[name="gps"]');
+      const gpsText = liveInput ? liveInput.value : copyBtn.dataset.copyGps;
+      copyTextToClipboard(gpsText).then((ok) => {
         copyBtn.textContent = ok ? "Copied" : "Copy failed";
         setTimeout(() => (copyBtn.textContent = "Copy"), 1500);
       });
@@ -896,11 +931,10 @@ const MANUAL_MARK_TYPES = ["Catch", "Mark", "POI"];
 /**
  * Editable form version of the same popup, laid out as one deliberate sequence rather than a flat list: Type
  * first (nothing else can be decided before it), then Species right after it for a type that needs one (Catch/
- * Mark) — picking it defaults Name — then Name itself, Date/Time and the (read-only) GPS position with its Copy
- * button, then everything else as collapsible sections, pick-lists as pills, each showing what's set while
- * closed. Repositioning a mark's GPS point isn't offered here (fat-finger a coordinate and the pin silently
- * jumps oceans); Source is read-only metadata. See applyMarkEntryGate for the two-step "Type, then Species"
- * lock this order exists to serve — Oliver's own request.
+ * Mark) — picking it defaults Name — then Name itself, Date/Time and the GPS position (editable — see
+ * markGpsFieldHtml/parseGpsFieldValue — with its Copy button), then everything else as collapsible sections,
+ * pick-lists as pills, each showing what's set while closed. Source is read-only metadata. See applyMarkEntryGate
+ * for the two-step "Type, then Species" lock this order exists to serve — Oliver's own request.
  *
  * `opts.allowAllTypes` (sync.js's GPX import review only — see MANUAL_MARK_TYPES) offers every configured Mark
  * Type, Session Start/End included, instead of just the three this popup otherwise ever assigns.
@@ -957,7 +991,7 @@ function buildMarkPopupEditHtml(mark, markLists, opts = {}) {
         <label class="mark-edit-field">Date/Time
           <input type="datetime-local" name="dateTime" step="1" value="${naiveToDatetimeLocal(mark.dateTime)}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
-        ${markGpsRowHtml(mark)}
+        ${markGpsFieldHtml(mark)}
         <div class="mark-edit-groups">
         ${cachedIsAdmin && mark.ownerUserId != null ? markEditGroupHtml("owner", "Owner", markPillRowHtml("ownerUserId", true) + hiddenSelect("ownerUserId", markOwnerOptionsHtml(mark.ownerUserId))) : ""}
         ${otherPickLists}
@@ -1081,18 +1115,26 @@ function applyMarkEntryGate(formEl, type, species) {
 
 /**
  * Reads the edit form's current values back into a full mark object ready
- * to save — id/lat/lng/createdAt/source carried over unchanged from the
- * original (see buildMarkPopupEditHtml's own comment on why lat/lng, and
- * separately source, aren't editable here), everything else pick-list/
- * optional/size fields included only when non-blank, keeping the same
- * sparse-object convention the rest of marks.json already uses (an unset
- * field is simply absent, not `""`). Size is rounded to a whole number —
- * the schema only ever stores whole centimetres — rather than silently
- * accepting a decimal a numeric input would otherwise happily produce.
+ * to save — id/createdAt/source carried over unchanged from the original
+ * (source is read-only metadata; id/createdAt identify the record, never
+ * edited here), everything else pick-list/optional/size fields included
+ * only when non-blank, keeping the same sparse-object convention the rest
+ * of marks.json already uses (an unset field is simply absent, not `""`).
+ * Size is rounded to a whole number — the schema only ever stores whole
+ * centimetres — rather than silently accepting a decimal a numeric input
+ * would otherwise happily produce.
+ *
+ * lat/lng come from the GPS field (see markGpsFieldHtml/parseGpsFieldValue)
+ * — null when it doesn't parse to a real coordinate, which the save
+ * handler below checks for and blocks on, the same way it blocks on a
+ * missing Type or Species; never silently falls back to the original
+ * position, which would hide a typo instead of catching it.
  */
 function collectMarkFormValues(form, originalMark) {
   const val = (name) => (form.querySelector(`[name="${name}"]`).value || "").trim();
   const type = val("type");
+  const gpsInput = form.querySelector('[name="gps"]');
+  const parsedGps = parseGpsFieldValue(gpsInput ? gpsInput.value : "");
   // Only ever collects fields applicable to the CURRENTLY SELECTED type
   // (not just whatever's visible — the same check, read fresh from the
   // form, rather than trusting applyMarkFieldVisibility's hide/show to
@@ -1107,8 +1149,8 @@ function collectMarkFormValues(form, originalMark) {
   const applicable = fieldKeysForMarkType(type);
   const updated = {
     id: originalMark.id,
-    lat: originalMark.lat,
-    lng: originalMark.lng,
+    lat: parsedGps ? parsedGps.lat : null,
+    lng: parsedGps ? parsedGps.lng : null,
     name: val("name"),
     type,
     dateTime: datetimeLocalToNaive(form.querySelector('[name="dateTime"]').value),
@@ -1694,6 +1736,13 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       const form = popupEl.querySelector("[data-mark-form]");
       const statusEl = popupEl.querySelector("[data-mark-save-status]");
       const updated = collectMarkFormValues(form, mark);
+      // A mark always needs a real position; collectMarkFormValues already turned an unparseable GPS field into
+      // null rather than guessing, so this just has to catch that and stop, same as the type/species checks below.
+      if (updated.lat == null || updated.lng == null) {
+        statusEl.textContent = "Enter a valid GPS coordinate (lat, lng).";
+        statusEl.style.color = "#dc2626";
+        return;
+      }
       // Second, independent check alongside the disabled-button gate
       // itself (applyMarkEntryGate) — not just trusting the UI state, the
       // same reasoning handleBulkEditSave's own re-check follows.
@@ -1722,6 +1771,9 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
 
       const result = await saveMarkToD1(updated, options.isNew);
       if (result.success) {
+        // Captured before Object.assign overwrites mark's own lat/lng below — the marker itself is still sitting
+        // at the OLD position at this point, so this is the only place that still knows whether it needs to move.
+        const gpsChanged = mark.lat !== updated.lat || mark.lng !== updated.lng;
         // Mutate the SAME object every closure here already holds a
         // reference to (marksById's entry, this popup's `mark`) rather than
         // replacing it — swapping in a new object would leave marksById
@@ -1738,13 +1790,21 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         if (!("waterDepth" in updated)) delete mark.waterDepth;
         if (!("windDirection" in updated)) delete mark.windDirection;
         if (!("windSpeed" in updated)) delete mark.windSpeed;
+        // leaflet.markercluster listens for the marker's own "move" event (fired by setLatLng) and re-clusters it
+        // itself — including keeping an already-open popup open across the move — so this is all repositioning it
+        // ever needs, on this same marker, whether or not its shape is about to change too (the shape-swap branch
+        // just below reads the marker's position back via getLatLng(), already updated by the time it runs).
+        if (gpsChanged) marker.setLatLng([mark.lat, mark.lng]);
         saveLastMarkFieldValues(mark); // every successful save, create or edit — see that function's own comment
 
         // An edit (not a brand-new mark, which would otherwise vanish the moment it's saved if the current filters
-        // don't cover it) re-applies the map filters, same as bulk edit — see refreshAfterEdit's calls below.
+        // don't cover it) re-applies the map filters, same as bulk edit — see refreshAfterEdit's calls below. A
+        // moved mark's own connecting Session line (renderSessionLines — see the same call in the Delete handler's
+        // own comment) needs the same recompute, or it would keep pointing at the old position until reload.
         const wasEdit = !options.isNew;
         const refreshAfterEdit = () => {
           if (wasEdit && options.state && options.state.refreshMarkControls) options.state.refreshMarkControls();
+          if (gpsChanged && options.map && options.state) renderSessionLines(options.map, options.state, Array.from(options.state.marksById.values()));
         };
         if (options.isNew && options.state) {
           options.state.marksById.set(mark.id, mark);
