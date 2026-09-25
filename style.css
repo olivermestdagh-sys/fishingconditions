@@ -2196,20 +2196,6 @@ main.wide {
   font-size: 0.72rem;
 }
 
-/* The Kayak/Land toggle on a dual-type row's name pill (buildTypeTogglePills, week.js) — reuses .loc-chip/
-   .mark-pill/.is-on (the Map tab's own type-picker styling, app.js's renderLocationTypePills) for state/hover
-   parity, just sized down since it rides inside the same tight floating pill as the star/name/ⓘ button. */
-.weeknew-row-type-toggle {
-  display: flex;
-  gap: 2px;
-  flex: 0 0 auto;
-}
-.weeknew-row-type-toggle .weeknew-row-type-pill {
-  font-size: 0.58rem;
-  padding: 2px 6px;
-  white-space: nowrap;
-}
-
 .weeknew-row-sessions {
   display: flex;
   flex-direction: column;
@@ -2454,17 +2440,6 @@ main.wide {
      one — this one has to stay at 0 so Chart.js's own measurement of it
      matches what's actually displayed. */
   padding: 0;
-}
-
-/* A location tracked as both Kayak and Land based (see computeLocationRows/buildLocationRowElement, week.js) gets
-   a second Location-condition strip on its one merged row — one extra strip row's worth of height on top of
-   whatever --weeknew-mobile-row-height currently resolves to (328px desktop, 210px under the phone breakpoint
-   below, further scaled for landscape phones by applyLandscapeScale, week.js), so this stays correct across all
-   three without duplicating that logic here. Must match renderConditionsChart's own locationStrips-aware
-   layout.padding.bottom exactly, same reasoning as the matching .chart-frame-dual-strip rules on
-   .location-hover-panel-chart-frame/.live-chart-frame (app.js/map-live.js's own version of this). */
-.weeknew-row.weeknew-row-dual-strip .weeknew-row-chart {
-  min-height: calc(var(--weeknew-mobile-row-height, 328px) + 14px);
 }
 .weeknew-row-chart canvas {
   /* Same Chart.js responsive:true pattern used everywhere else on the
@@ -3278,9 +3253,6 @@ main.wide {
   }
   .weeknew-page .week-timeline-scroll + .footnote {
     display: none; /* the gesture hints text costs a lot of height on a phone */
-  }
-  .weeknew-row.weeknew-row-dual-strip .weeknew-row-chart {
-    min-height: calc(var(--weeknew-mobile-row-height, 210px) + 11px);
   }
 }
 

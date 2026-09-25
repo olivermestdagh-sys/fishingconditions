@@ -116,12 +116,6 @@ let selectedGroups = new Set();
 let selectedDirections = new Set();
 let pinnedOrder = []; // location NAMES, in the order they were pinned — oldest pin first
 
-// location NAME -> "Kayak" | "Land based" — in-memory only, never persisted. Which type's sessions/timings/
-// drag-to-schedule a dual-type row currently shows (see resolveActiveType/buildTypeTogglePills below) — only
-// ever has entries for a location that actually has both types (currently Balnarring Beach and Lang Lang Boat
-// Ramp); computeLocationRows never looks anything up here for a single-type location.
-let activeRowType = new Map();
-
 // Computed (drag-derived) sessions — see charts.js's
 // computeScheduleFromDragRangeMs for how one of these gets built, and the
 // big comment on wireSessionRangeSelect below for the full click-arm/
@@ -889,33 +883,13 @@ function sortLocationsForDisplay(locationEntries) {
   return [...pinned, ...rest];
 }
 
-/** Kayak first by default — matching the graph's own "Kayak always on top" strip ordering (buildLocationRowElement)
- * — unless the person already toggled this location to Land based AND that type is still one of the types that
- * actually survived the current filters (a Type filter change could otherwise leave a stale saved choice for a
- * type this location no longer has right now). Single-type locations never call this with more than one option,
- * so they always just get their one real type back. */
-function resolveActiveType(name, availableTypes) {
-  if (availableTypes.length < 2) return availableTypes[0];
-  const saved = activeRowType.get(name);
-  if (saved && availableTypes.includes(saved)) return saved;
-  return availableTypes.includes("Kayak") ? "Kayak" : availableTypes[0];
-}
-
 /**
- * One entry per PHYSICAL location that passes the current filters — carrying EVERY type variant that survived
- * filtering (`variants`: normally 1, occasionally 2 for a location tracked as both Kayak and Land based), which
- * one is currently `active` for this row (resolveActiveType above), and each variant's own list of qualifying
- * sessions (zero, one, or several) within the displayed period, computed the same way as the old Week Ahead page
- * (computeWindowsForLocation, shared in charts.js).
- *
- * Oliver's own request: a dual-type location gets ONE row instead of two separate full-width ones — Kayak's own
- * setUp/packUp/timeToSpot/timeFromSpot/qualifying-sessions genuinely differ from Land based's for the same
- * physical spot (this is real scheduling math, not a cosmetic difference — see computeScheduleFromDragRangeMs,
- * js/week-tools.js), so only ONE type's numbers can ever drive that row's sidebar/sessions/drag-to-schedule at a
- * time; buildTypeTogglePills (below buildLocationRowElement) is how the person picks which. The graph's own
- * Location-condition strip is the one thing that doesn't need picking — it shows BOTH ratings regardless of which
- * variant is active (see buildLocationRowElement's own locationStrips wiring), the same pattern already shipped
- * for the Map tab (app.js) and Live mode (map-live.js).
+ * One entry per (location, type) that passes the current filters, each
+ * with its own list of qualifying sessions (zero, one, or several) within
+ * the displayed period — computed the same way as the old Week Ahead page
+ * (computeWindowsForLocation, shared in charts.js), just no longer
+ * collapsed into "one tile per session"; here every session for the same
+ * location lands on that location's single row.
  */
 function computeLocationRows() {
   const minCondition = Number(document.getElementById("minCondition").value) || 1;
@@ -928,29 +902,12 @@ function computeLocationRows() {
       groupsMatchFilter(locationGroupsOf(loc), selectedGroups) &&
       directionsMatchFilter(loc.shore, selectedDirections)
   );
+  const ordered = sortLocationsForDisplay(filtered);
 
-  // Grouped by name FIRST — sortLocationsForDisplay only ever reads .name, so it works unchanged on these
-  // {name, locs} groups exactly as it did on individual locations before; a Map preserves first-seen order, so
-  // this doesn't reshuffle anything relative to before for a single-type location.
-  const byName = new Map();
-  for (const loc of filtered) {
-    if (!byName.has(loc.name)) byName.set(loc.name, []);
-    byName.get(loc.name).push(loc);
-  }
-  const ordered = sortLocationsForDisplay([...byName.entries()].map(([name, locs]) => ({ name, locs })));
-
-  return ordered.map(({ name, locs }) => {
-    const variants = locs
-      .slice()
-      .sort((a, b) => (a.type === "Kayak" ? -1 : b.type === "Kayak" ? 1 : 0)) // Kayak first, matching the strip order
-      .map((loc) => {
-        const locRows = allRows.filter((r) => r["Location Name"] === loc.name && r["Type"] === loc.type);
-        const sessions = computeQualifyingSessions(locRows, minCondition, minHours);
-        return { loc, locRows, sessions };
-      });
-    const activeType = resolveActiveType(name, variants.map((v) => v.loc.type));
-    const active = variants.find((v) => v.loc.type === activeType) || variants[0];
-    return { name, variants, activeType, active };
+  return ordered.map((loc) => {
+    const locRows = allRows.filter((r) => r["Location Name"] === loc.name && r["Type"] === loc.type);
+    const sessions = computeQualifyingSessions(locRows, minCondition, minHours);
+    return { loc, locRows, sessions };
   });
 }
 
@@ -1224,39 +1181,6 @@ function renderWeekView() {
 
 
 /**
- * The Kayak/Land toggle on a dual-type row's floating name pill — same loc-chip/mark-pill/is-on classes and
- * tap-to-select styling as the Map tab's own type picker (renderLocationTypePills, app.js), for visual and
- * interaction parity, just sized down (weeknew-row-type-pill, style.css) to fit inside the pill. Picks which
- * type's sessions/timings/drag-to-schedule this row is built from (computeLocationRows/resolveActiveType above);
- * the graph's own Location-condition strip shows BOTH regardless of this choice, so tapping it never hides either
- * rating, only which type's real-world numbers the sidebar/scheduling half of the row currently reflects.
- */
-function buildTypeTogglePills(name, variants, activeType) {
-  const box = document.createElement("div");
-  box.className = "weeknew-row-type-toggle";
-  for (const v of variants) {
-    const on = v.loc.type === activeType;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "loc-chip mark-pill weeknew-row-type-pill" + (on ? " is-on" : "");
-    btn.setAttribute("aria-pressed", String(on));
-    btn.textContent = v.loc.type;
-    btn.addEventListener("click", () => {
-      if (on) return;
-      // This row is about to be torn down and rebuilt from scratch by the renderWeekView() below regardless —
-      // disarming first just makes sure the OTHER things arming touches (the armed button's own styling, the
-      // canvas's touch-action override) get cleaned up explicitly rather than left dangling on DOM nodes this
-      // rebuild is about to discard anyway.
-      if (armedLocationName === name) disarmSchedule();
-      activeRowType.set(name, v.loc.type);
-      renderWeekView();
-    });
-    box.appendChild(btn);
-  }
-  return box;
-}
-
-/**
  * Builds one location's row: a sticky-left sidebar (name, type/shore, pin
  * star, a small chip per qualifying session, and any computed/planned
  * sessions for this location) plus its always-visible conditions graph.
@@ -1273,14 +1197,9 @@ function buildTypeTogglePills(name, variants, activeType) {
  * sidebar, so several planned options for the same or different locations
  * can sit side by side for comparison.
  */
-function buildLocationRowElement({ name, variants, activeType, active }, timelineStart, timelineEnd, totalTrackWidth) {
-  // Everything below reads only loc/locRows/sessions, exactly as before this function's own signature grew a
-  // `variants`/`activeType` around it (computeLocationRows above) — those now simply come from whichever variant
-  // is currently active for this row, rather than there only ever being one variant to begin with.
-  const { loc, locRows, sessions } = active;
-
+function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, timelineEnd, totalTrackWidth) {
   const row = document.createElement("div");
-  row.className = "weeknew-row" + (variants.length > 1 ? " weeknew-row-dual-strip" : "");
+  row.className = "weeknew-row";
 
   const sidebar = document.createElement("div");
   sidebar.className = "weeknew-row-sidebar";
@@ -1313,9 +1232,6 @@ function buildLocationRowElement({ name, variants, activeType, active }, timelin
   titleRow.className = "weeknew-row-title-line";
   titleRow.appendChild(star);
   titleRow.appendChild(titleWrap);
-  // Only when this location actually has more than one type surviving the current filters — see
-  // buildTypeTogglePills' own comment for what picking one does (and doesn't) change.
-  if (variants.length > 1) titleRow.appendChild(buildTypeTogglePills(name, variants, activeType));
   // Phone layout only (hidden by CSS otherwise): the ⓘ button on the name pill
   // opens this row's session chips and planning buttons in a popover.
   const detailsBtn = document.createElement("button");
@@ -1458,11 +1374,6 @@ function buildLocationRowElement({ name, variants, activeType, active }, timelin
       disableBuiltinEvents: true, // this page drives the tooltip itself — see wireSyncedTooltip below
       showFirstBoxIcons: true, // windvane/fish legend on each row's own first condition-strip box
       tideOffsetMinutes: loc.tideOffset,
-      // Both types' own rows (Kayak first) when this location has more than one — same locationStrips mechanism
-      // already shipped for the Map tab/Live mode (js/chart-base.js's buildConditionStripsPlugin). Uses each
-      // variant's own locRows (unfiltered by the visible time window), matching app.js's own usage — the strip
-      // plugin clips out-of-range points itself against the chart's own x-axis bounds.
-      locationStrips: variants.length > 1 ? variants.map((v) => ({ label: v.loc.type === "Kayak" ? "Kayak" : "Land", rows: v.locRows })) : null,
     });
     rowChartRef = rowChart;
     if (rowChart) {
