@@ -716,20 +716,80 @@ function markGpsRowHtml(mark) {
     <button type="button" class="btn-secondary mark-gps-copy" data-copy-gps="${gps}" title="Copy the GPS coordinates">Copy</button></div>`;
 }
 
+/** One signed-degrees axis -> "D°MM'SS.s"H" (Degrees Minutes Seconds) — always a bare non-negative degree count
+ * plus a hemisphere letter carrying the sign, never a "-", since that's the conventional way this format is
+ * written. `hemiPos`/`hemiNeg` are the two letters for this axis (N/S for latitude, E/W for longitude).
+ *
+ * Rounds to the nearest tenth of an arcsecond BEFORE splitting into degrees/minutes/seconds, not after — doing it
+ * after (floor the degrees and minutes, then toFixed(1) whatever's left over for seconds) hits real floating-point
+ * cases where the leftover is something like 59.999999999999996 seconds, which toFixed(1) rounds UP to the
+ * genuinely invalid "60.0" instead of carrying into the next minute. Rounding the whole value first means the
+ * floor/remainder split only ever happens on an already-rounded number, so this can't come up; the min>=60/deg
+ * carry just below is a second, defensive line in case some other input ever lands exactly on a boundary. */
+function formatDegMinSec(value, hemiPos, hemiNeg) {
+  const hemi = value < 0 ? hemiNeg : hemiPos;
+  const abs = Math.round(Math.abs(value) * 36000) / 36000; // nearest 0.1 arcsecond, in whole degrees
+  let deg = Math.floor(abs);
+  let min = Math.floor((abs - deg) * 60);
+  let sec = Math.round((abs - deg - min / 60) * 3600 * 10) / 10;
+  if (sec >= 60) {
+    sec = 0;
+    min += 1;
+  }
+  if (min >= 60) {
+    min = 0;
+    deg += 1;
+  }
+  const secStr = sec.toFixed(1);
+  return `${deg}°${String(min).padStart(2, "0")}'${secStr.length < 4 ? "0" + secStr : secStr}"${hemi}`;
+}
+
+/** One signed-degrees axis -> "D°MM.mmm'H" (Degrees Decimal Minutes) — same hemisphere-letter convention, and the
+ * same round-the-whole-value-first reasoning against a false "60.000" minutes, as formatDegMinSec just above. */
+function formatDegDecMin(value, hemiPos, hemiNeg) {
+  const hemi = value < 0 ? hemiNeg : hemiPos;
+  const abs = Math.round(Math.abs(value) * 60000) / 60000; // nearest 0.001 minute, in whole degrees
+  let deg = Math.floor(abs);
+  let min = Math.round((abs - deg) * 60 * 1000) / 1000;
+  if (min >= 60) {
+    min = 0;
+    deg += 1;
+  }
+  const minStr = min.toFixed(3);
+  return `${deg}°${minStr.length < 6 ? "0" + minStr : minStr}'${hemi}`;
+}
+
+/** markGpsText's own DMS/DDM equivalents — "latAxis, lngAxis" in whichever of the two formats, or "" for a mark
+ * with no real position yet (same as markGpsText). */
+function markGpsDmsText(mark) {
+  if (mark.lat == null || mark.lng == null) return "";
+  return `${formatDegMinSec(Number(mark.lat), "N", "S")}, ${formatDegMinSec(Number(mark.lng), "E", "W")}`;
+}
+function markGpsDdmText(mark) {
+  if (mark.lat == null || mark.lng == null) return "";
+  return `${formatDegDecMin(Number(mark.lat), "N", "S")}, ${formatDegDecMin(Number(mark.lng), "E", "W")}`;
+}
+
 /** Oliver's own request: a mark's GPS position can be corrected by hand, on the edit form, rather than being fixed
- * forever at wherever it was first clicked or saved from. One text field in the same "lat, lng" shape as
- * markGpsText/parseGpsFieldValue (paste-friendly — the same format Google Maps and most apps hand back), not two
- * separate number inputs, so a coordinate copied from elsewhere can be pasted straight in without splitting it up
- * first. Copy still sits right next to it, but reads the field's own CURRENT (possibly just-edited) value at click
- * time (see the data-copy-gps handler below) rather than the value the popup happened to render with. */
+ * forever at wherever it was first clicked or saved from — and typed or pasted in whichever of three shapes is
+ * easiest at the time (DD, DMS or DDM — see formatDegMinSec/formatDegDecMin above and parseDmsAxis/parseDdmAxis
+ * below), all three kept in step live as any one of them changes (see the gps*Input wiring in
+ * wireMarkPopupButtons). Only DD is ever actually saved — collectMarkFormValues reads [name="gps"] alone — the
+ * other two are purely an editing convenience that stays in sync with it. Each row's own Copy button reads that
+ * field's own CURRENT (possibly just-edited) value at click time (see the data-copy-gps handler below) rather than
+ * the value the popup happened to render with. */
 function markGpsFieldHtml(mark) {
-  const gps = markGpsText(mark);
-  return `<div class="mark-gps-row" style="align-items:flex-end;">
-    <label class="mark-edit-field" style="flex:1;margin:0;">GPS
-      <input type="text" name="gps" value="${escapeHtml(gps)}" placeholder="-38.123456, 145.123456" style="${MARK_POPUP_INPUT_STYLE}" />
+  const row = (label, name, value, placeholder) => `<div class="mark-gps-row" style="align-items:flex-end;">
+    <label class="mark-edit-field" style="flex:1;margin:0;">${label}
+      <input type="text" name="${name}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" style="${MARK_POPUP_INPUT_STYLE}" />
     </label>
-    <button type="button" class="btn-secondary mark-gps-copy" data-copy-gps="${escapeHtml(gps)}" title="Copy the GPS coordinates">Copy</button>
+    <button type="button" class="btn-secondary mark-gps-copy" data-copy-gps="${escapeHtml(value)}" title="Copy the GPS coordinates">Copy</button>
   </div>`;
+  return (
+    row("GPS (DD)", "gps", markGpsText(mark), "-38.123456, 145.123456") +
+    row("GPS (DMS)", "gpsDms", markGpsDmsText(mark), `38°07'24.4"S, 145°17'33.6"E`) +
+    row("GPS (DDM)", "gpsDdm", markGpsDdmText(mark), `38°07.408'S, 145°17.560'E`)
+  );
 }
 
 /** The reverse of markGpsText: "lat, lng" (any reasonable whitespace around the comma) back into {lat, lng}, or
@@ -742,6 +802,87 @@ function parseGpsFieldValue(text) {
   const lng = Number(m[2]);
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
   return { lat, lng };
+}
+
+/** One DMS axis back into signed decimal degrees, or null — deliberately loose about the exact symbols used
+ * (°/'/" or d/m/s or none at all, any run of non-digit junk between the three numbers) since this is meant to
+ * accept whatever a person actually types or pastes, not just this popup's own canonical formatDegMinSec output.
+ * A trailing hemisphere letter (N/S for latitude, E/W for longitude — whichever pair the caller passes) carries
+ * the sign; a leading "-" works too, but not both together (that's not a real coordinate, not a typo worth
+ * guessing at). Minutes/seconds of 60 or more, or a result outside the real ±maxDeg range for this axis, are
+ * rejected the same way an out-of-range plain-decimal value already is in parseGpsFieldValue. */
+function parseDmsAxis(text, hemiPos, hemiNeg, maxDeg) {
+  const m = String(text || "")
+    .trim()
+    .match(/^(-)?\s*(\d+(?:\.\d+)?)[^0-9.]+(\d+(?:\.\d+)?)[^0-9.]+(\d+(?:\.\d+)?)[^0-9A-Za-z]*([A-Za-z])?\s*$/);
+  if (!m) return null;
+  const [, sign, degStr, minStr, secStr, hemiRaw] = m;
+  const hemi = hemiRaw ? hemiRaw.toUpperCase() : null;
+  if (hemi && hemi !== hemiPos && hemi !== hemiNeg) return null;
+  if (hemi && sign) return null;
+  const deg = Number(degStr), min = Number(minStr), sec = Number(secStr);
+  if (min >= 60 || sec >= 60) return null;
+  let value = deg + min / 60 + sec / 3600;
+  if (sign === "-" || hemi === hemiNeg) value = -value;
+  if (value < -maxDeg || value > maxDeg) return null;
+  return value;
+}
+
+/** DDM's own version of parseDmsAxis — same tolerance for symbols/spacing and the same sign-vs-hemisphere rule,
+ * just two numbers (degrees, decimal minutes) instead of three. */
+function parseDdmAxis(text, hemiPos, hemiNeg, maxDeg) {
+  const m = String(text || "")
+    .trim()
+    .match(/^(-)?\s*(\d+(?:\.\d+)?)[^0-9.]+(\d+(?:\.\d+)?)[^0-9A-Za-z]*([A-Za-z])?\s*$/);
+  if (!m) return null;
+  const [, sign, degStr, minStr, hemiRaw] = m;
+  const hemi = hemiRaw ? hemiRaw.toUpperCase() : null;
+  if (hemi && hemi !== hemiPos && hemi !== hemiNeg) return null;
+  if (hemi && sign) return null;
+  const deg = Number(degStr), min = Number(minStr);
+  if (min >= 60) return null;
+  let value = deg + min / 60;
+  if (sign === "-" || hemi === hemiNeg) value = -value;
+  if (value < -maxDeg || value > maxDeg) return null;
+  return value;
+}
+
+/** "latAxis, lngAxis" -> {lat, lng} for whichever per-axis parser is passed (parseDmsAxis or parseDdmAxis), or
+ * null if it doesn't split into exactly two comma-separated axes, or either one fails to parse. */
+function parseGpsAxisPair(text, axisParser) {
+  const parts = String(text || "").split(",");
+  if (parts.length !== 2) return null;
+  const lat = axisParser(parts[0], "N", "S", 90);
+  const lng = axisParser(parts[1], "E", "W", 180);
+  if (lat == null || lng == null) return null;
+  return { lat, lng };
+}
+
+/** Wires the live DD/DMS/DDM cross-sync described on markGpsFieldHtml — called from wherever that markup ends up
+ * (wireMarkPopupButtons for the main map, sync.js's own openCandidatePopup for the GPX import review popup, which
+ * wires its own buttons rather than going through wireMarkPopupButtons at all). A no-op if `form` doesn't actually
+ * have the three fields (shouldn't happen wherever markGpsFieldHtml was used to build it, but this only ever gets
+ * called on a "the fields might not be there" basis anyway, same as the rest of this file's optional-field checks). */
+function wireGpsFormatSync(form) {
+  const gpsDdInput = form.querySelector('[name="gps"]');
+  const gpsDmsInput = form.querySelector('[name="gpsDms"]');
+  const gpsDdmInput = form.querySelector('[name="gpsDdm"]');
+  if (!gpsDdInput || !gpsDmsInput || !gpsDdmInput) return;
+  const syncGpsFieldsFrom = (source) => {
+    const parsed =
+      source === gpsDdInput
+        ? parseGpsFieldValue(gpsDdInput.value)
+        : source === gpsDmsInput
+          ? parseGpsAxisPair(gpsDmsInput.value, parseDmsAxis)
+          : parseGpsAxisPair(gpsDdmInput.value, parseDdmAxis);
+    if (!parsed) return;
+    if (source !== gpsDdInput) gpsDdInput.value = markGpsText(parsed);
+    if (source !== gpsDmsInput) gpsDmsInput.value = markGpsDmsText(parsed);
+    if (source !== gpsDdmInput) gpsDdmInput.value = markGpsDdmText(parsed);
+  };
+  gpsDdInput.addEventListener("input", () => syncGpsFieldsFrom(gpsDdInput));
+  gpsDmsInput.addEventListener("input", () => syncGpsFieldsFrom(gpsDmsInput));
+  gpsDdmInput.addEventListener("input", () => syncGpsFieldsFrom(gpsDdmInput));
 }
 
 async function copyTextToClipboard(text) {
@@ -860,11 +1001,12 @@ document.addEventListener(
     const copyBtn = target.closest("[data-copy-gps]");
     if (copyBtn) {
       e.preventDefault();
-      // The edit form's own GPS field sits right next to this button (markGpsFieldHtml) — copy whatever's
-      // CURRENTLY typed there, not the value the popup happened to render with, so editing the coordinate first
-      // and then copying it doesn't hand back the stale original. The view popup has no such field (markGpsRowHtml
-      // is read-only there), so it falls back to the static value the button itself was rendered with.
-      const liveInput = copyBtn.closest(".mark-gps-row")?.querySelector('[name="gps"]');
+      // The edit form's own GPS row has its own input right next to this button (markGpsFieldHtml — one of DD/DMS/
+      // DDM, whichever row this button belongs to) — copy whatever's CURRENTLY typed there, not the value the
+      // popup happened to render with, so editing the coordinate first and then copying it doesn't hand back the
+      // stale original. The view popup has no such input (markGpsRowHtml is read-only there), so it falls back to
+      // the static value the button itself was rendered with.
+      const liveInput = copyBtn.closest(".mark-gps-row")?.querySelector("input");
       const gpsText = liveInput ? liveInput.value : copyBtn.dataset.copyGps;
       copyTextToClipboard(gpsText).then((ok) => {
         copyBtn.textContent = ok ? "Copied" : "Copy failed";
@@ -1586,6 +1728,8 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         refreshMarkFormConditionsForNewTime(form, mark.lat, mark.lng, naive);
       });
     }
+
+    wireGpsFormatSync(form);
     syncMarkFormPills(form);
   }
 

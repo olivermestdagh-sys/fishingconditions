@@ -1030,7 +1030,9 @@ function openCandidatePopup(idx) {
   applyMarkFieldVisibility(popupEl, c.type);
   const typeSelect = popupEl.querySelector("[data-mark-type-select]");
   if (typeSelect) typeSelect.addEventListener("change", () => applyMarkFieldVisibility(popupEl, typeSelect.value));
-  syncMarkFormPills(popupEl.querySelector("[data-mark-form]")); // draws the pill rows (see buildMarkPopupEditHtml)
+  const markForm = popupEl.querySelector("[data-mark-form]");
+  wireGpsFormatSync(markForm); // keeps the DD/DMS/DDM fields (markGpsFieldHtml) in step here too — js/marks-core.js
+  syncMarkFormPills(markForm); // draws the pill rows (see buildMarkPopupEditHtml)
 
   popupEl.querySelector("[data-mark-save]").addEventListener("click", () => {
     const form = popupEl.querySelector("[data-mark-form]");
