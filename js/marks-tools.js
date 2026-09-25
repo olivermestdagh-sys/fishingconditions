@@ -1145,7 +1145,8 @@ function startNewMarkEntry(map, lat, lng, state, defaults = {}) {
     // plus two Open-Meteo calls would otherwise fire for every new mark
     // regardless of type, even though POI/Mark can't show or save a
     // single one of those fields.
-    if (fieldKeysForMarkType(draft.type).includes("weatherCondition")) {
+    if (!draft._historicalLookupStarted && fieldKeysForMarkType(draft.type).includes("weatherCondition")) {
+      draft._historicalLookupStarted = true;
       fillMarkFormFromHistoricalLookup(popupEl, lat, lng, draft.dateTime);
     }
   });

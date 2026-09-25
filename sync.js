@@ -1023,7 +1023,7 @@ function openCandidatePopup(idx) {
   if (!reviewMap) return; // only reachable outside Import mode
   const popup = L.popup(markPopupOptions())
     .setLatLng([c.lat, c.lng])
-    .setContent(buildMarkPopupEditHtml(c, markLists))
+    .setContent(buildMarkPopupEditHtml(c, markLists, { allowAllTypes: true }))
     .openOn(reviewMap);
 
   const popupEl = popup.getElement();

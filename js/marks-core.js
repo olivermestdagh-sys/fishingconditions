@@ -198,8 +198,14 @@ MARK_TYPE_FIELD_KEYS["Session End"] = SESSION_FIELD_KEYS;
  * set for anything not explicitly listed there (including "Fish" via the
  * alias just above, and any future type this map hasn't been taught about
  * yet) — see MARK_TYPE_FIELD_KEYS's own comment for why under-hiding is
- * the safer default than over-hiding. */
+ * the safer default than over-hiding. A literal "" is different from an
+ * unrecognised type, though: it means a brand-new draft with no Type
+ * chosen yet (see startNewMarkEntry), where nothing extra should show
+ * until Type itself is picked — falling back to Catch's full set here too
+ * would both clutter the form early and wrongly gate on Species before
+ * Type is even set (see typeRequiresSpecies/applyMarkEntryGate). */
 function fieldKeysForMarkType(type) {
+  if (type === "") return [];
   return MARK_TYPE_FIELD_KEYS[type] || MARK_TYPE_FIELD_KEYS.Catch;
 }
 
@@ -796,9 +802,12 @@ function syncMarkFormPills(form) {
       if (inner.length) group.style.display = inner.some((g) => g.style.display !== "none") ? "" : "none";
     }
   });
-  // While Species has to be chosen first (applySpeciesGate), its section opens so the prompt can be acted on.
-  const prompt = form.querySelector("[data-species-first-prompt]");
-  if (prompt && prompt.style.display === "block") setMarkEditGroupOpen(form, "species", true);
+  // While Type or Species has to be chosen first (applyMarkEntryGate), its own section opens so the prompt can be
+  // acted on right there, rather than the person having to go find and expand it themselves.
+  const typePrompt = form.querySelector("[data-type-first-prompt]");
+  if (typePrompt && typePrompt.style.display === "block") setMarkEditGroupOpen(form, "type", true);
+  const speciesPrompt = form.querySelector("[data-species-first-prompt]");
+  if (speciesPrompt && speciesPrompt.style.display === "block") setMarkEditGroupOpen(form, "species", true);
 }
 
 function setMarkEditGroupOpen(form, key, open) {
@@ -876,22 +885,36 @@ for (const type of ["change", "input"]) {
   });
 }
 
+/** The only types this popup's own Type picker ever offers — Session Start/Session End are assigned solely by the
+ * GPX import review flow (sync.js, which passes `{ allowAllTypes: true }` to keep offering them there); manually
+ * adding or editing a mark through this popup should never turn it into (or reveal) half of a session pairing it
+ * has no way to link up correctly. The mark's own CURRENT type is always offered too regardless (see
+ * markListOptionsHtml), so an existing Session mark opened here — however that happened — still shows its real
+ * type rather than silently losing it. */
+const MANUAL_MARK_TYPES = ["Catch", "Mark", "POI"];
+
 /**
- * Editable form version of the same popup, laid out like the filter dialog: Name, Date/Time and the (read-only)
- * GPS position with its Copy button at the top, then one collapsible section per field — pick-lists as pills —
- * each showing what's set while closed. Repositioning a mark's GPS point isn't offered here (fat-finger a
- * coordinate and the pin silently jumps oceans); Source is read-only metadata.
+ * Editable form version of the same popup, laid out as one deliberate sequence rather than a flat list: Type
+ * first (nothing else can be decided before it), then Species right after it for a type that needs one (Catch/
+ * Mark) — picking it defaults Name — then Name itself, Date/Time and the (read-only) GPS position with its Copy
+ * button, then everything else as collapsible sections, pick-lists as pills, each showing what's set while
+ * closed. Repositioning a mark's GPS point isn't offered here (fat-finger a coordinate and the pin silently
+ * jumps oceans); Source is read-only metadata. See applyMarkEntryGate for the two-step "Type, then Species"
+ * lock this order exists to serve — Oliver's own request.
+ *
+ * `opts.allowAllTypes` (sync.js's GPX import review only — see MANUAL_MARK_TYPES) offers every configured Mark
+ * Type, Session Start/End included, instead of just the three this popup otherwise ever assigns.
  *
  * Every pick-list still has its real <select> (and, for a Session, its tick-box list — see
  * multiCapableControlsHtml) in the form, hidden: the pills only drive them (see syncMarkFormPills and the
- * document listeners above), so collectMarkFormValues, applySpeciesGate, applyMultiControlModes and the
+ * document listeners above), so collectMarkFormValues, applyMarkEntryGate, applyMultiControlModes and the
  * condition look-ups keep working on the same controls as before.
  *
  * Every field beyond Name/Type/Date-Time/Source sits in a `data-field-group="<key>"` element, always rendered
  * but shown/hidden by applyMarkFieldVisibility (called on render and on every Type change — see
  * wireMarkPopupButtons), so switching Type mid-edit reveals/hides fields live.
  */
-function buildMarkPopupEditHtml(mark, markLists) {
+function buildMarkPopupEditHtml(mark, markLists, opts = {}) {
   const hiddenSelect = (name, optionsHtml, extra = "") =>
     `<select name="${name}" ${extra} hidden tabindex="-1" aria-hidden="true">${optionsHtml}</select>`;
   const pickListGroup = (f, heading) =>
@@ -910,11 +933,20 @@ function buildMarkPopupEditHtml(mark, markLists) {
   const speciesField = MARK_POPUP_OPTIONAL_FIELDS.find((f) => f.key === "species");
   const otherPickLists = MARK_POPUP_OPTIONAL_FIELDS.filter((f) => f.key !== "species").map((f) => pickListGroup(f)).join("");
   const windOptions = `<option value=""></option>${SHORE_OPTIONS.map((d) => `<option value="${d}" ${mark.windDirection === d ? "selected" : ""}>${d}</option>`).join("")}`;
+  const typeMarkLists = opts.allowAllTypes ? markLists : markLists.filter((r) => r.field !== "Mark Type" || MANUAL_MARK_TYPES.includes(r.value));
 
   return `
     <div data-mark-id="${escapeHtml(mark.id)}" class="mark-edit" style="min-width:230px;max-width:280px;">
       <form data-mark-form class="mark-edit-form" onsubmit="return false;">
-        <label class="mark-edit-field" style="margin-top:0;">Name
+        <div data-type-first-prompt style="display:none;margin:0 0 6px;padding:6px 8px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:0.8rem;color:#854d0e;">Choose a type first — the rest of the form unlocks once it's set.</div>
+        <div class="mark-edit-groups" style="margin-top:0;">
+        ${markEditGroupHtml("type", "Type", markPillRowHtml("type", true) + hiddenSelect("type", markListOptionsHtml(typeMarkLists, "Mark Type", mark.type), "data-mark-type-select"))}
+        </div>
+        <div data-species-first-prompt style="display:none;margin:6px 0;padding:6px 8px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:0.8rem;color:#854d0e;">Choose a species first — the rest of the form unlocks once it's set.</div>
+        <div class="mark-edit-groups" data-field-group="species">
+        ${pickListGroup(speciesField)}
+        </div>
+        <label class="mark-edit-field">Name
           <input type="text" name="name" value="${escapeHtml(mark.name || "")}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
         <div data-species-name-sync-confirm style="display:none;margin:6px 0;padding:6px 8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:0.8rem;">
@@ -926,11 +958,8 @@ function buildMarkPopupEditHtml(mark, markLists) {
           <input type="datetime-local" name="dateTime" step="1" value="${naiveToDatetimeLocal(mark.dateTime)}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
         ${markGpsRowHtml(mark)}
-        <div data-species-first-prompt style="display:none;margin:6px 0;padding:6px 8px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:0.8rem;color:#854d0e;">Choose a species first — the rest of the form unlocks once it's set.</div>
         <div class="mark-edit-groups">
-        ${markEditGroupHtml("type", "Type", markPillRowHtml("type", true) + hiddenSelect("type", markListOptionsHtml(markLists, "Mark Type", mark.type), "data-mark-type-select"))}
         ${cachedIsAdmin && mark.ownerUserId != null ? markEditGroupHtml("owner", "Owner", markPillRowHtml("ownerUserId", true) + hiddenSelect("ownerUserId", markOwnerOptionsHtml(mark.ownerUserId))) : ""}
-        ${pickListGroup(speciesField)}
         ${otherPickLists}
         ${markEditGroupHtml("windDirection", "Wind Direction", markPillRowHtml("windDirection") + hiddenSelect("windDirection", windOptions), "windDirection")}
         ${markEditGroupHtml(
@@ -1013,34 +1042,41 @@ function applyMultiControlModes(formEl, type) {
 }
 
 /**
- * Oliver's own request: when creating or editing a Catch/Mark, Species
- * has to be set before anything else in the form is usable — not just
- * another field somewhere in the list. Locks every field except Type
- * and Species itself (Type stays usable so a Catch/Mark started by
- * mistake can still be switched away without being stuck; Species
- * obviously has to stay usable so the gate can ever be cleared) and
- * shows a short prompt explaining why, for as long as the current type
- * needs a species and doesn't have one yet. Re-run on every Type change
- * (alongside applyMarkFieldVisibility, which this runs right next to)
- * and every Species change, so switching types or picking a species
- * unlocks the rest of the form immediately, live, without needing to
- * save/reopen. Save itself is also blocked while gated, as a second,
+ * Oliver's own request: a mark's Type has to be chosen before anything
+ * else in the form is usable, and — for a Catch/Mark, which needs one —
+ * Species has to be chosen next, before anything AFTER it. Two stacked
+ * gates, not one: while Type is blank, everything except Type itself is
+ * locked; once Type is set, Species unlocks (for a type that needs it)
+ * and everything else stays locked until Species is set too; a type that
+ * doesn't need a species (POI) skips straight to fully unlocked. Shows
+ * whichever single prompt applies, explaining why. Re-run on every Type
+ * change (alongside applyMarkFieldVisibility, which this runs right next
+ * to) and every Species change, so picking either unlocks the rest of
+ * the form immediately, live, without needing to save/reopen. Save
+ * itself is also blocked while either gate is up, as a second,
  * independent check — not just the fields being disabled — for the
  * same "don't just trust the UI state" reason handleBulkEditSave
  * re-checks rather than assuming its own form only ever describes
  * legal states.
  */
-function applySpeciesGate(formEl, type, species) {
-  const needsGate = typeRequiresSpecies(type) && !species;
-  const promptEl = formEl.querySelector("[data-species-first-prompt]");
-  if (promptEl) promptEl.style.display = needsGate ? "block" : "none";
+function applyMarkEntryGate(formEl, type, species) {
+  const needsType = !type;
+  const needsSpecies = !needsType && typeRequiresSpecies(type) && !species;
+  const typePromptEl = formEl.querySelector("[data-type-first-prompt]");
+  if (typePromptEl) typePromptEl.style.display = needsType ? "block" : "none";
+  const speciesPromptEl = formEl.querySelector("[data-species-first-prompt]");
+  if (speciesPromptEl) speciesPromptEl.style.display = needsSpecies ? "block" : "none";
   formEl.querySelectorAll("input, select, textarea").forEach((el) => {
-    if (el.name === "type" || el.name === "species") return;
-    el.disabled = needsGate;
+    if (el.name === "type") return;
+    if (el.name === "species") {
+      el.disabled = needsType; // Species itself only ever waits on Type, never gates on itself
+      return;
+    }
+    el.disabled = needsType || needsSpecies;
   });
   const wrapper = formEl.parentElement;
   const saveBtn = wrapper ? wrapper.querySelector("[data-mark-save]") : null;
-  if (saveBtn) saveBtn.disabled = needsGate;
+  if (saveBtn) saveBtn.disabled = needsType || needsSpecies;
 }
 
 /**
@@ -1430,13 +1466,23 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
     if (typeSelect) {
       applyMarkFieldVisibility(form, typeSelect.value);
       applyMultiControlModes(form, typeSelect.value);
-      if (speciesSelect) applySpeciesGate(form, typeSelect.value, speciesSelect.value);
+      if (speciesSelect) applyMarkEntryGate(form, typeSelect.value, speciesSelect.value);
       typeSelect.addEventListener("change", () => {
         applyMarkFieldVisibility(form, typeSelect.value);
         applyMultiControlModes(form, typeSelect.value);
         const syncBlockOnType = form.querySelector("[data-species-name-sync-confirm]");
         if (syncBlockOnType) syncBlockOnType.style.display = "none";
-        if (speciesSelect) applySpeciesGate(form, typeSelect.value, speciesSelect.value);
+        if (speciesSelect) applyMarkEntryGate(form, typeSelect.value, speciesSelect.value);
+        // A brand-new mark starts with no Type at all (see startNewMarkEntry), so its own one-time best-effort
+        // historical-conditions fill can't run at creation the way it can for a preset type (Live's "You are
+        // here" quick-entry) — fieldKeysForMarkType("") never includes weatherCondition. Once Type is actually
+        // picked here and turns out to need it, run that same fill now instead; mark._historicalLookupStarted
+        // (set by whichever of the two call sites runs first) stops both from ever firing twice for one mark.
+        if (options.isNew && !mark._historicalLookupStarted && fieldKeysForMarkType(typeSelect.value).includes("weatherCondition")) {
+          mark._historicalLookupStarted = true;
+          const naive = datetimeLocalToNaive(form.querySelector('[name="dateTime"]').value);
+          fillMarkFormFromHistoricalLookup(popupEl, mark.lat, mark.lng, naive);
+        }
       });
     }
 
@@ -1452,7 +1498,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       const syncYes = form.querySelector("[data-species-name-sync-yes]");
       const syncNo = form.querySelector("[data-species-name-sync-no]");
       speciesSelect.addEventListener("change", () => {
-        if (typeSelect) applySpeciesGate(form, typeSelect.value, speciesSelect.value);
+        if (typeSelect) applyMarkEntryGate(form, typeSelect.value, speciesSelect.value);
         const species = speciesSelect.value;
         if (syncBlock) syncBlock.style.display = "none";
         // A Session's Name is never driven by its species (they are its targets).
@@ -1649,8 +1695,13 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       const statusEl = popupEl.querySelector("[data-mark-save-status]");
       const updated = collectMarkFormValues(form, mark);
       // Second, independent check alongside the disabled-button gate
-      // itself (applySpeciesGate) — not just trusting the UI state, the
+      // itself (applyMarkEntryGate) — not just trusting the UI state, the
       // same reasoning handleBulkEditSave's own re-check follows.
+      if (!updated.type) {
+        statusEl.textContent = "Choose a type first.";
+        statusEl.style.color = "#dc2626";
+        return;
+      }
       if (typeRequiresSpecies(updated.type) && !updated.species) {
         statusEl.textContent = "Choose a species first.";
         statusEl.style.color = "#dc2626";
