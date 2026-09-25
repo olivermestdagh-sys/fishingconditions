@@ -72,43 +72,26 @@
  * back to showing an explanatory message instead of an empty map box.
  */
 /**
- * Hand-drawn map pin icons (Kayak / Land based / both) for
- * renderLeafletLocationMap below — built the same way this site already
- * builds its other icons (the windsock/fish markers on the graphs)
- * rather than depending on an icon font or library, since there's no
- * ready-made "kayak" icon in any standard set anyway. A classic teardrop
- * pin with a small circular window near the top holding the actual
- * symbol — kayak: a solid hull with a white paddle line (and blade caps
- * at each end) crossing it, the paddle drawn in white specifically so it
- * reads as a distinct line rather than blending into a same-color hull;
- * land based: a bold bent fishing rod, with the line down to the hook
- * drawn thin/faint so the rod itself — not the line — is the dominant
- * shape, matching which part actually signifies "fishing" at a glance.
+ * Map pin icons (Kayak / Land based / both) for renderLeafletLocationMap
+ * below. A classic teardrop pin with a small circular window near the top
+ * holding the actual symbol — Lucide's own "kayak"/"footprints" icon paths
+ * (see iconPathsFor/typeIconSvg in chart-base.js, the shared source of
+ * truth for this site's Kayak/Land-based icon pair), recentred and scaled
+ * to fit the window.
  */
 const MAP_PIN_STYLES = {
-  kayak: { fill: "#185FA5", light: "#E6F1FB" },
-  landBased: { fill: "#854F0B", light: "#FAEEDA" },
+  kayak: { fill: KAYAK_ICON_COLOR, light: "#E6F1FB" },
+  landBased: { fill: LAND_BASED_ICON_COLOR, light: "#FAEEDA" },
   both: { fill: "#534AB7", light: "#EEEDFE" },
   home: { fill: "#15803D", light: "#DCFCE7" },
 };
 
-function kayakGlyphSvg(color, cx, cy, scale) {
+function typeMapGlyphSvg(type, color, cx, cy, scale) {
   return `
-    <g transform="translate(${cx} ${cy}) scale(${scale})">
-      <path d="M-9 0 Q-6 -3.2 0 -3.2 Q6 -3.2 9 0 Q6 3.2 0 3.2 Q-6 3.2 -9 0 Z" fill="${color}"/>
-      <line x1="-7.5" y1="-6.5" x2="7.5" y2="6.5" stroke="white" stroke-width="1.3" stroke-linecap="round"/>
-      <line x1="-9.3" y1="-8.3" x2="-6" y2="-5" stroke="white" stroke-width="2.6" stroke-linecap="round"/>
-      <line x1="6" y1="5" x2="9.3" y2="8.3" stroke="white" stroke-width="2.6" stroke-linecap="round"/>
-    </g>
-  `;
-}
-
-function rodGlyphSvg(color, cx, cy, scale) {
-  return `
-    <g transform="translate(${cx} ${cy}) scale(${scale})">
-      <path d="M-8 8 L5 -8 Q8 -12 6.5 -7" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      <path d="M6 -7.5 L8.5 6" fill="none" stroke="${color}" stroke-width="0.8" stroke-dasharray="1,1.2" opacity="0.75"/>
-      <circle cx="8.5" cy="7" r="1.4" fill="${color}"/>
+    <g transform="translate(${cx} ${cy}) scale(${scale}) translate(-12 -12)">
+      <g fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        ${iconPathsFor(type).map((d) => `<path d="${d}"/>`).join("")}
+      </g>
     </g>
   `;
 }
@@ -132,9 +115,9 @@ function buildMapPinIconHtml(kind) {
   const { fill, light } = MAP_PIN_STYLES[kind] || MAP_PIN_STYLES.kayak;
   let glyph;
   if (kind === "home") glyph = houseGlyphSvg(fill, 17, 16, 1);
-  else if (kind === "landBased") glyph = rodGlyphSvg(fill, 17, 16, 1);
-  else if (kind === "both") glyph = kayakGlyphSvg(fill, 12.5, 16, 0.62) + rodGlyphSvg(fill, 21.5, 16, 0.62);
-  else glyph = kayakGlyphSvg(fill, 17, 16, 1);
+  else if (kind === "landBased") glyph = typeMapGlyphSvg("Land based", fill, 17, 16, 0.82);
+  else if (kind === "both") glyph = typeMapGlyphSvg("Kayak", fill, 12.5, 16, 0.5) + typeMapGlyphSvg("Land based", fill, 21.5, 16, 0.5);
+  else glyph = typeMapGlyphSvg("Kayak", fill, 17, 16, 0.82);
   return `
     <svg width="34" height="44" viewBox="0 0 34 44" xmlns="http://www.w3.org/2000/svg">
       <path d="M17 2C9.3 2 3 8.3 3 16c0 11 14 26 14 26s14-15 14-26C31 8.3 24.7 2 17 2z" fill="${fill}"/>

@@ -54,37 +54,38 @@ function fmtAxisHourTick(ms) {
   return String(displayHour).padStart(2, "0");
 }
 
+// Lucide's own "kayak" and "footprints" icons (MIT/ISC — unpkg.com/lucide-static), the site's one shared
+// Kayak/Land-based icon pair. Raw <path> d-data only, at Lucide's native 24x24 viewBox — every consumer wraps
+// it in whatever markup IT needs (a standalone <svg> for a chip, or a positioned <g> inside a map pin).
+const KAYAK_ICON_PATHS = [
+  "M18 17a1 1 0 0 0-1 1v1a2 2 0 1 0 2-2z",
+  "M20.97 3.61a.45.45 0 0 0-.58-.58C10.2 6.6 6.6 10.2 3.03 20.39a.45.45 0 0 0 .58.58C13.8 17.4 17.4 13.8 20.97 3.61",
+  "m6.707 6.707 10.586 10.586",
+  "M7 5a2 2 0 1 0-2 2h1a1 1 0 0 0 1-1z",
+];
+const FOOTPRINTS_ICON_PATHS = [
+  "M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z",
+  "M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z",
+  "M16 17h4",
+  "M4 13h4",
+];
+// The two accent colours this distinction uses site-wide — one definition, shared with the map pins
+// (js/map-core.js), so the two can't quietly drift apart in colour again.
+const KAYAK_ICON_COLOR = "#185FA5";
+const LAND_BASED_ICON_COLOR = "#854F0B";
+
+function iconPathsFor(type) {
+  return type === "Kayak" ? KAYAK_ICON_PATHS : FOOTPRINTS_ICON_PATHS;
+}
+
 /**
  * Small self-contained SVG icon for a location type — used on window
- * cards, the location dropdown, and the Live page's type picker. Hand-drawn
- * shapes, no external image assets, consistent with everything else on
- * this site being self-contained. Colored (not just currentColor outlines)
- * for better differentiation at a glance. Tested directly in the browser
- * at real render sizes (14–32px) — kept deliberately simple at small
- * sizes, since more detail (a full cockpit + paddle + reels on the kayak)
- * blurred into an indistinct blob below ~24px in testing.
+ * cards, the location dropdown, and the Live page's type picker.
  */
 function typeIconSvg(type, size) {
   size = size || 16;
-  if (type === "Kayak") {
-    // Elongated hull + two rods angled outward from distinct mounting
-    // points, reading as a fishing kayak rather than a plain kayak.
-    return `<svg viewBox="0 0 32 24" width="${size}" height="${size}">
-      <path d="M2 16 Q9 12.5 16 12.5 Q23 12.5 30 16 Q23 19 16 19 Q9 19 2 16 Z" fill="#f97316" stroke="#c2410c" stroke-width="0.8"/>
-      <line x1="17" y1="14" x2="27" y2="3" stroke="#78350f" stroke-width="1.6" stroke-linecap="round"/>
-      <line x1="15" y1="15" x2="5" y2="4" stroke="#78350f" stroke-width="1.6" stroke-linecap="round"/>
-    </svg>`;
-  }
-  // Land based: a rod holder planted in the ground, a rod at an angle,
-  // reel, and the line arcing out to the water.
-  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}">
-    <path d="M1 20 L9 20" stroke="#a8a29e" stroke-width="2" stroke-linecap="round"/>
-    <path d="M13 20 Q16 18.5 19 20 Q21 21 23 20" fill="none" stroke="#38bdf8" stroke-width="1.3" stroke-linecap="round"/>
-    <rect x="7.3" y="14" width="1.4" height="6.5" rx="0.6" fill="#57534e"/>
-    <line x1="8" y1="15" x2="20" y2="4" stroke="#92400e" stroke-width="1.2" stroke-linecap="round"/>
-    <circle cx="10.3" cy="12.6" r="1" fill="#44403c"/>
-    <path d="M20 4 Q19 10 17.5 19" stroke="#0ea5e9" stroke-width="0.6" fill="none" stroke-dasharray="0.5 1"/>
-  </svg>`;
+  const color = type === "Kayak" ? KAYAK_ICON_COLOR : LAND_BASED_ICON_COLOR;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconPathsFor(type).map((d) => `<path d="${d}"/>`).join("")}</svg>`;
 }
 
 const COMPASS_DEGREES = {
