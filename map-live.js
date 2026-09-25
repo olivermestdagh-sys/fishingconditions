@@ -713,22 +713,15 @@ function liveRenderSummary(loc, rows, now) {
 // isn't yanked away.
 let hasCenteredLiveChartOnNow = false;
 
-// Filtered/sorted/_t-annotated rows for one (name, type) pair — used both for currentLoc (getRowsForCurrentLoc,
-// just below) and for a sibling type's own rows when the dual Location-condition strip needs them
-// (renderForLocation's own locationStrips, right below that).
-function rowsForLocationType(name, type) {
-  return (liveData.rows || [])
-    .filter((r) => r["Location Name"] === name && r["Type"] === type)
-    .map((r) => ({ ...r, _t: parseNaive(r.dateTime) }))
-    .sort((a, b) => a._t - b._t);
-}
-
 // Shared by renderForLocation and the "You are here" quick-mark-entry click
 // handler (liveBuildMap) — both need the exact same filtered/sorted/
 // _t-annotated rows for currentLoc.
 function getRowsForCurrentLoc() {
   if (!currentLoc) return [];
-  return rowsForLocationType(currentLoc.name, currentLoc.type);
+  return (liveData.rows || [])
+    .filter((r) => r["Location Name"] === currentLoc.name && r["Type"] === currentLoc.type)
+    .map((r) => ({ ...r, _t: parseNaive(r.dateTime) }))
+    .sort((a, b) => a._t - b._t);
 }
 
 function renderForLocation(loc) {
@@ -750,20 +743,6 @@ function renderForLocation(loc) {
   }
   frame.style.display = "block";
   emptyState.style.display = "none";
-
-  // Same dual Location-condition-strip treatment as the Map tab's own hover panel (app.js's renderCharts) —
-  // Kayak always first/on top when this location has both types, windowed to the exact same range as the
-  // primary rows so both strips cover the same visible period.
-  let locationStrips = null;
-  const variants = (liveData.locations || []).filter((l) => l.name === loc.name);
-  if (variants.some((v) => v.type === "Kayak") && variants.some((v) => v.type === "Land based")) {
-    const windowedRowsForType = (type) => rowsForLocationType(loc.name, type).filter((r) => r._t >= windowStart && r._t <= windowEnd);
-    locationStrips = [
-      { label: "Kayak", rows: windowedRowsForType("Kayak") },
-      { label: "Land", rows: windowedRowsForType("Land based") },
-    ];
-  }
-  frame.classList.toggle("chart-frame-dual-strip", !!locationStrips);
 
   const sunTimes = (liveData.sunTimes && liveData.sunTimes[loc.name]) || [];
 
@@ -796,7 +775,6 @@ function renderForLocation(loc) {
     // Explicit, not left to auto-fit — guarantees "now" sits at EXACTLY
     // the horizontal midpoint of the canvas, which the mobile centering scroll below depends on.
     xRange: { min: windowStart, max: windowEnd },
-    locationStrips,
   });
 
   if (isMobileDevice && !hasCenteredLiveChartOnNow) {

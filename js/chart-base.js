@@ -406,29 +406,8 @@ function drawBoatIcon(ctx, cx, cy, size) {
   ctx.restore();
 }
 
-/** The exact height of one condition-strip row — the single source of truth both buildConditionStripsPlugin below
- * and renderConditionsChart's own layout.padding.bottom (chart-render.js) read, so the two can never drift apart
- * the way a duplicated magic number eventually would (see this function's own callers' comments for the real,
- * previously-shipped bug that came from exactly that kind of drift). */
-function conditionStripHeight(isMobile) {
-  return isMobile ? 11 : 14;
-}
-
-/**
- * `locationStrips`, when given, REPLACES the single default "Loc" strip with two or more {label, rows} entries —
- * one row per Leaflet condition strip, own colours read from that entry's OWN `rows` (not the outer `rows`
- * argument) via the same "Condition" field. Oliver's own request: a location tracked as both Kayak and Land based
- * shows BOTH ratings on the one graph — Kayak always first/on top — rather than needing a separate graph per type.
- * The caller (renderCharts/app.js, renderForLocation/map-live.js) decides whether to pass this at all (only when a
- * location genuinely has both types) and is responsible for Kayak-first ordering; this plugin just draws whatever
- * list it's handed, in that order.
- *
- * The Fishing Condition strip is drawn from the outer `rows` regardless — it's the same value no matter which
- * type you look at (see compute_fishing_condition, scripts/fetch_conditions.py), so there's never a reason to
- * duplicate IT even when the Location strip splits into two. */
-function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false, locationStrips = null) {
-  const stripHeight = conditionStripHeight(isMobile);
-  const strips = locationStrips || [{ label: "Loc", rows }];
+function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false) {
+  const stripHeight = isMobile ? 11 : 14;
   // 0, not a few px — the two strips sit directly touching now, per
   // feedback that even a small gap between them (and between the plot
   // area and the first strip) read as visually wrong once the actual
@@ -475,11 +454,8 @@ function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false, l
       // "top - 28") already prove this same padding-zone-drawing pattern
       // works, just on the opposite edge.
       const topMarginInPadding = 0; // flush against the plot area — safe now that strips are guaranteed to never overlap data (see the comment above), so there's no longer a reason to leave any gap here
-      // One top position per Location strip (usually 1, occasionally 2 — see locationStrips above), then the
-      // Fishing strip immediately after the last one. Same stacking this always did when there was only ever
-      // exactly one Location strip; this just generalizes "then" to "after however many there are".
-      const locStripTops = strips.map((_, i) => bottom + topMarginInPadding + i * (stripHeight + rowGap));
-      const fishStripTop = locStripTops[locStripTops.length - 1] + stripHeight + rowGap;
+      const locStripTop = bottom + topMarginInPadding;
+      const fishStripTop = locStripTop + stripHeight + rowGap;
 
       // Backing rect flush with the strips themselves (no +/-px overshoot
       // into the plot area or past the last strip) — it used to reach 2px
@@ -490,10 +466,10 @@ function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false, l
       // strips, which is exactly what this was meant to stop.
       ctx.save();
       ctx.fillStyle = "rgba(255, 255, 255, 0.72)";
-      ctx.fillRect(left, locStripTops[0], right - left, fishStripTop + stripHeight - locStripTops[0]);
+      ctx.fillRect(left, locStripTop, right - left, fishStripTop + stripHeight - locStripTop);
       ctx.restore();
 
-      const drawStrip = (stripRows, field, label, stripTop, iconDrawFn) => {
+      const drawStrip = (field, label, stripTop, iconDrawFn) => {
         ctx.save();
         ctx.font = `700 ${isMobile ? 8 : 9}px -apple-system, BlinkMacSystemFont, sans-serif`;
         ctx.fillStyle = "#475569";
@@ -504,11 +480,11 @@ function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false, l
         ctx.fillText(label, left - 4, stripTop + stripHeight / 2);
 
         let iconDrawn = false;
-        for (let i = 0; i < stripRows.length; i++) {
-          const val = stripRows[i][field];
+        for (let i = 0; i < rows.length; i++) {
+          const val = rows[i][field];
           if (val == null) continue;
-          const xStart = xScale.getPixelForValue(stripRows[i]._t);
-          const xEnd = i + 1 < stripRows.length ? xScale.getPixelForValue(stripRows[i + 1]._t) : right;
+          const xStart = xScale.getPixelForValue(rows[i]._t);
+          const xEnd = i + 1 < rows.length ? xScale.getPixelForValue(rows[i + 1]._t) : right;
           const clippedStart = Math.max(xStart, left);
           const clippedEnd = Math.min(xEnd, right);
           if (clippedEnd <= clippedStart) continue;
@@ -523,10 +499,8 @@ function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false, l
         ctx.restore();
       };
 
-      strips.forEach((s, i) => drawStrip(s.rows, "Condition", s.label, locStripTops[i], drawWindsockIcon));
-      // Always the outer `rows` (whichever type is toggled) — Fishing Condition is identical regardless of type,
-      // so there's nothing to split even when strips.length is 2.
-      drawStrip(rows, "Fishing Condition", "Fish", fishStripTop, drawFishIcon);
+      drawStrip("Condition", "Loc", locStripTop, drawWindsockIcon);
+      drawStrip("Fishing Condition", "Fish", fishStripTop, drawFishIcon);
     },
   };
 }

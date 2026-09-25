@@ -1271,7 +1271,7 @@ function buildSessionSpanPlugin(spans) {
   };
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, computedSessionMarkers, dragPreviewState, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes, hideValueAxes = false, overlayHeading = false, extraPlugins = [], locationStrips = null }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, computedSessionMarkers, dragPreviewState, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes, hideValueAxes = false, overlayHeading = false, extraPlugins = [] }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -1453,7 +1453,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       buildSessionSpanPlugin(sessionSpanList),
       buildComputedSessionMarkersPlugin(computedSessionMarkers),
       buildSessionDragPreviewPlugin(dragPreviewState),
-      buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons, locationStrips),
+      buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons),
       buildNowAndThresholdPlugin(rows, minTideHeight, stopFishingTime),
       buildTideExtremaPlugin(rows),
       buildSwellMarkersPlugin(rows),
@@ -1525,26 +1525,28 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       // strip above it, specifically to reclaim the space this padding
       // would otherwise set aside. See buildDayBandPlugin.
       // Bottom padding reserves vertical space for
-      // buildConditionStripsPlugin's condition-strip rows, so the
+      // buildConditionStripsPlugin's two condition-strip rows, so the
       // data lines' own Y-scale clears the strip zone instead of ever
       // rendering into it — same principle as the top padding already
       // reserving space for the day-heading strip above.
       //
-      // EXACT match to what the strips actually use — conditionStripHeight(isMobile) times the number of rows
-      // they'll actually draw: 1 Fishing strip plus 1 Location strip normally, or 2 when locationStrips is passed
-      // (a location tracked as both Kayak and Land based — see buildConditionStripsPlugin's own comment). NOT a
-      // flat safe over-estimate — an earlier version reserved a flat 39px "to be safe" regardless of isMobile, on
-      // the theory that a little extra reserved-but-unused space was harmless. Confirmed directly against the
-      // live rendered canvas (pixel-sampling the actual output) that it wasn't harmless: the strips only ever
-      // filled 28px of that reserved 39, leaving an 11px band of literally transparent canvas between the bottom
-      // of the strips and the edge of the chart frame — a second, genuinely real gap, distinct from (and found
-      // after) the chart-to-strip gap this same reservation was originally built to fix. Kept exact (via the
-      // shared conditionStripHeight helper, not a duplicated magic number) specifically because being exact
-      // matters more than being simple — the CSS values this depends on (.location-hover-panel-chart-frame,
-      // .live-chart-frame, .weeknew-row-chart, and index.html's mobile row-height script) all have matching
-      // desktop/mobile numbers for the same reason, and the two-strip case additionally needs its own
-      // .chart-frame-dual-strip modifier on whichever frame is showing it (app.js/map-live.js toggle it) adding
-      // exactly one more conditionStripHeight(isMobile) on top of the normal frame height.
+      // EXACT match to what the strips actually use — stripHeight*2,
+      // isMobile-aware (28px desktop, 22px mobile) — NOT a flat safe
+      // over-estimate anymore. An earlier version of this reserved a
+      // flat 39px "to be safe" regardless of isMobile, on the theory
+      // that a little extra reserved-but-unused space was harmless.
+      // Confirmed directly against the live rendered canvas (pixel-
+      // sampling the actual output) that it wasn't harmless: the strips
+      // only ever filled 28px of that reserved 39, leaving an 11px band
+      // of literally transparent canvas between the bottom of the
+      // strips and the edge of the chart frame — a second, genuinely
+      // real gap, distinct from (and found after) the chart-to-strip
+      // gap this same reservation was originally built to fix. Kept
+      // isMobile-aware now specifically because being exact matters more
+      // than being simple — the CSS values this depends on
+      // (.location-hover-panel-chart-frame, .live-chart-frame,
+      // .weeknew-row-chart, and index.html's mobile row-height script)
+      // all have matching desktop/mobile numbers now for the same reason.
       //
       // THIS PADDING ALONE ONLY MOVES THE PROBLEM, IT DOESN'T FIX IT: it
       // shrinks the plot area within whatever total canvas height the
@@ -1572,7 +1574,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
       layout: {
         padding: {
           top: overlayHeading ? 0 : showDayHeading || moonPhases ? 40 : 0,
-          bottom: conditionStripHeight(isMobile) * ((locationStrips ? locationStrips.length : 1) + 1),
+          bottom: isMobile ? 22 : 28,
         },
         autoPadding: false,
       },

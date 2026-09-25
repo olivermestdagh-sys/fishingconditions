@@ -689,16 +689,6 @@ main {
   height: 330px;
 }
 
-/* A location tracked as both Kayak and Land based shows a second Location-condition strip (see
-   buildConditionStripsPlugin's own comment, js/chart-base.js) — app.js toggles this class on whenever that's the
-   case for whatever's currently shown, adding exactly one more strip row (14px desktop / 11px mobile below) on
-   top of the normal frame height, matching renderConditionsChart's own layout.padding.bottom for the same case
-   exactly — must always match; see that padding's own comment for why a mismatch here previously shipped as a
-   real bug. */
-.location-hover-panel-chart-frame.chart-frame-dual-strip {
-  height: 344px;
-}
-
 /* Same 900px threshold as isMobileDevice in app.js (Math.min(innerWidth,
    innerHeight) <= 900) — the two aren't literally the same check (this is
    a pure viewport-width media query; that also considers height, and
@@ -715,9 +705,6 @@ main {
 @media (max-width: 900px) {
   .location-hover-panel-chart-frame {
     height: 264px;
-  }
-  .location-hover-panel-chart-frame.chart-frame-dual-strip {
-    height: 275px;
   }
 }
 
@@ -2632,12 +2619,6 @@ main.wide {
   margin-bottom: 4px;
 }
 
-/* Same dual-strip case as .location-hover-panel-chart-frame.chart-frame-dual-strip above — map-live.js toggles
-   this class the same way, one extra strip row on top of the normal height, must match layout.padding.bottom. */
-.live-chart-frame.chart-frame-dual-strip {
-  height: 422px;
-}
-
 /* Deliberately, substantially shorter than desktop on mobile — not just
    the small strip-reservation difference the 402px above was (which
    only ever amounted to a 6px adjustment for accounting reasons, not a
@@ -2653,9 +2634,6 @@ main.wide {
 @media (max-width: 900px) {
   .live-chart-frame {
     height: 260px;
-  }
-  .live-chart-frame.chart-frame-dual-strip {
-    height: 271px;
   }
 }
 

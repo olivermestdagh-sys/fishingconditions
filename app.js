@@ -797,24 +797,6 @@ function renderCharts(rows, loc, sunTimesOverride) {
   frame.style.display = "block";
   emptyState.style.display = "none";
 
-  // Oliver's own request: a location tracked as both Kayak and Land based shows BOTH Location-condition ratings
-  // on this one graph — Kayak always first/on top, regardless of which type is actually toggled (renderLocationTypePills)
-  // for everything else on it (the tide/wind/pressure lines, sessions, the ramp-access line all still follow
-  // whichever type is toggled) — rather than needing to switch to a whole separate graph just to see the other
-  // type's rating. locationStrips stays null (renderConditionsChart's own single-"Loc"-strip default) for a
-  // single-type location, exactly as before.
-  let locationStrips = null;
-  if (loc) {
-    const variants = state.data.locations.filter((l) => l.name === loc.name);
-    if (variants.some((v) => v.type === "Kayak") && variants.some((v) => v.type === "Land based")) {
-      locationStrips = [
-        { label: "Kayak", rows: state.rowsByLocation[locationKey(loc.name, "Kayak")] || [] },
-        { label: "Land", rows: state.rowsByLocation[locationKey(loc.name, "Land based")] || [] },
-      ];
-    }
-  }
-  frame.classList.toggle("chart-frame-dual-strip", !!locationStrips);
-
   // Mobile keeps the wide, un-squashed, horizontally-scrollable graph
   // (explicit pixel width proportional to the real time range — see
   // PIXELS_PER_HOUR above), set BEFORE renderConditionsChart runs, since
@@ -880,7 +862,6 @@ function renderCharts(rows, loc, sunTimesOverride) {
     // wireHoldToShowTooltip in init()) rather than Chart.js's own default
     // tap-triggered one — same reasoning/pattern as Live and Week Ahead.
     disableBuiltinEvents: true,
-    locationStrips,
   });
 }
 
