@@ -135,6 +135,60 @@ function getDiamondMarkerClass() {
   return _diamondMarkerClass;
 }
 
+/** An axis-aligned square (NOT rotated — diamond above is already the
+ * rotated-square look, so this stays visually distinct from it). Same lazy
+ * L.CircleMarker.extend() pattern as getDiamondMarkerClass, see its comment
+ * for why the deferred `.extend()` call matters. */
+let _squareMarkerClass = null;
+function getSquareMarkerClass() {
+  if (!_squareMarkerClass) {
+    _squareMarkerClass = L.CircleMarker.extend({
+      _project() {
+        L.CircleMarker.prototype._project.call(this);
+        if (!this._point) return;
+        const p = this._point;
+        const r = this._radius;
+        this._parts = [[
+          L.point(p.x - r, p.y - r),
+          L.point(p.x + r, p.y - r),
+          L.point(p.x + r, p.y + r),
+          L.point(p.x - r, p.y + r),
+        ]];
+      },
+      _updatePath() {
+        this._renderer._updatePoly(this, true);
+      },
+    });
+  }
+  return _squareMarkerClass;
+}
+
+/** A right-pointing triangle — tip on the right, flat edge on the left, so
+ * it reads as a "play" glyph (Oliver's own description) rather than a
+ * generic up-pointing triangle. Same lazy pattern as the shapes above. */
+let _triangleMarkerClass = null;
+function getTriangleMarkerClass() {
+  if (!_triangleMarkerClass) {
+    _triangleMarkerClass = L.CircleMarker.extend({
+      _project() {
+        L.CircleMarker.prototype._project.call(this);
+        if (!this._point) return;
+        const p = this._point;
+        const r = this._radius;
+        this._parts = [[
+          L.point(p.x - r, p.y - r),
+          L.point(p.x + r, p.y),
+          L.point(p.x - r, p.y + r),
+        ]];
+      },
+      _updatePath() {
+        this._renderer._updatePoly(this, true);
+      },
+    });
+  }
+  return _triangleMarkerClass;
+}
+
 /**
  * A "+" shape (not a diagonal "x") — reads more clearly at this marker's
  * actual on-screen size (a handful of pixels) than a thin diagonal cross
@@ -173,13 +227,20 @@ function getCrossMarkerClass() {
   return _crossMarkerClass;
 }
 
-// Real, confirmed shape/colour names — see gpxSymForMark's own header
-// comment in sync.js for how these were finally nailed down (a real GPX
-// export straight off Oliver's own HDS Live-7, after two earlier guesses
-// that were each wrong in different ways). "square" here is deliberately
-// NOT one of the three — what looked like a separate square on the unit
-// turned out to already be this same "diamond" shape.
-const LOWRANCE_SHAPE_GETTERS = { circle: () => L.CircleMarker, diamond: getDiamondMarkerClass, cross: getCrossMarkerClass };
+// The shapes this site's own map can draw. circle/diamond/cross are also the
+// three real, confirmed Lowrance device icons — see gpxSymForMark's own
+// header comment in sync.js for how those were finally nailed down (a real
+// GPX export straight off Oliver's own HDS Live-7, after two earlier guesses
+// that were each wrong in different ways); on that unit, what looked like a
+// separate square icon turned out to already be this same "diamond" shape.
+// square/triangle below are website-only additions with no Lowrance/Garmin
+// device equivalent — a Mark Shape Format using either still has its own
+// free-text lowranceSym/garminSym fields (locationsadmin.js), just with no
+// real device icon to point them at.
+const LOWRANCE_SHAPE_GETTERS = {
+  circle: () => L.CircleMarker, diamond: getDiamondMarkerClass, cross: getCrossMarkerClass,
+  square: getSquareMarkerClass, triangle: getTriangleMarkerClass,
+};
 
 // Fallback shape per Mark Type, used ONLY when neither the mark's species
 // NOR its own Type has a Mark Shape Format assigned at all (see
@@ -766,12 +827,13 @@ function createMarkClusterIcon(cluster) {
 
 /**
  * One satellite's own little shape, as a plain absolutely-filled div —
- * matches the three real shapes this site draws on the map itself
- * (circle/diamond/cross — see createMarkShapeLayer/getDiamondMarkerClass/
- * getCrossMarkerClass) as closely as CSS reasonably allows, without
- * pulling in an actual SVG or Canvas render for something this small.
- * Diamond is a rotated square; cross uses a clip-path plus-sign polygon
- * (a standard CSS technique — no image/font dependency).
+ * matches the five real shapes this site draws on the map itself
+ * (circle/diamond/cross/square/triangle — see createMarkShapeLayer and the
+ * getXMarkerClass functions above) as closely as CSS reasonably allows,
+ * without pulling in an actual SVG or Canvas render for something this
+ * small. Diamond is a rotated square; cross and triangle use a clip-path
+ * polygon (a standard CSS technique — no image/font dependency); square is
+ * the same box with no rotation, so it stays visually distinct from diamond.
  */
 function markShapeToCssHtml(shape, size, color) {
   const shared = `width:100%;height:100%;background:${color};box-shadow:0 1px 3px rgba(0,0,0,0.45);`;
@@ -780,6 +842,12 @@ function markShapeToCssHtml(shape, size, color) {
   }
   if (shape === "cross") {
     return `<div style="${shared}clip-path:polygon(35% 0%,65% 0%,65% 35%,100% 35%,100% 65%,65% 65%,65% 100%,35% 100%,35% 65%,0% 65%,0% 35%,35% 35%);"></div>`;
+  }
+  if (shape === "square") {
+    return `<div style="${shared}border:1.5px solid #fff;box-sizing:border-box;"></div>`;
+  }
+  if (shape === "triangle") {
+    return `<div style="${shared}clip-path:polygon(0% 0%,100% 50%,0% 100%);"></div>`;
   }
   return `<div style="${shared}border:1.5px solid #fff;border-radius:50%;box-sizing:border-box;"></div>`;
 }

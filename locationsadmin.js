@@ -1492,11 +1492,10 @@ function resolveTileFormatColor(entry) {
 }
 
 // Website icon choices for a Mark Shape Format — matches
-// LOWRANCE_SHAPE_GETTERS/getDiamondMarkerClass/getCrossMarkerClass in
-// charts.js exactly (the only three shapes this site's own map actually
-// knows how to draw), so an icon choice made here can never reference a
-// shape the map has no way to render.
-const MARK_ICON_OPTIONS = ["circle", "diamond", "cross"];
+// LOWRANCE_SHAPE_GETTERS in js/marks-layer.js exactly (the only shapes this
+// site's own map actually knows how to draw), so an icon choice made here
+// can never reference a shape the map has no way to render.
+const MARK_ICON_OPTIONS = ["circle", "diamond", "cross", "square", "triangle"];
 
 /** Sets or clears a pick-list value's `shapeFormat` or `colorFormat`
  * (formatName === "" means "opt out, go back to this value's own
