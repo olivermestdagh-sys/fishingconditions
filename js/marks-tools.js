@@ -1183,7 +1183,7 @@ function startCopiedMarkEntry(map, sourceMark, state) {
   };
   const applicable = fieldKeysForMarkType(draft.type);
   const COPYABLE_KEYS = [
-    "species", "weatherCondition", "tideCondition", "tideExtreme", "waterCondition", "bait", "rig", "rod", "berley",
+    "species", "weatherCondition", "tideCondition", "tideExtreme", "waterCondition", "bait", "rig", "rod", "berley", "fishingMethod", "lure",
     "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed",
     "notes", "released",
   ];
