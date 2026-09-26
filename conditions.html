@@ -134,6 +134,8 @@
         <div id="hoverPanelTypePills" class="location-type-pills"></div>
         <div id="hoverPanelTileInfo" class="loc-tile-info"></div>
         <div id="hoverPanelSessions" class="loc-tile-sessions"></div>
+        <div id="hoverPanelScheduleButtons" class="weeknew-add-buttons-row"></div>
+        <div id="hoverPanelComputedSessions" class="loc-tile-sessions"></div>
         <div id="hoverPanelHint" class="graph-gesture-hint" aria-hidden="true">
           <div>Double-tap to expand</div>
           <div>Hold for 2s to toggle data point</div>
@@ -193,6 +195,9 @@
         </div>
         <p id="timingsStatus" class="footnote" style="margin:0 0 10px;text-align:left;"></p>
 
+        <div id="liveScheduleButtons" class="weeknew-add-buttons-row"></div>
+        <div id="liveComputedSessions" class="loc-tile-sessions"></div>
+
         <section id="typePickerSection" style="display:none;margin:0 0 12px;">
           <div id="typePicker" class="type-photo-row"></div>
         </section>
@@ -211,6 +216,9 @@
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js" integrity="sha384-DhxhYObIMeMNGyAG7iK11OHzBIKyEIeRL0ad1iFPAOwZB8iirUlTT0O/WJJUk8+o" crossorigin="anonymous"></script>
+<!-- Mouse-wheel/pinch zoom on every conditions chart (js/chart-render.js) — Hammer.js is chartjs-plugin-zoom's own pinch-gesture dependency. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js" integrity="sha512-UXumZrZNiOwnTcZSHLOfcTs0aos2MzBWHXOHOuB0J/R44QB0dwY5JgfbvljXcklVf65Gc4El6RjZ+lnwd2az2g==" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.2.0/chartjs-plugin-zoom.min.js" integrity="sha512-FRGbE3pigbYamZnw4+uT4t63+QJOfg4MXSgzPn2t8AWg9ofmFvZ/0Z37ZpCawjfXLBSVX2p2CncsmUH2hzsgJg==" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" integrity="sha384-eXVCORTRlv4FUUgS/xmOyr66XBVraen8ATNLMESp92FKXLAMiKkerixTiBvXriZr" crossorigin="anonymous"></script>
 <script src="js/chart-base.js"></script>

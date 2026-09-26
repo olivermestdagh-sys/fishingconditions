@@ -864,6 +864,341 @@ function persistComputedSessions(list) {
   Prefs.set(COMPUTED_SESSIONS_STORAGE_KEY, JSON.stringify(list));
 }
 
+// Computed (drag-derived) sessions — shared globally across Week Ahead, the
+// Map tab, and Map Live mode: a schedule computed on any one of them is the
+// same underlying record (keyed by locationName+locationType), stored via
+// loadComputedSessions/persistComputedSessions above, so it shows up on all
+// three. Each page loads this once at init (`computedSessions =
+// loadComputedSessions();`) and re-renders whatever it needs to after any
+// change, via the onChanged callback threaded through the functions below.
+let computedSessions = [];
+
+// Which canvas is currently primed for a click-drag-release range
+// selection — null when nothing is armed. Sets/cleared by
+// onArmScheduleClick and wireSessionRangeSelect below; checked by BOTH the
+// tooltip-hold gesture and any drag-to-pan/drag-to-scroll gesture so they
+// can get out of the way while a session calculation is actually being
+// dragged out. Shared globally (not per-page) so only one graph across the
+// whole site is ever armed at a time.
+let armedLocationName = null;
+
+// "fishing" or "onsite" — which of the two arm buttons ("+ Fishing times" /
+// "+ Home to home") was used to arm it. Picked fresh every time by which
+// button is tapped, since which one makes sense can genuinely differ
+// session to session — not a persisted setting.
+let armedMode = null;
+
+/**
+ * Only ever ONE canvas armed at a time, across the whole site — arming a
+ * new one disarms whichever was previously armed first. Tracks the actual
+ * DOM elements (not just the location name) so it can strip the "armed"
+ * visual state cleanly regardless of which page/row/chip they belonged to.
+ * armedRow is whatever element should get the "armed-for-schedule" outline
+ * class — a Week Ahead row, or a Map/Live chart frame — and may be null for
+ * a caller with nothing suitable to outline. armedScrollWrap is whatever
+ * scrollable ancestor should be locked (overflow/touch-action) for the
+ * duration of the drag — Week Ahead's board, Map's/Live's own chart
+ * scroller, or null where there's nothing to lock (e.g. Map's desktop view,
+ * which never scrolls in the first place).
+ */
+let armedRow = null;
+let armedChip = null;
+let armedCanvas = null;
+let armedScrollWrap = null;
+
+function disarmSchedule() {
+  if (armedRow) armedRow.classList.remove("armed-for-schedule");
+  if (armedChip) armedChip.classList.remove("armed");
+  // Restored to "" (the CSS default, effectively "auto") rather than left
+  // at "none" — an unarmed canvas should scroll normally again, same as it
+  // always could before this row/graph was ever armed.
+  if (armedCanvas) armedCanvas.style.touchAction = "";
+  // touch-action alone on the canvas turned out not to be enough on real
+  // phones — Week Ahead's mobile layout rotates the whole <body> -90deg
+  // (the force-landscape trick in index.html), and under that
+  // transform the browser's own touch-action-based scroll-vs-gesture
+  // decision doesn't reliably line up with the canvas the person is
+  // actually touching (same rotated-coordinate-space class of issue as
+  // xValFromEvent's own comment below). Directly locking the scroll
+  // CONTAINER itself — overflow:hidden, which blocks user-driven scrolling
+  // outright regardless of touch-action — is a harder guarantee that
+  // doesn't depend on that logic working correctly. scrollLeft/scrollTop
+  // are preserved while hidden and restored the instant overflow goes back
+  // to auto, so this doesn't visibly move anything, just freezes it in
+  // place for the duration of the drag.
+  if (armedScrollWrap) {
+    armedScrollWrap.style.overflow = "";
+    armedScrollWrap.style.touchAction = "";
+  }
+  armedLocationName = null;
+  armedMode = null;
+  armedRow = null;
+  armedChip = null;
+  armedCanvas = null;
+  armedScrollWrap = null;
+}
+
+/**
+ * Arms a canvas for the click-arm-then-drag flow (see wireSessionRangeSelect
+ * just below for the drag half) — triggered by one of the two "+ Fishing
+ * times" / "+ Home to home" buttons at the top of a location's session
+ * list (mode is just whichever of those two was clicked), NOT by tapping
+ * an individual qualifying-session chip. Arming isn't tied to any
+ * particular session's time window, so there's nothing to scroll to here;
+ * it just readies THIS chart for whatever range the person drags out next,
+ * wherever they're currently looking.
+ *
+ * Sets this canvas's touch-action to "none" as part of arming — on a touch
+ * device, the browser's native "drag on a scrollable area pans it"
+ * behavior is decided from touch-action, not from whether JS later calls
+ * preventDefault(), so this has to happen here (synchronously, at arm
+ * time) rather than only inside wireSessionRangeSelect's own pointerdown
+ * handler, which by itself was consistently losing the very first touch of
+ * a drag to native scrolling.
+ *
+ * getRowChart is a () => chart closure rather than the chart directly,
+ * because at the moment this listener is attached, the chart may not exist
+ * yet on some callers (Week Ahead's deferred/lazy row rendering) — reading
+ * it lazily always gets whatever the CURRENT chart is. row is the element
+ * to add the "armed-for-schedule" outline class to (null if the caller has
+ * nothing suitable — see disarmSchedule's comment). scrollWrap is the
+ * scrollable ancestor to lock for the duration of the drag (null if there
+ * isn't one to worry about).
+ */
+function onArmScheduleClick(loc, row, btn, mode, getRowChart, canvas, scrollWrap) {
+  if (armedLocationName === loc.name && armedMode === mode) {
+    // Tapping the already-armed row's own button again (the SAME mode)
+    // is a cancel, not a re-arm — matches the hold-to-arm tooltip's own
+    // "hold again to turn it back off" convention elsewhere on this site.
+    disarmSchedule();
+    return;
+  }
+  // Covers both "arming a fresh row" and "switching this row's OWN mode"
+  // (tapping the other button while already armed) — either way, start
+  // clean rather than trying to patch the previous armed state in place.
+  disarmSchedule();
+  armedLocationName = loc.name;
+  armedMode = mode;
+  armedRow = row || null;
+  armedChip = btn;
+  armedCanvas = canvas;
+  armedScrollWrap = scrollWrap || null;
+  if (armedRow) armedRow.classList.add("armed-for-schedule");
+  btn.classList.add("armed");
+  canvas.style.touchAction = "none";
+  // See disarmSchedule's comment for why the scroll container itself
+  // (not just this canvas) gets locked — belt-and-suspenders against the
+  // rotated-mobile-layout touch-action quirk.
+  if (armedScrollWrap) {
+    armedScrollWrap.style.overflow = "hidden";
+    armedScrollWrap.style.touchAction = "none";
+  }
+}
+
+/**
+ * The actual click-drag-release gesture, wired to a canvas by whichever
+ * page owns it (Week Ahead wires one per row; Map/Live wire their own
+ * single canvas) — each call only ever acts when armedLocationName matches
+ * THIS canvas's own location, so an unarmed canvas behaves completely
+ * normally (tooltip-hold, board/scroll pan) regardless of some OTHER
+ * canvas being armed elsewhere.
+ *
+ * Should be registered before any tooltip-hold/drag-to-pan listener on the
+ * same canvas so it gets first look at every pointer event:
+ * stopImmediatePropagation() below prevents those from ever seeing that
+ * event once armed. Three gestures (hold-to-tooltip, drag-to-pan,
+ * drag-to-plan) can't coexist as three independent listeners on the same
+ * surface, so arming makes this canvas swallow events for its own gesture
+ * and nothing else gets a turn until it's disarmed again.
+ *
+ * stopImmediatePropagation alone isn't enough on a touch device, though:
+ * mobile browsers decide whether a touch gesture is a native scroll BEFORE
+ * JS's own event handlers necessarily get a meaningful chance to stop it,
+ * based on the touched element's CSS touch-action, not on preventDefault()
+ * alone. onArmScheduleClick sets this canvas's touch-action to "none" the
+ * moment it arms (and disarmSchedule restores it), so a touch-drag here
+ * never gets interpreted as "scroll sideways" in the first place — this is
+ * genuinely necessary in addition to, not instead of, the
+ * stopImmediatePropagation/preventDefault calls below.
+ *
+ * dragPreview is a small mutable {hoverXVal, dragStartXVal} object — see
+ * buildSessionDragPreviewPlugin (js/chart-render.js) for how it's actually
+ * drawn. Owned by whichever caller built this chart, passed in here so
+ * this function can update it live and the plugin can read it live,
+ * without either side needing to know about Chart.js internals or
+ * re-create anything mid-gesture.
+ *
+ * onComputed is called after a completed drag successfully computes and
+ * stores a session (Week Ahead passes renderWeekView, Map/Live pass their
+ * own re-render function) — there's no single shared "redraw everything"
+ * entry point across pages, so each caller supplies its own.
+ *
+ * getChart/getLoc are () => value getters, not fixed values, for the same
+ * reason wireHoldToShowTooltip takes a getChart getter (see its own
+ * comment): Week Ahead builds a fresh canvas+chart per row so a fixed
+ * value would be fine there, but the Map tab and Map Live mode wire this
+ * ONCE against their one persistent <canvas> (destroying/recreating the
+ * Chart.js instance, and switching which location it shows, without ever
+ * replacing the canvas element) — wiring per-render there would stack up
+ * duplicate listeners, exactly like wireHoldToShowTooltip's own case.
+ * Week Ahead's call site just passes trivial getters (() => rowChart,
+ * () => loc) since those never change for that row's lifetime anyway.
+ */
+function wireSessionRangeSelect(getChart, canvas, getLoc, dragPreview, onComputed) {
+  let dragStartXVal = null;
+
+  canvas.addEventListener("pointerdown", (e) => {
+    const loc = getLoc();
+    const chart = getChart();
+    if (!loc || !chart || armedLocationName !== loc.name) return; // not this canvas's turn — let tooltip-hold/board-pan handle it normally
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    dragStartXVal = xValFromEvent(chart, e);
+    dragPreview.dragStartXVal = dragStartXVal;
+    dragPreview.hoverXVal = dragStartXVal;
+    chart.draw();
+  });
+
+  // Fires on every hover, not just while actually dragging (no button
+  // pressed yet) — this is the "hovering over the armed graph shows the
+  // time under the mouse" half of the gesture, before any press has
+  // happened. Once a drag IS in progress (dragStartXVal set), the same
+  // updated hoverXVal is also what the plugin uses as the live end of the
+  // shaded range.
+  canvas.addEventListener("pointermove", (e) => {
+    const loc = getLoc();
+    const chart = getChart();
+    if (!loc || !chart || armedLocationName !== loc.name) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    dragPreview.hoverXVal = xValFromEvent(chart, e);
+    chart.draw();
+  });
+
+  canvas.addEventListener("pointerup", (e) => {
+    const loc = getLoc();
+    const chart = getChart();
+    if (!loc || !chart || armedLocationName !== loc.name || dragStartXVal == null) return;
+    e.stopImmediatePropagation();
+    const dragEndXVal = xValFromEvent(chart, e);
+    const startMs = Math.min(dragStartXVal, dragEndXVal);
+    const endMs = Math.max(dragStartXVal, dragEndXVal);
+    const modeUsed = armedMode; // captured before disarmSchedule() clears it below
+    dragStartXVal = null;
+    dragPreview.dragStartXVal = null;
+    dragPreview.hoverXVal = null;
+    disarmSchedule();
+    // A tap with no real drag (start === end, or too close to mean
+    // anything) isn't a range — treat it as "changed my mind", not as a
+    // zero-length session.
+    if (endMs - startMs < 60000) {
+      chart.draw(); // clears the now-stale preview shading/label
+      return;
+    }
+    computeAndStoreSession(loc, startMs, endMs, modeUsed, onComputed);
+  });
+
+  canvas.addEventListener("pointercancel", () => {
+    dragStartXVal = null;
+    dragPreview.dragStartXVal = null;
+    dragPreview.hoverXVal = null;
+    const chart = getChart();
+    if (chart) chart.draw();
+  });
+}
+
+/**
+ * Resolves live drive time (GPS + Google Routes, above), converts the drag
+ * range into a full schedule for whichever arm button started this drag
+ * ("+ Fishing times" vs "+ Home to home" — see onArmScheduleClick), stores
+ * it, and calls onChanged so the caller can re-render however it needs to.
+ *
+ * Stores BOTH locationName and locationType — a location can have separate
+ * Kayak and Land based entries sharing the same name but different
+ * setUp/timeToSpot/packUp/timeFromSpot values, so a schedule computed for
+ * one literally isn't correct for the other; scoping by name alone would
+ * show the exact same computed markers on both of that location's rows.
+ */
+async function computeAndStoreSession(loc, dragStartMs, dragEndMs, mode, onChanged) {
+  const origin = currentTripOrigin(); // the "From" choice — GPS or one of their homes
+  const driveMinutes = await getTripDriveMinutes(loc.lat, loc.lng, origin);
+  const schedule = computeScheduleFromDragRangeMs(mode, dragStartMs, dragEndMs, loc, driveMinutes);
+  const record = {
+    id: `${loc.name}|${loc.type}|${dragStartMs}|${Date.now()}`,
+    locationName: loc.name,
+    locationType: loc.type,
+    originLabel: tripOriginLabel(origin), // shown on the chip: where its drive time was worked out from
+    ...schedule,
+  };
+  computedSessions.push(record);
+  persistComputedSessions(computedSessions);
+  if (typeof onChanged === "function") onChanged();
+}
+
+function removeComputedSession(id, onChanged) {
+  computedSessions = computedSessions.filter((r) => r.id !== id);
+  persistComputedSessions(computedSessions);
+  if (typeof onChanged === "function") onChanged();
+}
+
+/** The "From" select in front of a location's "+ Fishing times" / "+ Home to home" buttons: GPS or one of the
+ * signed-in person's homes (by town). One choice site-wide — changing any select saves it and updates them all. */
+function buildTripOriginSelect() {
+  const select = document.createElement("select");
+  select.className = "weeknew-trip-origin";
+  select.setAttribute("aria-label", "Work out trip times from");
+  select.title = "Where drive times are worked out from";
+  fillTripOriginSelect(select);
+  select.addEventListener("change", () => {
+    setTripOrigin(select.value);
+    refreshTripOriginSelects();
+  });
+  return select;
+}
+
+function fillTripOriginSelect(select) {
+  const origin = currentTripOrigin();
+  const options = [...myHomes.map((h) => ({ value: h.id, label: homeLabel(h) })), { value: "gps", label: "GPS" }];
+  select.innerHTML = options.map((o) => `<option value="${escapeHtml(o.value)}">From: ${escapeHtml(o.label)}</option>`).join("");
+  select.value = origin;
+}
+
+/** Re-labels and re-selects every From select on the page (after a change, or once home names have been looked up). */
+function refreshTripOriginSelects() {
+  document.querySelectorAll(".weeknew-trip-origin").forEach(fillTripOriginSelect);
+}
+
+/**
+ * One chip for an already-computed (drag-derived) session — full text
+ * breakdown of every schedule instant that resolved (see
+ * computeScheduleFromDragRangeMs; a null field is simply skipped, not
+ * shown as a blank/placeholder), plus a remove button. Deliberately plain
+ * text here rather than icons — the icon+time compact treatment lives on
+ * the chart itself (buildComputedSessionMarkersPlugin); repeating icons in
+ * an already-narrow sidebar/panel column would mean wrapping constantly.
+ *
+ * onChanged is called after the remove button removes this session (same
+ * per-caller re-render callback as computeAndStoreSession above).
+ */
+function buildComputedSessionChip(record, onChanged) {
+  const chip = document.createElement("div");
+  chip.className = "weeknew-computed-session";
+  const fmt = (ms) => fmtNaive(ms, { hour: "2-digit", minute: "2-digit", hour12: false });
+  const parts = SCHEDULE_INSTANT_DISPLAY.filter(({ key }) => record[key] != null).map(({ key, label }) => `${label} ${fmt(record[key])}`);
+  const modeLabel = record.mode === "fishing" ? "Fishing time" : "Home to home";
+  const fromLabel = record.originLabel ? ` · from ${escapeHtml(record.originLabel)}` : "";
+  chip.innerHTML = `
+    <div class="weeknew-session-time">${modeLabel}${fromLabel}</div>
+    <div class="weeknew-computed-session-line">${parts.join(" · ")}</div>
+    ${record.driveTimeUnavailable ? `<div class="weeknew-computed-session-note">Drive time unavailable — showing what could be calculated without it.</div>` : ""}
+    <button type="button" class="weeknew-computed-session-remove" aria-label="Remove this planned session">×</button>
+  `;
+  chip.querySelector(".weeknew-computed-session-remove").addEventListener("click", (e) => {
+    e.stopPropagation();
+    removeComputedSession(record.id, onChanged);
+  });
+  return chip;
+}
 
 /**
  * Replaces Chart.js's default "tap anywhere to show the tooltip" behavior

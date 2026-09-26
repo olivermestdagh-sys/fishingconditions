@@ -8,6 +8,14 @@
 // with day/night banding, so every page renders it identically and bug
 // fixes only need to happen once.
 
+// Registered once, here, rather than per-chart — enables mouse-wheel/pinch
+// zoom (js/chart-render.js's renderConditionsChart, options.plugins.zoom)
+// on every conditions chart site-wide. ChartZoom/Hammer are the UMD
+// globals the cdnjs builds expose (chartjs-plugin-zoom + its own pinch-
+// gesture dependency, hammer.js), loaded just before this script on every
+// page that has this one.
+Chart.register(ChartZoom);
+
 function parseNaive(iso) {
   // Parse "YYYY-MM-DDTHH:MM:SS" (or with a space) into a timezone-neutral ms value,
   // treated as UTC purely for arithmetic/positioning.

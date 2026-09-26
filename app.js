@@ -16,6 +16,13 @@ let state = {
   // needing another network round trip.
   previewRows: null, previewSunTimes: null, previewLoc: null,
   previewShore: null, previewType: "Kayak",
+  // The real, saved location the hover panel is currently showing (null
+  // while showing a preview, or while nothing's open) — read by
+  // wireSessionRangeSelect's getLoc getter (js/week-tools.js), wired once
+  // in init() against this page's one persistent <canvas> (see that call's
+  // own comment for why a getter, not a fixed value). dragPreview is that
+  // same wiring's live drag-in-progress state (buildSessionDragPreviewPlugin).
+  currentLoc: null, dragPreview: { hoverXVal: null, dragStartXVal: null },
 };
 
 // Text hoverPanelEmptyState starts with in the HTML — captured once here so
@@ -102,6 +109,25 @@ async function init() {
     tileIds: ["hoverPanelTileInfo", "hoverPanelSessions", "hoverPanelHint"],
   });
   setupDragToScroll(document.getElementById("locationChartScroll"));
+
+  // Same computed (drag-derived) schedule storage Week Ahead uses
+  // (js/week-tools.js) — a schedule computed here shows up there too, and
+  // vice versa, since both read/write the same locationName+locationType-
+  // keyed records.
+  computedSessions = loadComputedSessions();
+  // Wired once against this page's one persistent <canvas>, same reasoning
+  // as wireHoldToShowTooltip/setupDragToScroll just above — see
+  // wireSessionRangeSelect's own comment (js/week-tools.js) for why it
+  // takes getters here rather than fixed values.
+  wireSessionRangeSelect(
+    () => state.chart,
+    document.getElementById("conditionsChart"),
+    () => state.currentLoc,
+    state.dragPreview,
+    () => {
+      if (state.currentLoc) renderLocation(locationKey(state.currentLoc.name, state.currentLoc.type));
+    }
+  );
 
   liveInitOnce();
   wireMapToolbar();
@@ -320,6 +346,11 @@ function hideLocationHoverPanel() {
   // ever being remembered. Clearing it here makes "nothing open" a real,
   // rememberable state of its own, not just an unsaved transient one.
   Prefs.remove("selectedLocation");
+  // Nothing left to arm a schedule against once the panel's closed — also
+  // clears any leftover "armed-for-schedule" outline/touch-action lock if
+  // this location happened to still be armed (js/week-tools.js).
+  state.currentLoc = null;
+  disarmSchedule();
 }
 
 /**
@@ -401,6 +432,9 @@ async function onLocationMapClickForPreview(lat, lng) {
     document.getElementById("hoverPanelLocationName").textContent = "Preview";
     setLocationEditGear(null); // a preview isn't a saved location — nothing to edit
     renderLocationTypePills(null);
+    state.currentLoc = null;
+    disarmSchedule();
+    renderScheduleControls(null);
     showPreviewNote(false);
     showPreviewControls(false);
     hideAddPermanentButton();
@@ -435,6 +469,14 @@ async function previewLocationOnMap(candidate, clickLat, clickLng) {
   document.getElementById("hoverPanelLocationName").textContent = `${candidate.name} (preview)`;
   setLocationEditGear(null); // a preview isn't a saved location — nothing to edit
     renderLocationTypePills(null);
+  // A preview has no saved setUp/timeToSpot/packUp/timeFromSpot config to
+  // compute a schedule from, so no arm buttons/computed chips for it —
+  // also clears state.currentLoc so wireSessionRangeSelect's getLoc getter
+  // (init()) can't be dragged against whichever REAL location was showing
+  // right before this preview started.
+  state.currentLoc = null;
+  disarmSchedule();
+  renderScheduleControls(null);
   showPreviewNote(true);
   showPreviewControls(false);
   document.getElementById("locationChartFrame").style.display = "none";
@@ -728,6 +770,8 @@ let locationPill = null; // floating name pill + details tile on the graph (moun
 function renderLocation(key) {
   const loc = state.data.locations.find((l) => locationKey(l.name, l.type) === key);
   const rows = state.rowsByLocation[key] || [];
+  state.currentLoc = loc || null; // read live by wireSessionRangeSelect's getLoc getter (init())
+  disarmSchedule(); // a schedule armed for the PREVIOUS location/type no longer applies here (js/week-tools.js)
 
   document.getElementById("hoverPanelLocationName").textContent = loc ? displayNameFor(loc) : "";
   document.getElementById("hoverPanelTileInfo").innerHTML = loc
@@ -758,6 +802,7 @@ function renderLocation(key) {
       : null
   );
   renderTileSessions(rows);
+  renderScheduleControls(loc);
   // A real, saved location's own graph — not a preview (see
   // previewLocationOnMap) — so the preview note/badge/controls never
   // linger onto it if the panel was last showing a preview.
@@ -766,6 +811,43 @@ function renderLocation(key) {
   hideAddPermanentButton();
   state.previewRows = null;
   renderCharts(rows, loc);
+}
+
+/**
+ * The "+ Fishing times" / "+ Home to home" buttons and the list of
+ * already-computed schedules for this location — the same feature Week
+ * Ahead has (js/week-tools.js), added here so a schedule can be planned
+ * straight from the Map tab's own graph, not just from Week Ahead's board.
+ * null (or a preview — see previewLocationOnMap) hides both, same as
+ * renderLocationTypePills/renderTileSessions above.
+ */
+function renderScheduleControls(loc) {
+  const btnsBox = document.getElementById("hoverPanelScheduleButtons");
+  const chipsBox = document.getElementById("hoverPanelComputedSessions");
+  btnsBox.innerHTML = "";
+  chipsBox.innerHTML = "";
+  if (!loc) return;
+
+  btnsBox.appendChild(buildTripOriginSelect());
+  const canvas = document.getElementById("conditionsChart");
+  for (const { mode, label } of [
+    { mode: "fishing", label: "+ Fishing times" },
+    { mode: "onsite", label: "+ Home to home" },
+  ]) {
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "weeknew-add-fishing-times";
+    addBtn.textContent = label;
+    addBtn.addEventListener("click", () => {
+      onArmScheduleClick(loc, document.getElementById("locationChartFrame"), addBtn, mode, () => state.chart, canvas, document.getElementById("locationChartScroll"));
+    });
+    btnsBox.appendChild(addBtn);
+  }
+
+  const thisLocComputed = computedSessions.filter((r) => r.locationName === loc.name && r.locationType === loc.type);
+  for (const record of thisLocComputed) {
+    chipsBox.appendChild(buildComputedSessionChip(record, () => renderLocation(locationKey(loc.name, loc.type))));
+  }
 }
 
 // sunTimesOverride lets previewLocationOnMap supply WillyWeather's own
@@ -849,6 +931,13 @@ function renderCharts(rows, loc, sunTimesOverride) {
     compact: true,
     // Shades the good sessions on the graph, same as Week Ahead does.
     sessionSpan: computeQualifyingSessions(rows).map((s) => ({ from: s.from, to: s.to })),
+    // Flags for any already-computed ("+ Fishing times"/"+ Home to home")
+    // schedule for this location — same computedSessions list Week Ahead
+    // reads (js/week-tools.js). None for a preview (loc null).
+    computedSessionMarkers: loc ? computedSessions.filter((r) => r.locationName === loc.name && r.locationType === loc.type) : [],
+    // Live drag-in-progress preview, read by buildSessionDragPreviewPlugin
+    // — updated by wireSessionRangeSelect (wired once in init()).
+    dragPreviewState: () => state.dragPreview,
     tideOffsetMinutes: loc ? loc.tideOffset : null,
     // The floating panel is a quick-glance view — the °C/km/h axis numbers
     // aren't very readable at this size anyway, and hiding them frees up

@@ -19,6 +19,12 @@ let currentLocationName = null;
 let currentType = null;
 let currentLoc = null;
 let stopFishingTime = null;
+// Live drag-in-progress state for the "+ Fishing times"/"+ Home to home"
+// gesture (js/week-tools.js) — read by buildSessionDragPreviewPlugin,
+// updated by wireSessionRangeSelect (wired once in liveInitOnce, same
+// reasoning as wireHoldToShowTooltip there: this mode reuses one
+// persistent <canvas> across every location switch).
+let liveDragPreview = { hoverXVal: null, dragStartXVal: null };
 // Home address — a single lat/lng set on the Settings tab's map ("Add Home"), loaded from the settings endpoint.
 
 // timeToMinutes comes from js/week-tools.js (identical).
@@ -595,6 +601,7 @@ function hideLiveHoverPanel() {
   // Collapses for next time — closing the panel always means "start fresh,
   // collapsed" the next time it opens.
   setPanelExpanded(false);
+  disarmSchedule(); // clears any leftover "armed-for-schedule" outline/touch-action lock (js/week-tools.js)
 }
 
 function setPanelExpanded(expanded) {
@@ -662,6 +669,7 @@ function selectLocationAndType(name, preferredType) {
   // Pack-up time differs by type, and the reference point itself changes on
   // a different location — any previously calculated line would be stale.
   stopFishingTime = null;
+  disarmSchedule(); // a schedule armed for the PREVIOUS location/type no longer applies here (js/week-tools.js)
   if (isNewLocation) hasCenteredLiveChartOnNow = false; // a genuinely new location is worth re-centering on "now" again; switching type on the SAME spot isn't
   setTimingsStatus("");
 
@@ -724,6 +732,41 @@ function getRowsForCurrentLoc() {
     .sort((a, b) => a._t - b._t);
 }
 
+/**
+ * The "+ Fishing times" / "+ Home to home" buttons and the list of
+ * already-computed schedules for the current location — same feature Week
+ * Ahead and the Map tab have (js/week-tools.js). null hides both (no data
+ * for this location/type yet — see renderForLocation's early return).
+ */
+function renderLiveScheduleControls(loc) {
+  const btnsBox = document.getElementById("liveScheduleButtons");
+  const chipsBox = document.getElementById("liveComputedSessions");
+  btnsBox.innerHTML = "";
+  chipsBox.innerHTML = "";
+  if (!loc) return;
+
+  btnsBox.appendChild(buildTripOriginSelect());
+  const canvas = document.getElementById("liveChart");
+  for (const { mode, label } of [
+    { mode: "fishing", label: "+ Fishing times" },
+    { mode: "onsite", label: "+ Home to home" },
+  ]) {
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "weeknew-add-fishing-times";
+    addBtn.textContent = label;
+    addBtn.addEventListener("click", () => {
+      onArmScheduleClick(loc, document.getElementById("liveChartFrame"), addBtn, mode, () => liveChart, canvas, document.getElementById("liveChartScroll"));
+    });
+    btnsBox.appendChild(addBtn);
+  }
+
+  const thisLocComputed = computedSessions.filter((r) => r.locationName === loc.name && r.locationType === loc.type);
+  for (const record of thisLocComputed) {
+    chipsBox.appendChild(buildComputedSessionChip(record, () => renderForLocation(currentLoc)));
+  }
+}
+
 function renderForLocation(loc) {
   const rows = getRowsForCurrentLoc();
 
@@ -739,6 +782,7 @@ function renderForLocation(loc) {
   if (windowRows.length === 0) {
     frame.style.display = "none";
     emptyState.style.display = "block";
+    renderLiveScheduleControls(null);
     return;
   }
   frame.style.display = "block";
@@ -769,6 +813,14 @@ function renderForLocation(loc) {
     moonPhases: liveData.moonPhases,
     minTideHeight: loc.minTideHeight,
     stopFishingTime,
+    // Flags for any already-computed ("+ Fishing times"/"+ Home to home")
+    // schedule for this location+type — same computedSessions list Week
+    // Ahead and the Map tab read (js/week-tools.js). A separate, additive
+    // feature from stopFishingTime above (the Home By quick line).
+    computedSessionMarkers: computedSessions.filter((r) => r.locationName === loc.name && r.locationType === loc.type),
+    // Live drag-in-progress preview, read by buildSessionDragPreviewPlugin
+    // — updated by wireSessionRangeSelect (wired once in liveInitOnce).
+    dragPreviewState: () => liveDragPreview,
     compact: false,
     disableBuiltinEvents: true, // this mode drives the tooltip itself — see wireHoldToShowTooltip in liveInitOnce
     tideOffsetMinutes: loc.tideOffset,
@@ -776,6 +828,7 @@ function renderForLocation(loc) {
     // the horizontal midpoint of the canvas, which the mobile centering scroll below depends on.
     xRange: { min: windowStart, max: windowEnd },
   });
+  renderLiveScheduleControls(loc);
 
   if (isMobileDevice && !hasCenteredLiveChartOnNow) {
     hasCenteredLiveChartOnNow = true;
@@ -833,6 +886,19 @@ function liveInitOnce() {
   // so wiring per-render would stack up duplicate listeners. The getter
   // always reads whatever the current liveChart is.
   wireHoldToShowTooltip(() => liveChart, document.getElementById("liveChart"));
+  // Same "wired once against a persistent canvas" reasoning as
+  // wireHoldToShowTooltip just above — see wireSessionRangeSelect's own
+  // comment (js/week-tools.js) for why it takes getters here rather than
+  // fixed values.
+  wireSessionRangeSelect(
+    () => liveChart,
+    document.getElementById("liveChart"),
+    () => currentLoc,
+    liveDragPreview,
+    () => {
+      if (currentLoc) renderForLocation(currentLoc);
+    }
+  );
   setupFullscreenToggle("liveChartFrame", { fullscreenOnRotate: false });
 }
 

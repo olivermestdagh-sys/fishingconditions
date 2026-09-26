@@ -1733,6 +1733,26 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
             },
           },
         },
+        // Mouse-wheel/pinch zoom on the time axis only (chartjs-plugin-zoom,
+        // registered once in js/chart-base.js) — no drag-to-zoom and no pan:
+        // a drag on this canvas already means something else everywhere it's
+        // used (session range select, tooltip-hold-to-show, board pan), so
+        // adding a THIRD meaning for the same gesture would conflict with
+        // those rather than add to them. limits.x caps how far either
+        // direction can go at the chart's own [minT, maxT] and a one-hour
+        // minimum span, so reversing the wheel/pinch always lands exactly
+        // back at the default full view — a dedicated "reset zoom" control
+        // isn't needed, and double-tap/double-click are already claimed
+        // by setupFullscreenToggle's own gesture on every one of these
+        // frames, so zoom deliberately doesn't try to reuse that too.
+        zoom: {
+          limits: { x: { min: minT, max: maxT, minRange: 3600000 } },
+          zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            mode: "x",
+          },
+        },
       },
     },
   });

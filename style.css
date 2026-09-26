@@ -2257,6 +2257,17 @@ main.wide {
   outline-offset: -2px;
 }
 
+/* Same "primed for a drag" outline as above, for the Map tab and Map Live
+   mode — those pass their own chart frame directly as onArmScheduleClick's
+   "row" argument (js/week-tools.js), since neither has a per-row wrapper
+   like Week Ahead's .weeknew-row to hang this off of instead. */
+.location-hover-panel-chart-frame.armed-for-schedule,
+.live-chart-frame.armed-for-schedule {
+  cursor: crosshair;
+  outline: 2px solid #0f766e;
+  outline-offset: -2px;
+}
+
 /* A computed (drag-derived) schedule, persisted and shown alongside the
    auto-detected "qualifying session" chips above — deliberately a
    different accent (teal, matching the on-chart markers) so the two kinds
