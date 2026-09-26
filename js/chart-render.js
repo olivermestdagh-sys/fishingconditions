@@ -1733,23 +1733,42 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
             },
           },
         },
-        // Mouse-wheel/pinch zoom on the time axis only (chartjs-plugin-zoom,
+        // Mouse-wheel zoom on the time axis only (chartjs-plugin-zoom,
         // registered once in js/chart-base.js) — no drag-to-zoom and no pan:
         // a drag on this canvas already means something else everywhere it's
         // used (session range select, tooltip-hold-to-show, board pan), so
         // adding a THIRD meaning for the same gesture would conflict with
         // those rather than add to them. limits.x caps how far either
         // direction can go at the chart's own [minT, maxT] and a one-hour
-        // minimum span, so reversing the wheel/pinch always lands exactly
-        // back at the default full view — a dedicated "reset zoom" control
-        // isn't needed, and double-tap/double-click are already claimed
-        // by setupFullscreenToggle's own gesture on every one of these
-        // frames, so zoom deliberately doesn't try to reuse that too.
+        // minimum span, so reversing the wheel always lands exactly back at
+        // the default full view — a dedicated "reset zoom" control isn't
+        // needed, and double-tap/double-click are already claimed by
+        // setupFullscreenToggle's own gesture on every one of these frames,
+        // so zoom deliberately doesn't try to reuse that too.
+        //
+        // Deliberately wheel-only, NOT pinch — REAL BUG, FOUND AND FIXED:
+        // pinch support (chartjs-plugin-zoom + hammer.js) broke one-finger
+        // drag-to-scroll on mobile Week Ahead entirely, even though only
+        // TWO-finger pinch was ever enabled here. The plugin creates a
+        // Hammer.Manager directly on the chart's own <canvas> as soon as
+        // Hammer is loaded on the page AT ALL (see the zoom plugin's own
+        // source — the Manager is created unconditionally once Hammer is
+        // present, only the Pinch recognizer itself is gated on
+        // pinch.enabled), and Hammer's Manager sets that element's CSS
+        // touch-action as soon as it exists — which is enough, on its own,
+        // to stop the browser treating a single-finger touch starting on
+        // that canvas as a native scroll gesture, regardless of whether a
+        // pinch recognizer was ever added to it. Since the canvas covers
+        // almost the entire touchable area of a Week Ahead row, this broke
+        // the whole board's one-finger pan on phones. The only reliable fix
+        // is to never load hammer.js at all (see index.html/conditions.html/
+        // reports.html) — chartjs-plugin-zoom's own code already skips ALL
+        // Hammer/pinch setup gracefully when Hammer isn't present, so wheel
+        // zoom keeps working exactly the same with it gone.
         zoom: {
           limits: { x: { min: minT, max: maxT, minRange: 3600000 } },
           zoom: {
             wheel: { enabled: true },
-            pinch: { enabled: true },
             mode: "x",
           },
         },

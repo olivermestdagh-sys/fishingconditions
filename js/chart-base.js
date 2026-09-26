@@ -8,12 +8,12 @@
 // with day/night banding, so every page renders it identically and bug
 // fixes only need to happen once.
 
-// Registered once, here, rather than per-chart — enables mouse-wheel/pinch
-// zoom (js/chart-render.js's renderConditionsChart, options.plugins.zoom)
-// on every conditions chart site-wide. ChartZoom/Hammer are the UMD
-// globals the cdnjs builds expose (chartjs-plugin-zoom + its own pinch-
-// gesture dependency, hammer.js), loaded just before this script on every
-// page that has this one.
+// Registered once, here, rather than per-chart — enables mouse-wheel zoom
+// (js/chart-render.js's renderConditionsChart, options.plugins.zoom) on
+// every conditions chart site-wide. ChartZoom is the UMD global the cdnjs
+// build exposes, loaded just before this script on every page that has
+// this one. Deliberately wheel-only, not pinch — see the zoom option's own
+// comment (js/chart-render.js) for why hammer.js is never loaded here.
 Chart.register(ChartZoom);
 
 function parseNaive(iso) {

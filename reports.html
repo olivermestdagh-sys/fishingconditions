@@ -143,8 +143,9 @@
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js" integrity="sha384-DhxhYObIMeMNGyAG7iK11OHzBIKyEIeRL0ad1iFPAOwZB8iirUlTT0O/WJJUk8+o" crossorigin="anonymous"></script>
-<!-- Mouse-wheel/pinch zoom on every conditions chart (js/chart-render.js) — Hammer.js is chartjs-plugin-zoom's own pinch-gesture dependency. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js" integrity="sha512-UXumZrZNiOwnTcZSHLOfcTs0aos2MzBWHXOHOuB0J/R44QB0dwY5JgfbvljXcklVf65Gc4El6RjZ+lnwd2az2g==" crossorigin="anonymous"></script>
+<!-- Mouse-wheel zoom on every conditions chart (js/chart-render.js). Deliberately NOT loading hammer.js — that
+     pulls in chartjs-plugin-zoom's pinch support, which broke one-finger drag-to-scroll on mobile Week Ahead
+     even with pinch itself disabled (see the zoom option's own comment, js/chart-render.js, for why). -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.2.0/chartjs-plugin-zoom.min.js" integrity="sha512-FRGbE3pigbYamZnw4+uT4t63+QJOfg4MXSgzPn2t8AWg9ofmFvZ/0Z37ZpCawjfXLBSVX2p2CncsmUH2hzsgJg==" crossorigin="anonymous"></script>
 <script src="js/chart-base.js"></script>
 <script src="js/catch-limits.js"></script>

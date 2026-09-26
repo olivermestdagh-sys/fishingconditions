@@ -19,7 +19,7 @@ const pages = fs.readdirSync(root).filter((f) => f.endsWith(".html"));
 const linter = new Linter({ configType: "flat" });
 
 // Globals provided by libraries loaded from CDNs (not by our own scripts).
-const libraryGlobals = { L: "readonly", Chart: "readonly", ChartZoom: "readonly", Hammer: "readonly" };
+const libraryGlobals = { L: "readonly", Chart: "readonly", ChartZoom: "readonly" };
 
 let failures = 0;
 for (const page of pages) {
