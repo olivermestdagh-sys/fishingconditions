@@ -57,8 +57,8 @@ test("only a Session allows multiple species", () => {
   for (const t of ["Catch", "Mark", "POI", "Fish"]) assert.equal(fns.typeAllowsMultipleSpecies(t), false);
 });
 
-test("A session allows several baits, rigs and rods (and berley), other types do not", () => {
-  for (const k of ["bait", "rig", "rod", "berley", "species"]) {
+test("A session allows several baits, rigs and rods (and berley, fishing method), other types do not", () => {
+  for (const k of ["bait", "rig", "rod", "berley", "fishingMethod", "species"]) {
     for (const t of SESSION_TYPES) assert.equal(fns.typeAllowsMultipleValues(t, k), true, `${t} ${k}`);
     assert.equal(fns.typeAllowsMultipleValues("Catch", k), false, k);
   }

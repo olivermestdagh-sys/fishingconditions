@@ -297,6 +297,7 @@ CREATE TABLE IF NOT EXISTS marks (
   weather_condition TEXT,
   tide_condition TEXT,
   tide_extreme TEXT, -- HHW/LHW/HLW/LLW modifier for tide_condition (added later via ALTER TABLE)
+  fishing_method TEXT, -- comma-joined on Session Start/End (multi-value, like bait/rig/rod/berley); single value on a Catch (added later via ALTER TABLE)
   water_condition TEXT,
   water_depth REAL,
   water_temperature REAL,

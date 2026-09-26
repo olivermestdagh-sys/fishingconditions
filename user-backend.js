@@ -1626,7 +1626,7 @@ async function handleMarkItem(request, url, env, id) {
       `UPDATE marks SET lat=?, lng=?, name=?, type=?, date_time=?, source=?, source_uuid=?, species=?, bait=?, rig=?,
                         rod=?, berley=?, notes=?, size=?, released=?, weather_condition=?, tide_condition=?, tide_extreme=?, water_condition=?,
                         water_depth=?, water_temperature=?, temperature=?, barometer=?, wind_direction=?, wind_speed=?,
-                        session_role=?, session_group_id=?, user_id=?
+                        fishing_method=?, session_role=?, session_group_id=?, user_id=?
        WHERE id = ? AND user_id = ?`
     )
       .bind(
@@ -1634,7 +1634,7 @@ async function handleMarkItem(request, url, env, id) {
         merged.species, merged.bait, merged.rig, merged.rod, merged.berley, merged.notes, merged.size, merged.released,
         merged.weatherCondition, merged.tideCondition, merged.tideExtreme, merged.waterCondition, merged.waterDepth,
         merged.waterTemperature, merged.temperature, merged.barometer, merged.windDirection, merged.windSpeed,
-        merged.sessionRole, merged.sessionGroupId, newOwner,
+        merged.fishingMethod, merged.sessionRole, merged.sessionGroupId, newOwner,
         id, uid
       )
       .run();
@@ -1655,8 +1655,8 @@ async function insertOrUpdateMark(env, id, uid, body, now) {
     `INSERT INTO marks (id, user_id, lat, lng, name, type, date_time, source, source_uuid, species, bait, rig, rod,
                          berley, notes, size, released, weather_condition, tide_condition, tide_extreme, water_condition, water_depth,
                          water_temperature, temperature, barometer, wind_direction, wind_speed,
-                         session_role, session_group_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                         fishing_method, session_role, session_group_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       id, uid, body.lat, body.lng, body.name ?? null, body.type, body.dateTime, body.source ?? "manual",
@@ -1664,7 +1664,7 @@ async function insertOrUpdateMark(env, id, uid, body, now) {
       body.berley ?? null, body.notes ?? null, body.size ?? null, body.released ? 1 : 0, body.weatherCondition ?? null, body.tideCondition ?? null, body.tideExtreme ?? null,
       body.waterCondition ?? null, body.waterDepth ?? null, body.waterTemperature ?? null, body.temperature ?? null,
       body.barometer ?? null, body.windDirection ?? null, body.windSpeed ?? null,
-      body.sessionRole ?? null, body.sessionGroupId ?? null, now
+      body.fishingMethod ?? null, body.sessionRole ?? null, body.sessionGroupId ?? null, now
     )
     .run();
 }
@@ -1690,6 +1690,7 @@ function mergeMarkFields(existing, body) {
     tideCondition: body.tideCondition !== undefined ? body.tideCondition : existing.tide_condition,
     tideExtreme: body.tideExtreme !== undefined ? body.tideExtreme : existing.tide_extreme,
     waterCondition: body.waterCondition !== undefined ? body.waterCondition : existing.water_condition,
+    fishingMethod: body.fishingMethod !== undefined ? body.fishingMethod : existing.fishing_method,
     waterDepth: body.waterDepth !== undefined ? body.waterDepth : existing.water_depth,
     waterTemperature: body.waterTemperature !== undefined ? body.waterTemperature : existing.water_temperature,
     temperature: body.temperature !== undefined ? body.temperature : existing.temperature,
@@ -1723,6 +1724,7 @@ function rowToMark(row) {
     tideCondition: row.tide_condition,
     tideExtreme: row.tide_extreme,
     waterCondition: row.water_condition,
+    fishingMethod: row.fishing_method,
     waterDepth: row.water_depth,
     waterTemperature: row.water_temperature,
     temperature: row.temperature,

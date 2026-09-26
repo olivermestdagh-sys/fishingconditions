@@ -715,6 +715,7 @@ const MARK_LIST_FIELDS = [
   { key: "rig", label: "Rig" },
   { key: "rod", label: "Rod" },
   { key: "berley", label: "Berley" },
+  { key: "fishingMethod", label: "Fishing Method" },
 ];
 
 /**
