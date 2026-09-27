@@ -131,6 +131,7 @@ async function init() {
 
   liveInitOnce();
   wireMapToolbar();
+  wireDeviceToolsMenu();
   initHomesToolbar(); // the house-with-+ button (js/homes.js)
   // A review that was loaded but never finished or cancelled (Import mode,
   // see map-sync.js/sync.js) survives leaving this tab: it's restored here,
@@ -243,6 +244,10 @@ function applyModeChrome() {
   liveToggle.disabled = isImport;
   const deviceTools = document.getElementById("mapDeviceTools");
   deviceTools.style.display = cachedIsAdmin && mapMode === "normal" ? "flex" : "none";
+  if (deviceTools.style.display === "none") {
+    const deviceToolsMenu = deviceTools.querySelector(".device-tools-menu");
+    if (deviceToolsMenu) deviceToolsMenu.classList.remove("open");
+  }
   document.getElementById("btnSessionDefaults").style.display = isLive ? "" : "none";
   document.getElementById("btnLiveSession").style.display = isLive && cachedIsSignedIn ? "" : "none";
   document.getElementById("btnRefreshLiveGps").style.display = isLive ? "" : "none";
@@ -267,6 +272,38 @@ function wireMapToolbar() {
       /* storage blocked — the toggle still works for this visit */
     }
     setMode(on ? "live" : "normal");
+  });
+}
+
+// The Import/Export button in the Map toolbar: a single icon button that
+// opens a floating menu with Import GPX / Export Lowrance / Export Garmin.
+function wireDeviceToolsMenu() {
+  const wrap = document.querySelector(".device-tools-menu");
+  const toggleBtn = document.getElementById("btnDeviceToolsToggle");
+  const menu = document.getElementById("deviceToolsMenu");
+  if (!wrap || !toggleBtn || !menu) return;
+
+  function closeMenu() {
+    wrap.classList.remove("open");
+    toggleBtn.setAttribute("aria-expanded", "false");
+  }
+  function openMenu() {
+    wrap.classList.add("open");
+    toggleBtn.setAttribute("aria-expanded", "true");
+  }
+
+  toggleBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    wrap.classList.contains("open") ? closeMenu() : openMenu();
+  });
+  // Closes on any menu item click, including the Import GPX label — its native
+  // file-picker trigger fires independently and isn't affected by this.
+  menu.addEventListener("click", () => closeMenu());
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".device-tools-menu")) closeMenu();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeMenu();
   });
 }
 

@@ -49,12 +49,20 @@
   <button type="button" id="btnRefreshLiveGps" class="btn-secondary live-quick-btn" style="display:none;" title="Refresh your location" aria-label="Refresh your location">⟳</button>
   <span id="liveGpsStatus" class="live-gps-status" style="display:none;">Finding your location…</span>
   <div id="mapDeviceTools" class="map-device-tools" style="display:none;">
-    <label class="btn-secondary map-import-btn" title="Load a Garmin GPX or Lowrance .usr export to review and import">
-      Import GPX
-      <input type="file" id="syncFileInput" accept=".gpx,.usr" hidden />
-    </label>
-    <button type="button" id="btnExportLowrance" class="btn-secondary" title="Exports only the marks currently visible (filters applied)">Export Lowrance</button>
-    <button type="button" id="btnExportGarmin" class="btn-secondary" title="Exports only the marks currently visible (filters applied)">Export Garmin</button>  </div>
+    <div class="device-tools-menu">
+      <button type="button" id="btnDeviceToolsToggle" class="btn-secondary map-filter-btn" title="Import / Export marks" aria-label="Import / Export marks" aria-haspopup="true" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M9 3L5 6.99h3V14h2V6.99h3L9 3zm7 14.01V10h-2v7.01h-3L15 21l4-3.99h-3z"/></svg>
+      </button>
+      <div id="deviceToolsMenu" class="device-tools-dropdown">
+        <label class="btn-secondary map-import-btn device-tools-menu-item" title="Load a Garmin GPX or Lowrance .usr export to review and import">
+          Import GPX
+          <input type="file" id="syncFileInput" accept=".gpx,.usr" hidden />
+        </label>
+        <button type="button" id="btnExportLowrance" class="btn-secondary device-tools-menu-item" title="Exports only the marks currently visible (filters applied)">Export Lowrance</button>
+        <button type="button" id="btnExportGarmin" class="btn-secondary device-tools-menu-item" title="Exports only the marks currently visible (filters applied)">Export Garmin</button>
+      </div>
+    </div>
+  </div>
   <span id="parseStatus" class="map-toolbar-status"></span>
   <span id="exportStatus" class="map-toolbar-status"></span>
 </div>

@@ -2950,8 +2950,9 @@ main.wide {
   max-width: calc(100vw - 65px);
 }
 
-/* Gear button in the Map toolbar, just after the Live toggle (see initMarkControls) — opens Filters and Colour by.
-   The active-filter count follows the gear as "(5)", and is empty (so hidden) when no filter is on. */
+/* Compact icon-button style shared by the Map toolbar's gear button (Filters and Colour by —
+   the active-filter count follows the gear as "(5)", empty/hidden when no filter is on) and its
+   Import/Export button (see .device-tools-menu below). */
 .map-toolbar .map-filter-btn {
   display: inline-flex;
   align-items: center;
@@ -3637,6 +3638,29 @@ body {
 .map-toolbar .btn-secondary { padding: 4px 10px; font-size: 0.8rem; }
 .map-toolbar-status { font-size: 0.8rem; }
 .map-toolbar-status:empty { display: none; }
+
+/* Import/Export button: a single icon button that opens a small floating menu
+   with the Import GPX / Export Lowrance / Export Garmin actions, modeled on the
+   Week Ahead details popover (.weeknew-row.details-open .weeknew-row-sessions). */
+.device-tools-menu { position: relative; display: inline-flex; }
+.device-tools-dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--white);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+  padding: 6px;
+  z-index: 600;
+  min-width: 170px;
+  max-width: calc(100vw - 24px);
+}
+.device-tools-menu.open .device-tools-dropdown { display: flex; }
+.device-tools-menu-item { justify-content: flex-start; width: 100%; text-align: left; white-space: nowrap; }
 
 .live-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; user-select: none; }
 .live-toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; }
