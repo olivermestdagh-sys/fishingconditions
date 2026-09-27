@@ -51,6 +51,9 @@ let publicLocationGroups = []; // Public's own group names, shown alongside loca
                           // locationGroups directly) must keep seeing ONLY your own groups.
 let publicMarkLists = []; // Public's own Fishing Mark Lists rows, same read-only-badge treatment — see mergedMarkListsFor
 let rigSublistOverrides = new Map(); // rigId -> your own private sub list on a Rig you don't own (Public's) — see saveRigSublistOverride
+let markListFormatOverrides = new Map(); // publicRowId -> {shapeFormat, colorFormat, icon, colorValue} (only the ones you've actually
+                          // overridden) — your own pick of Shape/Colour Format for a Public value, or your own
+                          // redefinition of what a Public Format itself renders as. See mergedMarkListsFor/onSetPublicFormatOverride.
 let currentUser = null;  // result of checkSignedIn() — null if not signed in
                           // at all, regardless of role. Location Groups,
                           // Fishing Mark Lists, and Locations are now
@@ -1272,6 +1275,7 @@ async function loadMarkLists() {
     markLists = [];
     publicMarkLists = [];
     rigSublistOverrides = new Map();
+    markListFormatOverrides = new Map();
     document.getElementById("markListsSection").style.display = "none";
     return;
   }
@@ -1289,6 +1293,7 @@ async function loadMarkLists() {
   if (isAdmin && viewingAsPublic) {
     publicMarkLists = [];
     rigSublistOverrides = new Map();
+    markListFormatOverrides = new Map();
   } else {
     try {
       const res = await fetch(`${USER_BACKEND_URL}/api/marklists?userId=public`, { credentials: "include" });
@@ -1304,6 +1309,13 @@ async function loadMarkLists() {
       console.error("Failed to load your private rig sub lists:", err);
       rigSublistOverrides = new Map();
     }
+    try {
+      const res = await fetch(`${USER_BACKEND_URL}/api/marklist-format-overrides`, { credentials: "include" });
+      markListFormatOverrides = res.ok ? new Map((await res.json()).map((r) => [r.publicRowId, r])) : new Map();
+    } catch (err) {
+      console.error("Failed to load your private format overrides:", err);
+      markListFormatOverrides = new Map();
+    }
   }
   document.getElementById("markListsSection").style.display = "block";
   document.getElementById("markListsSignedOut").style.display = "none";
@@ -1314,11 +1326,27 @@ async function loadMarkLists() {
 /** Own rows for `label` (e.g. "Rig", "Species", "Mark Shape Format"), then Public's own rows for the
  * same field whose value isn't already one of yours (own wins on a name clash — same convention as
  * the Map's own existing Public+own merge, fetchUnionedMarkLists, js/backend.js). Public-sourced rows
- * are spread with `_isPublic: true` so callers can badge them and disable editing. */
+ * are spread with `_isPublic: true` so callers can badge them and disable direct editing, with your own
+ * format override (if any) already overlaid — only the fields you've actually overridden replace
+ * Public's own value, so every existing consumer (the chip's shape/colour <select> "current" value,
+ * resolveTileFormatColor's swatch lookup, renderMarkSubFormatList's icon/colour display) automatically
+ * shows the effective value with no changes needed there. */
 function mergedMarkListsFor(label) {
   const own = markLists.filter((r) => r.field === label);
   const ownValues = new Set(own.map((r) => r.value));
-  const fromPublic = publicMarkLists.filter((r) => r.field === label && !ownValues.has(r.value)).map((r) => ({ ...r, _isPublic: true }));
+  const fromPublic = publicMarkLists
+    .filter((r) => r.field === label && !ownValues.has(r.value))
+    .map((r) => {
+      const override = markListFormatOverrides.get(r.id);
+      const patch = {};
+      if (override) {
+        if (override.shapeFormat != null) patch.shapeFormat = override.shapeFormat;
+        if (override.colorFormat != null) patch.colorFormat = override.colorFormat;
+        if (override.icon != null) patch.icon = override.icon;
+        if (override.colorValue != null) patch.color = override.colorValue;
+      }
+      return { ...r, ...patch, _isPublic: true, _hasFormatOverride: !!override };
+    });
   return [...own, ...fromPublic];
 }
 
@@ -1774,14 +1802,17 @@ function renderMarkLists() {
       const colorNames = mergedMarkListsFor("Mark Colour Format").map((r) => r.value);
       const currentShape = v.shapeFormat || "";
       const currentColor = v.colorFormat || "";
+      // Public rows: the select stays editable, but a pick is YOUR OWN override (data-override-row-id),
+      // never a write to Public's own row — see the change-handler wiring below and onSetPublicFormatOverride.
+      const overrideAttr = isPublic ? ` data-override-row-id="${v.id}"` : "";
       const shapeSelectHtml = `
-        <select class="mark-list-shapeformat-select" data-field-label="${label}" data-value="${escAttr}" title="Mark Shape Format (optional)"${isPublic ? " disabled" : ""}
+        <select class="mark-list-shapeformat-select" data-field-label="${label}" data-value="${escAttr}"${overrideAttr} title="Mark Shape Format (optional)"
           style="font-size:0.7rem;padding:1px 3px;border-radius:5px;border:1px solid var(--grey-200);background:var(--white);color:var(--grey-500);">
           <option value=""${currentShape ? "" : " selected"}>Shape…</option>
           ${shapeNames.map((f) => `<option value="${f.replace(/"/g, "&quot;")}" ${f === currentShape ? "selected" : ""}>${f.replace(/</g, "&lt;")}</option>`).join("")}
         </select>`;
       const colorSelectHtml = `
-        <select class="mark-list-colorformat-select" data-field-label="${label}" data-value="${escAttr}" title="Mark Colour Format (optional)"${isPublic ? " disabled" : ""}
+        <select class="mark-list-colorformat-select" data-field-label="${label}" data-value="${escAttr}"${overrideAttr} title="Mark Colour Format (optional)"
           style="font-size:0.7rem;padding:1px 3px;border-radius:5px;border:1px solid var(--grey-200);background:var(--white);color:var(--grey-500);">
           <option value=""${currentColor ? "" : " selected"}>Colour…</option>
           ${colorNames.map((f) => `<option value="${f.replace(/"/g, "&quot;")}" ${f === currentColor ? "selected" : ""}>${f.replace(/</g, "&lt;")}</option>`).join("")}
@@ -1837,14 +1868,22 @@ function renderMarkLists() {
   });
   container.querySelectorAll(".mark-list-shapeformat-select").forEach((select) => {
     select.addEventListener("change", (e) => {
-      onSetMarkListValueSubFormat(e.currentTarget.dataset.fieldLabel, e.currentTarget.dataset.value, "shapeFormat", e.currentTarget.value);
-      renderMarkLists();
+      const overrideRowId = e.currentTarget.dataset.overrideRowId;
+      if (overrideRowId) onSetPublicFormatOverride(overrideRowId, "shapeFormat", e.currentTarget.value);
+      else {
+        onSetMarkListValueSubFormat(e.currentTarget.dataset.fieldLabel, e.currentTarget.dataset.value, "shapeFormat", e.currentTarget.value);
+        renderMarkLists();
+      }
     });
   });
   container.querySelectorAll(".mark-list-colorformat-select").forEach((select) => {
     select.addEventListener("change", (e) => {
-      onSetMarkListValueSubFormat(e.currentTarget.dataset.fieldLabel, e.currentTarget.dataset.value, "colorFormat", e.currentTarget.value);
-      renderMarkLists();
+      const overrideRowId = e.currentTarget.dataset.overrideRowId;
+      if (overrideRowId) onSetPublicFormatOverride(overrideRowId, "colorFormat", e.currentTarget.value);
+      else {
+        onSetMarkListValueSubFormat(e.currentTarget.dataset.fieldLabel, e.currentTarget.dataset.value, "colorFormat", e.currentTarget.value);
+        renderMarkLists();
+      }
     });
   });
   container.querySelectorAll(".mark-list-limit-input").forEach((input) => {
@@ -2079,14 +2118,23 @@ function renderMarkSubFormatList(fieldName, containerId, newInputId) {
       const escText = f.value.replace(/</g, "&lt;");
       const escLowrance = (f.lowranceSym || "").replace(/"/g, "&quot;");
       const escGarmin = (f.garminSym || "").replace(/"/g, "&quot;");
+      // Public rows: the icon-select/colour-input stay editable, but a pick is YOUR OWN override
+      // (data-override-row-id), never a write to Public's own row — see onSetPublicFormatOverride.
+      // The colour input has no "blank" state (unlike the select's own placeholder option), so it gets
+      // an explicit Reset button once you actually have a colour override on this row.
+      const overrideAttr = isPublic ? ` data-override-row-id="${f.id}"` : "";
+      const resetColorHtml = isPublic && f._hasFormatOverride
+        ? `<button type="button" class="mark-subformat-color-reset" data-override-row-id="${f.id}" title="Reset to Public's colour"
+            style="background:none;border:none;color:var(--grey-500);cursor:pointer;font-size:0.75rem;padding:0 4px;">↺</button>`
+        : "";
       const sitePickerHtml = isShape
-        ? `<select class="mark-subformat-icon-select" data-field="${fieldName}" data-value="${escAttr}" title="Icon shape for this site's own map"${isPublic ? " disabled" : ""}
+        ? `<select class="mark-subformat-icon-select" data-field="${fieldName}" data-value="${escAttr}"${overrideAttr} title="Icon shape for this site's own map"
             style="font-size:0.8rem;padding:4px 6px;border-radius:5px;border:1px solid var(--grey-200);">
             <option value=""${f.icon ? "" : " selected"}>Icon…</option>
             ${MARK_ICON_OPTIONS.map((i) => `<option value="${i}" ${i === f.icon ? "selected" : ""}>${i}</option>`).join("")}
           </select>`
-        : `<input type="color" class="mark-subformat-color-input" data-field="${fieldName}" data-value="${escAttr}" value="${f.color || "#3388ff"}"
-            title="Colour for this site's own map"${isPublic ? " disabled" : ""} style="width:34px;height:30px;padding:0;border:1px solid var(--grey-200);border-radius:5px;" />`;
+        : `<input type="color" class="mark-subformat-color-input" data-field="${fieldName}" data-value="${escAttr}"${overrideAttr} value="${f.color || "#3388ff"}"
+            title="Colour for this site's own map" style="width:34px;height:30px;padding:0;border:1px solid var(--grey-200);border-radius:5px;" />${resetColorHtml}`;
       const removeBtnHtml = isPublic
         ? ""
         : `<button type="button" data-remove-mark-subformat data-field="${fieldName}" data-value="${escAttr}" aria-label="Remove ${escAttr}"
@@ -2113,13 +2161,20 @@ function renderMarkSubFormatList(fieldName, containerId, newInputId) {
   });
   container.querySelectorAll(".mark-subformat-icon-select").forEach((select) => {
     select.addEventListener("change", (e) => {
-      onSetMarkSubFormatProperty(e.currentTarget.dataset.field, e.currentTarget.dataset.value, "icon", e.currentTarget.value);
+      const overrideRowId = e.currentTarget.dataset.overrideRowId;
+      if (overrideRowId) onSetPublicFormatOverride(overrideRowId, "icon", e.currentTarget.value);
+      else onSetMarkSubFormatProperty(e.currentTarget.dataset.field, e.currentTarget.dataset.value, "icon", e.currentTarget.value);
     });
   });
   container.querySelectorAll(".mark-subformat-color-input").forEach((input) => {
     input.addEventListener("change", (e) => {
-      onSetMarkSubFormatProperty(e.currentTarget.dataset.field, e.currentTarget.dataset.value, "color", e.currentTarget.value);
+      const overrideRowId = e.currentTarget.dataset.overrideRowId;
+      if (overrideRowId) onSetPublicFormatOverride(overrideRowId, "colorValue", e.currentTarget.value);
+      else onSetMarkSubFormatProperty(e.currentTarget.dataset.field, e.currentTarget.dataset.value, "color", e.currentTarget.value);
     });
+  });
+  container.querySelectorAll(".mark-subformat-color-reset").forEach((btn) => {
+    btn.addEventListener("click", (e) => onSetPublicFormatOverride(e.currentTarget.dataset.overrideRowId, "colorValue", null));
   });
   // "input" (not "change") for the two free-text sym fields — these have
   // no picker to "close", so onSetMarkSubFormatProperty's own debounce
@@ -2192,6 +2247,34 @@ function onSetMarkSubFormatProperty(fieldName, formatName, prop, value) {
         });
     }, 600)
   );
+}
+
+/** Your own pick of Shape Format / Colour Format for a Public VALUE, or your own redefinition of what
+ * a Public Format DEFINITION itself renders as (icon/colorValue) — `prop` is one of "shapeFormat",
+ * "colorFormat", "icon", "colorValue"; `value` falsy clears just that one field back to Public's own.
+ * Never touches Public's row itself — stored in user_marklist_format_overrides, keyed by rowId. */
+async function onSetPublicFormatOverride(rowId, prop, value) {
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/marklist-format-overrides/${rowId}`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [prop]: value || null }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    const saved = await res.json();
+    if (!saved.shapeFormat && !saved.colorFormat && !saved.icon && !saved.colorValue) markListFormatOverrides.delete(rowId);
+    else markListFormatOverrides.set(rowId, saved);
+    renderMarkLists();
+    setMarkListsSaveStatus("", false);
+  } catch (err) {
+    console.error("Failed to save your format override:", err);
+    setMarkListsSaveStatus("Couldn't save that change: " + err.message, true);
+    renderMarkLists();
+  }
 }
 
 /** One of a Species' limit inputs changed: blank clears it, a number of 0 or more saves it (0 is real, e.g. a no-take

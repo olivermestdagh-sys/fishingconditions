@@ -239,6 +239,13 @@ export default {
       if (rigOverrideMatch) {
         return handleRigSublistOverrideItem(request, url, env, rigOverrideMatch[1]);
       }
+      if (url.pathname === "/api/marklist-format-overrides") {
+        return handleMarklistFormatOverridesCollection(request, url, env);
+      }
+      const formatOverrideMatch = url.pathname.match(/^\/api\/marklist-format-overrides\/([^/]+)$/);
+      if (formatOverrideMatch) {
+        return handleMarklistFormatOverrideItem(request, url, env, formatOverrideMatch[1]);
+      }
       if (url.pathname === "/api/location-quota" && request.method === "GET") {
         const user = await requireUser(request, env);
         if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
@@ -1320,6 +1327,91 @@ async function handleRigSublistOverrideItem(request, url, env, rigId) {
 
   if (request.method === "DELETE") {
     await env.DB.prepare("DELETE FROM user_rig_sublist_overrides WHERE user_id = ? AND rig_id = ?").bind(user.id, rigId).run();
+    return new Response(null, { status: 204, headers: corsHeaders(env) });
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+// ---------------------------------------------------------------------
+// Mark-list format overrides (schema-v2.sql user_marklist_format_overrides)
+// — a normal user's own private pick, on top of a mark-list row they don't
+// own (i.e. one of Public's), of either: which Shape/Colour Format a VALUE
+// row (Species/Bait/Rig/etc) uses, or what a Mark Shape/Colour Format
+// DEFINITION row itself renders as (its icon or hex colour). Same
+// caller-always-own-id reasoning as the Rig sub-list overrides above.
+// ---------------------------------------------------------------------
+
+function rowToFormatOverride(row) {
+  return { publicRowId: row.public_row_id, shapeFormat: row.shape_format, colorFormat: row.color_format, icon: row.icon, colorValue: row.color_value };
+}
+
+async function handleMarklistFormatOverridesCollection(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+
+  if (request.method === "GET") {
+    const { results } = await env.DB.prepare("SELECT * FROM user_marklist_format_overrides WHERE user_id = ?").bind(user.id).all();
+    return jsonResponse(results.map(rowToFormatOverride), 200, env);
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+async function handleMarklistFormatOverrideItem(request, url, env, rowId) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+
+  const target = await env.DB.prepare("SELECT user_id, field FROM user_mark_lists WHERE id = ?").bind(rowId).first();
+  if (!target) return jsonResponse({ error: "Not found." }, 404, env);
+  if (target.user_id === user.id) return jsonResponse({ error: "You own this — edit it directly." }, 400, env);
+
+  if (request.method === "PUT") {
+    const body = await readJsonBody(request);
+    if (!body || typeof body !== "object") return jsonResponse({ error: "Request body must be a JSON object." }, 400, env);
+    const isFormatDef = target.field === "Mark Shape Format" || target.field === "Mark Colour Format";
+    if ((body.shapeFormat !== undefined || body.colorFormat !== undefined) && isFormatDef) {
+      return jsonResponse({ error: "shapeFormat/colorFormat only apply to a value, not a Format definition itself." }, 400, env);
+    }
+    if (body.icon !== undefined && target.field !== "Mark Shape Format") {
+      return jsonResponse({ error: "icon only applies to a Mark Shape Format." }, 400, env);
+    }
+    if (body.colorValue !== undefined && target.field !== "Mark Colour Format") {
+      return jsonResponse({ error: "colorValue only applies to a Mark Colour Format." }, 400, env);
+    }
+    for (const key of ["shapeFormat", "colorFormat", "icon", "colorValue"]) {
+      if (body[key] !== undefined && body[key] !== null && (typeof body[key] !== "string" || !body[key].trim())) {
+        return jsonResponse({ error: `${key} must be a non-empty string, or null to clear it.` }, 400, env);
+      }
+    }
+    const existing = await env.DB.prepare("SELECT * FROM user_marklist_format_overrides WHERE user_id = ? AND public_row_id = ?").bind(user.id, rowId).first();
+    const merged = {
+      shapeFormat: body.shapeFormat !== undefined ? body.shapeFormat : existing?.shape_format ?? null,
+      colorFormat: body.colorFormat !== undefined ? body.colorFormat : existing?.color_format ?? null,
+      icon: body.icon !== undefined ? body.icon : existing?.icon ?? null,
+      colorValue: body.colorValue !== undefined ? body.colorValue : existing?.color_value ?? null,
+    };
+    const isEmpty = !merged.shapeFormat && !merged.colorFormat && !merged.icon && !merged.colorValue;
+    if (isEmpty) {
+      if (existing) await env.DB.prepare("DELETE FROM user_marklist_format_overrides WHERE id = ?").bind(existing.id).run();
+      return jsonResponse({ publicRowId: rowId, shapeFormat: null, colorFormat: null, icon: null, colorValue: null }, 200, env);
+    }
+    if (existing) {
+      await env.DB.prepare("UPDATE user_marklist_format_overrides SET shape_format=?, color_format=?, icon=?, color_value=? WHERE id = ?")
+        .bind(merged.shapeFormat, merged.colorFormat, merged.icon, merged.colorValue, existing.id)
+        .run();
+    } else {
+      await env.DB.prepare(
+        "INSERT INTO user_marklist_format_overrides (id, user_id, public_row_id, shape_format, color_format, icon, color_value, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      )
+        .bind(crypto.randomUUID(), user.id, rowId, merged.shapeFormat, merged.colorFormat, merged.icon, merged.colorValue, Date.now())
+        .run();
+    }
+    return jsonResponse({ publicRowId: rowId, ...merged }, 200, env);
+  }
+
+  if (request.method === "DELETE") {
+    await env.DB.prepare("DELETE FROM user_marklist_format_overrides WHERE user_id = ? AND public_row_id = ?").bind(user.id, rowId).run();
     return new Response(null, { status: 204, headers: corsHeaders(env) });
   }
 

@@ -299,6 +299,25 @@ CREATE TABLE IF NOT EXISTS user_rig_sublist_overrides (
 );
 CREATE INDEX IF NOT EXISTS idx_urso_user ON user_rig_sublist_overrides(user_id);
 
+-- A normal user's own private override on a mark-list row they don't own (i.e. one of Public's) —
+-- lets them pick their own Shape/Colour Format for a Public VALUE (Species/Bait/Rig/etc), or redefine
+-- what a Public FORMAT DEFINITION itself renders as (its icon or hex colour), without touching that
+-- row. Rejected if user_id already owns the row — they'd edit it directly then. Only shape_format/
+-- color_format apply to a value row; only icon applies to a Mark Shape Format row; only color_value
+-- applies to a Mark Colour Format row (enforced server-side, same spirit as the Rig sub-list gate).
+CREATE TABLE IF NOT EXISTS user_marklist_format_overrides (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  public_row_id TEXT NOT NULL REFERENCES user_mark_lists(id) ON DELETE CASCADE,
+  shape_format TEXT,
+  color_format TEXT,
+  icon TEXT,
+  color_value TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE (user_id, public_row_id)
+);
+CREATE INDEX IF NOT EXISTS idx_umfo_user ON user_marklist_format_overrides(user_id);
+
 -- A user's own logged fishing marks (catches and points of interest).
 -- Columns mirror data/marks.json's own record shape field-for-field
 -- (confirmed against the live file, not guessed) rather than normalizing
