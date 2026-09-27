@@ -17,8 +17,7 @@ const lists = [
   { field: "Rod", value: "Light" }, { field: "Rod", value: "Heavy" },
   { field: "Rig", value: "Running sinker" }, { field: "Rig", value: "Paternoster" },
   { field: "Bait", value: "Prawn" }, { field: "Bait", value: "Squid" },
-  { field: "Fishing Method", value: "Bait" }, { field: "Fishing Method", value: "Lure" },
-  { field: "Lure", value: "Soft plastic" }, { field: "Lure", value: "Hard body" },
+  { field: "Fishing Method", value: "Bait" }, { field: "Fishing Method", value: "Jigging" },
 ];
 const options = fns.sessionCardOptions(lists);
 
@@ -26,8 +25,7 @@ test("option lists come from the mark list rows, in order, without duplicates", 
   assert.deepEqual(options.species, ["Bream", "Whiting"]);
   assert.deepEqual(options.rods, ["Light", "Heavy"]);
   assert.deepEqual(options.water, ["Clear"]);
-  assert.deepEqual(options.fishingMethod, ["Bait", "Lure"]);
-  assert.deepEqual(options.lure, ["Soft plastic", "Hard body"]);
+  assert.deepEqual(options.fishingMethod, ["Bait", "Jigging"]);
 });
 
 test("normalise copes with garbage and drops values the lists no longer offer", () => {
@@ -35,26 +33,26 @@ test("normalise copes with garbage and drops values the lists no longer offer", 
   assert.deepEqual(fns.normaliseSessionDefaults(null), fns.emptySessionDefaults());
   assert.deepEqual(fns.normaliseSessionDefaults([1, 2]), fns.emptySessionDefaults());
   const raw = JSON.stringify({
-    species: ["Bream", "Gone", "Bream"], water: "Muddy", berley: "Pilchard", fishingMethod: ["Bait", "Gone"], lure: ["Soft plastic", "Gone"], rods: ["Light", "Retired"],
+    species: ["Bream", "Gone", "Bream"], water: "Muddy", berley: "Pilchard", fishingMethod: ["Bait", "Gone"], rods: ["Light", "Retired"],
     rodSetups: { Light: { rig: "Paternoster", bait: "Nope" }, Retired: { rig: "Paternoster", bait: "Prawn" } },
   });
   assert.deepEqual(fns.normaliseSessionDefaults(raw, options), {
-    species: ["Bream"], water: "", berley: "Pilchard", fishingMethod: ["Bait"], lure: ["Soft plastic"], rods: ["Light"], rodSetups: { Light: { rig: "Paternoster", bait: "" } },
+    species: ["Bream"], water: "", berley: "Pilchard", fishingMethod: ["Bait"], rods: ["Light"], rodSetups: { Light: { rig: "Paternoster", bait: "" } },
   });
   // With no lists loaded nothing is pruned
   assert.deepEqual(fns.normaliseSessionDefaults(raw).species, ["Bream", "Gone"]);
 });
 
-test("session cards: species, water, berley, fishing method, lure, rods, then a rig and a bait card per rod", () => {
+test("session cards: species, water, berley, fishing method, rods, then a rig and a bait card per rod", () => {
   let draft = fns.emptySessionDefaults();
-  assert.deepEqual(fns.buildSessionCardSteps(options, draft).map((s) => s.id), ["species", "water", "berley", "fishingMethod", "lure", "rods"]);
+  assert.deepEqual(fns.buildSessionCardSteps(options, draft).map((s) => s.id), ["species", "water", "berley", "fishingMethod", "rods"]);
   draft = fns.applySessionCardChoice(draft, "rods", "Light");
   draft = fns.applySessionCardChoice(draft, "rods", "Heavy");
   const steps = fns.buildSessionCardSteps(options, draft);
-  assert.deepEqual(steps.map((s) => s.id), ["species", "water", "berley", "fishingMethod", "lure", "rods", "rig:Light", "bait:Light", "rig:Heavy", "bait:Heavy"]);
-  assert.equal(steps[6].title, "Light");
-  assert.deepEqual(steps[6].options, options.rigs);
-  assert.deepEqual(steps[7].options, options.baits);
+  assert.deepEqual(steps.map((s) => s.id), ["species", "water", "berley", "fishingMethod", "rods", "rig:Light", "bait:Light", "rig:Heavy", "bait:Heavy"]);
+  assert.equal(steps[5].title, "Light");
+  assert.deepEqual(steps[5].options, options.rigs);
+  assert.deepEqual(steps[6].options, options.baits);
 });
 
 test("choices: species and rods toggle, water/berley/rig/bait are single and clear on a second press", () => {
@@ -64,13 +62,9 @@ test("choices: species and rods toggle, water/berley/rig/bait are single and cle
   d = fns.applySessionCardChoice(d, "species", "Bream");
   assert.deepEqual(d.species, ["Whiting"]);
   d = fns.applySessionCardChoice(d, "fishingMethod", "Bait");
-  d = fns.applySessionCardChoice(d, "fishingMethod", "Lure");
+  d = fns.applySessionCardChoice(d, "fishingMethod", "Jigging");
   d = fns.applySessionCardChoice(d, "fishingMethod", "Bait");
-  assert.deepEqual(d.fishingMethod, ["Lure"], "fishing method toggles like species");
-  d = fns.applySessionCardChoice(d, "lure", "Soft plastic");
-  d = fns.applySessionCardChoice(d, "lure", "Hard body");
-  d = fns.applySessionCardChoice(d, "lure", "Soft plastic");
-  assert.deepEqual(d.lure, ["Hard body"], "lure toggles like species");
+  assert.deepEqual(d.fishingMethod, ["Jigging"], "fishing method toggles like species");
   d = fns.applySessionCardChoice(d, "water", "Clear");
   assert.equal(d.water, "Clear");
   d = fns.applySessionCardChoice(d, "water", "Clear");
@@ -111,9 +105,9 @@ test("catch cards: only target species and session rods; fall back to the full l
   assert.equal(allTargets[0].dividerAfter, 0, "no divider when every species is a target");
 });
 
-test("catch mark: type Catch, rig/bait from the rod, water/berley/fishing method/lure from the session, size a number", () => {
+test("catch mark: type Catch, rig/bait from the rod, water/berley/fishing method from the session, size a number", () => {
   const defaults = {
-    species: ["Bream"], water: "Clear", berley: "Pilchard", fishingMethod: ["Bait", "Lure"], lure: ["Soft plastic", "Hard body"], rods: ["Light"],
+    species: ["Bream"], water: "Clear", berley: "Pilchard", fishingMethod: ["Bait", "Jigging"], rods: ["Light"],
     rodSetups: { Light: { rig: "Paternoster", bait: "Prawn" } },
   };
   const m = fns.buildCatchFromCards(
@@ -124,13 +118,13 @@ test("catch mark: type Catch, rig/bait from the rod, water/berley/fishing method
   assert.deepEqual(m, {
     id: "m_1", lat: -33.9, lng: 151.2, name: "Bream", type: "Catch", dateTime: "2026-09-22 06:30:00", createdAt: "2026-09-22 06:30:00",
     source: "Manual", species: "Bream", size: 27, rod: "Light", rig: "Paternoster", bait: "Prawn",
-    waterCondition: "Clear", berley: "Pilchard", fishingMethod: "Bait, Lure", lure: "Soft plastic, Hard body", tideCondition: "Running In", tideExtreme: "HHW",
+    waterCondition: "Clear", berley: "Pilchard", fishingMethod: "Bait, Jigging", tideCondition: "Running In", tideExtreme: "HHW",
   });
 });
 
 test("catch mark leaves unset fields off", () => {
   const m = fns.buildCatchFromCards({ id: "m_2", lat: 1, lng: 2, dateTime: "d", species: "Bream", size: "", rod: "" }, fns.emptySessionDefaults(), {});
-  for (const k of ["size", "rod", "rig", "bait", "waterCondition", "berley", "fishingMethod", "lure", "tideCondition", "tideExtreme", "waterDepth"]) assert.ok(!(k in m), k);
+  for (const k of ["size", "rod", "rig", "bait", "waterCondition", "berley", "fishingMethod", "tideCondition", "tideExtreme", "waterDepth"]) assert.ok(!(k in m), k);
 });
 
 test("catch mark carries the last water depth actually saved anywhere, silently (no card of its own)", () => {
@@ -144,11 +138,11 @@ test("catch mark carries the last water depth actually saved anywhere, silently 
 
 test("+ Session answers are preloaded from Session defaults; water depth and the time are the caller's own", () => {
   const defaults = {
-    species: ["Bream", "Whiting"], water: "Clear", berley: "Pilchard", fishingMethod: ["Bait"], lure: ["Soft plastic"], rods: ["Light"],
+    species: ["Bream", "Whiting"], water: "Clear", berley: "Pilchard", fishingMethod: ["Bait"], rods: ["Light"],
     rodSetups: { Light: { rig: "Paternoster", bait: "Prawn" } },
   };
   const a = fns.emptySessionStartAnswers(defaults, "2026-09-22 06:30:00");
-  assert.deepEqual(a, { species: ["Bream", "Whiting"], water: "Clear", fishingMethod: ["Bait"], lure: ["Soft plastic"], rods: ["Light"], berley: "Pilchard", waterDepth: null, dateTime: "2026-09-22 06:30:00" });
+  assert.deepEqual(a, { species: ["Bream", "Whiting"], water: "Clear", fishingMethod: ["Bait"], rods: ["Light"], berley: "Pilchard", waterDepth: null, dateTime: "2026-09-22 06:30:00" });
   // preloaded from the last water depth actually saved anywhere, when there is one
   const withDepth = fns.emptySessionStartAnswers(defaults, "2026-09-22 06:30:00", 3.2);
   assert.equal(withDepth.waterDepth, 3.2);
@@ -162,14 +156,12 @@ test("+ Session hub sub-lines: the current value(s), or Not set", () => {
   assert.equal(fns.sessionStartFieldValueText("species", a), "Not set");
   assert.equal(fns.sessionStartFieldValueText("water", a), "Not set");
   assert.equal(fns.sessionStartFieldValueText("fishingMethod", a), "Not set");
-  assert.equal(fns.sessionStartFieldValueText("lure", a), "Not set");
   assert.equal(fns.sessionStartFieldValueText("waterDepth", a), "Not set");
-  const b = { species: ["Bream", "Whiting"], water: "Clear", fishingMethod: ["Bait", "Lure"], lure: ["Soft plastic", "Hard body"], rods: ["Light", "Heavy"], berley: "", waterDepth: 4.5, dateTime: "d" };
+  const b = { species: ["Bream", "Whiting"], water: "Clear", fishingMethod: ["Bait", "Jigging"], rods: ["Light", "Heavy"], berley: "", waterDepth: 4.5, dateTime: "d" };
   assert.equal(fns.sessionStartFieldValueText("species", b), "Bream, Whiting");
   assert.equal(fns.sessionStartFieldValueText("rods", b), "Light, Heavy");
   assert.equal(fns.sessionStartFieldValueText("water", b), "Clear");
-  assert.equal(fns.sessionStartFieldValueText("fishingMethod", b), "Bait, Lure");
-  assert.equal(fns.sessionStartFieldValueText("lure", b), "Soft plastic, Hard body");
+  assert.equal(fns.sessionStartFieldValueText("fishingMethod", b), "Bait, Jigging");
   assert.equal(fns.sessionStartFieldValueText("berley", b), "Not set");
   assert.equal(fns.sessionStartFieldValueText("waterDepth", b), "4.5 m");
 });
@@ -184,11 +176,8 @@ test("+ Session field choices: species/rods toggle, water/berley are single and 
   a = fns.applySessionStartFieldChoice(a, "rods", "Light");
   assert.deepEqual(a.rods, ["Light"]);
   a = fns.applySessionStartFieldChoice(a, "fishingMethod", "Bait");
-  a = fns.applySessionStartFieldChoice(a, "fishingMethod", "Lure");
-  assert.deepEqual(a.fishingMethod, ["Bait", "Lure"], "fishing method toggles like species/rods");
-  a = fns.applySessionStartFieldChoice(a, "lure", "Soft plastic");
-  a = fns.applySessionStartFieldChoice(a, "lure", "Hard body");
-  assert.deepEqual(a.lure, ["Soft plastic", "Hard body"], "lure toggles like species/rods");
+  a = fns.applySessionStartFieldChoice(a, "fishingMethod", "Jigging");
+  assert.deepEqual(a.fishingMethod, ["Bait", "Jigging"], "fishing method toggles like species/rods");
   a = fns.applySessionStartFieldChoice(a, "water", "Clear");
   assert.equal(a.water, "Clear");
   a = fns.applySessionStartFieldChoice(a, "water", "Clear");
@@ -203,7 +192,7 @@ test("Session Start mark: name from sessionNumber, multi-values comma-joined, ri
   const m = fns.buildSessionStartFromCards(
     {
       id: "m_1", lat: -33.9, lng: 151.2, dateTime: "2026-09-22 06:30:00", createdAt: "2026-09-22 06:31:05", sessionGroupId: "g_1",
-      species: ["Bream", "Whiting"], water: "Clear", fishingMethod: ["Bait", "Lure"], lure: ["Soft plastic", "Hard body"], rods: ["Light", "Heavy"], berley: "Pilchard", waterDepth: 4.5, sessionNumber: 2,
+      species: ["Bream", "Whiting"], water: "Clear", fishingMethod: ["Bait", "Jigging"], rods: ["Light", "Heavy"], berley: "Pilchard", waterDepth: 4.5, sessionNumber: 2,
     },
     defaults,
     { tideCondition: "Running In", tideExtreme: "HHW" }
@@ -211,7 +200,7 @@ test("Session Start mark: name from sessionNumber, multi-values comma-joined, ri
   assert.deepEqual(m, {
     id: "m_1", lat: -33.9, lng: 151.2, name: "Session 2 Start", type: "Session Start", dateTime: "2026-09-22 06:30:00",
     createdAt: "2026-09-22 06:31:05", source: "Manual", sessionRole: "start", sessionGroupId: "g_1",
-    species: "Bream, Whiting", waterCondition: "Clear", berley: "Pilchard", fishingMethod: "Bait, Lure", lure: "Soft plastic, Hard body", waterDepth: 4.5,
+    species: "Bream, Whiting", waterCondition: "Clear", berley: "Pilchard", fishingMethod: "Bait, Jigging", waterDepth: 4.5,
     rod: "Light, Heavy", rig: "Paternoster, Running sinker", bait: "Prawn", // the two rods' baits are the same: joined without a duplicate
     tideCondition: "Running In", tideExtreme: "HHW",
   });
@@ -230,7 +219,7 @@ test("Session End mark: closes out a Start with the same field values, its own i
   const startMark = {
     id: "start_1", lat: -33.9, lng: 151.2, name: "Session 1 Start", type: "Session Start", dateTime: "2026-09-22 06:00:00",
     createdAt: "2026-09-22 06:00:00", source: "Manual", sessionRole: "start", sessionGroupId: "g_1",
-    species: "Bream, Whiting", waterCondition: "Clear", berley: "Pilchard", fishingMethod: "Bait, Lure", lure: "Soft plastic, Hard body", waterDepth: 4.5,
+    species: "Bream, Whiting", waterCondition: "Clear", berley: "Pilchard", fishingMethod: "Bait, Jigging", waterDepth: 4.5,
     rod: "Light, Heavy", rig: "Paternoster, Running sinker", bait: "Prawn", tideCondition: "Running In", tideExtreme: "HHW",
   };
   const m = fns.buildSessionEndFromStart(
@@ -241,7 +230,7 @@ test("Session End mark: closes out a Start with the same field values, its own i
   assert.deepEqual(m, {
     id: "end_1", lat: -33.95, lng: 151.25, name: "Session 1 End", type: "Session End", dateTime: "2026-09-22 09:15:00",
     createdAt: "2026-09-22 09:15:05", source: "Manual", sessionRole: "end", sessionGroupId: "g_1",
-    species: "Bream, Whiting", waterCondition: "Clear", berley: "Pilchard", fishingMethod: "Bait, Lure", lure: "Soft plastic, Hard body", waterDepth: 4.5,
+    species: "Bream, Whiting", waterCondition: "Clear", berley: "Pilchard", fishingMethod: "Bait, Jigging", waterDepth: 4.5,
     rod: "Light, Heavy", rig: "Paternoster, Running sinker", bait: "Prawn", tideCondition: "Running In", tideExtreme: "HHW",
   });
 });

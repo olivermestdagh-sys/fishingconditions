@@ -287,7 +287,7 @@ CREATE INDEX IF NOT EXISTS idx_urs_user ON user_rod_setups(user_id);
 
 -- A named bundle of Rod Setups plus the rest of what Session Defaults (Map tab, js/live-cards.js
 -- liveSessionDefaults) controls outside a per-rod rig/bait pick — Species, Water Condition, Berley,
--- Fishing Method, Lure. rod_setup_ids/species/fishing_method/lure are JSON arrays of strings;
+-- Fishing Method. rod_setup_ids/species/fishing_method are JSON arrays of strings;
 -- rod_setup_ids is not a real FK (SQLite can't constrain inside a JSON blob) — same "keeps working even
 -- if referenced later" tolerance already used for user_rod_setups.rod/rig themselves.
 CREATE TABLE IF NOT EXISTS user_trip_setups (
@@ -299,7 +299,6 @@ CREATE TABLE IF NOT EXISTS user_trip_setups (
   water TEXT,
   berley TEXT,
   fishing_method TEXT,
-  lure TEXT,
   created_at INTEGER NOT NULL,
   UNIQUE (user_id, name)
 );
@@ -371,7 +370,6 @@ CREATE TABLE IF NOT EXISTS marks (
   tide_condition TEXT,
   tide_extreme TEXT, -- HHW/LHW/HLW/LLW modifier for tide_condition (added later via ALTER TABLE)
   fishing_method TEXT, -- comma-joined on Session Start/End (multi-value, like bait/rig/rod/berley); single value on a Catch (added later via ALTER TABLE)
-  lure TEXT, -- comma-joined on Session Start/End (multi-value, like fishing_method); single value on a Catch (added later via ALTER TABLE)
   water_condition TEXT,
   water_depth REAL,
   water_temperature REAL,

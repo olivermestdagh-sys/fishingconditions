@@ -1292,8 +1292,8 @@ async function handleRodSetupItem(request, url, env, id) {
 // Trip Setups (schema-v2.sql user_trip_setups) — a named bundle of Rod
 // Setups plus everything else Session Defaults (Map tab, js/live-cards.js
 // liveSessionDefaults) controls outside a per-rod rig/bait pick: Species,
-// Water Condition, Berley, Fishing Method, Lure. rod_setup_ids/species/
-// fishing_method/lure are all JSON arrays of strings, reusing parseSubList
+// Water Condition, Berley, Fishing Method. rod_setup_ids/species/
+// fishing_method are all JSON arrays of strings, reusing parseSubList
 // (a generic "JSON array of strings" parser despite its name). Available to
 // any signed-in user, same as Rod Setups — not merged with Public's data.
 // ---------------------------------------------------------------------
@@ -1307,12 +1307,11 @@ function rowToTripSetup(row) {
     water: row.water,
     berley: row.berley,
     fishingMethod: parseSubList(row.fishing_method),
-    lure: parseSubList(row.lure),
   };
 }
 
 function validateTripSetupInput(body) {
-  for (const key of ["rodSetupIds", "species", "fishingMethod", "lure"]) {
+  for (const key of ["rodSetupIds", "species", "fishingMethod"]) {
     if (body[key] !== undefined && (!Array.isArray(body[key]) || body[key].some((v) => typeof v !== "string" || !v.trim()))) {
       return `${key} must be a list of option names.`;
     }
@@ -1348,9 +1347,9 @@ async function handleTripSetupsCollection(request, url, env) {
     const arr = (v) => (v && v.length ? JSON.stringify(v) : null);
     try {
       await env.DB.prepare(
-        "INSERT INTO user_trip_setups (id, user_id, name, rod_setup_ids, species, water, berley, fishing_method, lure, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO user_trip_setups (id, user_id, name, rod_setup_ids, species, water, berley, fishing_method, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
       )
-        .bind(id, uid, body.name, arr(body.rodSetupIds), arr(body.species), body.water ?? null, body.berley ?? null, arr(body.fishingMethod), arr(body.lure), Date.now())
+        .bind(id, uid, body.name, arr(body.rodSetupIds), arr(body.species), body.water ?? null, body.berley ?? null, arr(body.fishingMethod), Date.now())
         .run();
     } catch (err) {
       return jsonResponse({ error: `You already have a trip setup named "${body.name}".` }, 409, env);
@@ -1386,12 +1385,11 @@ async function handleTripSetupItem(request, url, env, id) {
       water: body.water !== undefined ? body.water : existing.water,
       berley: body.berley !== undefined ? body.berley : existing.berley,
       fishingMethod: body.fishingMethod !== undefined ? body.fishingMethod : parseSubList(existing.fishing_method),
-      lure: body.lure !== undefined ? body.lure : parseSubList(existing.lure),
     };
     const arr = (v) => (v && v.length ? JSON.stringify(v) : null);
     try {
-      await env.DB.prepare("UPDATE user_trip_setups SET name=?, rod_setup_ids=?, species=?, water=?, berley=?, fishing_method=?, lure=? WHERE id = ? AND user_id = ?")
-        .bind(merged.name, arr(merged.rodSetupIds), arr(merged.species), merged.water ?? null, merged.berley ?? null, arr(merged.fishingMethod), arr(merged.lure), id, uid)
+      await env.DB.prepare("UPDATE user_trip_setups SET name=?, rod_setup_ids=?, species=?, water=?, berley=?, fishing_method=? WHERE id = ? AND user_id = ?")
+        .bind(merged.name, arr(merged.rodSetupIds), arr(merged.species), merged.water ?? null, merged.berley ?? null, arr(merged.fishingMethod), id, uid)
         .run();
     } catch (err) {
       return jsonResponse({ error: `You already have a trip setup named "${merged.name}".` }, 409, env);
@@ -2037,7 +2035,7 @@ async function handleMarkItem(request, url, env, id) {
       `UPDATE marks SET lat=?, lng=?, name=?, type=?, date_time=?, source=?, source_uuid=?, species=?, bait=?, rig=?,
                         rod=?, berley=?, notes=?, size=?, released=?, weather_condition=?, tide_condition=?, tide_extreme=?, water_condition=?,
                         water_depth=?, water_temperature=?, temperature=?, barometer=?, wind_direction=?, wind_speed=?,
-                        fishing_method=?, lure=?, session_role=?, session_group_id=?, user_id=?
+                        fishing_method=?, session_role=?, session_group_id=?, user_id=?
        WHERE id = ? AND user_id = ?`
     )
       .bind(
@@ -2045,7 +2043,7 @@ async function handleMarkItem(request, url, env, id) {
         merged.species, merged.bait, merged.rig, merged.rod, merged.berley, merged.notes, merged.size, merged.released,
         merged.weatherCondition, merged.tideCondition, merged.tideExtreme, merged.waterCondition, merged.waterDepth,
         merged.waterTemperature, merged.temperature, merged.barometer, merged.windDirection, merged.windSpeed,
-        merged.fishingMethod, merged.lure, merged.sessionRole, merged.sessionGroupId, newOwner,
+        merged.fishingMethod, merged.sessionRole, merged.sessionGroupId, newOwner,
         id, uid
       )
       .run();
@@ -2066,8 +2064,8 @@ async function insertOrUpdateMark(env, id, uid, body, now) {
     `INSERT INTO marks (id, user_id, lat, lng, name, type, date_time, source, source_uuid, species, bait, rig, rod,
                          berley, notes, size, released, weather_condition, tide_condition, tide_extreme, water_condition, water_depth,
                          water_temperature, temperature, barometer, wind_direction, wind_speed,
-                         fishing_method, lure, session_role, session_group_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                         fishing_method, session_role, session_group_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       id, uid, body.lat, body.lng, body.name ?? null, body.type, body.dateTime, body.source ?? "manual",
@@ -2075,7 +2073,7 @@ async function insertOrUpdateMark(env, id, uid, body, now) {
       body.berley ?? null, body.notes ?? null, body.size ?? null, body.released ? 1 : 0, body.weatherCondition ?? null, body.tideCondition ?? null, body.tideExtreme ?? null,
       body.waterCondition ?? null, body.waterDepth ?? null, body.waterTemperature ?? null, body.temperature ?? null,
       body.barometer ?? null, body.windDirection ?? null, body.windSpeed ?? null,
-      body.fishingMethod ?? null, body.lure ?? null, body.sessionRole ?? null, body.sessionGroupId ?? null, now
+      body.fishingMethod ?? null, body.sessionRole ?? null, body.sessionGroupId ?? null, now
     )
     .run();
 }
@@ -2102,7 +2100,6 @@ function mergeMarkFields(existing, body) {
     tideExtreme: body.tideExtreme !== undefined ? body.tideExtreme : existing.tide_extreme,
     waterCondition: body.waterCondition !== undefined ? body.waterCondition : existing.water_condition,
     fishingMethod: body.fishingMethod !== undefined ? body.fishingMethod : existing.fishing_method,
-    lure: body.lure !== undefined ? body.lure : existing.lure,
     waterDepth: body.waterDepth !== undefined ? body.waterDepth : existing.water_depth,
     waterTemperature: body.waterTemperature !== undefined ? body.waterTemperature : existing.water_temperature,
     temperature: body.temperature !== undefined ? body.temperature : existing.temperature,
@@ -2137,7 +2134,6 @@ function rowToMark(row) {
     tideExtreme: row.tide_extreme,
     waterCondition: row.water_condition,
     fishingMethod: row.fishing_method,
-    lure: row.lure,
     waterDepth: row.water_depth,
     waterTemperature: row.water_temperature,
     temperature: row.temperature,

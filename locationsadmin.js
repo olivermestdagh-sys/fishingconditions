@@ -1035,11 +1035,11 @@ function setRodSetupsStatus(text, isError) {
 // Trips > Trip Setups (user_trip_setups) — a named bundle of Rod Setups
 // plus everything else Session Defaults (Map tab, js/live-cards.js
 // liveSessionDefaults) controls outside a per-rod rig/bait pick: Species,
-// Water Condition, Berley, Fishing Method, Lure. Available to any signed-in
+// Water Condition, Berley, Fishing Method. Available to any signed-in
 // user, same as Rod Setups — not merged with Public's data (this is
 // personal, unlike Fishing Mark Lists/Location Groups).
 // ---------------------------------------------------------------------
-let tripSetups = []; // [{id, name, rodSetupIds, species, water, berley, fishingMethod, lure}]
+let tripSetups = []; // [{id, name, rodSetupIds, species, water, berley, fishingMethod}]
 
 async function loadTripSetups() {
   if (!currentUser) {
@@ -1065,7 +1065,6 @@ function renderTripSetupsList() {
   const waterOptions = mergedMarkListsFor("Water Condition").map((r) => r.value);
   const berleyOptions = mergedMarkListsFor("Berley").map((r) => r.value);
   const fishingMethodOptions = mergedMarkListsFor("Fishing Method").map((r) => r.value);
-  const lureOptions = mergedMarkListsFor("Lure").map((r) => r.value);
   const singleOptionsHtml = (options, current) =>
     `<option value="">—</option>${options.map((o) => `<option value="${escapeHtml(o)}"${o === current ? " selected" : ""}>${escapeHtml(o)}</option>`).join("")}`;
   const multiOptionsHtml = (options, current) =>
@@ -1106,7 +1105,6 @@ function renderTripSetupsList() {
         <select data-trip-berley="${idx}" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);">${singleOptionsHtml(berleyOptions, setup.berley)}</select>
       </div>
       ${multiSelectHtml("data-trip-fishingmethod", idx, fishingMethodOptions, setup.fishingMethod, "Fishing Method")}
-      ${multiSelectHtml("data-trip-lure", idx, lureOptions, setup.lure, "Lure")}
       <button type="button" data-remove-trip="${idx}" class="btn-secondary">Remove</button>
     `;
     list.appendChild(row);
@@ -1137,12 +1135,6 @@ function renderTripSetupsList() {
     select.addEventListener("change", (e) => {
       const chosen = Array.from(e.currentTarget.selectedOptions).map((o) => o.value);
       onTripSetupFieldChange(Number(e.currentTarget.dataset.tripFishingmethod), "fishingMethod", chosen);
-    });
-  });
-  list.querySelectorAll("[data-trip-lure]").forEach((select) => {
-    select.addEventListener("change", (e) => {
-      const chosen = Array.from(e.currentTarget.selectedOptions).map((o) => o.value);
-      onTripSetupFieldChange(Number(e.currentTarget.dataset.tripLure), "lure", chosen);
     });
   });
   list.querySelectorAll("[data-remove-trip]").forEach((btn) => {
@@ -2183,7 +2175,7 @@ function renderMarkLists() {
   // Rod/Rig options (and a rig's own sub list) just changed — keep Trips > Rod Setups in sync.
   renderNewRodSetupSelects();
   renderRodSetupsList();
-  // Species/Water/Berley/Fishing Method/Lure options just changed — keep Trip Setups in sync too.
+  // Species/Water/Berley/Fishing Method options just changed — keep Trip Setups in sync too.
   renderTripSetupsList();
 }
 

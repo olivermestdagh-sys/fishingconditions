@@ -504,7 +504,6 @@ async function saveLiveSession(options, answers, defaults, gpsPromise) {
     species: answers.species,
     water: answers.water,
     fishingMethod: answers.fishingMethod,
-    lure: answers.lure,
     rods: answers.rods,
     berley: answers.berley,
     waterDepth: answers.waterDepth,

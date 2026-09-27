@@ -15,7 +15,7 @@
 const LIVE_SESSION_DEFAULTS_KEY = "liveSessionDefaults";
 
 function emptySessionDefaults() {
-  return { species: [], water: "", berley: "", fishingMethod: [], lure: [], rods: [], rodSetups: {} };
+  return { species: [], water: "", berley: "", fishingMethod: [], rods: [], rodSetups: {} };
 }
 
 const uniqueStrings = (list) => [...new Set((Array.isArray(list) ? list : []).filter((v) => typeof v === "string" && v !== ""))];
@@ -58,7 +58,6 @@ function normaliseSessionDefaults(raw, options) {
     water: single(src.water, "water"),
     berley: single(src.berley, "berley"),
     fishingMethod: keepAllowed(uniqueStrings(src.fishingMethod), "fishingMethod"),
-    lure: keepAllowed(uniqueStrings(src.lure), "lure"),
     rods,
     rodSetups,
   };
@@ -93,7 +92,6 @@ function sessionCardOptions(markLists) {
     water: markListValues(markLists, "Water Condition"),
     berley: markListValues(markLists, "Berley"),
     fishingMethod: markListValues(markLists, "Fishing Method"),
-    lure: markListValues(markLists, "Lure"),
     rods: markListValues(markLists, "Rod"),
     rigs: markListValues(markLists, "Rig"),
     baits: markListValues(markLists, "Bait"),
@@ -130,7 +128,6 @@ function buildSessionCardSteps(options, draft, ctx = {}) {
     { id: "water", title: "Water", prompt: "What is the water like?", multi: false, options: options.water, selected: draft.water ? [draft.water] : [] },
     { id: "berley", title: "Berley", prompt: "Which berley are you using?", multi: false, options: options.berley, selected: draft.berley ? [draft.berley] : [] },
     { id: "fishingMethod", title: "Fishing method", prompt: "Which method(s) do you usually use?", multi: true, options: options.fishingMethod, selected: draft.fishingMethod },
-    { id: "lure", title: "Lure", prompt: "Which lure(s) do you usually use?", multi: true, options: options.lure, selected: draft.lure },
     { id: "rods", title: "Active rods", prompt: "Which rods are you fishing?", multi: true, options: options.rods, selected: draft.rods },
   ];
   for (const rod of draft.rods) {
@@ -147,14 +144,12 @@ function applySessionCardChoice(draft, stepId, value) {
     ...draft,
     species: [...draft.species],
     fishingMethod: [...draft.fishingMethod],
-    lure: [...draft.lure],
     rods: [...draft.rods],
     rodSetups: Object.fromEntries(Object.entries(draft.rodSetups).map(([rod, s]) => [rod, { ...s }])),
   };
   const toggle = (list) => (list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   if (stepId === "species") next.species = toggle(next.species);
   else if (stepId === "fishingMethod") next.fishingMethod = toggle(next.fishingMethod);
-  else if (stepId === "lure") next.lure = toggle(next.lure);
   else if (stepId === "water") next.water = draft.water === value ? "" : value;
   else if (stepId === "berley") next.berley = draft.berley === value ? "" : value;
   else if (stepId === "rods") {
@@ -284,7 +279,6 @@ function buildCatchFromCards({ id, lat, lng, dateTime, species, size, rod, tooSm
   if (defaults.water) mark.waterCondition = defaults.water;
   if (defaults.berley) mark.berley = defaults.berley;
   if (defaults.fishingMethod && defaults.fishingMethod.length) mark.fishingMethod = defaults.fishingMethod.join(", ");
-  if (defaults.lure && defaults.lure.length) mark.lure = defaults.lure.join(", ");
   if (lastWaterDepth != null) mark.waterDepth = lastWaterDepth;
   if (tide && tide.tideCondition) mark.tideCondition = tide.tideCondition;
   if (tide && tide.tideExtreme) mark.tideExtreme = tide.tideExtreme;
@@ -334,7 +328,6 @@ const SESSION_START_LIST_FIELDS = [
   { id: "species", title: "Target species", prompt: "Which species are you targeting?", multi: true },
   { id: "water", title: "Water", prompt: "What is the water like?", multi: false },
   { id: "fishingMethod", title: "Fishing method", prompt: "Which method(s) are you using?", multi: true },
-  { id: "lure", title: "Lure", prompt: "Which lure(s) are you using?", multi: true },
   { id: "rods", title: "Rod", prompt: "Which rods are you fishing?", multi: true },
   { id: "berley", title: "Berley", prompt: "Which berley are you using?", multi: false },
 ];
@@ -345,7 +338,7 @@ const SESSION_START_LIST_FIELDS = [
  * `nowStr` (the caller's "now", so this stays pure/testable). */
 function emptySessionStartAnswers(defaults, nowStr, lastWaterDepth = null) {
   return {
-    species: [...defaults.species], water: defaults.water, fishingMethod: [...defaults.fishingMethod], lure: [...defaults.lure], rods: [...defaults.rods],
+    species: [...defaults.species], water: defaults.water, fishingMethod: [...defaults.fishingMethod], rods: [...defaults.rods],
     berley: defaults.berley, waterDepth: lastWaterDepth, dateTime: nowStr,
   };
 }
@@ -355,7 +348,6 @@ function emptySessionStartAnswers(defaults, nowStr, lastWaterDepth = null) {
 function sessionStartFieldValueText(fieldId, answers) {
   if (fieldId === "species") return answers.species.length ? answers.species.join(", ") : "Not set";
   if (fieldId === "fishingMethod") return answers.fishingMethod.length ? answers.fishingMethod.join(", ") : "Not set";
-  if (fieldId === "lure") return answers.lure.length ? answers.lure.join(", ") : "Not set";
   if (fieldId === "rods") return answers.rods.length ? answers.rods.join(", ") : "Not set";
   if (fieldId === "water") return answers.water || "Not set";
   if (fieldId === "berley") return answers.berley || "Not set";
@@ -366,11 +358,10 @@ function sessionStartFieldValueText(fieldId, answers) {
 /** Applies a button press on one "+ Session" list field (species/rods toggle; water/berley set, or clear on
  * repress), returning the new answers (the old ones are not changed). */
 function applySessionStartFieldChoice(answers, fieldId, value) {
-  const next = { ...answers, species: [...answers.species], fishingMethod: [...answers.fishingMethod], lure: [...answers.lure], rods: [...answers.rods] };
+  const next = { ...answers, species: [...answers.species], fishingMethod: [...answers.fishingMethod], rods: [...answers.rods] };
   const toggle = (list) => (list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   if (fieldId === "species") next.species = toggle(next.species);
   else if (fieldId === "fishingMethod") next.fishingMethod = toggle(next.fishingMethod);
-  else if (fieldId === "lure") next.lure = toggle(next.lure);
   else if (fieldId === "rods") next.rods = toggle(next.rods);
   else if (fieldId === "water") next.water = answers.water === value ? "" : value;
   else if (fieldId === "berley") next.berley = answers.berley === value ? "" : value;
@@ -384,7 +375,7 @@ function applySessionStartFieldChoice(answers, fieldId, value) {
  * (map-live.js) so this stays pure — `dateTime` is the hub's (possibly edited) time, `createdAt` is when it's
  * actually saved. `tide` ({tideCondition, tideExtreme}) is the tide worked out for `dateTime`.
  */
-function buildSessionStartFromCards({ id, lat, lng, dateTime, createdAt, sessionGroupId, species, water, fishingMethod, lure, rods, berley, waterDepth, sessionNumber }, defaults, tide) {
+function buildSessionStartFromCards({ id, lat, lng, dateTime, createdAt, sessionGroupId, species, water, fishingMethod, rods, berley, waterDepth, sessionNumber }, defaults, tide) {
   const mark = {
     id, lat, lng, name: `Session ${sessionNumber} Start`, type: "Session Start", dateTime, createdAt,
     source: "Manual", sessionRole: "start", sessionGroupId,
@@ -392,7 +383,6 @@ function buildSessionStartFromCards({ id, lat, lng, dateTime, createdAt, session
   if (species && species.length) mark.species = species.join(", ");
   if (water) mark.waterCondition = water;
   if (fishingMethod && fishingMethod.length) mark.fishingMethod = fishingMethod.join(", ");
-  if (lure && lure.length) mark.lure = lure.join(", ");
   if (berley) mark.berley = berley;
   if (waterDepth != null) mark.waterDepth = waterDepth;
   if (rods && rods.length) {
@@ -411,7 +401,7 @@ function buildSessionStartFromCards({ id, lat, lng, dateTime, createdAt, session
  * "End Session/Move" button both use this) — "the same values as the previous Session Start". Everything about
  * WHERE/WHEN the End record itself is (id/lat/lng/dateTime/createdAt) is the caller's own: ending a session
  * happens at a different time/place than starting it. */
-const SESSION_END_CARRIED_FIELDS = ["species", "waterCondition", "berley", "fishingMethod", "lure", "waterDepth", "rod", "rig", "bait", "tideCondition", "tideExtreme"];
+const SESSION_END_CARRIED_FIELDS = ["species", "waterCondition", "berley", "fishingMethod", "waterDepth", "rod", "rig", "bait", "tideCondition", "tideExtreme"];
 
 /**
  * The Session End mark that closes out `startMark` (a loaded Session Start mark): named "Session N End"
@@ -757,7 +747,6 @@ function showSessionStartFlow({ options, defaults, initialAnswers, run, sessionN
       { id: "dateTime", title: "Date/Time", sub: formatNaiveDisplay(answers.dateTime) || "Not set" },
       { id: "water", title: "Water", sub: sessionStartFieldValueText("water", answers) },
       { id: "fishingMethod", title: "Method", sub: sessionStartFieldValueText("fishingMethod", answers) },
-      { id: "lure", title: "Lure", sub: sessionStartFieldValueText("lure", answers) },
       { id: "rods", title: "Rod", sub: sessionStartFieldValueText("rods", answers) },
       { id: "berley", title: "Berley", sub: sessionStartFieldValueText("berley", answers) },
       { id: "waterDepth", title: "Water depth", sub: sessionStartFieldValueText("waterDepth", answers) },

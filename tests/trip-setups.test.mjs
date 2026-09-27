@@ -1,5 +1,5 @@
 // Trips > Trip Setups (user_trip_setups): a named bundle of Rod Setups plus Species/Water/Berley/
-// Fishing Method/Lure. Same CRUD shape as Rod Setups (/api/rodsetups) — list, create, update, delete,
+// Fishing Method. Same CRUD shape as Rod Setups (/api/rodsetups) — list, create, update, delete,
 // each scoped to the signed-in user.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -46,14 +46,14 @@ function makeEnv() {
           },
           async run() {
             if (/^INSERT INTO user_trip_setups/.test(sql)) {
-              const [id, user_id, name, rod_setup_ids, species, water, berley, fishing_method, lure, created_at] = args;
+              const [id, user_id, name, rod_setup_ids, species, water, berley, fishing_method, created_at] = args;
               if (rows.some((r) => r.user_id === user_id && r.name === name)) throw new Error("UNIQUE constraint failed");
-              rows.push({ id, user_id, name, rod_setup_ids, species, water, berley, fishing_method, lure, created_at });
+              rows.push({ id, user_id, name, rod_setup_ids, species, water, berley, fishing_method, created_at });
             } else if (/^UPDATE user_trip_setups/.test(sql)) {
-              const [name, rod_setup_ids, species, water, berley, fishing_method, lure, id, user_id] = args;
+              const [name, rod_setup_ids, species, water, berley, fishing_method, id, user_id] = args;
               if (rows.some((r) => r.user_id === user_id && r.name === name && r.id !== id)) throw new Error("UNIQUE constraint failed");
               const row = rows.find((r) => r.id === id && r.user_id === user_id);
-              Object.assign(row, { name, rod_setup_ids, species, water, berley, fishing_method, lure });
+              Object.assign(row, { name, rod_setup_ids, species, water, berley, fishing_method });
             } else if (/^DELETE FROM user_trip_setups/.test(sql)) {
               const idx = rows.findIndex((r) => r.id === args[0] && r.user_id === args[1]);
               if (idx !== -1) rows.splice(idx, 1);
@@ -88,19 +88,17 @@ test("create, list, update and delete a trip setup", async () => {
   assert.equal(created.water, null);
   assert.equal(created.berley, null);
   assert.deepEqual(created.fishingMethod, []);
-  assert.deepEqual(created.lure, []);
 
   res = await req(env, "GET", "/api/tripsetups");
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), [created]);
 
-  res = await req(env, "PUT", `/api/tripsetups/${created.id}`, { water: "Clear", berley: "Pilchard", fishingMethod: ["Bait"], lure: ["Soft plastic"] });
+  res = await req(env, "PUT", `/api/tripsetups/${created.id}`, { water: "Clear", berley: "Pilchard", fishingMethod: ["Bait"] });
   assert.equal(res.status, 200);
   const updated = await res.json();
   assert.equal(updated.water, "Clear");
   assert.equal(updated.berley, "Pilchard");
   assert.deepEqual(updated.fishingMethod, ["Bait"]);
-  assert.deepEqual(updated.lure, ["Soft plastic"]);
   assert.deepEqual(updated.rodSetupIds, ["rs1", "rs2"]); // untouched fields stay as they were
 
   res = await req(env, "DELETE", `/api/tripsetups/${created.id}`);

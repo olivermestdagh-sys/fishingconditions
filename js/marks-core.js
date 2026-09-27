@@ -143,7 +143,6 @@ const MARK_POPUP_OPTIONAL_FIELDS = [
   { key: "rod", listLabel: "Rod", displayLabel: "Rod" },
   { key: "berley", listLabel: "Berley", displayLabel: "Berley" },
   { key: "fishingMethod", listLabel: "Fishing Method", displayLabel: "Method" },
-  { key: "lure", listLabel: "Lure", displayLabel: "Lure" },
 ];
 
 /**
@@ -172,7 +171,7 @@ const MARK_TYPE_FIELD_KEYS = {
   POI: [],
   Mark: ["species"],
   Catch: [
-    "species", "weatherCondition", "tideCondition", "tideExtreme", "waterCondition", "bait", "rig", "rod", "berley", "fishingMethod", "lure",
+    "species", "weatherCondition", "tideCondition", "tideExtreme", "waterCondition", "bait", "rig", "rod", "berley", "fishingMethod",
     "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed", "notes", "released",
   ],
 };
@@ -226,7 +225,7 @@ function typeAllowsMultipleSpecies(type) {
 
 /** Fields where a Session can hold several values (stored comma-joined, the
  * same convention the Sync import already uses for bait/rig/rod/berley). */
-const SESSION_MULTI_VALUE_FIELDS = ["species", "bait", "rig", "rod", "berley", "fishingMethod", "lure"];
+const SESSION_MULTI_VALUE_FIELDS = ["species", "bait", "rig", "rod", "berley", "fishingMethod"];
 function typeAllowsMultipleValues(type, key) {
   return isSessionType(type) && SESSION_MULTI_VALUE_FIELDS.includes(key);
 }
