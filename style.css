@@ -1628,20 +1628,39 @@ main.wide {
   }
 }
 
-.filters-toggle {
+/* Thresholds/filters toolbar (Week Ahead, Reports) — looks and behaves like the Map's own Live bar:
+   a toggle switch plus a gear+badge button that opens the .ww-candidate-* modal (js/week-tools.js's
+   showThresholdFilterModal). Generic (not map-scoped), unlike .map-toolbar/.map-filter-btn, since it's
+   used outside the Map tab. */
+.filters-toolbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  cursor: pointer;
-  user-select: none;
+  gap: 12px;
 }
-
-.filters-content {
-  margin-top: 10px;
+.filters-toggle-switch { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; user-select: none; }
+.filters-toggle-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.filters-toggle-track { position: relative; width: 36px; height: 20px; border-radius: 10px; background: var(--grey-300, #cbd5e1); transition: background 0.15s; }
+.filters-toggle-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+.filters-toggle-switch input:checked + .filters-toggle-track { background: #16a34a; }
+.filters-toggle-switch input:checked + .filters-toggle-track::after { transform: translateX(16px); }
+.filters-toggle-switch input:focus-visible + .filters-toggle-track { outline: 2px solid var(--blue-900, #0b2a4a); outline-offset: 2px; }
+.filters-gear-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  white-space: nowrap;
 }
-
-.filters-content.collapsed {
-  display: none;
+.filters-badge { font-weight: 700; }
+.filters-badge:empty { display: none; }
+.filters-active-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.filters-active-chips:empty {
+  margin-top: 0;
 }
 
 .window-card-header {

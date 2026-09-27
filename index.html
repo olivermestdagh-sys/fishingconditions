@@ -96,57 +96,18 @@
 
 <main class="wide" style="padding-bottom:8px;">
   <section class="summary-card gc-filters">
-    <div class="filters-toggle" id="filtersToggle" role="button" tabindex="0">
-      <label class="loc-edit-label" style="margin:0;">Thresholds &amp; filters</label>
-      <span class="schedule-toggle-hint" id="filtersToggleHint">▸ tap to show</span>
+    <div class="filters-toolbar" id="filtersToolbar">
+      <label class="filters-toggle-switch" title="Filtering: when on, only locations matching your Type/Group/Direction/Location picks below are shown; when off, everything shows but your picks are kept for next time">
+        <input type="checkbox" id="filteringEnabledToggle" checked />
+        <span class="filters-toggle-track" aria-hidden="true"></span>
+        <span>Filtering</span>
+      </label>
+      <button type="button" id="filtersGearBtn" class="btn-secondary filters-gear-btn" title="Thresholds and filters" aria-label="Thresholds and filters" aria-haspopup="dialog">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>
+        <span id="filtersGearBadge" class="filters-badge"></span>
+      </button>
     </div>
-    <div class="filters-content collapsed" id="filtersContent">
-    <p class="footnote" style="margin:0 0 12px;text-align:left;">
-      Every hourly forecast row that sits inside a run of consecutive hours meeting the thresholds below (evaluated per location).
-    </p>
-    <div class="filter-row thresholds-row">
-      <div>
-        <label for="minCondition">Min Condition rating</label>
-        <div class="rating-stepper">
-          <button type="button" class="rating-stepper-btn" id="minConditionDown" aria-label="Decrease min condition rating">−</button>
-          <div class="condition-badge rating-stepper-badge" id="minConditionBadge">3.0</div>
-          <button type="button" class="rating-stepper-btn" id="minConditionUp" aria-label="Increase min condition rating">+</button>
-          <input type="hidden" id="minCondition" min="1" max="5" value="3" />
-        </div>
-      </div>
-      <div>
-        <label for="minHours">Min consecutive hours</label>
-        <div class="rating-stepper">
-          <button type="button" class="rating-stepper-btn" id="minHoursDown" aria-label="Decrease min consecutive hours">−</button>
-          <div class="condition-badge rating-stepper-badge rating-stepper-badge-neutral" id="minHoursBadge">3.0</div>
-          <button type="button" class="rating-stepper-btn" id="minHoursUp" aria-label="Increase min consecutive hours">+</button>
-          <input type="hidden" id="minHours" min="1" max="24" value="3" />
-        </div>
-      </div>
-    </div>
-    <p class="footnote" style="margin:8px 0 0;text-align:left;">
-      "Min consecutive hours" is a genuine clock-duration minimum — matches the session lengths below.
-    </p>
-
-    <label style="display:block;margin:14px 0 6px;">Type</label>
-    <div id="typeChips" class="chip-row"></div>
-
-    <label style="display:block;margin:14px 0 6px;">Location Group</label>
-    <div id="groupChips" class="chip-row"></div>
-
-    <label style="display:block;margin:14px 0 6px;">Shore Direction</label>
-    <div id="directionChips" class="chip-row"></div>
-
-    <div class="loc-filter-header" style="margin-top:14px;">
-      <label>Locations</label>
-      <div class="loc-filter-actions">
-        <button type="button" id="btnLocAll" class="chip-action">All</button>
-        <button type="button" id="btnLocNone" class="chip-action">None</button>
-      </div>
-    </div>
-    <p class="footnote" style="margin:0 0 6px;text-align:left;">Tap ☆ to pin a location to the top of the list below.</p>
-    <div id="locationChips" class="chip-row"></div>
-    </div>
+    <div id="filtersActiveChips" class="filters-active-chips"></div>
   </section>
 
   <section class="summary-card week-full-bleed" style="padding:0;overflow:hidden;position:relative;">

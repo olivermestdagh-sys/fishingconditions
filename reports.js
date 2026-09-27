@@ -143,6 +143,93 @@ function applyReportsFilters() {
   renderAllReports();
 }
 
+/** Restores whatever's currently applied onto the filter grid's inputs — needed because the modal (see
+ * showReportsFilterModal) rebuilds the grid fresh via buildReportsFilterUI every time it opens, which
+ * otherwise leaves already-applied values looking blank even though they're still in effect. */
+function restoreReportsFilterInputsFromState() {
+  const setValue = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.value = value;
+  };
+  setValue("reportsFilterDateFrom", reportsFilters.dateFrom);
+  setValue("reportsFilterDateTo", reportsFilters.dateTo);
+  setValue("reportsFilterTempMin", reportsFilters.temperatureMin);
+  setValue("reportsFilterTempMax", reportsFilters.temperatureMax);
+  setValue("reportsFilterDepthMin", reportsFilters.waterDepthMin);
+  setValue("reportsFilterDepthMax", reportsFilters.waterDepthMax);
+  document.querySelectorAll("[data-report-filter-picklist]").forEach((el) => {
+    const wanted = reportsFilters.picklist[el.dataset.reportFilterPicklist];
+    if (wanted) el.value = wanted;
+  });
+}
+
+/** How many of the filter fields are currently non-blank — shown on the toolbar gear's badge, same
+ * "(n)" convention as the Map's own mark-filter badge and Week Ahead's facet-filter badge. */
+function countActiveReportsFilters() {
+  let n = 0;
+  if (reportsFilters.dateFrom) n++;
+  if (reportsFilters.dateTo) n++;
+  if (reportsFilters.temperatureMin !== "") n++;
+  if (reportsFilters.temperatureMax !== "") n++;
+  if (reportsFilters.waterDepthMin !== "") n++;
+  if (reportsFilters.waterDepthMax !== "") n++;
+  n += Object.keys(reportsFilters.picklist).length;
+  return n;
+}
+
+function refreshReportsFilterBadge() {
+  const badge = document.getElementById("reportsFiltersGearBadge");
+  if (badge) badge.textContent = countActiveReportsFilters() > 0 ? `(${countActiveReportsFilters()})` : "";
+}
+
+/**
+ * Filters modal — wraps the existing filter grid (buildReportsFilterUI) and its Apply/Reset buttons in
+ * the site's generic centered-dialog shell (.ww-candidate-*), same shell the Map's/Week Ahead's own
+ * filter modals use, opened from the toolbar's gear button (see the DOMContentLoaded wiring below)
+ * instead of the old always-inline disclosure card.
+ */
+function showReportsFilterModal() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "ww-candidate-overlay";
+    overlay.innerHTML = `
+      <div class="ww-candidate-dialog">
+        <button type="button" class="ww-candidate-close" aria-label="Close">&times;</button>
+        <h3 style="margin:0 0 8px;">Filters</h3>
+        <div class="reports-filter-grid" id="reportsFilterGrid"></div>
+        <div style="margin-top:10px;display:flex;gap:8px;">
+          <button type="button" id="reportsApplyFiltersBtn" class="btn-primary">Apply filters</button>
+          <button type="button" id="reportsResetFiltersBtn" class="btn-secondary">Reset</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    buildReportsFilterUI();
+    restoreReportsFilterInputsFromState();
+
+    const cleanup = () => {
+      overlay.remove();
+      resolve();
+    };
+    document.getElementById("reportsApplyFiltersBtn").addEventListener("click", () => {
+      applyReportsFilters();
+      refreshReportsFilterBadge();
+    });
+    document.getElementById("reportsResetFiltersBtn").addEventListener("click", () => {
+      document.querySelectorAll("#reportsFilterGrid input").forEach((el) => (el.value = ""));
+      document.querySelectorAll("#reportsFilterGrid select").forEach((el) => (el.value = ""));
+      resetReportsFilters();
+      reportsFilteredCatches = reportsAllMarks.filter((m) => m.type === "Catch");
+      renderAllReports();
+      refreshReportsFilterBadge();
+    });
+    overlay.querySelector(".ww-candidate-close").addEventListener("click", cleanup);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) cleanup();
+    });
+  });
+}
+
 // ---------------------------------------------------------------------
 // Report 1 — catch rate by tide stage
 // ---------------------------------------------------------------------
@@ -689,26 +776,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   reportsAllMarks = marksRes.ok ? await marksRes.json() : [];
   reportsTrackedLocations = await loadTrackedLocationsForLookup();
 
-  buildReportsFilterUI();
   resetReportsFilters();
   reportsFilteredCatches = reportsAllMarks.filter((m) => m.type === "Catch");
   renderAllReports();
   initSessionRibbon(reportsAllMarks);
 
-  const toggle = document.getElementById("reportsFiltersToggle");
-  const content = document.getElementById("reportsFiltersContent");
-  const hint = document.getElementById("reportsFiltersToggleHint");
-  const toggleFilters = () => {
-    const nowCollapsed = content.classList.toggle("collapsed");
-    hint.textContent = nowCollapsed ? "▸ tap to show" : "▾ hide";
-  };
-  toggle.addEventListener("click", toggleFilters);
-  toggle.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      toggleFilters();
-    }
+  document.getElementById("reportsFiltersGearBtn").addEventListener("click", () => {
+    showReportsFilterModal();
   });
+  refreshReportsFilterBadge();
 
   document.querySelectorAll("[data-tide-group]").forEach((btn) =>
     btn.addEventListener("click", () => {
@@ -716,13 +792,4 @@ document.addEventListener("DOMContentLoaded", async () => {
       renderTideReport();
     })
   );
-
-  document.getElementById("reportsApplyFiltersBtn").addEventListener("click", applyReportsFilters);
-  document.getElementById("reportsResetFiltersBtn").addEventListener("click", () => {
-    document.querySelectorAll("#reportsFilterGrid input").forEach((el) => (el.value = ""));
-    document.querySelectorAll("#reportsFilterGrid select").forEach((el) => (el.value = ""));
-    resetReportsFilters();
-    reportsFilteredCatches = reportsAllMarks.filter((m) => m.type === "Catch");
-    renderAllReports();
-  });
 });

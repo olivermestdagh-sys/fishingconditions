@@ -110,10 +110,12 @@ let allRows = [];
 let allLocations = [];
 let sunTimesData = {};
 let moonPhasesData = {};
-let selectedLocations = new Set();
-let selectedTypes = new Set(["Kayak", "Land based"]);
-let selectedGroups = new Set();
-let selectedDirections = new Set();
+// facetFilters: {type, group, direction, location}, each {include: Set, exclude: Set} — see
+// locationMatchesFacetFilters/emptyFacetFilters/migrateLegacyFacetFilters (js/week-tools.js).
+let facetFilters = emptyFacetFilters();
+// Master on/off for the four facet filters above (not the thresholds — see initFilterControls'
+// own comment on why thresholds are never bypassed by this). ON by default, matching pre-toggle behavior.
+let filteringEnabled = true;
 let pinnedOrder = []; // location NAMES, in the order they were pinned — oldest pin first
 
 // computedSessions, armedLocationName and armedMode (the click-arm-then-
@@ -326,7 +328,6 @@ function togglePin(name) {
     pinnedOrder.splice(idx, 1);
   }
   persistPinnedOrder();
-  renderLocationChipsWithPins();
   renderWeekView();
 }
 
@@ -419,210 +420,270 @@ async function init() {
     return;
   }
 
-  const filtersToggle = document.getElementById("filtersToggle");
-  const filtersContent = document.getElementById("filtersContent");
-  const filtersHint = document.getElementById("filtersToggleHint");
-  const toggleFilters = () => {
-    const nowCollapsed = filtersContent.classList.toggle("collapsed");
-    filtersHint.textContent = nowCollapsed ? "▸ tap to show" : "▾ hide";
-  };
-  filtersToggle.addEventListener("click", toggleFilters);
-  filtersToggle.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFilters(); }
-  });
-
-  // Locations/types filters and Min Condition/Min Hours thresholds persist
-  // across visits (same localStorage keys as week.js, via charts.js) —
-  // shared with the original Week Ahead page on purpose, since they're the
-  // same underlying settings, not a separate copy for this page. Pin
-  // order (below) is its own separate key, specific to this page's layout.
-  let saved = null;
-  try {
-    saved = JSON.parse(localStorage.getItem(LOC_FILTER_STORAGE_KEY) || "null");
-  } catch {
-    saved = null;
-  }
+  // Facet filters (Type/Location Group/Shore Direction/Locations) persist across visits, migrated
+  // from whatever's saved under their old plain-array shape (see migrateLegacyFacetFilters's own
+  // comment) — same localStorage keys as before, shared with the original Week Ahead page on
+  // purpose, since they're the same underlying settings, not a separate copy for this page.
   const allNames = allLocations.map((l) => l.name);
-  if (Array.isArray(saved) && saved.length) {
-    selectedLocations = new Set(saved.filter((n) => allNames.includes(n)));
-  } else {
-    selectedLocations = new Set(allNames);
-  }
+  facetFilters = migrateLegacyFacetFilters(allNames);
+  persistFacetFilters(facetFilters); // writes the migrated shape straight back, so a second load doesn't re-migrate
 
-  let savedTypes = null;
+  let savedFilteringEnabled = null;
   try {
-    savedTypes = JSON.parse(localStorage.getItem(TYPE_FILTER_STORAGE_KEY) || "null");
+    savedFilteringEnabled = localStorage.getItem(FILTERING_ENABLED_STORAGE_KEY);
   } catch {
-    savedTypes = null;
+    savedFilteringEnabled = null;
   }
-  selectedTypes = Array.isArray(savedTypes) && savedTypes.length ? new Set(savedTypes) : new Set(["Kayak", "Land based"]);
-
-  // Location Group defaults to EMPTY — the opposite of selectedLocations
-  // above, and deliberately so: this filter is opt-in OR-style tag
-  // matching (see groupsMatchFilter in charts.js) where checking a chip
-  // ADDS AN ACCEPTABLE OPTION rather than including a category, so no
-  // chips checked correctly means no requirement applied yet (show
-  // everything), not "select every group" the way Location/Type default
-  // to. Defaulting to all-checked here — the naive parallel to those
-  // other two filters — would mean a location needs to carry whichever
-  // single group happens to be the only one that exists just to show up
-  // on a fresh visit.
-  let savedGroups = null;
-  try {
-    savedGroups = JSON.parse(localStorage.getItem(GROUP_FILTER_STORAGE_KEY) || "null");
-  } catch {
-    savedGroups = null;
-  }
-  const allGroups = Array.from(new Set(allLocations.flatMap((l) => locationGroupsOf(l))));
-  selectedGroups = new Set(Array.isArray(savedGroups) ? savedGroups.filter((g) => allGroups.includes(g)) : []);
-
-  // Direction defaults to EMPTY for the same reason Location Group does
-  // (see groupsMatchFilter/directionsMatchFilter in charts.js) — it's an
-  // opt-in OR-style facet, not a select-all-by-default category filter.
-  let savedDirections = null;
-  try {
-    savedDirections = JSON.parse(localStorage.getItem(DIRECTION_FILTER_STORAGE_KEY) || "null");
-  } catch {
-    savedDirections = null;
-  }
-  selectedDirections = new Set(Array.isArray(savedDirections) ? savedDirections.filter((d) => CARDINAL_DIRECTIONS.includes(d)) : []);
-
-  let savedThresholds = null;
-  try {
-    savedThresholds = JSON.parse(localStorage.getItem(THRESHOLDS_STORAGE_KEY) || "null");
-  } catch {
-    savedThresholds = null;
-  }
-  if (savedThresholds) {
-    if (savedThresholds.minCondition != null) document.getElementById("minCondition").value = savedThresholds.minCondition;
-    if (savedThresholds.minHours != null) document.getElementById("minHours").value = savedThresholds.minHours;
-  }
+  filteringEnabled = savedFilteringEnabled == null ? true : savedFilteringEnabled === "1";
 
   // Drop any pinned name that no longer exists in the data (a location was
   // renamed/removed in Settings since the last visit) — same defensive
   // pattern as the saved-locations filter above.
   pinnedOrder = loadPinnedOrder().filter((n) => allNames.includes(n));
 
-  // Cross-filtering: changing Type narrows which Location Group, Direction,
-  // AND Location chips are even offered; changing Group narrows which
-  // Direction and Location chips are offered; changing Direction narrows
-  // which Group and Location chips are offered — see charts.js's
-  // renderGroupChips/renderDirectionChips/renderLocationChips for the full
-  // reasoning (same approach here, just via this page's own pin-aware
-  // renderLocationChipsWithPins instead of the shared renderLocationChips).
-  function refreshGroupChips() {
-    renderGroupChips(allLocations, selectedGroups, onGroupFilterChanged, selectedTypes, selectedDirections);
-  }
-  function refreshDirectionChips() {
-    renderDirectionChips(allLocations, selectedDirections, onDirectionFilterChanged, selectedTypes, selectedGroups);
-  }
-  function onGroupFilterChanged() {
-    refreshDirectionChips(); // Group narrows which Direction tiles are offered, in turn
-    renderLocationChipsWithPins();
-    renderWeekView();
-  }
-  function onDirectionFilterChanged() {
-    refreshGroupChips(); // Direction narrows which Group chips are offered, in turn
-    renderLocationChipsWithPins();
-    renderWeekView();
-  }
-  function onTypeFilterChanged() {
-    refreshGroupChips();
-    refreshDirectionChips();
-    renderLocationChipsWithPins();
-    renderWeekView();
-  }
-
-  renderLocationChipsWithPins();
-  renderTypeChips(selectedTypes, onTypeFilterChanged);
-  refreshGroupChips();
-  refreshDirectionChips();
-  document.getElementById("btnLocAll").addEventListener("click", () => {
-    // Selects every CURRENTLY OFFERED (narrowed by Type+Group+Direction)
-    // location, not literally every location regardless of the active
-    // filters — matches what's actually shown as a chip right now.
-    selectedLocations = new Set(
-      allLocations
-        .filter(
-          (l) =>
-            selectedTypes.has(l.type) &&
-            groupsMatchFilter(locationGroupsOf(l), selectedGroups) &&
-            directionsMatchFilter(l.shore, selectedDirections)
-        )
-        .map((l) => l.name)
-    );
-    persistSelectedLocations(selectedLocations);
-    renderLocationChipsWithPins();
-    renderWeekView();
-  });
-  document.getElementById("btnLocNone").addEventListener("click", () => {
-    selectedLocations = new Set();
-    persistSelectedLocations(selectedLocations);
-    renderLocationChipsWithPins();
-    renderWeekView();
-  });
-
-  wireThresholdStepper("minCondition", 0.1, 1, 5, conditionColor);
-  wireThresholdStepper("minHours", 1, 1, 24, null);
-
+  initFilterControls();
   renderWeekView();
 }
 
 /**
- * Same idea as charts.js's shared renderLocationChips, but with a pin/star
- * button on each chip too — kept as its own page-local copy rather than
- * extending the shared function, so week.js (and any other page using the
- * shared chips) is completely unaffected by this page's pinning feature.
- * The star and the chip's own select/deselect are separate click targets
- * (the star calls stopPropagation) so tapping one never triggers the other.
- *
- * Narrowed by the current Type, Location Group, and Direction filters —
- * same "restrict which chips are offered, don't touch what's actually
- * selected" approach as charts.js's own renderLocationChips.
+ * Wires the toolbar's toggle switch and gear+badge button (the Week Ahead
+ * equivalent of the Map's Live toggle + Filters gear, initMarkControls in
+ * js/marks-tools.js) — the toggle is a master on/off for the four facet
+ * filters ONLY, never the Min Condition/Min Hours thresholds: those define
+ * what a "qualifying session" IS at all (the page's core computation), not
+ * a show/hide restriction, so switching them off would make every hour
+ * qualifying and defeat the page's purpose, unlike a facet filter which
+ * only narrows which already-computed locations are shown.
  */
-function renderLocationChipsWithPins() {
-  const container = document.getElementById("locationChips");
-  container.innerHTML = "";
-  const seenNames = new Set();
-  for (const loc of allLocations) {
-    if (!selectedTypes.has(loc.type)) continue;
-    if (!groupsMatchFilter(locationGroupsOf(loc), selectedGroups)) continue;
-    if (!directionsMatchFilter(loc.shore, selectedDirections)) continue;
-    if (seenNames.has(loc.name)) continue;
-    seenNames.add(loc.name);
+/**
+ * Thresholds + filters modal — the Week Ahead equivalent of the Map's own
+ * showMarkFilterModal (js/marks-tools.js), same shell (.ww-candidate-*) and
+ * same 3-state chip cycling. `ctx.onChange` is called after every mutating
+ * action (a chip tap, Clear all, a pin toggle) so the caller can persist +
+ * re-render whatever it needs to (the page's own active-chip bar, badge
+ * count, and the week view itself) — this function only ever mutates
+ * ctx.facetFilters/pinnedOrder live and re-renders its own body, it never
+ * needs to know what else depends on that state.
+ *
+ * The Locations group doubles as the pin-to-top picker (★/☆, this page's own
+ * togglePin/pinnedOrder) — the only facet with anything beyond plain 3-state
+ * chips, since pinning which locations lead the board is otherwise homeless
+ * once this row is no longer always visible on the page itself.
+ *
+ * Page-local (not js/week-tools.js) specifically because it references
+ * wireThresholdStepper/pinnedOrder/togglePin, all week.js-only — everything
+ * ELSE it calls (facetGroupHtml, facetCandidates, facetChipStateFor/StyleFor,
+ * facetFilterOpenGroups, FACET_LABELS, THRESHOLDS_STORAGE_KEY, conditionColor)
+ * lives in the shared js/week-tools.js and is generic.
+ */
+function showThresholdFilterModal(ctx) {
+  const { allLocations, facetFilters, onChange } = ctx;
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "ww-candidate-overlay";
+    overlay.innerHTML = `
+      <div class="ww-candidate-dialog">
+        <button type="button" class="ww-candidate-close" aria-label="Close">&times;</button>
+        <h3 style="margin:0 0 8px;">Thresholds &amp; filters</h3>
+        <p class="footnote" style="margin:0 0 12px;text-align:left;">
+          Every hourly forecast row that sits inside a run of consecutive hours meeting the thresholds below (evaluated per location).
+        </p>
+        <div class="filter-row thresholds-row">
+          <div>
+            <label for="minCondition">Min Condition rating</label>
+            <div class="rating-stepper">
+              <button type="button" class="rating-stepper-btn" id="minConditionDown" aria-label="Decrease min condition rating">−</button>
+              <div class="condition-badge rating-stepper-badge" id="minConditionBadge">3.0</div>
+              <button type="button" class="rating-stepper-btn" id="minConditionUp" aria-label="Increase min condition rating">+</button>
+              <input type="hidden" id="minCondition" min="1" max="5" value="3" />
+            </div>
+          </div>
+          <div>
+            <label for="minHours">Min consecutive hours</label>
+            <div class="rating-stepper">
+              <button type="button" class="rating-stepper-btn" id="minHoursDown" aria-label="Decrease min consecutive hours">−</button>
+              <div class="condition-badge rating-stepper-badge rating-stepper-badge-neutral" id="minHoursBadge">3.0</div>
+              <button type="button" class="rating-stepper-btn" id="minHoursUp" aria-label="Increase min consecutive hours">+</button>
+              <input type="hidden" id="minHours" min="1" max="24" value="3" />
+            </div>
+          </div>
+        </div>
+        <p class="footnote" style="margin:8px 0 12px;text-align:left;">
+          "Min consecutive hours" is a genuine clock-duration minimum — matches the session lengths below.
+        </p>
+        <p class="footnote" style="margin:0 0 12px;">Filters: tap once to require it, tap again to exclude it, tap again to clear.</p>
+        <div data-facet-sections></div>
+        <div style="display:flex;gap:8px;margin-top:6px;">
+          <button type="button" id="facetFilterClearAll" class="btn-secondary" style="flex:1;">Clear all</button>
+          <button type="button" id="facetFilterDone" class="btn-primary" style="flex:1;">Done</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
 
-    const chip = document.createElement("span");
-    chip.className = "loc-chip weeknew-chip" + (selectedLocations.has(loc.name) ? " active" : "");
+    // Restore the currently-saved thresholds onto this fresh copy of the inputs before wiring the steppers,
+    // so the badges/buttons reflect reality immediately rather than the placeholder defaults above.
+    let savedThresholds = null;
+    try {
+      savedThresholds = JSON.parse(localStorage.getItem(THRESHOLDS_STORAGE_KEY) || "null");
+    } catch {
+      savedThresholds = null;
+    }
+    if (savedThresholds) {
+      if (savedThresholds.minCondition != null) document.getElementById("minCondition").value = savedThresholds.minCondition;
+      if (savedThresholds.minHours != null) document.getElementById("minHours").value = savedThresholds.minHours;
+    }
+    wireThresholdStepper("minCondition", 0.1, 1, 5, conditionColor);
+    wireThresholdStepper("minHours", 1, 1, 24, null);
 
-    const star = document.createElement("button");
-    star.type = "button";
-    star.className = "weeknew-pin-btn" + (pinnedOrder.includes(loc.name) ? " pinned" : "");
-    star.setAttribute("aria-label", pinnedOrder.includes(loc.name) ? `Unpin ${displayNameFor(loc)}` : `Pin ${displayNameFor(loc)} to top`);
-    star.textContent = pinnedOrder.includes(loc.name) ? "★" : "☆";
-    star.addEventListener("click", (e) => {
-      e.stopPropagation();
-      togglePin(loc.name);
-    });
-    chip.appendChild(star);
+    function sectionHtml(facet) {
+      const values = facetCandidates(facet, allLocations, facetFilters);
+      if (values.length === 0) return "";
+      const chips = values
+        .map((v) => {
+          const cs = facetChipStateFor(facetFilters, facet, v);
+          const escValue = v.replace(/"/g, "&quot;");
+          const escText = v.replace(/</g, "&lt;");
+          return `<span class="loc-chip facet-filter-chip" data-facet="${facet}" data-value="${escValue}" data-state="${cs}"
+            style="cursor:pointer;${facetChipStyleFor(cs)}">${escText}</span>`;
+        })
+        .join("");
+      return facetGroupHtml(facetFilters, facet, FACET_LABELS[facet], `<div style="display:flex;flex-wrap:wrap;gap:6px;">${chips}</div>`);
+    }
 
-    const label = document.createElement("button");
-    label.type = "button";
-    label.className = "weeknew-chip-label";
-    label.textContent = displayNameFor(loc);
-    label.addEventListener("click", () => {
-      if (selectedLocations.has(loc.name)) {
-        selectedLocations.delete(loc.name);
+    function locationSectionHtml() {
+      const values = facetCandidates("location", allLocations, facetFilters);
+      if (values.length === 0) return "";
+      const chips = values
+        .map((name) => {
+          const loc = allLocations.find((l) => l.name === name);
+          const displayText = displayNameFor(loc) || name;
+          const cs = facetChipStateFor(facetFilters, "location", name);
+          const pinned = pinnedOrder.includes(name);
+          const escValue = name.replace(/"/g, "&quot;");
+          const escText = displayText.replace(/</g, "&lt;");
+          return `<span class="loc-chip facet-filter-chip" data-facet="location" data-value="${escValue}" data-state="${cs}"
+            style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;${facetChipStyleFor(cs)}">
+            <button type="button" class="weeknew-pin-btn${pinned ? " pinned" : ""}" data-pin-location="${escValue}"
+              aria-label="${pinned ? "Unpin" : "Pin"} ${escText}" style="background:none;border:none;padding:0;cursor:pointer;font-size:1em;line-height:1;">${pinned ? "★" : "☆"}</button>
+            <span>${escText}</span>
+          </span>`;
+        })
+        .join("");
+      const allNone = `<div style="display:flex;gap:6px;margin-bottom:6px;">
+        <button type="button" class="chip-action" id="facetLocAll">All</button>
+        <button type="button" class="chip-action" id="facetLocNone">None</button>
+      </div>`;
+      return facetGroupHtml(facetFilters, "location", "Locations (☆ to pin to the top of the list below)", `${allNone}<div style="display:flex;flex-wrap:wrap;gap:6px;">${chips}</div>`);
+    }
+
+    function renderBody() {
+      overlay.querySelector("[data-facet-sections]").innerHTML = [sectionHtml("type"), sectionHtml("group"), sectionHtml("direction"), locationSectionHtml()].join("");
+      wireBody();
+    }
+
+    function cycleFacetChip(facet, value) {
+      const f = facetFilters[facet];
+      const current = facetChipStateFor(facetFilters, facet, value);
+      if (current === "neutral") {
+        f.include.add(value);
+      } else if (current === "include") {
+        f.include.delete(value);
+        f.exclude.add(value);
       } else {
-        selectedLocations.add(loc.name);
+        f.exclude.delete(value);
       }
-      persistSelectedLocations(selectedLocations);
-      chip.classList.toggle("active");
-      renderWeekView();
-    });
-    chip.appendChild(label);
+      onChange();
+      renderBody();
+    }
 
-    container.appendChild(chip);
+    function wireBody() {
+      overlay.querySelectorAll(".facet-filter-chip").forEach((chip) => {
+        chip.addEventListener("click", () => cycleFacetChip(chip.dataset.facet, chip.dataset.value));
+      });
+      overlay.querySelectorAll("[data-pin-location]").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          togglePin(btn.dataset.pinLocation);
+          renderBody();
+        });
+      });
+      overlay.querySelectorAll("[data-toggle-facet-group]").forEach((head) => {
+        head.addEventListener("click", () => {
+          const key = head.dataset.toggleFacetGroup;
+          const open = head.getAttribute("aria-expanded") !== "true";
+          if (open) facetFilterOpenGroups.add(key);
+          else facetFilterOpenGroups.delete(key);
+          head.setAttribute("aria-expanded", String(open));
+          head.querySelector("[data-caret]").style.transform = open ? "" : "rotate(-90deg)";
+          head.querySelector("[data-summary]").style.display = open ? "none" : "flex";
+          overlay.querySelector(`[data-group-body="${key}"]`).style.display = open ? "block" : "none";
+        });
+      });
+      const allBtn = overlay.querySelector("#facetLocAll");
+      const noneBtn = overlay.querySelector("#facetLocNone");
+      if (allBtn) {
+        allBtn.addEventListener("click", () => {
+          facetFilters.location = { include: new Set(), exclude: new Set() };
+          onChange();
+          renderBody();
+        });
+      }
+      if (noneBtn) {
+        noneBtn.addEventListener("click", () => {
+          const candidates = facetCandidates("location", allLocations, facetFilters);
+          facetFilters.location = { include: new Set(), exclude: new Set(candidates) };
+          onChange();
+          renderBody();
+        });
+      }
+    }
+
+    renderBody();
+
+    const cleanup = () => {
+      overlay.remove();
+      resolve();
+    };
+    overlay.querySelector("#facetFilterClearAll").addEventListener("click", () => {
+      for (const facet of Object.keys(facetFilters)) facetFilters[facet] = { include: new Set(), exclude: new Set() };
+      onChange();
+      renderBody();
+    });
+    overlay.querySelector("#facetFilterDone").addEventListener("click", cleanup);
+    overlay.querySelector(".ww-candidate-close").addEventListener("click", cleanup);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) cleanup();
+    });
+  });
+}
+
+function initFilterControls() {
+  const gearBtn = document.getElementById("filtersGearBtn");
+  const badge = document.getElementById("filtersGearBadge");
+  const chipsContainer = document.getElementById("filtersActiveChips");
+  const toggle = document.getElementById("filteringEnabledToggle");
+  toggle.checked = filteringEnabled;
+
+  function refresh() {
+    renderActiveFacetFilterChips(chipsContainer, facetFilters, refresh);
+    const activeCount = countActiveFacetFilters(facetFilters);
+    badge.textContent = activeCount > 0 ? `(${activeCount})` : "";
+    persistFacetFilters(facetFilters);
+    renderWeekView();
   }
+
+  gearBtn.addEventListener("click", async () => {
+    await showThresholdFilterModal({ allLocations, facetFilters, onChange: refresh });
+    refresh();
+  });
+  toggle.addEventListener("change", () => {
+    filteringEnabled = toggle.checked;
+    Prefs.set(FILTERING_ENABLED_STORAGE_KEY, filteringEnabled ? "1" : "0");
+    refresh();
+  });
+
+  refresh();
 }
 
 /**
@@ -652,21 +713,17 @@ function sortLocationsForDisplay(locationEntries) {
  * location lands on that location's single row.
  */
 function computeLocationRows() {
-  const minCondition = Number(document.getElementById("minCondition").value) || 1;
-  const minHours = Number(document.getElementById("minHours").value) || 1;
-
-  const filtered = allLocations.filter(
-    (loc) =>
-      selectedLocations.has(loc.name) &&
-      selectedTypes.has(loc.type) &&
-      groupsMatchFilter(locationGroupsOf(loc), selectedGroups) &&
-      directionsMatchFilter(loc.shore, selectedDirections)
-  );
+  // Thresholds are read from storage (via computeQualifyingSessions's own null-means-"read the
+  // saved values" fallback), not from #minCondition/#minHours directly — those inputs only exist
+  // while the thresholds/filters modal happens to be open, so a DOM read here would break the
+  // moment it's closed. Never bypassed by filteringEnabled — see initFilterControls' own comment
+  // on why thresholds aren't part of that toggle.
+  const filtered = filteringEnabled ? allLocations.filter((loc) => locationMatchesFacetFilters(loc, facetFilters)) : allLocations.slice();
   const ordered = sortLocationsForDisplay(filtered);
 
   return ordered.map((loc) => {
     const locRows = allRows.filter((r) => r["Location Name"] === loc.name && r["Type"] === loc.type);
-    const sessions = computeQualifyingSessions(locRows, minCondition, minHours);
+    const sessions = computeQualifyingSessions(locRows, null, null);
     return { loc, locRows, sessions };
   });
 }

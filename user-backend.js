@@ -2341,6 +2341,7 @@ const SYNCED_PREF_KEYS = new Set([
   "goodConditionsSelectedTypes",
   "goodConditionsSelectedGroups",
   "goodConditionsSelectedDirections",
+  "goodConditionsFilteringEnabled",
   "goodConditionsThresholds",
   "goodConditionsPinnedLocationsNew",
   "goodConditionsComputedSessions",

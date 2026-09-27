@@ -13,6 +13,7 @@ const SYNCED_PREF_KEYS = [
   "goodConditionsSelectedTypes",
   "goodConditionsSelectedGroups",
   "goodConditionsSelectedDirections",
+  "goodConditionsFilteringEnabled",
   "goodConditionsThresholds",
   "goodConditionsPinnedLocationsNew",
   "goodConditionsComputedSessions",

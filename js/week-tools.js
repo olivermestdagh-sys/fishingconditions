@@ -7,12 +7,13 @@ const LOC_FILTER_STORAGE_KEY = "goodConditionsSelectedLocations";
 const TYPE_FILTER_STORAGE_KEY = "goodConditionsSelectedTypes";
 const GROUP_FILTER_STORAGE_KEY = "goodConditionsSelectedGroups";
 const DIRECTION_FILTER_STORAGE_KEY = "goodConditionsSelectedDirections";
+const FILTERING_ENABLED_STORAGE_KEY = "goodConditionsFilteringEnabled";
 const THRESHOLDS_STORAGE_KEY = "goodConditionsThresholds";
 
 // Locations without any Location Group assigned yet (or before this field
 // existed at all) still need to be filterable/visible rather than
 // silently disappearing — grouped under this pseudo-value alongside
-// whatever real group names exist, both here and in renderGroupChips.
+// whatever real group names exist.
 const UNGROUPED_LABEL = "Ungrouped";
 
 // A location can belong to several groups at once (locationGroups is an
@@ -21,42 +22,6 @@ const UNGROUPED_LABEL = "Ungrouped";
 function locationGroupsOf(loc) {
   const groups = Array.isArray(loc.locationGroups) ? loc.locationGroups.filter((g) => g && g.trim()) : [];
   return groups.length ? groups : [UNGROUPED_LABEL];
-}
-
-/**
- * A set of tags matches the Location Group filter if the location carries
- * AT LEAST ONE of the currently selected groups — OR within the facet,
- * not AND. Location Group used to also do double duty for compass
- * direction (Eastern/Western/etc lived in the same flat group list),
- * which was the actual problem this replaced: AND-ing two region-style
- * groups together (e.g. "Port Phillip" + "Western Port") always produced
- * zero results, since a location normally sits in exactly one region.
- * Direction has since moved to its own facet (see directionsMatchFilter)
- * that's derived from the Shore setting instead, which is what actually
- * needed AND-against-region semantics — so Location Group itself can go
- * back to pure OR: checking "Port Phillip" and "Western Port" now sensibly
- * means "either bay", and stacking a Direction tile on top narrows THAT
- * combined result down to one shore, via the AND at the call site between
- * groupsMatchFilter(...) and directionsMatchFilter(...).
- *
- * An empty selection matches EVERYTHING — the opposite convention from
- * the Location/Type filters, where an empty set means "None was clicked,
- * hide everything". Those are simple set-membership filters (checking a
- * box includes a category); this is an opt-in tag filter, where checking
- * a box ADDS AN ACCEPTABLE OPTION rather than including a category — so
- * having nothing checked means no requirement has been added yet, not
- * that every possible requirement applies at once. Concretely: if this
- * treated an empty selection as "match nothing" (or defaulted every chip
- * to checked on load, mirroring Location/Type), a location would need to
- * carry a group that happens to be the only one that exists just to show
- * up on a fresh visit.
- */
-function groupsMatchFilter(locGroups, selectedGroups) {
-  if (selectedGroups.size === 0) return true;
-  for (const g of selectedGroups) {
-    if (locGroups.includes(g)) return true;
-  }
-  return false;
 }
 
 /**
@@ -76,26 +41,100 @@ function shoreStartsWithDirection(shore, direction) {
 }
 
 /**
- * Direction filter matching — OR within the selection, same convention as
- * groupsMatchFilter: checking "N" and "E" together shows anything facing
- * a northern OR eastern shore, not locations that could somehow face
- * both. An empty selection matches everything, also matching
- * groupsMatchFilter's "no requirement added yet" convention.
- *
- * Location Group and Direction are deliberately kept as two SEPARATE
- * facets rather than merged into one list, specifically so they can be
- * ANDed against each other at the call site — groupsMatchFilter(...) &&
- * directionsMatchFilter(...) — giving "(Region A OR Region B) AND
- * (Direction N OR Direction E)" without the person needing to touch any
- * AND/OR toggle: OR-within-a-facet, AND-across-facets falls out of the
- * two functions simply being combined with &&.
+ * Facet filters (Type/Location Group/Shore Direction/Locations) are 3-state
+ * per value — neutral, include or exclude — same convention as the Map's
+ * own mark filters (markMatchesFilters, js/marks-tools.js): an active
+ * include set requires a match (a location with none of the values
+ * fails); an active exclude set requires no match (a location with none
+ * of the values passes trivially); a facet with neither populated imposes
+ * no restriction at all. facets AND together; values within one facet's
+ * include/exclude combine with OR. `valueOrValues` may be a single value
+ * (Type, Locations) or an array (Location Group, Shore Direction — a
+ * location can carry several of each), letting one function serve both
+ * shapes identically.
  */
-function directionsMatchFilter(shore, selectedDirections) {
-  if (selectedDirections.size === 0) return true;
-  for (const d of selectedDirections) {
-    if (shoreStartsWithDirection(shore, d)) return true;
+function passesFacet(facet, valueOrValues) {
+  if (!facet) return true;
+  const values = Array.isArray(valueOrValues) ? valueOrValues : [valueOrValues];
+  if (facet.include && facet.include.size > 0) {
+    if (!values.some((v) => v && facet.include.has(v))) return false;
   }
-  return false;
+  if (facet.exclude && facet.exclude.size > 0) {
+    if (values.some((v) => v && facet.exclude.has(v))) return false;
+  }
+  return true;
+}
+
+/** Whether a location passes every current facet filter (Type/Group/Direction/Locations) — see passesFacet. */
+function locationMatchesFacetFilters(loc, facetFilters) {
+  if (!passesFacet(facetFilters.type, loc.type)) return false;
+  if (!passesFacet(facetFilters.group, locationGroupsOf(loc))) return false;
+  const matchingDirs = CARDINAL_DIRECTIONS.filter((d) => shoreStartsWithDirection(loc.shore, d));
+  if (!passesFacet(facetFilters.direction, matchingDirs)) return false;
+  if (!passesFacet(facetFilters.location, loc.name)) return false;
+  return true;
+}
+
+/** A fresh, empty (neutral) facet filter set — every facet imposes no restriction, matching everything. */
+function emptyFacetFilters() {
+  return {
+    type: { include: new Set(), exclude: new Set() },
+    group: { include: new Set(), exclude: new Set() },
+    direction: { include: new Set(), exclude: new Set() },
+    location: { include: new Set(), exclude: new Set() },
+  };
+}
+
+/**
+ * Lifts whatever's saved under the four legacy facet keys into the new
+ * {include, exclude} shape, preserving today's exact visible result so
+ * upgrading never silently changes anyone's view:
+ *   - Group/Direction were already "empty = match everything" opt-in tag
+ *     filters — a straight lift, the saved array becomes the include set.
+ *   - Type/Locations were "closed" lists (checked = shown; empty = show
+ *     NOTHING) — excluding the complement of what's checked, computed
+ *     against the values that exist right now, reproduces the identical
+ *     visible set under the new "empty = show everything" convention. An
+ *     absent key (never touched) migrates to neutral (empty/empty),
+ *     matching today's true default of "everything selected".
+ * Also passes a value through unchanged if it's already the new shape (an
+ * {include, exclude} object rather than a plain array) — handles an
+ * account whose other device already migrated and synced the new shape
+ * down to this one.
+ */
+function migrateLegacyFacetFilters(allLocationNames) {
+  function readJson(key) {
+    try {
+      return JSON.parse(localStorage.getItem(key) || "null");
+    } catch {
+      return null;
+    }
+  }
+  function isNewShape(saved) {
+    return !!saved && typeof saved === "object" && !Array.isArray(saved) && (Array.isArray(saved.include) || Array.isArray(saved.exclude));
+  }
+  function toSets(saved) {
+    return { include: new Set(saved.include || []), exclude: new Set(saved.exclude || []) };
+  }
+  function liftOpenFacet(key) {
+    const saved = readJson(key);
+    if (isNewShape(saved)) return toSets(saved);
+    return { include: new Set(Array.isArray(saved) ? saved : []), exclude: new Set() };
+  }
+  function liftClosedFacet(key, universe) {
+    const saved = readJson(key);
+    if (isNewShape(saved)) return toSets(saved);
+    if (!Array.isArray(saved)) return { include: new Set(), exclude: new Set() };
+    const included = new Set(saved.filter((v) => universe.includes(v)));
+    const excluded = new Set(universe.filter((v) => !included.has(v)));
+    return { include: included, exclude: excluded };
+  }
+  return {
+    type: liftClosedFacet(TYPE_FILTER_STORAGE_KEY, ["Kayak", "Land based"]),
+    group: liftOpenFacet(GROUP_FILTER_STORAGE_KEY),
+    direction: liftOpenFacet(DIRECTION_FILTER_STORAGE_KEY),
+    location: liftClosedFacet(LOC_FILTER_STORAGE_KEY, allLocationNames),
+  };
 }
 
 function fmtNaive(ms, opts) {
@@ -331,20 +370,15 @@ function conditionColor(avgValue) {
   return CONDITION_COLORS[rounded] || "var(--cond-none)";
 }
 
-function persistSelectedLocations(selectedLocations) {
-  Prefs.set(LOC_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedLocations)));
+function persistFacetFilter(key, facet) {
+  Prefs.set(key, JSON.stringify({ include: [...facet.include], exclude: [...facet.exclude] }));
 }
 
-function persistSelectedTypes(selectedTypes) {
-  Prefs.set(TYPE_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedTypes)));
-}
+const FACET_STORAGE_KEYS = { type: TYPE_FILTER_STORAGE_KEY, group: GROUP_FILTER_STORAGE_KEY, direction: DIRECTION_FILTER_STORAGE_KEY, location: LOC_FILTER_STORAGE_KEY };
+const FACET_LABELS = { type: "Type", group: "Location Group", direction: "Shore Direction", location: "Locations" };
 
-function persistSelectedGroups(selectedGroups) {
-  Prefs.set(GROUP_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedGroups)));
-}
-
-function persistSelectedDirections(selectedDirections) {
-  Prefs.set(DIRECTION_FILTER_STORAGE_KEY, JSON.stringify(Array.from(selectedDirections)));
+function persistFacetFilters(facetFilters) {
+  for (const facet of Object.keys(FACET_STORAGE_KEYS)) persistFacetFilter(FACET_STORAGE_KEYS[facet], facetFilters[facet]);
 }
 
 function persistThresholds() {
@@ -353,162 +387,139 @@ function persistThresholds() {
   Prefs.set(THRESHOLDS_STORAGE_KEY, JSON.stringify({ minCondition, minHours }));
 }
 
-// onChange is called after the toggle (with no arguments) so each caller
-// can supply its own "re-render everything that depends on this filter"
-// logic, rather than this function hardcoding a specific one.
-//
-// narrowByTypes/narrowByGroups/narrowByDirections are optional (callers
-// pass what they have; not required for backward compatibility with any
-// future caller that doesn't need cross-filtering) — when given, a
-// location only gets a chip here if it matches the current Type filter
-// AND matches the current Location Group filter (OR within that facet —
-// see groupsMatchFilter) AND matches the current Direction filter (OR
-// within that facet — see directionsMatchFilter). This only affects
-// which chips are OFFERED, not what's actually selected — a location
-// that disappears because its type/group/direction no longer matches
-// stays in selectedLocations exactly as it was, so if the filter changes
-// back, it reappears with its previous checked state rather than
-// resetting.
-function renderLocationChips(allLocations, selectedLocations, onChange, narrowByTypes, narrowByGroups, narrowByDirections) {
-  const container = document.getElementById("locationChips");
-  container.innerHTML = "";
-  // A location's name is no longer unique on its own (Kayak and Land based
-  // entries share the same name) — dedupe so this filter shows one chip
-  // per physical spot, not one per (name, type) combination.
-  const seenNames = new Set();
-  for (const loc of allLocations) {
-    if (narrowByTypes && !narrowByTypes.has(loc.type)) continue;
-    if (narrowByGroups && !groupsMatchFilter(locationGroupsOf(loc), narrowByGroups)) continue;
-    if (narrowByDirections && !directionsMatchFilter(loc.shore, narrowByDirections)) continue;
-    if (seenNames.has(loc.name)) continue;
-    seenNames.add(loc.name);
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "loc-chip" + (selectedLocations.has(loc.name) ? " active" : "");
-    chip.textContent = loc.name;
-    chip.addEventListener("click", () => {
-      if (selectedLocations.has(loc.name)) {
-        selectedLocations.delete(loc.name);
-      } else {
-        selectedLocations.add(loc.name);
-      }
-      persistSelectedLocations(selectedLocations);
-      chip.classList.toggle("active");
-      onChange();
-    });
-    container.appendChild(chip);
-  }
-}
-
-function renderTypeChips(selectedTypes, onChange) {
-  const container = document.getElementById("typeChips");
-  if (!container) return;
-  container.innerHTML = "";
-  for (const type of ["Kayak", "Land based"]) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "loc-chip type-chip" + (selectedTypes.has(type) ? " active" : "");
-    chip.innerHTML = `${typeIconSvg(type, 14)} <span>${type}</span>`;
-    chip.addEventListener("click", () => {
-      if (selectedTypes.has(type)) {
-        selectedTypes.delete(type);
-      } else {
-        selectedTypes.add(type);
-      }
-      persistSelectedTypes(selectedTypes);
-      chip.classList.toggle("active");
-      onChange();
-    });
-    container.appendChild(chip);
-  }
+function countActiveFacetFilters(facetFilters) {
+  return Object.values(facetFilters).reduce((n, f) => n + f.include.size + f.exclude.size, 0);
 }
 
 /**
- * Location Group filter chips — one per distinct group name currently in
- * use across allLocations (plus an "Ungrouped" chip for any location with
- * no groups at all, via locationGroupsOf(), so nothing becomes
- * unfilterable/invisible just because it predates this field or hasn't
- * been assigned a group yet). A location can belong to several groups at
- * once, so it contributes a chip candidate for EACH of its groups, not
- * just one. The set of AVAILABLE group names is managed separately on the
- * Settings page (config/location_groups.json, locationsadmin.js) — this
- * only shows groups actually assigned to at least one location right now,
- * same "derive what's shown from what's actually in use" approach
- * renderLocationChips already takes for individual locations.
- *
- * narrowByTypes/narrowByDirections (optional) restrict this to groups
- * that have at least one location matching the current Type filter AND
- * current Direction filter — same "narrow the offered chips, don't touch
- * what's actually selected" approach as renderLocationChips's own
- * narrowing params.
+ * Small removable-chip summary of whatever facet filters are currently
+ * active — mirrors the Map's own renderActiveFilterChips (js/marks-tools.js):
+ * "NOT " prefix distinguishes an exclude chip from an include one alongside
+ * the colour coding. Renders nothing when no filters are active at all.
  */
-function renderGroupChips(allLocations, selectedGroups, onChange, narrowByTypes, narrowByDirections) {
-  const container = document.getElementById("groupChips");
-  if (!container) return;
-  container.innerHTML = "";
-  const seenGroups = new Set();
-  for (const loc of allLocations) {
-    if (narrowByTypes && !narrowByTypes.has(loc.type)) continue;
-    if (narrowByDirections && !directionsMatchFilter(loc.shore, narrowByDirections)) continue;
-    for (const group of locationGroupsOf(loc)) {
-      if (seenGroups.has(group)) continue;
-      seenGroups.add(group);
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "loc-chip" + (selectedGroups.has(group) ? " active" : "");
-      chip.textContent = group;
-      chip.addEventListener("click", () => {
-        if (selectedGroups.has(group)) {
-          selectedGroups.delete(group);
-        } else {
-          selectedGroups.add(group);
+function renderActiveFacetFilterChips(container, facetFilters, onChange) {
+  const chips = [];
+  for (const [facet, label] of Object.entries(FACET_LABELS)) {
+    const f = facetFilters[facet];
+    for (const v of f.include) chips.push({ facet, label, value: v, mode: "include" });
+    for (const v of f.exclude) chips.push({ facet, label, value: v, mode: "exclude" });
+  }
+  if (chips.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+  container.innerHTML = chips
+    .map((c) => {
+      const style = c.mode === "include" ? "background:#dcfce7;border-color:#16a34a;color:#166534;" : "background:#fee2e2;border-color:#dc2626;color:#991b1b;";
+      const escValue = escapeHtml(c.value);
+      return `<span class="loc-chip" style="display:inline-flex;align-items:center;gap:4px;cursor:default;font-size:0.72rem;padding:3px 8px;${style}">
+        ${c.mode === "exclude" ? "NOT " : ""}${escapeHtml(c.label)}: ${escValue}
+        <button type="button" data-remove-active-facet-filter data-facet="${c.facet}" data-value="${escValue}" data-mode="${c.mode}"
+          aria-label="Remove filter"
+          style="background:none;border:none;color:inherit;cursor:pointer;padding:0;font-size:0.9rem;line-height:1;">×</button>
+      </span>`;
+    })
+    .join("");
+  container.querySelectorAll("[data-remove-active-facet-filter]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const { facet, value, mode } = btn.dataset;
+      facetFilters[facet][mode].delete(value);
+      onChange();
+    });
+  });
+}
+
+/**
+ * Which values are offered as chips for one facet inside the modal below,
+ * cross-narrowed by the OTHER three facets' current picks (same "restrict
+ * which chips are offered, don't touch what's actually selected" approach
+ * this file always took) — Type is fixed and never narrowed (it never was);
+ * Group/Direction/Locations are each narrowed by the other three.
+ */
+function facetCandidates(facet, allLocations, facetFilters) {
+  if (facet === "type") return ["Kayak", "Land based"];
+  if (facet === "group") {
+    const seen = new Set();
+    const out = [];
+    for (const loc of allLocations) {
+      if (!passesFacet(facetFilters.type, loc.type)) continue;
+      const dirs = CARDINAL_DIRECTIONS.filter((d) => shoreStartsWithDirection(loc.shore, d));
+      if (!passesFacet(facetFilters.direction, dirs)) continue;
+      for (const g of locationGroupsOf(loc)) {
+        if (!seen.has(g)) {
+          seen.add(g);
+          out.push(g);
         }
-        persistSelectedGroups(selectedGroups);
-        chip.classList.toggle("active");
-        onChange();
-      });
-      container.appendChild(chip);
+      }
+    }
+    return out;
+  }
+  if (facet === "direction") {
+    return CARDINAL_DIRECTIONS.filter((d) =>
+      allLocations.some((loc) => {
+        if (!passesFacet(facetFilters.type, loc.type)) return false;
+        if (!passesFacet(facetFilters.group, locationGroupsOf(loc))) return false;
+        return shoreStartsWithDirection(loc.shore, d);
+      })
+    );
+  }
+  // location
+  const seen = new Set();
+  const out = [];
+  for (const loc of allLocations) {
+    if (!passesFacet(facetFilters.type, loc.type)) continue;
+    if (!passesFacet(facetFilters.group, locationGroupsOf(loc))) continue;
+    const dirs = CARDINAL_DIRECTIONS.filter((d) => shoreStartsWithDirection(loc.shore, d));
+    if (!passesFacet(facetFilters.direction, dirs)) continue;
+    if (!seen.has(loc.name)) {
+      seen.add(loc.name);
+      out.push(loc.name);
     }
   }
+  return out;
 }
 
-/**
- * Direction filter chips — always exactly CARDINAL_DIRECTIONS (unlike
- * renderGroupChips, which derives its chip list from whatever groups are
- * actually assigned by hand). A tile is only offered if at least one
- * currently-visible location's Shore starts with that letter, same
- * "don't offer a chip that can't match anything right now" approach as
- * the other chip renderers — narrowByTypes/narrowByGroups apply first,
- * same as renderGroupChips's own narrowing params.
- */
-function renderDirectionChips(allLocations, selectedDirections, onChange, narrowByTypes, narrowByGroups) {
-  const container = document.getElementById("directionChips");
-  if (!container) return;
-  container.innerHTML = "";
-  for (const dir of CARDINAL_DIRECTIONS) {
-    const hasMatch = allLocations.some((loc) => {
-      if (narrowByTypes && !narrowByTypes.has(loc.type)) return false;
-      if (narrowByGroups && !groupsMatchFilter(locationGroupsOf(loc), narrowByGroups)) return false;
-      return shoreStartsWithDirection(loc.shore, dir);
-    });
-    if (!hasMatch) continue;
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "loc-chip" + (selectedDirections.has(dir) ? " active" : "");
-    chip.textContent = dir;
-    chip.addEventListener("click", () => {
-      if (selectedDirections.has(dir)) {
-        selectedDirections.delete(dir);
-      } else {
-        selectedDirections.add(dir);
-      }
-      persistSelectedDirections(selectedDirections);
-      chip.classList.toggle("active");
-      onChange();
-    });
-    container.appendChild(chip);
-  }
+// Which filter groups are expanded in the dialog below — kept across openings (all start collapsed),
+// same convention as the Map's own markFilterOpenGroups (js/marks-tools.js).
+const facetFilterOpenGroups = new Set();
+
+function facetChipStateFor(facetFilters, facet, value) {
+  const f = facetFilters[facet];
+  if (f.include.has(value)) return "include";
+  if (f.exclude.has(value)) return "exclude";
+  return "neutral";
 }
+function facetChipStyleFor(chipState) {
+  if (chipState === "include") return "background:#dcfce7;border-color:#16a34a;color:#166534;";
+  if (chipState === "exclude") return "background:#fee2e2;border-color:#dc2626;color:#991b1b;";
+  return "";
+}
+function facetSummaryHtmlFor(facetFilters, facet) {
+  const f = facetFilters[facet];
+  const esc = (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const chip = (text, cs) => `<span class="loc-chip" style="cursor:default;font-size:0.72rem;padding:2px 7px;${facetChipStyleFor(cs)}">${text}</span>`;
+  return [...f.include].map((v) => chip(esc(v), "include")).join("") + [...f.exclude].map((v) => chip(`NOT ${esc(v)}`, "exclude")).join("");
+}
+function facetGroupHtml(facetFilters, key, label, bodyHtml) {
+  const open = facetFilterOpenGroups.has(key);
+  return `
+    <div class="mark-filter-group" data-group="${key}" style="margin-bottom:8px;border:1px solid var(--grey-200);border-radius:8px;">
+      <button type="button" data-toggle-facet-group="${key}" aria-expanded="${open}"
+        style="display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;padding:8px 10px;cursor:pointer;text-align:left;font:inherit;color:inherit;">
+        <span data-caret style="display:inline-block;width:0.9em;transition:transform 0.1s;${open ? "" : "transform:rotate(-90deg);"}">▾</span>
+        <span style="font-size:0.8rem;font-weight:600;flex-shrink:0;">${label}</span>
+        <span data-summary="${key}" style="display:${open ? "none" : "flex"};flex-wrap:wrap;gap:4px;min-width:0;">${facetSummaryHtmlFor(facetFilters, key)}</span>
+      </button>
+      <div data-group-body="${key}" style="display:${open ? "block" : "none"};padding:0 10px 10px;">${bodyHtml}</div>
+    </div>
+  `;
+}
+
+// showThresholdFilterModal itself lives in week.js, not here — it's the only piece of this facet-filter
+// system that references week.js-only globals (wireThresholdStepper, pinnedOrder, togglePin), and this
+// file is shared with pages (conditions.html, reports.html) that load js/week-tools.js without week.js.
+// Everything above (facetGroupHtml, facetCandidates, facetChipStateFor/StyleFor, facetSummaryHtmlFor,
+// facetFilterOpenGroups, FACET_LABELS) is generic and used by that function from there.
 
 // ============================================================================
 // Shared trip-schedule infrastructure — lets Week Ahead offer the same
