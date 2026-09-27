@@ -1,5 +1,5 @@
 // chart-base.js
-// Shared basics used by every page with a graph: date/number formatting, wind and shore helpers, the small canvas icons (windsock, fish, home, car, boat), condition colours, chart-plugin builders for the axis labels and condition strips, and the tide-threshold (ramp access) calculation.
+// Shared basics used by every page with a graph: date/number formatting, wind and shore helpers, the small canvas icons (flag, fish, home, car, boat), condition colours, chart-plugin builders for the axis labels and condition strips, and the tide-threshold (ramp access) calculation.
 // One of the shared scripts split out of the old charts.js. All of them share one global scope; each page loads
 // only the ones it needs, in this order (checked by scripts/check-page-scripts.mjs).
 
@@ -259,100 +259,100 @@ function buildAxisUnitLabelsPlugin() {
   };
 }
 
+// Lucide's own "flag" and "fish" icons (MIT/ISC — unpkg.com/lucide-static), the source for the
+// two condition-strip legend icons below. Raw <path> d-data at Lucide's native 24x24 viewBox, same
+// sourcing convention as KAYAK_ICON_PATHS/FOOTPRINTS_ICON_PATHS above. The fish icon's upstream SVG
+// has 6 paths (body, gill mark, tail arc, and three fin/whisker details); only the body and tail arc
+// are kept here — the rest is too fine to survive the strip icon's tiny (~4-10px) real render size
+// and would just read as noise, the same "simplify to the essential silhouette" call the old
+// hand-drawn fish icon already made.
+const FLAG_ICON_PATH =
+  "M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528";
+const FISH_ICON_BODY_PATH =
+  "M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z";
+const FISH_ICON_TAIL_PATH = "M16 17.93a9.77 9.77 0 0 1 0-11.86";
+
+// Pre-rendered once per icon (always black — these sit on top of a colored strip, and a fixed
+// neutral color reads best against the strip's own red-to-green fill), cached the same way
+// makeArrowCanvas caches its per-color dart above. Built at 2x Lucide's native 24x24 so
+// ctx.drawImage's downscale to the strip's tiny real size (see buildConditionStripsPlugin) stays
+// crisp rather than drawing straight onto the chart canvas at ~5px where thin strokes vanish.
+const STRIP_ICON_CANVAS_CACHE = new Map();
+
+function stripIconCanvas(name, draw) {
+  if (STRIP_ICON_CANVAS_CACHE.has(name)) return STRIP_ICON_CANVAS_CACHE.get(name);
+  const dim = 48;
+  const canvas = document.createElement("canvas");
+  canvas.width = dim;
+  canvas.height = dim;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dim / 24, dim / 24); // Lucide's 24x24 path-data units -> this canvas
+  draw(ctx);
+  STRIP_ICON_CANVAS_CACHE.set(name, canvas);
+  return canvas;
+}
+
+function flagIconCanvas() {
+  return stripIconCanvas("flag", (ctx) => {
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.stroke(new Path2D(FLAG_ICON_PATH));
+  });
+}
+
+function fishIconCanvas() {
+  return stripIconCanvas("fish", (ctx) => {
+    ctx.fillStyle = "#000";
+    ctx.fill(new Path2D(FISH_ICON_BODY_PATH));
+    // The tail-arc, stroked WHITE rather than black — filling the body solid makes Lucide's own
+    // black tail-arc line invisible (same color as what's underneath it); white turns it into a
+    // visible crease separating "tail" from "body", which is what actually reads as a fish rather
+    // than a plain blob at this size.
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 1.8;
+    ctx.lineCap = "round";
+    ctx.stroke(new Path2D(FISH_ICON_TAIL_PATH));
+    // Lucide's own tiny "gill mark" path (a rounded-cap near-dot, "M18 12v.5") reused as the eye —
+    // near the pointed nose end (x=22 in FISH_ICON_BODY_PATH), not the tail end.
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(18, 12.25, 1.1, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
 /**
- * Small black canvas-drawn icons for the very first box of each condition
- * strip (see buildConditionStripsPlugin's showFirstBoxIcons option) — a
- * one-time visual legend so what the "Loc"/"Fish" strips and their colors
- * mean is recognizable without needing to read the small row labels.
- * Hand-drawn with Canvas path commands rather than an SVG/image asset —
- * this site has zero external icon dependencies to begin with, and these
- * need to be drawn directly into the chart's own canvas anyway (CSS/HTML
- * icons can't be overlaid at a precise pixel position inside a <canvas>).
+ * The very first box of each condition strip (see buildConditionStripsPlugin's showFirstBoxIcons
+ * option) gets a small icon drawn on top — a one-time visual legend so what the "Loc"/"Fish"
+ * strips and their colors mean is recognizable without needing to read the small row labels.
+ * Lucide-sourced (see flagIconCanvas/fishIconCanvas above), drawn via ctx.drawImage of a cached
+ * offscreen canvas rather than live path commands — same signature (ctx, cx, cy, size) the old
+ * hand-drawn versions used, so buildConditionStripsPlugin's call sites don't need to change.
  */
-function drawWindsockIcon(ctx, cx, cy, size) {
-  ctx.save();
-  const poleTopX = cx - size * 0.9;
-  const poleTopY = cy - size * 0.75;
-  ctx.strokeStyle = "#000";
-  ctx.lineWidth = size * 0.12;
-  ctx.beginPath();
-  ctx.moveTo(poleTopX, poleTopY);
-  ctx.lineTo(poleTopX, cy + size * 0.95);
-  ctx.stroke();
-
-  // Mount bracket + open mouth ring connecting the pole to the sock.
-  const ringX = poleTopX + size * 0.32;
-  const ringY = poleTopY + size * 0.1;
-  ctx.lineWidth = size * 0.06;
-  ctx.beginPath();
-  ctx.moveTo(poleTopX, poleTopY);
-  ctx.lineTo(ringX, ringY - size * 0.22);
-  ctx.moveTo(poleTopX, poleTopY);
-  ctx.lineTo(ringX, ringY + size * 0.22);
-  ctx.stroke();
-  ctx.lineWidth = size * 0.07;
-  ctx.beginPath();
-  ctx.ellipse(ringX, ringY, size * 0.06, size * 0.24, 0.25, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Body: stays wide for most of its length before a blunt (not pointed)
-  // rounded tip, drooping diagonally — a real windsock's fabric tube
-  // shape, not a flat pennant/flag tapering straight to a point.
-  const tailX = ringX + size * 1.5;
-  const tailY = ringY + size * 0.7;
-  ctx.fillStyle = "#000";
-  ctx.beginPath();
-  ctx.moveTo(ringX + size * 0.1, ringY - size * 0.26);
-  ctx.quadraticCurveTo(ringX + size * 0.95, ringY, tailX, tailY - size * 0.1);
-  ctx.quadraticCurveTo(tailX + size * 0.1, tailY, tailX, tailY + size * 0.1);
-  ctx.quadraticCurveTo(ringX + size * 0.95, ringY + size * 0.32, ringX + size * 0.1, ringY + size * 0.26);
-  ctx.closePath();
-  ctx.fill();
-
-  // Wind bands (the segmented stripes visible on a real windsock).
-  ctx.strokeStyle = "#fff";
-  ctx.lineWidth = size * 0.06;
-  ctx.beginPath();
-  ctx.moveTo(ringX + size * 0.55, ringY - size * 0.13);
-  ctx.lineTo(ringX + size * 0.5, ringY + size * 0.18);
-  ctx.moveTo(ringX + size * 0.95, ringY - size * 0.02);
-  ctx.lineTo(ringX + size * 0.92, ringY + size * 0.26);
-  ctx.stroke();
-  ctx.restore();
+function drawFlagIcon(ctx, cx, cy, size) {
+  const drawSize = size * 2.3;
+  ctx.drawImage(flagIconCanvas(), cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
 }
 
 function drawFishIcon(ctx, cx, cy, size) {
-  ctx.save();
-  ctx.fillStyle = "#000";
-  ctx.beginPath();
-  ctx.moveTo(cx + size, cy);
-  ctx.quadraticCurveTo(cx + size * 0.3, cy - size * 0.75, cx - size * 0.5, cy);
-  ctx.quadraticCurveTo(cx + size * 0.3, cy + size * 0.75, cx + size, cy);
-  ctx.closePath();
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(cx - size * 0.5, cy);
-  ctx.lineTo(cx - size * 1.3, cy - size * 0.5);
-  ctx.lineTo(cx - size * 1.3, cy + size * 0.5);
-  ctx.closePath();
-  ctx.fill();
-  ctx.beginPath();
-  ctx.fillStyle = "#fff";
-  ctx.arc(cx + size * 0.55, cy - size * 0.15, size * 0.16, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
+  const drawSize = size * 2.3;
+  ctx.drawImage(fishIconCanvas(), cx - drawSize / 2, cy - drawSize / 2, drawSize, drawSize);
 }
 
 /**
  * Three small canvas-drawn glyphs for the computed-session markers below
- * (buildComputedSessionMarkersPlugin) — same hand-drawn-shape, no-external-
- * asset approach as drawWindsockIcon/drawFishIcon above. Deliberately only
- * three shapes cover all seven schedule instants (see the ICON_FOR_INSTANT
- * mapping just below the plugin): Home covers leaveHome/homeBy, Car covers
- * arrive/driveHome, Boat covers launch/headBack — the instant's TEXT label
- * still disambiguates which specific one it is, so reusing a shape for two
- * instants doesn't lose any information, it just keeps the total icon
- * vocabulary small.
+ * (buildComputedSessionMarkersPlugin) — hand-drawn with live Canvas path
+ * commands, unlike the Lucide-sourced flag/fish icons above: these three
+ * don't have an obviously simpler off-the-shelf equivalent, and are drawn
+ * at a larger, more forgiving size than the tiny strip icons. Deliberately
+ * only three shapes cover all seven schedule instants (see the
+ * ICON_FOR_INSTANT mapping just below the plugin): Home covers
+ * leaveHome/homeBy, Car covers arrive/driveHome, Boat covers
+ * launch/headBack — the instant's TEXT label still disambiguates which
+ * specific one it is, so reusing a shape for two instants doesn't lose any
+ * information, it just keeps the total icon vocabulary small.
  */
 function drawHomeIcon(ctx, cx, cy, size) {
   ctx.save();
@@ -501,14 +501,14 @@ function buildConditionStripsPlugin(rows, isMobile, showFirstBoxIcons = false) {
           ctx.fillRect(clippedStart, stripTop, clippedEnd - clippedStart, stripHeight);
           if (showFirstBoxIcons && !iconDrawn && iconDrawFn) {
             iconDrawn = true;
-            const iconSize = Math.min(stripHeight, clippedEnd - clippedStart) * 0.3;
+            const iconSize = Math.min(stripHeight, clippedEnd - clippedStart) * 0.38;
             iconDrawFn(ctx, (clippedStart + clippedEnd) / 2, stripTop + stripHeight / 2, iconSize);
           }
         }
         ctx.restore();
       };
 
-      drawStrip("Condition", "Loc", locStripTop, drawWindsockIcon);
+      drawStrip("Condition", "Loc", locStripTop, drawFlagIcon);
       drawStrip("Fishing Condition", "Fish", fishStripTop, drawFishIcon);
     },
   };
