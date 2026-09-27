@@ -1673,8 +1673,7 @@ function publicRigSublistHtml(entry, esc) {
 
   const override = rigSublistOverrides.get(entry.id);
   const overrideHtml = override !== undefined
-    ? `<div class="mark-list-rig-override" data-rig-id="${entry.id}" style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px;padding:6px 8px;border-radius:8px;background:var(--white);color:#111827;">
-        <span style="font-size:0.65rem;font-weight:600;">Private — only visible to you:</span>
+    ? `<div class="mark-list-rig-override" data-rig-id="${entry.id}" title="Private — only visible to you" style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px;padding:6px 8px;border-radius:8px;background:var(--white);color:#111827;">
         ${override.length
           ? override.map((item, i) => `
               <span class="loc-chip" style="cursor:default;display:inline-flex;align-items:center;gap:6px;">
