@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="style.css" />
 <script src="js/install-app.js"></script>
 </head>
-<body>
+<body class="settings-page">
 
 <div class="sitebar"><header class="topbar">
   <h1>Olie's Kayak and Surf Fishing Conditions</h1>
@@ -152,6 +152,19 @@
         <button id="btnAddRodSetup" class="btn-secondary">+ Add setup</button>
       </div>
       <div id="rodSetupsStatus" style="margin-top:10px;font-size:0.85rem;"></div>
+    </div>
+    <div class="mark-list-field-group" id="tripSetupsFieldGroup" style="margin-bottom:0;margin-top:16px;">
+      <label class="loc-edit-label" style="display:block;margin-bottom:6px;">Trip Setups</label>
+      <p class="footnote" style="margin:0 0 12px;text-align:left;">
+        A named bundle of Rod Setups plus your usual Species, Water, Berley, Fishing Method and Lure —
+        everything Session Defaults on the Map covers, so you can switch a whole trip's defaults at once.
+      </p>
+      <div id="tripSetupsList"></div>
+      <div class="filter-row" style="margin-top:8px;flex-wrap:wrap;">
+        <input type="text" id="newTripSetupNameInput" placeholder="Trip name" style="flex:1;min-width:140px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
+        <button id="btnAddTripSetup" class="btn-secondary">+ Add trip setup</button>
+      </div>
+      <div id="tripSetupsStatus" style="margin-top:10px;font-size:0.85rem;"></div>
     </div>
   </section>
 

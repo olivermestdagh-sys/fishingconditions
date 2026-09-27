@@ -223,6 +223,13 @@ async function init() {
       onAddRodSetup();
     }
   });
+  document.getElementById("btnAddTripSetup").addEventListener("click", onAddTripSetup);
+  document.getElementById("newTripSetupNameInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      onAddTripSetup();
+    }
+  });
   document.getElementById("btnSendMessage").addEventListener("click", onSendMessage);
   document.getElementById("contactMessageInput").addEventListener("input", (e) => {
     document.getElementById("contactCharCount").textContent = `${e.target.value.length} / 2000`;
@@ -299,8 +306,9 @@ async function refreshPageForCurrentUser() {
 
   await Promise.all([
     loadLocationGroups(),
-    // Rod Setups' Rod/Rig options (and a rig's own sub list) come from markLists, so it loads after.
-    loadMarkLists().then(() => loadRodSetups()),
+    // Rod Setups' Rod/Rig options (and a rig's own sub list) come from markLists, so it loads after;
+    // Trip Setups' Rod Setups multi-select needs rodSetups itself, so it loads after that in turn.
+    loadMarkLists().then(() => loadRodSetups()).then(() => loadTripSetups()),
     loadUsers(),
     loadTiers(),
     loadMyMessages(),
@@ -957,6 +965,7 @@ async function onRodSetupFieldChange(idx, field, value, extra) {
     rodSetups[idx] = await res.json();
     setRodSetupsStatus("Saved.", false);
     renderRodSetupsList();
+    renderTripSetupsList(); // a Trip Setup's Rod Setups multi-select shows this setup's name
   } catch (err) {
     console.error("Failed to save rod setup:", err);
     setRodSetupsStatus(`Couldn't save: ${err.message}`, true);
@@ -990,6 +999,7 @@ async function onAddRodSetup() {
     rigSelect.value = "";
     setRodSetupsStatus("Added.", false);
     renderRodSetupsList();
+    renderTripSetupsList(); // a new Rod Setup is now selectable in a Trip Setup
   } catch (err) {
     console.error("Failed to add rod setup:", err);
     setRodSetupsStatus(`Couldn't add: ${err.message}`, true);
@@ -1008,6 +1018,7 @@ async function onRemoveRodSetup(idx) {
     rodSetups.splice(idx, 1);
     setRodSetupsStatus("Removed.", false);
     renderRodSetupsList();
+    renderTripSetupsList(); // any Trip Setup referencing it just stops offering it as selected
   } catch (err) {
     console.error("Failed to remove rod setup:", err);
     setRodSetupsStatus(`Couldn't remove: ${err.message}`, true);
@@ -1016,6 +1027,200 @@ async function onRemoveRodSetup(idx) {
 
 function setRodSetupsStatus(text, isError) {
   const el = document.getElementById("rodSetupsStatus");
+  el.textContent = text;
+  el.style.color = isError ? "var(--red-600, #c0392b)" : "var(--grey-500)";
+}
+
+// ---------------------------------------------------------------------
+// Trips > Trip Setups (user_trip_setups) — a named bundle of Rod Setups
+// plus everything else Session Defaults (Map tab, js/live-cards.js
+// liveSessionDefaults) controls outside a per-rod rig/bait pick: Species,
+// Water Condition, Berley, Fishing Method, Lure. Available to any signed-in
+// user, same as Rod Setups — not merged with Public's data (this is
+// personal, unlike Fishing Mark Lists/Location Groups).
+// ---------------------------------------------------------------------
+let tripSetups = []; // [{id, name, rodSetupIds, species, water, berley, fishingMethod, lure}]
+
+async function loadTripSetups() {
+  if (!currentUser) {
+    tripSetups = [];
+    return;
+  }
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/tripsetups${effectiveUserIdParam()}`, { credentials: "include" });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    tripSetups = await res.json();
+  } catch (err) {
+    console.error("Failed to load trip setups:", err);
+    tripSetups = [];
+    setTripSetupsStatus("Couldn't load trip setups — try reloading the page.", true);
+  }
+  renderTripSetupsList();
+}
+
+function renderTripSetupsList() {
+  const list = document.getElementById("tripSetupsList");
+  if (!list) return; // not on this page load yet (loadTripSetups can resolve before init() finishes wiring)
+  const speciesOptions = mergedMarkListsFor("Species").map((r) => r.value);
+  const waterOptions = mergedMarkListsFor("Water Condition").map((r) => r.value);
+  const berleyOptions = mergedMarkListsFor("Berley").map((r) => r.value);
+  const fishingMethodOptions = mergedMarkListsFor("Fishing Method").map((r) => r.value);
+  const lureOptions = mergedMarkListsFor("Lure").map((r) => r.value);
+  const singleOptionsHtml = (options, current) =>
+    `<option value="">—</option>${options.map((o) => `<option value="${escapeHtml(o)}"${o === current ? " selected" : ""}>${escapeHtml(o)}</option>`).join("")}`;
+  const multiOptionsHtml = (options, current) =>
+    options.map((o) => `<option value="${escapeHtml(o)}"${(current || []).includes(o) ? " selected" : ""}>${escapeHtml(o)}</option>`).join("");
+  const multiSelectHtml = (dataAttr, idx, options, current, label) => `
+    <div style="flex:1;min-width:130px;">
+      <label class="footnote" style="margin:0;display:block;">${label}</label>
+      <select ${dataAttr}="${idx}" multiple size="${Math.min(4, Math.max(2, options.length))}" style="width:100%;padding:4px;border-radius:8px;border:1px solid var(--grey-200);">
+        ${multiOptionsHtml(options, current)}
+      </select>
+    </div>`;
+
+  list.innerHTML = "";
+  if (tripSetups.length === 0) {
+    list.innerHTML = `<p class="footnote" style="margin:0;text-align:left;">No trip setups yet — add one below.</p>`;
+  }
+  tripSetups.forEach((setup, idx) => {
+    const row = document.createElement("div");
+    row.className = "filter-row";
+    row.style.cssText = "align-items:center;flex-wrap:wrap;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--grey-200);";
+    row.innerHTML = `
+      <div style="flex:2;min-width:140px;">
+        <input type="text" data-trip-name="${idx}" value="${escapeHtml(setup.name)}" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);" />
+      </div>
+      <div style="flex:1;min-width:160px;">
+        <label class="footnote" style="margin:0;display:block;">Rod Setups</label>
+        <select data-trip-rodsetups="${idx}" multiple size="${Math.min(4, Math.max(2, rodSetups.length))}" style="width:100%;padding:4px;border-radius:8px;border:1px solid var(--grey-200);">
+          ${rodSetups.map((rs) => `<option value="${rs.id}"${(setup.rodSetupIds || []).includes(rs.id) ? " selected" : ""}>${escapeHtml(rs.name)}</option>`).join("")}
+        </select>
+      </div>
+      ${multiSelectHtml("data-trip-species", idx, speciesOptions, setup.species, "Species")}
+      <div style="flex:1;min-width:120px;">
+        <label class="footnote" style="margin:0;display:block;">Water</label>
+        <select data-trip-water="${idx}" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);">${singleOptionsHtml(waterOptions, setup.water)}</select>
+      </div>
+      <div style="flex:1;min-width:120px;">
+        <label class="footnote" style="margin:0;display:block;">Berley</label>
+        <select data-trip-berley="${idx}" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);">${singleOptionsHtml(berleyOptions, setup.berley)}</select>
+      </div>
+      ${multiSelectHtml("data-trip-fishingmethod", idx, fishingMethodOptions, setup.fishingMethod, "Fishing Method")}
+      ${multiSelectHtml("data-trip-lure", idx, lureOptions, setup.lure, "Lure")}
+      <button type="button" data-remove-trip="${idx}" class="btn-secondary">Remove</button>
+    `;
+    list.appendChild(row);
+  });
+
+  list.querySelectorAll("[data-trip-name]").forEach((input) => {
+    input.addEventListener("change", (e) => onTripSetupFieldChange(Number(e.currentTarget.dataset.tripName), "name", e.currentTarget.value));
+  });
+  list.querySelectorAll("[data-trip-rodsetups]").forEach((select) => {
+    select.addEventListener("change", (e) => {
+      const chosen = Array.from(e.currentTarget.selectedOptions).map((o) => o.value);
+      onTripSetupFieldChange(Number(e.currentTarget.dataset.tripRodsetups), "rodSetupIds", chosen);
+    });
+  });
+  list.querySelectorAll("[data-trip-species]").forEach((select) => {
+    select.addEventListener("change", (e) => {
+      const chosen = Array.from(e.currentTarget.selectedOptions).map((o) => o.value);
+      onTripSetupFieldChange(Number(e.currentTarget.dataset.tripSpecies), "species", chosen);
+    });
+  });
+  list.querySelectorAll("[data-trip-water]").forEach((select) => {
+    select.addEventListener("change", (e) => onTripSetupFieldChange(Number(e.currentTarget.dataset.tripWater), "water", e.currentTarget.value));
+  });
+  list.querySelectorAll("[data-trip-berley]").forEach((select) => {
+    select.addEventListener("change", (e) => onTripSetupFieldChange(Number(e.currentTarget.dataset.tripBerley), "berley", e.currentTarget.value));
+  });
+  list.querySelectorAll("[data-trip-fishingmethod]").forEach((select) => {
+    select.addEventListener("change", (e) => {
+      const chosen = Array.from(e.currentTarget.selectedOptions).map((o) => o.value);
+      onTripSetupFieldChange(Number(e.currentTarget.dataset.tripFishingmethod), "fishingMethod", chosen);
+    });
+  });
+  list.querySelectorAll("[data-trip-lure]").forEach((select) => {
+    select.addEventListener("change", (e) => {
+      const chosen = Array.from(e.currentTarget.selectedOptions).map((o) => o.value);
+      onTripSetupFieldChange(Number(e.currentTarget.dataset.tripLure), "lure", chosen);
+    });
+  });
+  list.querySelectorAll("[data-remove-trip]").forEach((btn) => {
+    btn.addEventListener("click", (e) => onRemoveTripSetup(Number(e.currentTarget.dataset.removeTrip)));
+  });
+}
+
+async function onTripSetupFieldChange(idx, field, value) {
+  const setup = tripSetups[idx];
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/tripsetups/${setup.id}${effectiveUserIdParam()}`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [field]: value }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    tripSetups[idx] = await res.json();
+    setTripSetupsStatus("Saved.", false);
+    renderTripSetupsList();
+  } catch (err) {
+    console.error("Failed to save trip setup:", err);
+    setTripSetupsStatus(`Couldn't save: ${err.message}`, true);
+    renderTripSetupsList();
+  }
+}
+
+async function onAddTripSetup() {
+  const nameInput = document.getElementById("newTripSetupNameInput");
+  const name = nameInput.value.trim();
+  if (!name) {
+    setTripSetupsStatus("Enter a name for the trip setup.", true);
+    return;
+  }
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/tripsetups${effectiveUserIdParam()}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    tripSetups.push(await res.json());
+    nameInput.value = "";
+    setTripSetupsStatus("Added.", false);
+    renderTripSetupsList();
+  } catch (err) {
+    console.error("Failed to add trip setup:", err);
+    setTripSetupsStatus(`Couldn't add: ${err.message}`, true);
+  }
+}
+
+async function onRemoveTripSetup(idx) {
+  const setup = tripSetups[idx];
+  if (!confirm(`Remove the "${setup.name}" trip setup?`)) return;
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/tripsetups/${setup.id}${effectiveUserIdParam()}`, { method: "DELETE", credentials: "include" });
+    if (!res.ok && res.status !== 404) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    tripSetups.splice(idx, 1);
+    setTripSetupsStatus("Removed.", false);
+    renderTripSetupsList();
+  } catch (err) {
+    console.error("Failed to remove trip setup:", err);
+    setTripSetupsStatus(`Couldn't remove: ${err.message}`, true);
+  }
+}
+
+function setTripSetupsStatus(text, isError) {
+  const el = document.getElementById("tripSetupsStatus");
   el.textContent = text;
   el.style.color = isError ? "var(--red-600, #c0392b)" : "var(--grey-500)";
 }
@@ -1978,6 +2183,8 @@ function renderMarkLists() {
   // Rod/Rig options (and a rig's own sub list) just changed — keep Trips > Rod Setups in sync.
   renderNewRodSetupSelects();
   renderRodSetupsList();
+  // Species/Water/Berley/Fishing Method/Lure options just changed — keep Trip Setups in sync too.
+  renderTripSetupsList();
 }
 
 async function onAddMarkListValue(key) {

@@ -232,6 +232,13 @@ export default {
       if (rodSetupMatch) {
         return handleRodSetupItem(request, url, env, rodSetupMatch[1]);
       }
+      if (url.pathname === "/api/tripsetups") {
+        return handleTripSetupsCollection(request, url, env);
+      }
+      const tripSetupMatch = url.pathname.match(/^\/api\/tripsetups\/([^/]+)$/);
+      if (tripSetupMatch) {
+        return handleTripSetupItem(request, url, env, tripSetupMatch[1]);
+      }
       if (url.pathname === "/api/rig-sublist-overrides") {
         return handleRigSublistOverridesCollection(request, url, env);
       }
@@ -1275,6 +1282,126 @@ async function handleRodSetupItem(request, url, env, id) {
 
   if (request.method === "DELETE") {
     await env.DB.prepare("DELETE FROM user_rod_setups WHERE id = ? AND user_id = ?").bind(id, uid).run();
+    return new Response(null, { status: 204, headers: corsHeaders(env) });
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+// ---------------------------------------------------------------------
+// Trip Setups (schema-v2.sql user_trip_setups) — a named bundle of Rod
+// Setups plus everything else Session Defaults (Map tab, js/live-cards.js
+// liveSessionDefaults) controls outside a per-rod rig/bait pick: Species,
+// Water Condition, Berley, Fishing Method, Lure. rod_setup_ids/species/
+// fishing_method/lure are all JSON arrays of strings, reusing parseSubList
+// (a generic "JSON array of strings" parser despite its name). Available to
+// any signed-in user, same as Rod Setups — not merged with Public's data.
+// ---------------------------------------------------------------------
+
+function rowToTripSetup(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    rodSetupIds: parseSubList(row.rod_setup_ids),
+    species: parseSubList(row.species),
+    water: row.water,
+    berley: row.berley,
+    fishingMethod: parseSubList(row.fishing_method),
+    lure: parseSubList(row.lure),
+  };
+}
+
+function validateTripSetupInput(body) {
+  for (const key of ["rodSetupIds", "species", "fishingMethod", "lure"]) {
+    if (body[key] !== undefined && (!Array.isArray(body[key]) || body[key].some((v) => typeof v !== "string" || !v.trim()))) {
+      return `${key} must be a list of option names.`;
+    }
+  }
+  for (const key of ["water", "berley"]) {
+    if (body[key] !== undefined && body[key] !== null && typeof body[key] !== "string") {
+      return `${key} must be a string, or null to clear it.`;
+    }
+  }
+  return null;
+}
+
+async function handleTripSetupsCollection(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  if (request.method === "GET") {
+    const { results } = await env.DB.prepare("SELECT * FROM user_trip_setups WHERE user_id = ? ORDER BY name ASC").bind(uid).all();
+    return jsonResponse(results.map(rowToTripSetup), 200, env);
+  }
+
+  if (request.method === "POST") {
+    const body = await readJsonBody(request);
+    if (!body || typeof body.name !== "string" || !body.name.trim()) {
+      return jsonResponse({ error: "name is required." }, 400, env);
+    }
+    const validationError = validateTripSetupInput(body);
+    if (validationError) return jsonResponse({ error: validationError }, 400, env);
+    const id = crypto.randomUUID();
+    const arr = (v) => (v && v.length ? JSON.stringify(v) : null);
+    try {
+      await env.DB.prepare(
+        "INSERT INTO user_trip_setups (id, user_id, name, rod_setup_ids, species, water, berley, fishing_method, lure, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      )
+        .bind(id, uid, body.name, arr(body.rodSetupIds), arr(body.species), body.water ?? null, body.berley ?? null, arr(body.fishingMethod), arr(body.lure), Date.now())
+        .run();
+    } catch (err) {
+      return jsonResponse({ error: `You already have a trip setup named "${body.name}".` }, 409, env);
+    }
+    const created = await env.DB.prepare("SELECT * FROM user_trip_setups WHERE id = ?").bind(id).first();
+    return jsonResponse(rowToTripSetup(created), 201, env);
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+async function handleTripSetupItem(request, url, env, id) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  const existing = await env.DB.prepare("SELECT * FROM user_trip_setups WHERE id = ? AND user_id = ?").bind(id, uid).first();
+  if (!existing) return jsonResponse({ error: "Trip setup not found." }, 404, env);
+
+  if (request.method === "PUT") {
+    const body = await readJsonBody(request);
+    if (body.name !== undefined && (typeof body.name !== "string" || !body.name.trim())) {
+      return jsonResponse({ error: "name is required." }, 400, env);
+    }
+    const validationError = validateTripSetupInput(body);
+    if (validationError) return jsonResponse({ error: validationError }, 400, env);
+    const merged = {
+      name: body.name ?? existing.name,
+      rodSetupIds: body.rodSetupIds !== undefined ? body.rodSetupIds : parseSubList(existing.rod_setup_ids),
+      species: body.species !== undefined ? body.species : parseSubList(existing.species),
+      water: body.water !== undefined ? body.water : existing.water,
+      berley: body.berley !== undefined ? body.berley : existing.berley,
+      fishingMethod: body.fishingMethod !== undefined ? body.fishingMethod : parseSubList(existing.fishing_method),
+      lure: body.lure !== undefined ? body.lure : parseSubList(existing.lure),
+    };
+    const arr = (v) => (v && v.length ? JSON.stringify(v) : null);
+    try {
+      await env.DB.prepare("UPDATE user_trip_setups SET name=?, rod_setup_ids=?, species=?, water=?, berley=?, fishing_method=?, lure=? WHERE id = ? AND user_id = ?")
+        .bind(merged.name, arr(merged.rodSetupIds), arr(merged.species), merged.water ?? null, merged.berley ?? null, arr(merged.fishingMethod), arr(merged.lure), id, uid)
+        .run();
+    } catch (err) {
+      return jsonResponse({ error: `You already have a trip setup named "${merged.name}".` }, 409, env);
+    }
+    const updated = await env.DB.prepare("SELECT * FROM user_trip_setups WHERE id = ?").bind(id).first();
+    return jsonResponse(rowToTripSetup(updated), 200, env);
+  }
+
+  if (request.method === "DELETE") {
+    await env.DB.prepare("DELETE FROM user_trip_setups WHERE id = ? AND user_id = ?").bind(id, uid).run();
     return new Response(null, { status: 204, headers: corsHeaders(env) });
   }
 

@@ -285,6 +285,26 @@ CREATE TABLE IF NOT EXISTS user_rod_setups (
 );
 CREATE INDEX IF NOT EXISTS idx_urs_user ON user_rod_setups(user_id);
 
+-- A named bundle of Rod Setups plus the rest of what Session Defaults (Map tab, js/live-cards.js
+-- liveSessionDefaults) controls outside a per-rod rig/bait pick — Species, Water Condition, Berley,
+-- Fishing Method, Lure. rod_setup_ids/species/fishing_method/lure are JSON arrays of strings;
+-- rod_setup_ids is not a real FK (SQLite can't constrain inside a JSON blob) — same "keeps working even
+-- if referenced later" tolerance already used for user_rod_setups.rod/rig themselves.
+CREATE TABLE IF NOT EXISTS user_trip_setups (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  rod_setup_ids TEXT,
+  species TEXT,
+  water TEXT,
+  berley TEXT,
+  fishing_method TEXT,
+  lure TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE (user_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_uts_user ON user_trip_setups(user_id);
+
 -- A normal user's own private layer on top of a Rig they don't own (i.e. one of Public's) — lets
 -- them keep a personal sub list under a Public rig without needing write access to that row.
 -- Meaningless (and rejected) if user_id already owns the referenced rig — they'd just edit its own

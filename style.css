@@ -52,6 +52,15 @@ body {
   display: contents;
 }
 
+/* Settings only (locations.html's body.settings-page): keeps the title+tabs bar visible while
+   scrolling the page. Scoped rather than added to the bare .sitebar rule, since conditions.html and
+   index.html share that same class but each have their own full-page/sticky-header layouts already. */
+body.settings-page .sitebar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
 .topbar h1 {
   order: 0;
   margin: 0;
