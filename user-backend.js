@@ -225,6 +225,13 @@ export default {
       if (groupMatch) {
         return handleGroupItem(request, url, env, groupMatch[1]);
       }
+      if (url.pathname === "/api/rodsetups") {
+        return handleRodSetupsCollection(request, url, env);
+      }
+      const rodSetupMatch = url.pathname.match(/^\/api\/rodsetups\/([^/]+)$/);
+      if (rodSetupMatch) {
+        return handleRodSetupItem(request, url, env, rodSetupMatch[1]);
+      }
       if (url.pathname === "/api/location-quota" && request.method === "GET") {
         const user = await requireUser(request, env);
         if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
@@ -1169,6 +1176,96 @@ async function insertGroupMemberships(env, uid, locationId, groupIds) {
 }
 
 // ---------------------------------------------------------------------
+// Rod Setups (schema-v2.sql user_rod_setups) — a named rod+rig combo, with
+// an optional list of items picked from that rig's own sub list (see the
+// Rig `hasSublist`/`subList` fields on user_mark_lists, below). Available
+// to any signed-in user, same as Location Groups/Mark Lists (not Admin-only
+// like Tiers/Users) — respects effectiveUserIdParam()'s "View as Public".
+// ---------------------------------------------------------------------
+
+function rowToRodSetup(row) {
+  return { id: row.id, name: row.name, rod: row.rod, rig: row.rig, subListItems: parseSubList(row.sub_list_items) };
+}
+
+async function handleRodSetupsCollection(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  if (request.method === "GET") {
+    const { results } = await env.DB.prepare("SELECT * FROM user_rod_setups WHERE user_id = ? ORDER BY name ASC").bind(uid).all();
+    return jsonResponse(results.map(rowToRodSetup), 200, env);
+  }
+
+  if (request.method === "POST") {
+    const body = await readJsonBody(request);
+    if (!body || typeof body.name !== "string" || !body.name.trim()) {
+      return jsonResponse({ error: "name is required." }, 400, env);
+    }
+    if (body.subListItems !== undefined && (!Array.isArray(body.subListItems) || body.subListItems.some((v) => typeof v !== "string" || !v.trim()))) {
+      return jsonResponse({ error: "subListItems must be a list of option names." }, 400, env);
+    }
+    const id = crypto.randomUUID();
+    try {
+      await env.DB.prepare("INSERT INTO user_rod_setups (id, user_id, name, rod, rig, sub_list_items, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(id, uid, body.name, body.rod ?? null, body.rig ?? null, body.subListItems && body.subListItems.length ? JSON.stringify(body.subListItems) : null, Date.now())
+        .run();
+    } catch (err) {
+      return jsonResponse({ error: `You already have a rod setup named "${body.name}".` }, 409, env);
+    }
+    const created = await env.DB.prepare("SELECT * FROM user_rod_setups WHERE id = ?").bind(id).first();
+    return jsonResponse(rowToRodSetup(created), 201, env);
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+async function handleRodSetupItem(request, url, env, id) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  const existing = await env.DB.prepare("SELECT * FROM user_rod_setups WHERE id = ? AND user_id = ?").bind(id, uid).first();
+  if (!existing) return jsonResponse({ error: "Rod setup not found." }, 404, env);
+
+  if (request.method === "PUT") {
+    const body = await readJsonBody(request);
+    if (body.name !== undefined && (typeof body.name !== "string" || !body.name.trim())) {
+      return jsonResponse({ error: "name is required." }, 400, env);
+    }
+    if (body.subListItems !== undefined && (!Array.isArray(body.subListItems) || body.subListItems.some((v) => typeof v !== "string" || !v.trim()))) {
+      return jsonResponse({ error: "subListItems must be a list of option names." }, 400, env);
+    }
+    const merged = {
+      name: body.name ?? existing.name,
+      rod: body.rod !== undefined ? body.rod : existing.rod,
+      rig: body.rig !== undefined ? body.rig : existing.rig,
+      subListItems: body.subListItems !== undefined ? body.subListItems : parseSubList(existing.sub_list_items),
+    };
+    try {
+      await env.DB.prepare("UPDATE user_rod_setups SET name=?, rod=?, rig=?, sub_list_items=? WHERE id = ? AND user_id = ?")
+        .bind(merged.name, merged.rod, merged.rig, merged.subListItems.length ? JSON.stringify(merged.subListItems) : null, id, uid)
+        .run();
+    } catch (err) {
+      return jsonResponse({ error: `You already have a rod setup named "${merged.name}".` }, 409, env);
+    }
+    const updated = await env.DB.prepare("SELECT * FROM user_rod_setups WHERE id = ?").bind(id).first();
+    return jsonResponse(rowToRodSetup(updated), 200, env);
+  }
+
+  if (request.method === "DELETE") {
+    await env.DB.prepare("DELETE FROM user_rod_setups WHERE id = ? AND user_id = ?").bind(id, uid).run();
+    return new Response(null, { status: 204, headers: corsHeaders(env) });
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+// ---------------------------------------------------------------------
 // v2: Mark lists (schema-v2.sql user_mark_lists) — one generic table for
 // every pick-list category (Mark Type, Species, Bait, Rig, conditions,
 // shape/colour formats), mirroring mark_lists.json's own flat shape.
@@ -1194,15 +1291,19 @@ async function handleMarkListsCollection(request, url, env) {
     const body = await readJsonBody(request);
     const validationError = validateMarkListInput(body, { partial: false });
     if (validationError) return jsonResponse({ error: validationError }, 400, env);
+    if ((body.hasSublist !== undefined || body.subList !== undefined) && body.field !== "Rig") {
+      return jsonResponse({ error: "Only Rig values can have a sub list." }, 400, env);
+    }
     const id = crypto.randomUUID();
     try {
       await env.DB.prepare(
-        "INSERT INTO user_mark_lists (id, user_id, field, value, shape_format, color_format, color, icon, lowrance_sym, garmin_sym, min_size, max_size, max_qty, big_max_qty, big_size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO user_mark_lists (id, user_id, field, value, shape_format, color_format, color, icon, lowrance_sym, garmin_sym, min_size, max_size, max_qty, big_max_qty, big_size, has_sublist, sub_list, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       )
         .bind(
           id, uid, body.field, body.value, body.shapeFormat ?? null, body.colorFormat ?? null, body.color ?? null,
           body.icon ?? null, body.lowranceSym ?? null, body.garminSym ?? null,
-          body.minSize ?? null, body.maxSize ?? null, body.maxQty ?? null, body.bigMaxQty ?? null, body.bigSize ?? null, Date.now()
+          body.minSize ?? null, body.maxSize ?? null, body.maxQty ?? null, body.bigMaxQty ?? null, body.bigSize ?? null,
+          body.hasSublist ? 1 : 0, body.subList !== undefined ? JSON.stringify(body.subList) : null, Date.now()
         )
         .run();
     } catch (err) {
@@ -1232,6 +1333,9 @@ async function handleMarkListItem(request, url, env, id) {
     const body = await readJsonBody(request);
     const validationError = validateMarkListInput(body, { partial: true });
     if (validationError) return jsonResponse({ error: validationError }, 400, env);
+    if ((body.hasSublist !== undefined || body.subList !== undefined) && (body.field ?? existing.field) !== "Rig") {
+      return jsonResponse({ error: "Only Rig values can have a sub list." }, 400, env);
+    }
     const merged = {
       field: body.field ?? existing.field,
       value: body.value ?? existing.value,
@@ -1246,14 +1350,17 @@ async function handleMarkListItem(request, url, env, id) {
       maxQty: body.maxQty !== undefined ? body.maxQty : existing.max_qty,
       bigMaxQty: body.bigMaxQty !== undefined ? body.bigMaxQty : existing.big_max_qty,
       bigSize: body.bigSize !== undefined ? body.bigSize : existing.big_size,
+      hasSublist: body.hasSublist !== undefined ? body.hasSublist : !!existing.has_sublist,
+      subList: body.subList !== undefined ? body.subList : parseSubList(existing.sub_list),
     };
     try {
       await env.DB.prepare(
-        "UPDATE user_mark_lists SET field=?, value=?, shape_format=?, color_format=?, color=?, icon=?, lowrance_sym=?, garmin_sym=?, min_size=?, max_size=?, max_qty=?, big_max_qty=?, big_size=? WHERE id = ? AND user_id = ?"
+        "UPDATE user_mark_lists SET field=?, value=?, shape_format=?, color_format=?, color=?, icon=?, lowrance_sym=?, garmin_sym=?, min_size=?, max_size=?, max_qty=?, big_max_qty=?, big_size=?, has_sublist=?, sub_list=? WHERE id = ? AND user_id = ?"
       )
         .bind(
           merged.field, merged.value, merged.shapeFormat, merged.colorFormat, merged.color, merged.icon, merged.lowranceSym, merged.garminSym,
-          merged.minSize ?? null, merged.maxSize ?? null, merged.maxQty ?? null, merged.bigMaxQty ?? null, merged.bigSize ?? null, id, uid
+          merged.minSize ?? null, merged.maxSize ?? null, merged.maxQty ?? null, merged.bigMaxQty ?? null, merged.bigSize ?? null,
+          merged.hasSublist ? 1 : 0, merged.subList.length ? JSON.stringify(merged.subList) : null, id, uid
         )
         .run();
     } catch (err) {
@@ -1312,6 +1419,16 @@ function parseImageIndex(text) {
   try {
     const list = JSON.parse(text || "[]");
     return Array.isArray(list) ? list.filter((i) => i && typeof i.id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The sub_list column (Rig rows only — a JSON array of option strings) as an array; never throws. */
+function parseSubList(text) {
+  try {
+    const list = JSON.parse(text || "[]");
+    return Array.isArray(list) ? list.filter((v) => typeof v === "string") : [];
   } catch {
     return [];
   }
@@ -1416,6 +1533,8 @@ function rowToMarkList(row) {
     bigSize: row.big_size ?? null,
     qtyGroup: row.qty_group ?? null,
     images: parseImageIndex(row.image_index).map((i) => ({ id: i.id, version: i.v ?? null })),
+    hasSublist: !!row.has_sublist,
+    subList: parseSubList(row.sub_list),
   };
 }
 
@@ -1441,6 +1560,15 @@ function validateMarkListInput(body, { partial }) {
     if (!Array.isArray(list) || list.length > 50 || list.some((v) => typeof v !== "string" || !v.trim())) {
       return "linkedSpecies must be a list of species names.";
     }
+  }
+  if (body.subList !== undefined) {
+    const list = body.subList;
+    if (!Array.isArray(list) || list.length > 100 || list.some((v) => typeof v !== "string" || !v.trim())) {
+      return "subList must be a list of option names.";
+    }
+  }
+  if (body.hasSublist !== undefined && typeof body.hasSublist !== "boolean") {
+    return "hasSublist must be true or false.";
   }
   if (!partial || body.field !== undefined) {
     if (typeof body.field !== "string" || !body.field.trim()) return "field is required.";

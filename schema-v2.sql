@@ -248,6 +248,10 @@ CREATE TABLE IF NOT EXISTS user_mark_lists (
   big_size REAL,                     -- length, cm, from which a fish counts as "big"
   qty_group TEXT,                    -- species rows sharing a value share ONE combined max_qty (e.g. School + Gummy shark); NULL = not combined
   image_index TEXT,                  -- Species rows only: JSON [{"id":"<species_images.id>","v":<updated_at ms>}, ...] in display order; NULL = no images
+  -- Rig rows only (added later via ALTER TABLE) — a rig can maintain its own free-form sub list
+  -- (e.g. Rig "Soft plastic rig" -> "3in Paddle Tail", "Vibe"), picked from when building a Rod Setup:
+  has_sublist INTEGER,               -- 0/1: whether this rig maintains a sub list
+  sub_list TEXT,                     -- JSON array of option strings; NULL when empty/not applicable
   created_at INTEGER NOT NULL,
   UNIQUE (user_id, field, value)
 );
@@ -264,6 +268,22 @@ CREATE TABLE IF NOT EXISTS species_images (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_species_images_list ON species_images(list_id);
+
+-- A named rod+rig combination (Settings > Trips > Rod Setups) for quick reuse. `rod`/`rig` are free
+-- strings, same as every other mark field, not foreign keys into user_mark_lists — a setup keeps working
+-- even if that rod/rig name is later renamed or removed. `sub_list_items` holds whichever of the chosen
+-- rig's own sub_list options (see user_mark_lists.sub_list above) were picked for this setup.
+CREATE TABLE IF NOT EXISTS user_rod_setups (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  rod TEXT,
+  rig TEXT,
+  sub_list_items TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE (user_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_urs_user ON user_rod_setups(user_id);
 
 -- A user's own logged fishing marks (catches and points of interest).
 -- Columns mirror data/marks.json's own record shape field-for-field
