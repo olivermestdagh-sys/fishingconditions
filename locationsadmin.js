@@ -44,6 +44,13 @@ let locationGroups = []; // plain group-name strings — kept in this shape for
                           // from D1's user_location_groups, not GROUPS_FILE_PATH
 let groupNameToId = new Map(); // name -> D1 row id, needed only by this
                           // section's own add/remove calls below
+let publicLocationGroups = []; // Public's own group names, shown alongside locationGroups above (badged,
+                          // read-only) but deliberately NEVER merged into locationGroups itself — a
+                          // location can only join a group it actually owns (insertGroupMemberships,
+                          // user-backend.js), so js/location-editor.js's own group-tag picker (which reads
+                          // locationGroups directly) must keep seeing ONLY your own groups.
+let publicMarkLists = []; // Public's own Fishing Mark Lists rows, same read-only-badge treatment — see mergedMarkListsFor
+let rigSublistOverrides = new Map(); // rigId -> your own private sub list on a Rig you don't own (Public's) — see saveRigSublistOverride
 let currentUser = null;  // result of checkSignedIn() — null if not signed in
                           // at all, regardless of role. Location Groups,
                           // Fishing Mark Lists, and Locations are now
@@ -839,9 +846,11 @@ async function loadRodSetups() {
   renderRodSetupsList();
 }
 
-/** Every value under one MARK_LIST_FIELDS label (e.g. "Rod", "Rig"), in the order Settings shows them. */
+/** Every value under one MARK_LIST_FIELDS label (e.g. "Rod", "Rig"), own account first then Public's
+ * own (own wins on a name clash) — a Rod Setup can reference Public's gear too, same as everywhere
+ * else this merged view applies. See mergedMarkListsFor. */
 function markListValuesFor(label) {
-  return markLists.filter((r) => r.field === label).map((r) => r.value);
+  return mergedMarkListsFor(label).map((r) => r.value);
 }
 
 /** The "add a new setup" row's Rod/Rig <select>s — kept in sync with Fishing Mark Lists' own Rod/Rig
@@ -873,8 +882,9 @@ function renderRodSetupsList() {
     list.innerHTML = `<p class="footnote" style="margin:0;text-align:left;">No rod setups yet — add one below.</p>`;
   }
   rodSetups.forEach((setup, idx) => {
-    const rig = markLists.find((r) => r.field === "Rig" && r.value === setup.rig);
-    const sublistOptions = rig && rig.hasSublist ? rig.subList || [] : [];
+    const rig = mergedMarkListsFor("Rig").find((r) => r.value === setup.rig);
+    // Your own rig: its own Sub List. Public's rig: YOUR private override on top of it, if you have one.
+    const sublistOptions = rig ? (rig._isPublic ? rigSublistOverrides.get(rig.id) || [] : rig.hasSublist ? rig.subList || [] : []) : [];
     const row = document.createElement("div");
     row.className = "filter-row";
     row.style.cssText = "align-items:center;flex-wrap:wrap;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--grey-200);";
@@ -1024,6 +1034,7 @@ async function loadLocationGroups() {
   if (!currentUser) {
     locationGroups = [];
     groupNameToId = new Map();
+    publicLocationGroups = [];
     document.getElementById("groupsSection").style.display = "none";
     return;
   }
@@ -1039,6 +1050,19 @@ async function loadLocationGroups() {
     groupNameToId = new Map();
     setGroupsSaveStatus("Couldn't load groups — try reloading the page.", true);
   }
+  // While viewingAsPublic you already ARE Public — there's no separate Public layer to show
+  // alongside itself, so this stays empty in that mode (same reasoning throughout this file).
+  if (isAdmin && viewingAsPublic) {
+    publicLocationGroups = [];
+  } else {
+    try {
+      const res = await fetch(`${USER_BACKEND_URL}/api/groups?userId=public`, { credentials: "include" });
+      publicLocationGroups = res.ok ? (await res.json()).map((r) => r.name) : [];
+    } catch (err) {
+      console.error("Failed to load Public's location groups:", err);
+      publicLocationGroups = [];
+    }
+  }
   document.getElementById("groupsSection").style.display = "block";
   document.getElementById("groupsSignedOut").style.display = "none";
   document.getElementById("groupsEditor").style.display = "block";
@@ -1048,7 +1072,7 @@ async function loadLocationGroups() {
 function renderGroupsList() {
   const list = document.getElementById("groupsList");
   list.innerHTML = "";
-  if (locationGroups.length === 0) {
+  if (locationGroups.length === 0 && publicLocationGroups.length === 0) {
     list.innerHTML = `<p class="footnote" style="margin:0;text-align:left;">No groups yet — add one below.</p>`;
     return;
   }
@@ -1062,6 +1086,21 @@ function renderGroupsList() {
     `;
     list.appendChild(chip);
   });
+  // Public's own groups, shown alongside yours — badged, no remove button, and never counted as
+  // "yours" (own wins on a name clash, same convention as the Map's own Public+own mark-list merge).
+  publicLocationGroups
+    .filter((name) => !locationGroups.includes(name))
+    .forEach((name) => {
+      const chip = document.createElement("span");
+      chip.className = "loc-chip";
+      chip.title = "From the Public account — read-only";
+      chip.style.cssText = "cursor:default;display:inline-flex;align-items:center;gap:6px;opacity:0.75;border:1px dashed var(--grey-400, #9ca3af);";
+      chip.innerHTML = `
+        <span>${name.replace(/</g, "&lt;")}</span>
+        <span style="font-size:0.65rem;font-weight:600;">Public</span>
+      `;
+      list.appendChild(chip);
+    });
   list.querySelectorAll("button[data-remove-group]").forEach((btn) => {
     btn.addEventListener("click", (e) => onRemoveGroup(Number(e.currentTarget.dataset.removeGroup)));
   });
@@ -1231,6 +1270,8 @@ let markLists = []; // v2: sourced from /api/marklists (D1, 'public' user) — s
 async function loadMarkLists() {
   if (!currentUser) {
     markLists = [];
+    publicMarkLists = [];
+    rigSublistOverrides = new Map();
     document.getElementById("markListsSection").style.display = "none";
     return;
   }
@@ -1243,10 +1284,42 @@ async function loadMarkLists() {
     markLists = [];
     setMarkListsSaveStatus("Couldn't load mark lists — try reloading the page.", true);
   }
+  // While viewingAsPublic you already ARE Public — no separate Public layer (or private overrides
+  // on top of it) to show alongside itself, so both stay empty in that mode.
+  if (isAdmin && viewingAsPublic) {
+    publicMarkLists = [];
+    rigSublistOverrides = new Map();
+  } else {
+    try {
+      const res = await fetch(`${USER_BACKEND_URL}/api/marklists?userId=public`, { credentials: "include" });
+      publicMarkLists = res.ok ? await res.json() : [];
+    } catch (err) {
+      console.error("Failed to load Public's mark lists:", err);
+      publicMarkLists = [];
+    }
+    try {
+      const res = await fetch(`${USER_BACKEND_URL}/api/rig-sublist-overrides`, { credentials: "include" });
+      rigSublistOverrides = res.ok ? new Map((await res.json()).map((r) => [r.rigId, r.subList])) : new Map();
+    } catch (err) {
+      console.error("Failed to load your private rig sub lists:", err);
+      rigSublistOverrides = new Map();
+    }
+  }
   document.getElementById("markListsSection").style.display = "block";
   document.getElementById("markListsSignedOut").style.display = "none";
   document.getElementById("markListsEditor").style.display = "block";
   renderMarkLists();
+}
+
+/** Own rows for `label` (e.g. "Rig", "Species", "Mark Shape Format"), then Public's own rows for the
+ * same field whose value isn't already one of yours (own wins on a name clash — same convention as
+ * the Map's own existing Public+own merge, fetchUnionedMarkLists, js/backend.js). Public-sourced rows
+ * are spread with `_isPublic: true` so callers can badge them and disable editing. */
+function mergedMarkListsFor(label) {
+  const own = markLists.filter((r) => r.field === label);
+  const ownValues = new Set(own.map((r) => r.value));
+  const fromPublic = publicMarkLists.filter((r) => r.field === label && !ownValues.has(r.value)).map((r) => ({ ...r, _isPublic: true }));
+  return [...own, ...fromPublic];
 }
 
 // Simple relative-luminance check so a chip's label text stays readable
@@ -1483,9 +1556,12 @@ async function onChangeSpeciesLinks(speciesValue, detailsEl) {
 
 /** A Rig's own free-form sub list (Settings > Trips > Rod Setups reads it): a "Sub List" checkbox, and
  * — once ticked — the option chips themselves plus an add row. `escAttr` is the rig value already escaped
- * for an HTML attribute (the caller's own, so it matches exactly what's in the surrounding chip markup). */
+ * for an HTML attribute (the caller's own, so it matches exactly what's in the surrounding chip markup).
+ * A Public-sourced rig (entry._isPublic) gets a different, read-only-plus-private treatment instead —
+ * see publicRigSublistHtml. */
 function rigSublistHtml(entry, escAttr) {
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  if (entry._isPublic) return publicRigSublistHtml(entry, esc);
   const toggleHtml = `
     <label style="display:flex;align-items:center;gap:4px;font-size:0.7rem;flex-basis:100%;">
       <input type="checkbox" class="mark-list-rig-sublist-toggle" data-value="${escAttr}"${entry.hasSublist ? " checked" : ""} />
@@ -1555,6 +1631,101 @@ async function saveRigSublist(entry, patch) {
   }
 }
 
+/** A Public rig's own sub list (read-only, if it has one) plus YOUR OWN private layer on top of it —
+ * visible only to you, stored separately (user_rig_sublist_overrides), never touching Public's row. */
+function publicRigSublistHtml(entry, esc) {
+  const publicHtml = entry.hasSublist
+    ? `<div style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:2px;">
+        <span style="font-size:0.65rem;color:var(--grey-500);">Public's Sub List:</span>
+        ${(entry.subList || []).length
+          ? entry.subList.map((item) => `<span class="loc-chip" style="cursor:default;opacity:0.75;border:1px dashed var(--grey-400, #9ca3af);">${esc(item)}</span>`).join("")
+          : `<span class="footnote" style="margin:0;">No options yet.</span>`}
+      </div>`
+    : "";
+
+  const override = rigSublistOverrides.get(entry.id);
+  const overrideHtml = override !== undefined
+    ? `<div class="mark-list-rig-override" data-rig-id="${entry.id}" style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px;padding:6px 8px;border-radius:8px;background:var(--white);color:#111827;">
+        <span style="font-size:0.65rem;font-weight:600;">Private — only visible to you:</span>
+        ${override.length
+          ? override.map((item, i) => `
+              <span class="loc-chip" style="cursor:default;display:inline-flex;align-items:center;gap:6px;">
+                <span>${esc(item)}</span>
+                <button type="button" class="mark-list-rig-override-remove" data-index="${i}" aria-label="Remove ${esc(item)}"
+                  style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>
+              </span>`).join("")
+          : `<span class="footnote" style="margin:0;">No options yet.</span>`}
+        <span style="display:inline-flex;gap:4px;">
+          <input type="text" class="mark-list-rig-override-new" placeholder="Add option"
+            style="padding:4px 6px;font-size:0.75rem;border-radius:6px;border:1px solid var(--grey-200);width:110px;" />
+          <button type="button" class="btn-secondary mark-list-rig-override-add" style="padding:4px 8px;font-size:0.75rem;">+</button>
+        </span>
+        <button type="button" class="mark-list-rig-override-clear" title="Remove this private sub list entirely"
+          style="background:none;border:none;color:var(--grey-500);cursor:pointer;font-size:0.75rem;padding:0 4px;">Remove</button>
+      </div>`
+    : `<label style="flex-basis:100%;display:flex;align-items:center;gap:4px;font-size:0.7rem;margin-top:2px;">
+        <input type="checkbox" class="mark-list-rig-override-start" data-rig-id="${entry.id}" />
+        Keep a private sub list for this rig (only visible to you)
+      </label>`;
+
+  return `${publicHtml}${overrideHtml}`;
+}
+
+async function onStartRigSublistOverride(rigId, checked) {
+  if (!checked) return; // nothing started yet — the actual removal path is the Remove button once one exists
+  await saveRigSublistOverride(rigId, []);
+}
+
+function onAddRigSublistOverrideItem(rigId, raw) {
+  const item = raw.trim();
+  const list = rigSublistOverrides.get(rigId) || [];
+  if (!item || list.some((v) => v.toLowerCase() === item.toLowerCase())) return;
+  saveRigSublistOverride(rigId, [...list, item]);
+}
+
+function onRemoveRigSublistOverrideItem(rigId, index) {
+  const list = rigSublistOverrides.get(rigId) || [];
+  saveRigSublistOverride(rigId, list.filter((_, i) => i !== index));
+}
+
+async function saveRigSublistOverride(rigId, subList) {
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/rig-sublist-overrides/${rigId}`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subList }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `status ${res.status}`);
+    }
+    const saved = await res.json();
+    rigSublistOverrides.set(rigId, saved.subList);
+    renderMarkLists(); // also refreshes Rod Setups' own selects
+    setMarkListsSaveStatus("", false);
+  } catch (err) {
+    console.error("Failed to save your private rig sub list:", err);
+    setMarkListsSaveStatus("Couldn't save that change: " + err.message, true);
+    renderMarkLists();
+  }
+}
+
+async function onClearRigSublistOverride(rigId) {
+  if (!confirm("Remove your private sub list for this rig?")) return;
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/rig-sublist-overrides/${rigId}`, { method: "DELETE", credentials: "include" });
+    if (!res.ok && res.status !== 404) throw new Error(`status ${res.status}`);
+  } catch (err) {
+    console.error("Failed to remove your private rig sub list:", err);
+    setMarkListsSaveStatus("Couldn't remove: " + err.message, true);
+    return;
+  }
+  rigSublistOverrides.delete(rigId);
+  renderMarkLists();
+  setMarkListsSaveStatus("", false);
+}
+
 function renderMarkLists() {
   const container = document.getElementById("markListsGroups");
   container.innerHTML = MARK_LIST_FIELDS.map(({ key, label }) => `
@@ -1575,12 +1746,13 @@ function renderMarkLists() {
   // in the template string eight times over.
   MARK_LIST_FIELDS.forEach(({ key, label }) => {
     const row = container.querySelector(`.mark-list-chip-row[data-field="${key}"]`);
-    const values = markLists.filter((r) => r.field === label);
+    const values = mergedMarkListsFor(label);
     if (values.length === 0) {
       row.innerHTML = `<p class="footnote" style="margin:0;text-align:left;">No options yet — add one below.</p>`;
       return;
     }
     row.innerHTML = values.map((v) => {
+      const isPublic = !!v._isPublic;
       const escAttr = v.value.replace(/"/g, "&quot;");
       const escText = v.value.replace(/</g, "&lt;");
       // Tile colour comes from the assigned Mark COLOUR Format's own
@@ -1596,48 +1768,57 @@ function renderMarkLists() {
       // Condition value is harmless but currently inert — nothing reads
       // it back. Colour, by contrast, genuinely does apply everywhere (see
       // markStyleFor, charts.js) via whichever field the map happens to
-      // be grouped by.
-      const shapeNames = markLists.filter((r) => r.field === "Mark Shape Format").map((r) => r.value);
-      const colorNames = markLists.filter((r) => r.field === "Mark Colour Format").map((r) => r.value);
+      // be grouped by. Options are the MERGED format list — your own
+      // Species/etc can reference one of Public's Shape/Colour Formats too.
+      const shapeNames = mergedMarkListsFor("Mark Shape Format").map((r) => r.value);
+      const colorNames = mergedMarkListsFor("Mark Colour Format").map((r) => r.value);
       const currentShape = v.shapeFormat || "";
       const currentColor = v.colorFormat || "";
       const shapeSelectHtml = `
-        <select class="mark-list-shapeformat-select" data-field-label="${label}" data-value="${escAttr}" title="Mark Shape Format (optional)"
+        <select class="mark-list-shapeformat-select" data-field-label="${label}" data-value="${escAttr}" title="Mark Shape Format (optional)"${isPublic ? " disabled" : ""}
           style="font-size:0.7rem;padding:1px 3px;border-radius:5px;border:1px solid var(--grey-200);background:var(--white);color:var(--grey-500);">
           <option value=""${currentShape ? "" : " selected"}>Shape…</option>
           ${shapeNames.map((f) => `<option value="${f.replace(/"/g, "&quot;")}" ${f === currentShape ? "selected" : ""}>${f.replace(/</g, "&lt;")}</option>`).join("")}
         </select>`;
       const colorSelectHtml = `
-        <select class="mark-list-colorformat-select" data-field-label="${label}" data-value="${escAttr}" title="Mark Colour Format (optional)"
+        <select class="mark-list-colorformat-select" data-field-label="${label}" data-value="${escAttr}" title="Mark Colour Format (optional)"${isPublic ? " disabled" : ""}
           style="font-size:0.7rem;padding:1px 3px;border-radius:5px;border:1px solid var(--grey-200);background:var(--white);color:var(--grey-500);">
           <option value=""${currentColor ? "" : " selected"}>Colour…</option>
           ${colorNames.map((f) => `<option value="${f.replace(/"/g, "&quot;")}" ${f === currentColor ? "selected" : ""}>${f.replace(/</g, "&lt;")}</option>`).join("")}
         </select>`;
       // Mark Type, Tide Condition and Tide Extreme values can't be deleted — they're kept for shaping/colouring.
-      const removeBtnHtml = LOCKED_MARK_LIST_KEYS.includes(key)
+      // A Public-sourced value is never removable here either — editing Public's own rows only ever
+      // happens through the Admin "View as Public" toggle, never from this merged, read-only view.
+      const removeBtnHtml = LOCKED_MARK_LIST_KEYS.includes(key) || isPublic
         ? ""
         : `<button type="button" data-remove-mark-value data-field="${key}" data-value="${escAttr}"
           aria-label="Remove ${escAttr}"
           style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>`;
       // Species also carry their regulation limits, edited on a second line inside the chip.
+      // Public's own species show the same limits, disabled — informational, not editable — and skip
+      // the "Combined with" control entirely (combining only ever applies to your own species).
       const limitsHtml = key === "species"
         ? `${speciesImagesHtml(v)}<div class="mark-list-limits" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;margin-top:2px;">${SPECIES_LIMIT_FIELDS.map((f) => `
             <label style="display:flex;flex-direction:column;font-size:0.65rem;gap:1px;">${f.label}
               <input type="number" class="mark-list-limit-input" data-limit-prop="${f.prop}" data-value="${escAttr}" value="${v[f.prop] ?? ""}"
-                min="0" step="${f.integer ? "1" : "any"}" inputmode="${f.integer ? "numeric" : "decimal"}" title="${f.title}"
+                min="0" step="${f.integer ? "1" : "any"}" inputmode="${f.integer ? "numeric" : "decimal"}" title="${f.title}"${isPublic ? " disabled" : ""}
                 style="width:74px;padding:2px 4px;font-size:0.8rem;border-radius:5px;border:1px solid var(--grey-200);background:var(--white);color:#111827;" />
             </label>`).join("")}</div>
-          ${speciesLinksHtml(v)}`
+          ${isPublic ? "" : speciesLinksHtml(v)}`
         : "";
       // Rig values can each maintain their own free-form sub list (Settings > Trips > Rod Setups reads
-      // it: choosing that rig there reveals a multi-pick of exactly these items).
+      // it: choosing that rig there reveals a multi-pick of exactly these items). A Public rig instead
+      // shows Public's own sub list read-only, plus your own PRIVATE layer on top (rigSublistHtml).
       const sublistHtml = key === "rig" ? rigSublistHtml(v, escAttr) : "";
       const combinedBadge = key === "species" && v.qtyGroup
         ? `<span title="Max qty shared with: ${speciesLinkedNames(v).join(", ").replace(/"/g, "&quot;").replace(/</g, "&lt;")}" style="font-size:0.65rem;opacity:0.85;">qty shared</span>`
         : "";
+      const publicBadgeHtml = isPublic ? `<span style="font-size:0.65rem;font-weight:600;">Public</span>` : "";
+      const publicStyle = isPublic ? "opacity:0.75;border:1px dashed var(--grey-400, #9ca3af);" : "";
       return `
-      <span class="loc-chip" data-field="${key}" data-value="${escAttr}" style="display:inline-flex;align-items:center;gap:6px;${key === "species" || key === "rig" ? "flex-wrap:wrap;border-radius:16px;" : ""}${colorStyle}">
+      <span class="loc-chip" data-field="${key}" data-value="${escAttr}"${isPublic ? ' title="From the Public account — read-only"' : ""} style="display:inline-flex;align-items:center;gap:6px;${key === "species" || key === "rig" ? "flex-wrap:wrap;border-radius:16px;" : ""}${colorStyle}${publicStyle}">
         <span>${escText}</span>
+        ${publicBadgeHtml}
         ${combinedBadge}
         ${shapeSelectHtml}
         ${colorSelectHtml}
@@ -1703,6 +1884,26 @@ function renderMarkLists() {
         add();
       }
     });
+  });
+  container.querySelectorAll(".mark-list-rig-override-start").forEach((cb) => {
+    cb.addEventListener("change", (e) => onStartRigSublistOverride(e.currentTarget.dataset.rigId, e.currentTarget.checked));
+  });
+  container.querySelectorAll(".mark-list-rig-override").forEach((wrap) => {
+    const rigId = wrap.dataset.rigId;
+    wrap.querySelectorAll(".mark-list-rig-override-remove").forEach((btn) => {
+      btn.addEventListener("click", () => onRemoveRigSublistOverrideItem(rigId, Number(btn.dataset.index)));
+    });
+    const addBtn = wrap.querySelector(".mark-list-rig-override-add");
+    const newInput = wrap.querySelector(".mark-list-rig-override-new");
+    const add = () => onAddRigSublistOverrideItem(rigId, newInput.value);
+    addBtn.addEventListener("click", add);
+    newInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        add();
+      }
+    });
+    wrap.querySelector(".mark-list-rig-override-clear").addEventListener("click", () => onClearRigSublistOverride(rigId));
   });
   container.querySelectorAll(".mark-list-add-btn").forEach((btn) => {
     btn.addEventListener("click", (e) => onAddMarkListValue(e.currentTarget.dataset.field));
@@ -1794,7 +1995,7 @@ async function onAddMarkListValue(key) {
  * trying to make every unconfigured value visually distinct here too. */
 function resolveTileFormatColor(entry) {
   if (!entry.colorFormat) return null;
-  const format = markLists.find((r) => r.field === "Mark Colour Format" && r.value === entry.colorFormat);
+  const format = mergedMarkListsFor("Mark Colour Format").find((r) => r.value === entry.colorFormat);
   return format && format.color ? format.color : null;
 }
 
@@ -1868,35 +2069,41 @@ function renderMarkSubFormatList(fieldName, containerId, newInputId) {
   const container = document.getElementById(containerId);
   if (!container) return;
   const isShape = fieldName === "Mark Shape Format";
-  const entries = markLists.filter((r) => r.field === fieldName);
+  const entries = mergedMarkListsFor(fieldName);
   if (entries.length === 0) {
     container.innerHTML = `<p class="footnote" style="margin:0 0 8px;text-align:left;">No ${fieldName}s yet — add one below.</p>`;
   } else {
     container.innerHTML = entries.map((f) => {
+      const isPublic = !!f._isPublic;
       const escAttr = f.value.replace(/"/g, "&quot;");
       const escText = f.value.replace(/</g, "&lt;");
       const escLowrance = (f.lowranceSym || "").replace(/"/g, "&quot;");
       const escGarmin = (f.garminSym || "").replace(/"/g, "&quot;");
       const sitePickerHtml = isShape
-        ? `<select class="mark-subformat-icon-select" data-field="${fieldName}" data-value="${escAttr}" title="Icon shape for this site's own map"
+        ? `<select class="mark-subformat-icon-select" data-field="${fieldName}" data-value="${escAttr}" title="Icon shape for this site's own map"${isPublic ? " disabled" : ""}
             style="font-size:0.8rem;padding:4px 6px;border-radius:5px;border:1px solid var(--grey-200);">
             <option value=""${f.icon ? "" : " selected"}>Icon…</option>
             ${MARK_ICON_OPTIONS.map((i) => `<option value="${i}" ${i === f.icon ? "selected" : ""}>${i}</option>`).join("")}
           </select>`
         : `<input type="color" class="mark-subformat-color-input" data-field="${fieldName}" data-value="${escAttr}" value="${f.color || "#3388ff"}"
-            title="Colour for this site's own map" style="width:34px;height:30px;padding:0;border:1px solid var(--grey-200);border-radius:5px;" />`;
+            title="Colour for this site's own map"${isPublic ? " disabled" : ""} style="width:34px;height:30px;padding:0;border:1px solid var(--grey-200);border-radius:5px;" />`;
+      const removeBtnHtml = isPublic
+        ? ""
+        : `<button type="button" data-remove-mark-subformat data-field="${fieldName}" data-value="${escAttr}" aria-label="Remove ${escAttr}"
+          style="background:none;border:none;color:var(--grey-500);cursor:pointer;font-size:0.95rem;line-height:1;padding:0 4px;">×</button>`;
       return `
-      <div class="mark-subformat-row" data-field="${fieldName}" data-value="${escAttr}" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px;border:1px solid var(--grey-200);border-radius:8px;margin-bottom:6px;">
+      <div class="mark-subformat-row" data-field="${fieldName}" data-value="${escAttr}"${isPublic ? ' title="From the Public account — read-only"' : ""}
+        style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px;border:1px solid var(--grey-200);border-radius:8px;margin-bottom:6px;${isPublic ? "opacity:0.75;border-style:dashed;" : ""}">
         <strong style="min-width:110px;">${escText}</strong>
+        ${isPublic ? `<span style="font-size:0.65rem;font-weight:600;">Public</span>` : ""}
         ${sitePickerHtml}
         <input type="text" class="mark-subformat-lowrance-input" data-field="${fieldName}" data-value="${escAttr}" value="${escLowrance}"
-          placeholder="Lowrance &lt;sym&gt; text fragment, e.g. ${isShape ? "circle," : "yellow"}" title="Exact Lowrance <sym> text fragment"
+          placeholder="Lowrance &lt;sym&gt; text fragment, e.g. ${isShape ? "circle," : "yellow"}" title="Exact Lowrance <sym> text fragment"${isPublic ? " disabled" : ""}
           style="flex:1;min-width:170px;padding:5px 8px;border-radius:5px;border:1px solid var(--grey-200);font-size:0.8rem;" />
         <input type="text" class="mark-subformat-garmin-input" data-field="${fieldName}" data-value="${escAttr}" value="${escGarmin}"
-          placeholder="Garmin &lt;sym&gt; text fragment, e.g. ${isShape ? "Circle, " : "Yellow"}" title="Exact Garmin <sym> text fragment"
+          placeholder="Garmin &lt;sym&gt; text fragment, e.g. ${isShape ? "Circle, " : "Yellow"}" title="Exact Garmin <sym> text fragment"${isPublic ? " disabled" : ""}
           style="flex:1;min-width:170px;padding:5px 8px;border-radius:5px;border:1px solid var(--grey-200);font-size:0.8rem;" />
-        <button type="button" data-remove-mark-subformat data-field="${fieldName}" data-value="${escAttr}" aria-label="Remove ${escAttr}"
-          style="background:none;border:none;color:var(--grey-500);cursor:pointer;font-size:0.95rem;line-height:1;padding:0 4px;">×</button>
+        ${removeBtnHtml}
       </div>`;
     }).join("");
   }

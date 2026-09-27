@@ -232,6 +232,13 @@ export default {
       if (rodSetupMatch) {
         return handleRodSetupItem(request, url, env, rodSetupMatch[1]);
       }
+      if (url.pathname === "/api/rig-sublist-overrides") {
+        return handleRigSublistOverridesCollection(request, url, env);
+      }
+      const rigOverrideMatch = url.pathname.match(/^\/api\/rig-sublist-overrides\/([^/]+)$/);
+      if (rigOverrideMatch) {
+        return handleRigSublistOverrideItem(request, url, env, rigOverrideMatch[1]);
+      }
       if (url.pathname === "/api/location-quota" && request.method === "GET") {
         const user = await requireUser(request, env);
         if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
@@ -1081,7 +1088,9 @@ function validateTrackedInput(body) {
 async function handleGroupsCollection(request, url, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
-  const resolved = resolveEffectiveUserId(url, user);
+  // Any signed-in user may READ Public's own groups (Settings shows them merged into your own,
+  // badged and read-only) — writing to userId=public stays Admin-only, per allowPublicRead's own comment.
+  const resolved = resolveEffectiveUserId(url, user, { allowPublicRead: request.method === "GET" });
   if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
   const uid = resolved.id;
 
@@ -1266,6 +1275,58 @@ async function handleRodSetupItem(request, url, env, id) {
 }
 
 // ---------------------------------------------------------------------
+// Rig sub-list overrides (schema-v2.sql user_rig_sublist_overrides) — a
+// normal user's own private layer on top of a Rig they don't own (i.e.
+// one of Public's): lets them keep a personal sub list under a Public rig
+// without needing write access to that row. Always scoped to the CALLER's
+// own id — there's nothing to "act on someone else's behalf" for a
+// per-viewer private layer, so ?userId= is never honored here at all.
+// ---------------------------------------------------------------------
+
+async function handleRigSublistOverridesCollection(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+
+  if (request.method === "GET") {
+    const { results } = await env.DB.prepare("SELECT rig_id, sub_list FROM user_rig_sublist_overrides WHERE user_id = ?").bind(user.id).all();
+    return jsonResponse(results.map((r) => ({ rigId: r.rig_id, subList: parseSubList(r.sub_list) })), 200, env);
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+async function handleRigSublistOverrideItem(request, url, env, rigId) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+
+  if (request.method === "PUT") {
+    const body = await readJsonBody(request);
+    if (!body || !Array.isArray(body.subList) || body.subList.length > 100 || body.subList.some((v) => typeof v !== "string" || !v.trim())) {
+      return jsonResponse({ error: "subList must be a list of option names." }, 400, env);
+    }
+    const rig = await env.DB.prepare("SELECT user_id, field FROM user_mark_lists WHERE id = ?").bind(rigId).first();
+    if (!rig || rig.field !== "Rig") return jsonResponse({ error: "Rig not found." }, 404, env);
+    if (rig.user_id === user.id) return jsonResponse({ error: "You own this rig — edit its Sub List directly." }, 400, env);
+    const existing = await env.DB.prepare("SELECT id FROM user_rig_sublist_overrides WHERE user_id = ? AND rig_id = ?").bind(user.id, rigId).first();
+    if (existing) {
+      await env.DB.prepare("UPDATE user_rig_sublist_overrides SET sub_list = ? WHERE id = ?").bind(JSON.stringify(body.subList), existing.id).run();
+    } else {
+      await env.DB.prepare("INSERT INTO user_rig_sublist_overrides (id, user_id, rig_id, sub_list, created_at) VALUES (?, ?, ?, ?, ?)")
+        .bind(crypto.randomUUID(), user.id, rigId, JSON.stringify(body.subList), Date.now())
+        .run();
+    }
+    return jsonResponse({ rigId, subList: body.subList }, existing ? 200 : 201, env);
+  }
+
+  if (request.method === "DELETE") {
+    await env.DB.prepare("DELETE FROM user_rig_sublist_overrides WHERE user_id = ? AND rig_id = ?").bind(user.id, rigId).run();
+    return new Response(null, { status: 204, headers: corsHeaders(env) });
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+// ---------------------------------------------------------------------
 // v2: Mark lists (schema-v2.sql user_mark_lists) — one generic table for
 // every pick-list category (Mark Type, Species, Bait, Rig, conditions,
 // shape/colour formats), mirroring mark_lists.json's own flat shape.
@@ -1274,7 +1335,10 @@ async function handleRodSetupItem(request, url, env, id) {
 async function handleMarkListsCollection(request, url, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
-  const resolved = resolveEffectiveUserId(url, user);
+  // Any signed-in user may READ Public's own mark lists this way too (they're already fully
+  // anonymous-readable via /api/public/marklists, so this adds no new exposure) — writing to
+  // userId=public stays Admin-only, per allowPublicRead's own comment on resolveEffectiveUserId.
+  const resolved = resolveEffectiveUserId(url, user, { allowPublicRead: request.method === "GET" });
   if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
   const uid = resolved.id;
 
@@ -2985,11 +3049,17 @@ async function handleAdminDeleteTier(env, tierId) {
  * endpoint. This is the ONLY mechanism for editing Public's defaults —
  * there is no separate "edit the defaults" code path anywhere in this
  * file. A non-admin passing a userId that isn't their own is rejected
- * outright, never silently downgraded to "act as yourself instead".
+ * outright, never silently downgraded to "act as yourself instead" —
+ * UNLESS the caller opts in with `allowPublicRead` (only handed `true`
+ * from a GET branch, by Groups/Mark Lists collection reads): then any
+ * signed-in user may read (never write — callers only pass this for GET)
+ * Public's own rows, same as Settings now shows them merged into your
+ * own view, badged as Public's and not editable.
  */
-function resolveEffectiveUserId(url, callerUser) {
+function resolveEffectiveUserId(url, callerUser, { allowPublicRead = false } = {}) {
   const requested = url.searchParams.get("userId");
   if (!requested || requested === callerUser.id) return { id: callerUser.id };
+  if (allowPublicRead && requested === PUBLIC_USER_ID) return { id: requested };
   if (callerUser.role !== "admin") {
     return { error: "Only Admin can act on another user's data." };
   }

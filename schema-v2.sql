@@ -285,6 +285,20 @@ CREATE TABLE IF NOT EXISTS user_rod_setups (
 );
 CREATE INDEX IF NOT EXISTS idx_urs_user ON user_rod_setups(user_id);
 
+-- A normal user's own private layer on top of a Rig they don't own (i.e. one of Public's) — lets
+-- them keep a personal sub list under a Public rig without needing write access to that row.
+-- Meaningless (and rejected) if user_id already owns the referenced rig — they'd just edit its own
+-- sub_list directly (user_mark_lists.sub_list above) in that case.
+CREATE TABLE IF NOT EXISTS user_rig_sublist_overrides (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  rig_id TEXT NOT NULL REFERENCES user_mark_lists(id) ON DELETE CASCADE,
+  sub_list TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE (user_id, rig_id)
+);
+CREATE INDEX IF NOT EXISTS idx_urso_user ON user_rig_sublist_overrides(user_id);
+
 -- A user's own logged fishing marks (catches and points of interest).
 -- Columns mirror data/marks.json's own record shape field-for-field
 -- (confirmed against the live file, not guessed) rather than normalizing
