@@ -1123,6 +1123,7 @@ function buildMarkPopupEditHtml(mark, markLists, opts = {}) {
         <div class="mark-edit-groups" data-field-group="species">
         ${pickListGroup(speciesField)}
         </div>
+        ${numberField("size", "Size (cm)", " cm", 'min="0" step="1"')}
         <label class="mark-edit-field">Name
           <input type="text" name="name" value="${escapeHtml(mark.name || "")}" style="${MARK_POPUP_INPUT_STYLE}" />
         </label>
@@ -1142,7 +1143,6 @@ function buildMarkPopupEditHtml(mark, markLists, opts = {}) {
         ${markEditGroupHtml(
           "measurements",
           "Measurements",
-          numberField("size", "Size (cm)", " cm", 'min="0" step="1"') +
             numberField("barometer", "Barometer (hPa)", " hPa", 'min="0" step="0.1"') +
             numberField("temperature", "Temperature (°C)", "°C", 'step="0.1"') +
             numberField("waterTemperature", "Water Temp (°C)", "°C water", 'step="0.1"') +
