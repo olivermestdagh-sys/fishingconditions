@@ -1,0 +1,36 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+Full feature list, architecture diagram, tide-condition rules and privacy model are in `README.md` — read that first. This file only adds what a session needs to actually *work* in the repo: commands, the parts of the architecture that span multiple files, and two standing process rules.
+
+## Commands
+
+- `npm test` (= `node --test`) — runs everything in `tests/*.test.mjs`. Run a single file directly: `node --test tests/tide.test.mjs`.
+- `npm run check-pages` (= `node scripts/check-page-scripts.mjs`) — verifies every HTML page loads every shared `js/*.js` file it actually uses, in the right order. **Run this after adding/removing a function in a shared `js/*.js` file, or adding a `<script>` tag to any page** — it's the one check that catches a function only existing on some pages (see Architecture below).
+- Syntax-check a script: `node --check some-file.js`. `user-backend.js` is ESM despite the `.js` extension — copy it to a `.mjs` path first (`cp user-backend.js /tmp/user-backend.mjs && node --check /tmp/user-backend.mjs`), exactly as CI does.
+- `python -m py_compile scripts/fetch_conditions.py scripts/observation_archive.py` — compile-check the data pipeline (no Python test runner here).
+- No frontend build step — plain HTML/CSS/JS, no bundler, no `npm run dev`. Just edit and reload.
+- Deploy: pushing to `main` deploys the static site (GitHub Pages) automatically, and also auto-deploys the `fishingconditions-users` worker via `.github/workflows/deploy-worker.yml` *if* `user-backend.js` or `wrangler.toml` changed and the `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` repo secrets are set. Manual worker deploy (e.g. to test before pushing): `npx wrangler deploy`.
+- CI (`.github/workflows/ci.yml`) runs all of the above (syntax check, check-pages, tests, Python compile-check) on every push/PR — run them locally first rather than finding out from a red CI run.
+
+## Architecture
+
+- **Two independent Cloudflare Workers**, deliberately separate (different secrets, different blast radius — see `user-backend.js`'s own header comment): `user-backend.js` (accounts, sessions, D1, marks, per-user prefs — the real backend, config in `wrangler.toml`) and `willyweather-search.js` (a tiny stateless proxy that only exists to keep the WillyWeather API key out of the browser).
+- **Frontend has one shared global scope, not modules.** The shared code was originally one 9,600-line `charts.js`; it's since been split into `js/*.js` by topic (chart drawing, maps, marks, tide logic, backend helpers, prefs sync, etc.), but every one of those files still shares a single global scope — no `import`/`export`, no bundler. Each page (`index.html`, `conditions.html`, `reports.html`, `locations.html`) loads only the shared files it needs via plain `<script>` tags, in a specific order, then its own page script (`week.js`, `app.js`/`map-live.js`/`sync.js`, `reports.js`, `locationsadmin.js`). `scripts/check-page-scripts.mjs` is what keeps this honest — see Commands above. `live.html`/`sync.html` are just redirects into `conditions.html`'s Live/Import modes now.
+- **conditions.html is three modes on one map**: Normal (tracked spots + marks), Live (GPS, nearest spot, tap-to-log; `map-live.js`), Import (review a Garmin/Lowrance export; `sync.js`).
+- **Live config vs. batch data**: WillyWeather-derived numbers (forecasts, scores) only update on the 3-hourly GitHub Actions pipeline (`update.yml` → `scripts/fetch_conditions.py` → commits `data/conditions.json` + `config/locations.json` straight to `main` — a force-push can race with it). Everything else about a location (display name, group, timings, tide offset) is read live from D1 via `/api/public/locations` at page load and merged in (`mergeLiveLocationConfig`, `js/chart-render.js`) — a Settings edit shows up immediately, without waiting for the pipeline.
+- **Privacy model**: anonymous visitors get conditions + the tracked-location list only. Marks and personal settings (home location, Google Routes key) require sign-in and are scoped to that user (D1 `fishingconditions-users`, schema in `schema-v2.sql`). Every state-changing request must come from the site's own origin (CSRF guard in `user-backend.js`); the pipeline instead authenticates with a shared-secret header.
+- **Tide condition/extreme classification** (`classifyTideFromExtrema`, `rankExtremum` in `js/marks-core.js`) is shared by every mark-creation path — Live quick marks, a map click, and the Sync import — touching this logic means checking all three call sites, not just one.
+- **Per-user synced settings** (`js/prefs.js`, `Prefs.set`/`Prefs.remove`, each page's `await Prefs.load()` at init, backed by D1 `user_prefs` via `/api/prefs`): the allowlist of which localStorage keys sync (`SYNCED_PREF_KEYS`) is duplicated in `user-backend.js` and `js/prefs.js`, and a test checks they match — update both when adding a new synced preference.
+- **Facet filters** (Week Ahead's Type/Location Group/Shore Direction/Locations, `js/week-tools.js`) are 3-state (`{include, exclude}` Sets per value) and cross-narrow each other's candidate lists — the same convention as the Map's own mark filters (`js/marks-tools.js`).
+
+## Keep this file updated
+
+Treat this file as living documentation, not a one-time snapshot. When a change you make shifts something described above — a new shared `js/*.js` file, a changed/added command, a new worker, a new cross-cutting pattern, a renamed file this doc points at — update the relevant section in the same session, before moving on. A future session trusts this file to be current; let it go stale and it actively misleads instead of helping.
+
+## Always commit and push
+
+This is a solo project on a public repo with automatic deploy on push (GitHub Pages for the site, GitHub Actions for the worker — see Commands). After finishing and verifying a change, commit and push to `main` immediately, without asking first — then report what you did (with any caveats on what you couldn't test). Don't end a turn with "commit and push?"; just do it. If the push is rejected because the scheduled "Update conditions data" commit landed first, `git fetch` + `git rebase origin/main` (data-only commits, safe to rebase past), then push again.
+
+Still ask first for anything genuinely risky or destructive: history rewrites, force-push, deleting data, touching secrets, or anything outside this repo.
