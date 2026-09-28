@@ -3787,6 +3787,30 @@ body.live-card-open { overflow: hidden; }
 .live-card-choice.tone-warn { border-color: #fbbf24; }
 .live-card-choice.tone-full { border-color: #f87171; background: rgba(220, 38, 38, 0.28); }
 .live-card-choice.selected.tone-warn, .live-card-choice.selected.tone-full { background: #16a34a; border-color: #bbf7d0; }
+
+/* Week Ahead's Location Group/Shore Direction/Locations filter panels (week.js's showFacetCardPanel)
+   reuse this same card look for a 3-state include/exclude/neutral choice, not Catch's plain
+   selected/not — .excluded is the red counterpart to .selected's green. The Locations panel also
+   layers a small pin-to-top (★/☆) toggle in the corner of each card; .live-card-choice-wrap is a
+   plain (non-button) positioning wrapper since a real <button> can't nest inside another <button>. */
+.live-card-choice.excluded { background: rgba(220, 38, 38, 0.28); border-color: #f87171; }
+.live-card-choice-wrap { position: relative; }
+.live-card-choice-wrap .live-card-choice { width: 100%; }
+.live-card-pin-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.live-card-pin-btn.pinned { color: #fde68a; }
 .live-card-stepper { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 12px; }
 .live-card-stepper-value { text-align: center; font-size: 3.6rem; font-weight: 800; line-height: 1.1; padding-top: 6px; }
 .live-card-stepper-value.small { color: #fca5a5; font-size: 2.6rem; }

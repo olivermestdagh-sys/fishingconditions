@@ -446,7 +446,7 @@ async function init() {
 }
 
 /**
- * Wires the toolbar's toggle switch and gear+badge button (the Week Ahead
+ * Wires the toolbar's toggle switch and its filter buttons (the Week Ahead
  * equivalent of the Map's Live toggle + Filters gear, initMarkControls in
  * js/marks-tools.js) — the toggle is a master on/off for the four facet
  * filters ONLY, never the Min Condition/Min Hours thresholds: those define
@@ -456,92 +456,121 @@ async function init() {
  * only narrows which already-computed locations are shown.
  */
 /**
- * Thresholds + filters modal — the Week Ahead equivalent of the Map's own
- * showMarkFilterModal (js/marks-tools.js), same shell (.ww-candidate-*) and
- * same 3-state chip cycling. `ctx.onChange` is called after every mutating
- * action (a chip tap, Clear all, a pin toggle) so the caller can persist +
- * re-render whatever it needs to (the page's own active-chip bar, badge
- * count, and the week view itself) — this function only ever mutates
- * ctx.facetFilters/pinnedOrder live and re-renders its own body, it never
- * needs to know what else depends on that state.
+ * One facet's own full-screen selection panel (Location Group, Shore
+ * Direction or Locations — each has its own toolbar button now, Type
+ * already has its own 3-state toggle button, Min Condition/Min Hours their
+ * own popover) — same big-pill-button visual language as the Map/Live tab's
+ * "Session defaults" flow (.live-card-* CSS, js/live-cards.js's
+ * showCardFlow/showEndSessionConfirm), reused here for a single-screen
+ * panel rather than that flow's multi-step Prev/Next wizard: this facet is
+ * ALREADY the one screen, there's nothing to page through.
  *
- * The Locations group doubles as the pin-to-top picker (★/☆, this page's own
- * togglePin/pinnedOrder) — the only facet with anything beyond plain 3-state
- * chips, since pinning which locations lead the board is otherwise homeless
- * once this row is no longer always visible on the page itself.
+ * `ctx.onChange` is called after every mutating action (a card tap, Clear,
+ * a pin toggle) so the caller can persist + re-render whatever it needs to
+ * (this facet's own badge count and the week view itself) — this function
+ * only ever mutates ctx.facetFilters/pinnedOrder live and re-renders its
+ * own body, it never needs to know what else depends on that state.
+ *
+ * The "location" facet doubles as the pin-to-top picker (★/☆, this page's
+ * own togglePin/pinnedOrder) and gets an extra All/None row — the only
+ * facet with anything beyond a plain 3-state card grid, since pinning which
+ * locations lead the board is otherwise homeless once this row is no
+ * longer always visible on the page itself.
  *
  * Page-local (not js/week-tools.js) specifically because it references
- * wireThresholdStepper/pinnedOrder/togglePin, all week.js-only — everything
- * ELSE it calls (facetGroupHtml, facetCandidates, facetChipStateFor/StyleFor,
- * facetFilterOpenGroups, FACET_LABELS, THRESHOLDS_STORAGE_KEY, conditionColor)
- * lives in the shared js/week-tools.js and is generic.
+ * pinnedOrder/togglePin, both week.js-only — everything ELSE it calls
+ * (facetCandidates, facetChipStateFor, FACET_LABELS, displayNameFor,
+ * escapeHtml) lives in the shared js/week-tools.js or js/backend.js and is
+ * generic.
  */
-function showThresholdFilterModal(ctx) {
+function showFacetCardPanel(facet, ctx) {
   const { allLocations, facetFilters, onChange } = ctx;
+  const isLocation = facet === "location";
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
-    overlay.className = "ww-candidate-overlay";
-    overlay.innerHTML = `
-      <div class="ww-candidate-dialog">
-        <button type="button" class="ww-candidate-close" aria-label="Close">&times;</button>
-        <h3 style="margin:0 0 8px;">Filters</h3>
-        <p class="footnote" style="margin:0 0 12px;">Tap once to require it, tap again to exclude it, tap again to clear.</p>
-        <div data-facet-sections></div>
-        <div style="display:flex;gap:8px;margin-top:6px;">
-          <button type="button" id="facetFilterClearAll" class="btn-secondary" style="flex:1;">Clear all</button>
-          <button type="button" id="facetFilterDone" class="btn-primary" style="flex:1;">Done</button>
-        </div>
-      </div>
-    `;
+    overlay.className = "live-card-overlay";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
     document.body.appendChild(overlay);
+    document.body.classList.add("live-card-open");
 
-    function sectionHtml(facet) {
-      const values = facetCandidates(facet, allLocations, facetFilters);
-      if (values.length === 0) return "";
-      const chips = values
-        .map((v) => {
-          const cs = facetChipStateFor(facetFilters, facet, v);
-          const escValue = v.replace(/"/g, "&quot;");
-          const escText = v.replace(/</g, "&lt;");
-          return `<span class="loc-chip facet-filter-chip" data-facet="${facet}" data-value="${escValue}" data-state="${cs}"
-            style="cursor:pointer;${facetChipStyleFor(cs)}">${escText}</span>`;
-        })
-        .join("");
-      return facetGroupHtml(facetFilters, facet, FACET_LABELS[facet], `<div style="display:flex;flex-wrap:wrap;gap:6px;">${chips}</div>`);
+    const close = () => {
+      overlay.remove();
+      document.body.classList.remove("live-card-open");
+      resolve();
+    };
+
+    function candidateValues() {
+      return facetCandidates(facet, allLocations, facetFilters);
     }
 
-    function locationSectionHtml() {
-      const values = facetCandidates("location", allLocations, facetFilters);
-      if (values.length === 0) return "";
-      const chips = values
-        .map((name) => {
-          const loc = allLocations.find((l) => l.name === name);
-          const displayText = displayNameFor(loc) || name;
-          const cs = facetChipStateFor(facetFilters, "location", name);
-          const pinned = pinnedOrder.includes(name);
-          const escValue = name.replace(/"/g, "&quot;");
-          const escText = displayText.replace(/</g, "&lt;");
-          return `<span class="loc-chip facet-filter-chip" data-facet="location" data-value="${escValue}" data-state="${cs}"
-            style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;${facetChipStyleFor(cs)}">
-            <button type="button" class="weeknew-pin-btn${pinned ? " pinned" : ""}" data-pin-location="${escValue}"
-              aria-label="${pinned ? "Unpin" : "Pin"} ${escText}" style="background:none;border:none;padding:0;cursor:pointer;font-size:1em;line-height:1;">${pinned ? "★" : "☆"}</button>
-            <span>${escText}</span>
-          </span>`;
-        })
-        .join("");
-      const allNone = `<div style="display:flex;gap:6px;margin-bottom:6px;">
-        <button type="button" class="chip-action" id="facetLocAll">All</button>
-        <button type="button" class="chip-action" id="facetLocNone">None</button>
+    function choiceHtml(value) {
+      const cs = facetChipStateFor(facetFilters, facet, value);
+      const stateClass = cs === "include" ? " selected" : cs === "exclude" ? " excluded" : "";
+      const loc = isLocation ? allLocations.find((l) => l.name === value) : null;
+      const label = isLocation ? displayNameFor(loc) || value : value;
+      const escLabel = escapeHtml(label);
+      const choiceBtn = `<button type="button" class="live-card-choice${stateClass}" data-choice="${escapeHtml(value)}" aria-pressed="${cs === "include"}"><span>${escLabel}</span></button>`;
+      if (!isLocation) return choiceBtn;
+      const pinned = pinnedOrder.includes(value);
+      return `<div class="live-card-choice-wrap">
+        ${choiceBtn}
+        <button type="button" class="live-card-pin-btn${pinned ? " pinned" : ""}" data-pin-location="${escapeHtml(value)}"
+          aria-label="${pinned ? "Unpin" : "Pin"} ${escLabel}">${pinned ? "★" : "☆"}</button>
       </div>`;
-      return facetGroupHtml(facetFilters, "location", "Locations (☆ to pin to the top of the list below)", `${allNone}<div style="display:flex;flex-wrap:wrap;gap:6px;">${chips}</div>`);
     }
 
-    function renderBody() {
-      overlay.querySelector("[data-facet-sections]").innerHTML = [sectionHtml("group"), sectionHtml("direction"), locationSectionHtml()].join("");
-      wireBody();
+    function render() {
+      const values = candidateValues();
+      overlay.innerHTML = `
+        <div class="live-card">
+          <div class="live-card-head">
+            <h2 class="live-card-title">${escapeHtml(FACET_LABELS[facet])}</h2>
+            <p class="live-card-prompt">Tap once to require it, tap again to exclude it, tap again to clear.</p>
+            ${isLocation ? `<div class="live-card-nav live-card-nav-2" style="margin-top:8px;">
+              <button type="button" class="live-card-nav-btn" data-loc-all>All</button>
+              <button type="button" class="live-card-nav-btn" data-loc-none>None</button>
+            </div>` : ""}
+          </div>
+          <div class="live-card-grid">
+            ${values.length ? values.map(choiceHtml).join("") : `<p class="live-card-empty">Nothing to choose yet — add options for this on the Settings tab.</p>`}
+          </div>
+          <div class="live-card-nav live-card-nav-2">
+            <button type="button" class="live-card-nav-btn live-card-close" data-nav="clear">Clear</button>
+            <button type="button" class="live-card-nav-btn live-card-next" data-nav="done">Done</button>
+          </div>
+        </div>`;
+      overlay.querySelectorAll("[data-choice]").forEach((btn) => {
+        btn.addEventListener("click", () => cycleFacetChip(btn.dataset.choice));
+      });
+      if (isLocation) {
+        overlay.querySelectorAll("[data-pin-location]").forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            togglePin(btn.dataset.pinLocation);
+            render();
+          });
+        });
+        overlay.querySelector("[data-loc-all]").addEventListener("click", () => {
+          facetFilters.location = { include: new Set(), exclude: new Set() };
+          onChange();
+          render();
+        });
+        overlay.querySelector("[data-loc-none]").addEventListener("click", () => {
+          facetFilters.location = { include: new Set(), exclude: new Set(candidateValues()) };
+          onChange();
+          render();
+        });
+      }
+      overlay.querySelector('[data-nav="clear"]').addEventListener("click", () => {
+        facetFilters[facet] = { include: new Set(), exclude: new Set() };
+        onChange();
+        render();
+      });
+      overlay.querySelector('[data-nav="done"]').addEventListener("click", close);
     }
 
-    function cycleFacetChip(facet, value) {
+    function cycleFacetChip(value) {
       const f = facetFilters[facet];
       const current = facetChipStateFor(facetFilters, facet, value);
       if (current === "neutral") {
@@ -553,68 +582,12 @@ function showThresholdFilterModal(ctx) {
         f.exclude.delete(value);
       }
       onChange();
-      renderBody();
+      render();
     }
 
-    function wireBody() {
-      overlay.querySelectorAll(".facet-filter-chip").forEach((chip) => {
-        chip.addEventListener("click", () => cycleFacetChip(chip.dataset.facet, chip.dataset.value));
-      });
-      overlay.querySelectorAll("[data-pin-location]").forEach((btn) => {
-        btn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          togglePin(btn.dataset.pinLocation);
-          renderBody();
-        });
-      });
-      overlay.querySelectorAll("[data-toggle-facet-group]").forEach((head) => {
-        head.addEventListener("click", () => {
-          const key = head.dataset.toggleFacetGroup;
-          const open = head.getAttribute("aria-expanded") !== "true";
-          if (open) facetFilterOpenGroups.add(key);
-          else facetFilterOpenGroups.delete(key);
-          head.setAttribute("aria-expanded", String(open));
-          head.querySelector("[data-caret]").style.transform = open ? "" : "rotate(-90deg)";
-          head.querySelector("[data-summary]").style.display = open ? "none" : "flex";
-          overlay.querySelector(`[data-group-body="${key}"]`).style.display = open ? "block" : "none";
-        });
-      });
-      const allBtn = overlay.querySelector("#facetLocAll");
-      const noneBtn = overlay.querySelector("#facetLocNone");
-      if (allBtn) {
-        allBtn.addEventListener("click", () => {
-          facetFilters.location = { include: new Set(), exclude: new Set() };
-          onChange();
-          renderBody();
-        });
-      }
-      if (noneBtn) {
-        noneBtn.addEventListener("click", () => {
-          const candidates = facetCandidates("location", allLocations, facetFilters);
-          facetFilters.location = { include: new Set(), exclude: new Set(candidates) };
-          onChange();
-          renderBody();
-        });
-      }
-    }
-
-    renderBody();
-
-    const cleanup = () => {
-      overlay.remove();
-      resolve();
-    };
-    overlay.querySelector("#facetFilterClearAll").addEventListener("click", () => {
-      // Type is deliberately excluded — it's no longer shown in this modal, it has its own
-      // toolbar button (filtersTypeBtn) which the user resets independently by cycling it back to "All".
-      for (const facet of ["group", "direction", "location"]) facetFilters[facet] = { include: new Set(), exclude: new Set() };
-      onChange();
-      renderBody();
-    });
-    overlay.querySelector("#facetFilterDone").addEventListener("click", cleanup);
-    overlay.querySelector(".ww-candidate-close").addEventListener("click", cleanup);
+    render();
     overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) cleanup();
+      if (e.target === overlay) close();
     });
   });
 }
@@ -732,39 +705,39 @@ function renderTypeFilterButton() {
   btn.setAttribute("aria-label", `Type filter: ${label}. Tap to change.`);
 }
 
+// One badge count per facet, now that Group/Direction/Locations each have their own toolbar
+// button (filtersCount(facetFilters.group) etc.) instead of one shared gear badge.
+function facetCount(f) {
+  return f.include.size + f.exclude.size;
+}
+
 function initFilterControls() {
-  const gearBtn = document.getElementById("filtersGearBtn");
-  const badge = document.getElementById("filtersGearBadge");
-  const chipsContainer = document.getElementById("filtersActiveChips");
   const toggle = document.getElementById("filteringEnabledToggle");
   const typeBtn = document.getElementById("filtersTypeBtn");
   const thresholdsBtn = document.getElementById("filtersThresholdsBtn");
+  const facetButtons = {
+    group: { btn: document.getElementById("filtersGroupBtn"), badge: document.getElementById("filtersGroupBadge") },
+    direction: { btn: document.getElementById("filtersDirectionBtn"), badge: document.getElementById("filtersDirectionBadge") },
+    location: { btn: document.getElementById("filtersLocationsBtn"), badge: document.getElementById("filtersLocationsBadge") },
+  };
   toggle.checked = filteringEnabled;
 
   function refresh() {
-    // Type is shown by its own button (renderTypeFilterButton), not as a badge count or a
-    // removable chip here — this modal-facing view only covers Group/Direction/Location. A
-    // real (always-empty) type facet is still included since renderActiveFacetFilterChips/
-    // countActiveFacetFilters iterate FACET_LABELS (which still lists "type") and would throw
-    // on a missing key.
-    const modalFacetFilters = {
-      type: { include: new Set(), exclude: new Set() },
-      group: facetFilters.group,
-      direction: facetFilters.direction,
-      location: facetFilters.location,
-    };
-    renderActiveFacetFilterChips(chipsContainer, modalFacetFilters, refresh);
-    const activeCount = countActiveFacetFilters(modalFacetFilters);
-    badge.textContent = activeCount > 0 ? `(${activeCount})` : "";
     renderTypeFilterButton();
+    for (const facet of Object.keys(facetButtons)) {
+      const count = facetCount(facetFilters[facet]);
+      facetButtons[facet].badge.textContent = count > 0 ? `(${count})` : "";
+    }
     persistFacetFilters(facetFilters);
     renderWeekView();
   }
 
-  gearBtn.addEventListener("click", async () => {
-    await showThresholdFilterModal({ allLocations, facetFilters, onChange: refresh });
-    refresh();
-  });
+  for (const [facet, { btn }] of Object.entries(facetButtons)) {
+    btn.addEventListener("click", async () => {
+      await showFacetCardPanel(facet, { allLocations, facetFilters, onChange: refresh });
+      refresh();
+    });
+  }
   thresholdsBtn.addEventListener("click", async () => {
     await showThresholdsModal();
   });

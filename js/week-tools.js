@@ -387,48 +387,6 @@ function persistThresholds() {
   Prefs.set(THRESHOLDS_STORAGE_KEY, JSON.stringify({ minCondition, minHours }));
 }
 
-function countActiveFacetFilters(facetFilters) {
-  return Object.values(facetFilters).reduce((n, f) => n + f.include.size + f.exclude.size, 0);
-}
-
-/**
- * Small removable-chip summary of whatever facet filters are currently
- * active — mirrors the Map's own renderActiveFilterChips (js/marks-tools.js):
- * "NOT " prefix distinguishes an exclude chip from an include one alongside
- * the colour coding. Renders nothing when no filters are active at all.
- */
-function renderActiveFacetFilterChips(container, facetFilters, onChange) {
-  const chips = [];
-  for (const [facet, label] of Object.entries(FACET_LABELS)) {
-    const f = facetFilters[facet];
-    for (const v of f.include) chips.push({ facet, label, value: v, mode: "include" });
-    for (const v of f.exclude) chips.push({ facet, label, value: v, mode: "exclude" });
-  }
-  if (chips.length === 0) {
-    container.innerHTML = "";
-    return;
-  }
-  container.innerHTML = chips
-    .map((c) => {
-      const style = c.mode === "include" ? "background:#dcfce7;border-color:#16a34a;color:#166534;" : "background:#fee2e2;border-color:#dc2626;color:#991b1b;";
-      const escValue = escapeHtml(c.value);
-      return `<span class="loc-chip" style="display:inline-flex;align-items:center;gap:4px;cursor:default;font-size:0.72rem;padding:3px 8px;${style}">
-        ${c.mode === "exclude" ? "NOT " : ""}${escapeHtml(c.label)}: ${escValue}
-        <button type="button" data-remove-active-facet-filter data-facet="${c.facet}" data-value="${escValue}" data-mode="${c.mode}"
-          aria-label="Remove filter"
-          style="background:none;border:none;color:inherit;cursor:pointer;padding:0;font-size:0.9rem;line-height:1;">×</button>
-      </span>`;
-    })
-    .join("");
-  container.querySelectorAll("[data-remove-active-facet-filter]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const { facet, value, mode } = btn.dataset;
-      facetFilters[facet][mode].delete(value);
-      onChange();
-    });
-  });
-}
-
 /**
  * Which values are offered as chips for one facet inside the modal below,
  * cross-narrowed by the OTHER three facets' current picks (same "restrict
@@ -479,47 +437,18 @@ function facetCandidates(facet, allLocations, facetFilters) {
   return out;
 }
 
-// Which filter groups are expanded in the dialog below — kept across openings (all start collapsed),
-// same convention as the Map's own markFilterOpenGroups (js/marks-tools.js).
-const facetFilterOpenGroups = new Set();
-
 function facetChipStateFor(facetFilters, facet, value) {
   const f = facetFilters[facet];
   if (f.include.has(value)) return "include";
   if (f.exclude.has(value)) return "exclude";
   return "neutral";
 }
-function facetChipStyleFor(chipState) {
-  if (chipState === "include") return "background:#dcfce7;border-color:#16a34a;color:#166534;";
-  if (chipState === "exclude") return "background:#fee2e2;border-color:#dc2626;color:#991b1b;";
-  return "";
-}
-function facetSummaryHtmlFor(facetFilters, facet) {
-  const f = facetFilters[facet];
-  const esc = (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;");
-  const chip = (text, cs) => `<span class="loc-chip" style="cursor:default;font-size:0.72rem;padding:2px 7px;${facetChipStyleFor(cs)}">${text}</span>`;
-  return [...f.include].map((v) => chip(esc(v), "include")).join("") + [...f.exclude].map((v) => chip(`NOT ${esc(v)}`, "exclude")).join("");
-}
-function facetGroupHtml(facetFilters, key, label, bodyHtml) {
-  const open = facetFilterOpenGroups.has(key);
-  return `
-    <div class="mark-filter-group" data-group="${key}" style="margin-bottom:8px;border:1px solid var(--grey-200);border-radius:8px;">
-      <button type="button" data-toggle-facet-group="${key}" aria-expanded="${open}"
-        style="display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;padding:8px 10px;cursor:pointer;text-align:left;font:inherit;color:inherit;">
-        <span data-caret style="display:inline-block;width:0.9em;transition:transform 0.1s;${open ? "" : "transform:rotate(-90deg);"}">▾</span>
-        <span style="font-size:0.8rem;font-weight:600;flex-shrink:0;">${label}</span>
-        <span data-summary="${key}" style="display:${open ? "none" : "flex"};flex-wrap:wrap;gap:4px;min-width:0;">${facetSummaryHtmlFor(facetFilters, key)}</span>
-      </button>
-      <div data-group-body="${key}" style="display:${open ? "block" : "none"};padding:0 10px 10px;">${bodyHtml}</div>
-    </div>
-  `;
-}
 
-// showThresholdFilterModal itself lives in week.js, not here — it's the only piece of this facet-filter
-// system that references week.js-only globals (wireThresholdStepper, pinnedOrder, togglePin), and this
-// file is shared with pages (conditions.html, reports.html) that load js/week-tools.js without week.js.
-// Everything above (facetGroupHtml, facetCandidates, facetChipStateFor/StyleFor, facetSummaryHtmlFor,
-// facetFilterOpenGroups, FACET_LABELS) is generic and used by that function from there.
+// showFacetCardPanel/showThresholdsModal themselves live in week.js, not here — the only pieces of
+// this facet-filter system that reference week.js-only globals (pinnedOrder, togglePin,
+// wireThresholdStepper), and this file is shared with pages (conditions.html, reports.html) that
+// load js/week-tools.js without week.js. Everything above (facetCandidates, facetChipStateFor,
+// FACET_LABELS) is generic and used by those functions from there.
 
 // ============================================================================
 // Shared trip-schedule infrastructure — lets Week Ahead offer the same
