@@ -1619,7 +1619,7 @@ function renderMarkLists() {
   // value as a full editable tile (shape/colour selects, tile colour, Public/override handling).
   container.innerHTML = MARK_LIST_FIELDS.map(({ key, label }) => {
     const summaryHtml = mergedMarkListsFor(label)
-      .map((v) => `<span class="loc-chip mark-edit-summary-chip">${escapeHtml(v.value)}</span>`)
+      .map((v) => `<span class="loc-chip mark-edit-summary-chip" style="${tileColorStyle(v)}">${escapeHtml(v.value)}${tileIconHtml(v)}</span>`)
       .join("");
     const bodyHtml = `
       <div class="mark-list-chip-row" data-field="${key}" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;"></div>
@@ -1649,8 +1649,7 @@ function renderMarkLists() {
       // Tile colour comes from the assigned Mark COLOUR Format's own
       // "colour for the website" only — shape has no colour of its own to
       // contribute here (see resolveTileFormatColor below).
-      const tileColor = resolveTileFormatColor(v);
-      const colorStyle = tileColor ? `background:${tileColor};border-color:${tileColor};color:${pickReadableTextColor(tileColor)};` : "";
+      const colorStyle = tileColorStyle(v);
       // EVERY field's values get BOTH a Shape Format and a Colour Format
       // <select> (Oliver's own call) — though shape only actually
       // AFFECTS anything for Species/Mark Type (see resolveMarkShapeFormat,
@@ -1711,7 +1710,7 @@ function renderMarkLists() {
       const publicStyle = isPublic ? "opacity:0.75;border:1px dashed var(--grey-400, #9ca3af);" : "";
       return `
       <span class="loc-chip" data-field="${key}" data-value="${escAttr}"${isPublic ? ' title="From the Public account — read-only"' : ""} style="display:inline-flex;align-items:center;gap:6px;${key === "species" || key === "rig" ? "flex-wrap:wrap;border-radius:16px;" : ""}${colorStyle}${publicStyle}">
-        <span>${escText}</span>
+        <span>${escText}</span>${tileIconHtml(v)}
         ${publicBadgeHtml}
         ${combinedBadge}
         ${shapeSelectHtml}
@@ -1895,6 +1894,33 @@ function resolveTileFormatColor(entry) {
   if (!entry.colorFormat) return null;
   const format = mergedMarkListsFor("Mark Colour Format").find((r) => r.value === entry.colorFormat);
   return format && format.color ? format.color : null;
+}
+
+/** The inline style that paints a pick-list value's pill in its assigned Mark Colour Format's colour (readable text on it), or "" when it has none. */
+function tileColorStyle(entry) {
+  const color = resolveTileFormatColor(entry);
+  return color ? `background:${color};border-color:${color};color:${pickReadableTextColor(color)};` : "";
+}
+
+/** The icon of a value's assigned Mark Shape Format (one of MARK_ICON_OPTIONS), or null when none is set. */
+function resolveTileIcon(entry) {
+  if (!entry.shapeFormat) return null;
+  const format = mergedMarkListsFor("Mark Shape Format").find((r) => r.value === entry.shapeFormat);
+  return format && MARK_ICON_OPTIONS.includes(format.icon) ? format.icon : null;
+}
+
+/** A small shape glyph (drawn in the pill's own text colour) for the value's icon, placed after its name; "" when no icon is set. */
+function tileIconHtml(entry) {
+  const icon = resolveTileIcon(entry);
+  if (!icon) return "";
+  const shapes = {
+    circle: '<circle cx="6" cy="6" r="4.5"/>',
+    diamond: '<path d="M6 0.5 L11.5 6 L6 11.5 L0.5 6 Z"/>',
+    cross: '<path d="M4.5 0.5h3v4h4v3h-4v4h-3v-4h-4v-3h4z"/>',
+    square: '<rect x="1.5" y="1.5" width="9" height="9"/>',
+    triangle: '<path d="M6 1 L11.5 11 L0.5 11 Z"/>',
+  };
+  return `<svg viewBox="0 0 12 12" width="11" height="11" fill="currentColor" role="img" aria-label="${icon} icon" style="flex:0 0 auto;margin-left:4px;vertical-align:-1px;">${shapes[icon]}</svg>`;
 }
 
 // Website icon choices for a Mark Shape Format — matches
