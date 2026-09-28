@@ -26,13 +26,6 @@ function tdRigSublist(rigRow, overrides) {
   return (overrides && overrides.get(rigRow.id)) || [];
 }
 
-/** `base`, or "base 2", "base 3"... — the first not already in `existingNames` (names are unique per account/trip). */
-function tdDefaultName(base, existingNames) {
-  const taken = new Set((existingNames || []).map((n) => String(n).toLowerCase()));
-  if (!taken.has(base.toLowerCase())) return base;
-  for (let n = 2; ; n++) if (!taken.has(`${base} ${n}`.toLowerCase())) return `${base} ${n}`;
-}
-
 /** Whether `list` already holds `value` (case-insensitive, trimmed) — new pick-list values must not duplicate. */
 function tdHasValue(list, value) {
   const v = String(value).trim().toLowerCase();
@@ -154,25 +147,32 @@ async function showTripDefaults({ onClose } = {}) {
       : `<button type="button" class="live-card-choice td-add-pill" data-add-value="${kind}">+ Add</button>`;
   const nameInput = (value, placeholder) =>
     `<input type="text" class="live-card-datetime-input td-input" data-name-input value="${esc(value)}" placeholder="${esc(placeholder)}" maxlength="80" />`;
-  const addRow = (buttonLabel) => `
+  // "+ Add trip/action/rod setup": no default name — tapped, it opens a text box (Add / Cancel) to type the name.
+  const addRow = (kind, buttonLabel) => `
     <div class="td-add-row">
-      <button type="button" class="live-card-nav-btn td-add-btn" data-add>${esc(buttonLabel)}</button>
+      ${
+        addingKind() === kind
+          ? addValuePill(kind)
+          : `<button type="button" class="live-card-choice td-add-pill" data-add-value="${kind}">${esc(buttonLabel)}</button>`
+      }
     </div>`;
+  // Back is the big primary button; Exit is a small pill beside it (alone, on the trips list).
   const navHtml = (backLabel) =>
     backLabel
-      ? `<div class="live-card-nav live-card-nav-2">
-      <button type="button" class="live-card-nav-btn" data-nav="back">${backLabel}</button>
-      <button type="button" class="live-card-nav-btn live-card-next" data-nav="close">Done</button>
+      ? `<div class="live-card-nav td-nav">
+      <button type="button" class="live-card-nav-btn live-card-next td-back-btn" data-nav="back">&larr; ${backLabel}</button>
+      <button type="button" class="live-card-nav-btn td-exit-btn" data-nav="close">Exit</button>
     </div>`
-      : `<div class="live-card-nav live-card-nav-1">
-      <button type="button" class="live-card-nav-btn live-card-next" data-nav="close">Close</button>
+      : `<div class="live-card-nav td-nav">
+      <span></span>
+      <button type="button" class="live-card-nav-btn td-exit-btn" data-nav="close">Exit</button>
     </div>`;
 
   function tripsScreen() {
     const list = data.trips.length
       ? data.trips.map((t) => choice(t.name, `data-open-trip="${esc(t.id)}"`, false)).join("")
       : `<p class="live-card-empty">No trips yet — add one below.</p>`;
-    return { title: "Trip Defaults", prompt: "Pick a trip, or add a new one", body: `<div class="td-choices">${list}</div>${addRow("+ Add trip")}`, nav: navHtml(null) };
+    return { title: "Trip Defaults", prompt: "Pick a trip, or add a new one", body: `<div class="td-choices">${list}</div>${addRow("trip", "+ Add trip")}`, nav: navHtml(null) };
   }
 
   function tripScreen() {
@@ -186,7 +186,7 @@ async function showTripDefaults({ onClose } = {}) {
       prompt: "Trip name",
       body: `${nameInput(t.name, "Trip name")}
         <div class="td-section-title">Actions</div><div class="td-choices">${list}</div>
-        ${addRow("+ Add action")}
+        ${addRow("action", "+ Add action")}
         ${confirmDeleteHtml("Delete this trip and its actions")}`,
       nav: navHtml("Back"),
     };
@@ -210,7 +210,7 @@ async function showTripDefaults({ onClose } = {}) {
       body: `${nameInput(a.name, "Action name")}
         ${section("Fishing method", o.fishingMethod.map((m) => choice(m, `data-method="${esc(m)}"`, a.fishingMethod.includes(m))).join("") || "", "method")}
         ${section("Berley", o.berley.map((b) => choice(b, `data-berley="${esc(b)}"`, a.berley === b)).join("") || "", "berley")}
-        <div class="td-section"><div class="td-section-title">Rod setups</div><div class="td-pills">${pills}</div>${addRow("+ Add rod setup")}</div>
+        <div class="td-section"><div class="td-section-title">Rod setups</div><div class="td-pills">${pills}</div>${addRow("rodsetup", "+ Add rod setup")}</div>
         ${section("Species", o.species.map((s) => choice(s, `data-species="${esc(s)}"`, a.species.includes(s))).join("") || `<p class="live-card-empty">Nothing to choose yet.</p>`)}
         ${confirmDeleteHtml("Delete this action")}`,
       nav: navHtml("Back"),
@@ -304,37 +304,6 @@ async function showTripDefaults({ onClose } = {}) {
     }
 
     // Add (trip / action / rod setup, depending on the screen)
-    // One tap creates it under a default name ("New trip", "New trip 2", ...) and opens it, where the name can be edited.
-    const doAdd = () => {
-      if (view.name === "trips") {
-        const name = tdDefaultName("New trip", data.trips.map((t) => t.name));
-        attempt(async () => {
-          const created = await tdApi("/api/tripsetups", "POST", { name });
-          data.trips.push(created);
-          data.trips.sort((a, b) => a.name.localeCompare(b.name));
-          view = { name: "trip", tripId: created.id };
-        });
-      } else if (view.name === "trip") {
-        const name = tdDefaultName("New action", tdActionsForTrip(data.actions, view.tripId).map((a) => a.name));
-        attempt(async () => {
-          const created = await tdApi("/api/tripactions", "POST", { name, tripId: view.tripId });
-          data.actions.push(created);
-          view = { name: "action", tripId: view.tripId, actionId: created.id };
-        });
-      } else if (view.name === "action") {
-        const name = tdDefaultName("New rod setup", data.rodSetups.map((r) => r.name));
-        attempt(async () => {
-          const created = await tdApi("/api/rodsetups", "POST", { name });
-          data.rodSetups.push(created);
-          data.rodSetups.sort((a, b) => a.name.localeCompare(b.name));
-          // A brand-new rod setup is switched on for this action and opened straight away for its rod/rig.
-          await put("/api/tripactions", data.actions, view.actionId, { rodSetupIds: [...tdLiveRodSetupIds(action().rodSetupIds, data.rodSetups), created.id] });
-          view = { name: "rod", tripId: view.tripId, actionId: view.actionId, rodId: created.id };
-        });
-      }
-    };
-    on("[data-add]", doAdd);
-
     // Action fields
     const setAction = (patch) => attempt(() => put("/api/tripactions", data.actions, view.actionId, patch));
     on("[data-method]", (el) => setAction({ fishingMethod: tdToggle(action().fishingMethod, el.dataset.method) }));
@@ -369,6 +338,31 @@ async function showTripDefaults({ onClose } = {}) {
       adding = null;
       if (!value) return render();
       attempt(async () => {
+        if (kind === "trip") {
+          if (tdHasValue(data.trips.map((t) => t.name), value)) throw new Error(`You already have a trip named "${value}".`);
+          const created = await tdApi("/api/tripsetups", "POST", { name: value });
+          data.trips.push(created);
+          data.trips.sort((x, y) => x.name.localeCompare(y.name));
+          view = { name: "trip", tripId: created.id };
+          return;
+        }
+        if (kind === "action") {
+          if (tdHasValue(tdActionsForTrip(data.actions, view.tripId).map((x) => x.name), value)) throw new Error(`This trip already has an action named "${value}".`);
+          const created = await tdApi("/api/tripactions", "POST", { name: value, tripId: view.tripId });
+          data.actions.push(created);
+          view = { name: "action", tripId: view.tripId, actionId: created.id };
+          return;
+        }
+        if (kind === "rodsetup") {
+          if (tdHasValue(data.rodSetups.map((r) => r.name), value)) throw new Error(`You already have a rod setup named "${value}".`);
+          const created = await tdApi("/api/rodsetups", "POST", { name: value });
+          data.rodSetups.push(created);
+          data.rodSetups.sort((x, y) => x.name.localeCompare(y.name));
+          // A brand-new rod setup is switched on for this action and opened straight away for its rod/rig.
+          await put("/api/tripactions", data.actions, view.actionId, { rodSetupIds: [...tdLiveRodSetupIds(action().rodSetupIds, data.rodSetups), created.id] });
+          view = { name: "rod", tripId: view.tripId, actionId: view.actionId, rodId: created.id };
+          return;
+        }
         if (kind === "sub") {
           const rigRow = data.rigRows.find((row) => row.value === rod().rig);
           if (!rigRow) throw new Error("Choose a rig first.");

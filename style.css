@@ -3906,3 +3906,6 @@ body.live-card-open { overflow: hidden; }
 .td-inline-add { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
 .td-inline-add .td-input { flex: 1 1 140px; width: auto; margin-bottom: 0; }
 .td-inline-add .live-card-choice { min-height: 0; }
+.td-nav { grid-template-columns: 1fr auto; align-items: center; }
+.td-back-btn { min-height: 64px; font-size: 1.25rem; }
+.td-exit-btn { min-height: 0; padding: 10px 18px; border-radius: 999px; font-size: 1rem; font-weight: 600; }
