@@ -26,6 +26,36 @@ function tdRigSublist(rigRow, overrides) {
   return (overrides && overrides.get(rigRow.id)) || [];
 }
 
+/**
+ * The Session Start mark for a trip Action (Live mode): named "Session N Start" (the number nextSessionNumber gives), with
+ * the Action's species / fishing method / berley / bait, and rod / rig / rigOptions gathered from its Rod Setups
+ * (unique names, comma-joined; rigOptions = the rigs' sub-list items). `ctx` supplies what only the caller knows: id, lat,
+ * lng, dateTime, createdAt, sessionGroupId, sessionNumber, waterDepth (carried from the last mark). `tide` is
+ * {tideCondition, tideExtreme} worked out for the time.
+ */
+function buildSessionStartFromAction(action, rodSetups, ctx, tide) {
+  const uniq = (list) => [...new Set((list || []).filter((v) => v != null && String(v).trim() !== "").map((v) => String(v).trim()))];
+  const setups = (action.rodSetupIds || []).map((rid) => (rodSetups || []).find((r) => r.id === rid)).filter(Boolean);
+  const mark = {
+    id: ctx.id, lat: ctx.lat, lng: ctx.lng, name: `Session ${ctx.sessionNumber} Start`, type: "Session Start",
+    dateTime: ctx.dateTime, createdAt: ctx.createdAt, source: "Manual", sessionRole: "start", sessionGroupId: ctx.sessionGroupId,
+  };
+  const set = (key, list) => {
+    if (list.length) mark[key] = list.join(", ");
+  };
+  set("species", uniq(action.species));
+  set("fishingMethod", uniq(action.fishingMethod));
+  if (action.berley) mark.berley = action.berley;
+  set("bait", uniq(action.bait));
+  set("rod", uniq(setups.map((s) => s.rod)));
+  set("rig", uniq(setups.map((s) => s.rig)));
+  set("rigOptions", uniq(setups.flatMap((s) => s.subListItems || [])));
+  if (ctx.waterDepth != null) mark.waterDepth = ctx.waterDepth;
+  if (tide && tide.tideCondition) mark.tideCondition = tide.tideCondition;
+  if (tide && tide.tideExtreme) mark.tideExtreme = tide.tideExtreme;
+  return mark;
+}
+
 /** Whether `list` already holds `value` (case-insensitive, trimmed) — new pick-list values must not duplicate. */
 function tdHasValue(list, value) {
   const v = String(value).trim().toLowerCase();
@@ -210,6 +240,7 @@ async function showTripDefaults({ onClose } = {}) {
       body: `${nameInput(a.name, "Action name")}
         ${section("Fishing method", o.fishingMethod.map((m) => choice(m, `data-method="${esc(m)}"`, a.fishingMethod.includes(m))).join("") || "", "method")}
         ${section("Berley", o.berley.map((b) => choice(b, `data-berley="${esc(b)}"`, a.berley === b)).join("") || "", "berley")}
+        ${section("Bait", o.baits.map((b) => choice(b, `data-bait="${esc(b)}"`, (a.bait || []).includes(b))).join("") || "", "bait")}
         <div class="td-section"><div class="td-section-title">Rod setups</div><div class="td-pills">${pills}</div>${addRow("rodsetup", "+ Add rod setup")}</div>
         ${section("Species", o.species.map((s) => choice(s, `data-species="${esc(s)}"`, a.species.includes(s))).join("") || `<p class="live-card-empty">Nothing to choose yet.</p>`)}
         ${confirmDeleteHtml("Delete this action")}`,
@@ -307,6 +338,7 @@ async function showTripDefaults({ onClose } = {}) {
     // Action fields
     const setAction = (patch) => attempt(() => put("/api/tripactions", data.actions, view.actionId, patch));
     on("[data-method]", (el) => setAction({ fishingMethod: tdToggle(action().fishingMethod, el.dataset.method) }));
+    on("[data-bait]", (el) => setAction({ bait: tdToggle(action().bait, el.dataset.bait) }));
     on("[data-berley]", (el) => setAction({ berley: tdToggleSingle(action().berley, el.dataset.berley) }));
     on("[data-species]", (el) => setAction({ species: tdToggle(action().species, el.dataset.species) }));
     on("[data-toggle-rodsetup]", (el) => setAction({ rodSetupIds: tdToggle(tdLiveRodSetupIds(action().rodSetupIds, data.rodSetups), el.dataset.toggleRodsetup) }));
@@ -379,7 +411,7 @@ async function showTripDefaults({ onClose } = {}) {
           await put("/api/rodsetups", data.rodSetups, view.rodId, { subListItems: tdToggle(rod().subListItems, value) });
           return;
         }
-        const field = { method: "Fishing Method", berley: "Berley", rod: "Rod", rig: "Rig" }[kind];
+        const field = { method: "Fishing Method", berley: "Berley", bait: "Bait", rod: "Rod", rig: "Rig" }[kind];
         if (tdHasValue(data.lists.filter((r) => r.field === field).map((r) => r.value), value)) throw new Error(`"${value}" already exists under ${field}.`);
         const created = await tdApi("/api/marklists", "POST", { field, value });
         data.lists.push(created);
@@ -387,6 +419,7 @@ async function showTripDefaults({ onClose } = {}) {
         data.rigRows = data.lists.filter((r) => r.field === "Rig");
         // The new value is picked straight away.
         if (kind === "method") await put("/api/tripactions", data.actions, view.actionId, { fishingMethod: tdToggle(action().fishingMethod, value) });
+        else if (kind === "bait") await put("/api/tripactions", data.actions, view.actionId, { bait: tdToggle(action().bait, value) });
         else if (kind === "berley") await put("/api/tripactions", data.actions, view.actionId, { berley: value });
         else if (kind === "rod") await put("/api/rodsetups", data.rodSetups, view.rodId, { rod: value });
         else await put("/api/rodsetups", data.rodSetups, view.rodId, { rig: value, subListItems: [] });

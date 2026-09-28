@@ -5,7 +5,7 @@ import fs from "node:fs";
 
 const src = fs.readFileSync(new URL("../js/trip-defaults.js", import.meta.url), "utf8");
 const pure = src.slice(0, src.indexOf("// --- Backend"));
-const fns = new Function(pure + "\nreturn { tdToggle, tdToggleSingle, tdRigSublist, tdActionsForTrip, tdLiveRodSetupIds, tdHasValue };")();
+const fns = new Function(pure + "\nreturn { tdToggle, tdToggleSingle, tdRigSublist, tdActionsForTrip, tdLiveRodSetupIds, tdHasValue, buildSessionStartFromAction };")();
 
 test("tdToggle adds a missing value and removes a present one, without mutating", () => {
   const list = ["a"];
@@ -42,4 +42,33 @@ test("tdHasValue is a trimmed, case-insensitive membership check", () => {
   assert.equal(fns.tdHasValue(["Running Sinker"], " running sinker "), true);
   assert.equal(fns.tdHasValue(["Running Sinker"], "Paternoster"), false);
   assert.equal(fns.tdHasValue(undefined, "x"), false);
+});
+
+test("buildSessionStartFromAction maps an Action and its rod setups onto a Session Start mark", () => {
+  const rodSetups = [
+    { id: "a", rod: "Light", rig: "Soft plastic rig", subListItems: ["Vibe", "Paddle Tail"] },
+    { id: "b", rod: "Heavy", rig: "Soft plastic rig", subListItems: ["Vibe"] },
+  ];
+  const action = { species: ["Bream", "Whiting"], fishingMethod: ["Lure"], berley: "Pilchard", bait: ["Prawn"], rodSetupIds: ["a", "b", "gone"] };
+  const ctx = { id: "m1", lat: -38, lng: 145, dateTime: "2026-09-29 06:00:00", createdAt: "2026-09-29 06:00:00", sessionGroupId: "g1", sessionNumber: 3, waterDepth: 2.5 };
+  const mark = fns.buildSessionStartFromAction(action, rodSetups, ctx, { tideCondition: "Rising", tideExtreme: "HHW" });
+  assert.equal(mark.name, "Session 3 Start");
+  assert.equal(mark.type, "Session Start");
+  assert.equal(mark.sessionRole, "start");
+  assert.equal(mark.sessionGroupId, "g1");
+  assert.equal(mark.species, "Bream, Whiting");
+  assert.equal(mark.fishingMethod, "Lure");
+  assert.equal(mark.berley, "Pilchard");
+  assert.equal(mark.bait, "Prawn");
+  assert.equal(mark.rod, "Light, Heavy");
+  assert.equal(mark.rig, "Soft plastic rig"); // de-duplicated
+  assert.equal(mark.rigOptions, "Vibe, Paddle Tail");
+  assert.equal(mark.waterDepth, 2.5);
+  assert.equal(mark.tideCondition, "Rising");
+  assert.equal(mark.tideExtreme, "HHW");
+});
+
+test("buildSessionStartFromAction leaves off everything an Action doesn't set", () => {
+  const mark = fns.buildSessionStartFromAction({}, [], { id: "m", lat: 0, lng: 0, dateTime: "d", createdAt: "d", sessionGroupId: "g", sessionNumber: 1, waterDepth: null }, {});
+  for (const key of ["species", "fishingMethod", "berley", "bait", "rod", "rig", "rigOptions", "waterDepth", "tideCondition"]) assert.equal(key in mark, false, key);
 });

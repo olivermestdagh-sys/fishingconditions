@@ -314,6 +314,7 @@ CREATE TABLE IF NOT EXISTS user_trip_actions (
   name TEXT NOT NULL,
   fishing_method TEXT,
   berley TEXT,
+  bait TEXT, -- JSON array of Bait names (added later via ALTER TABLE)
   rod_setup_ids TEXT,
   species TEXT,
   created_at INTEGER NOT NULL,
@@ -387,6 +388,7 @@ CREATE TABLE IF NOT EXISTS marks (
   weather_condition TEXT,
   tide_condition TEXT,
   tide_extreme TEXT, -- HHW/LHW/HLW/LLW modifier for tide_condition (added later via ALTER TABLE)
+  rig_options TEXT, -- comma-joined Rig Sub List items picked for the rig(s) used (added later via ALTER TABLE)
   fishing_method TEXT, -- comma-joined on Session Start/End (multi-value, like bait/rig/rod/berley); single value on a Catch (added later via ALTER TABLE)
   water_condition TEXT,
   water_depth REAL,

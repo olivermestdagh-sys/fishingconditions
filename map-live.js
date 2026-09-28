@@ -292,7 +292,12 @@ async function openSessionDefaults() {
 async function openTripDefaults() {
   if (activeCardFlow) return;
   activeCardFlow = { close() {} }; // holds the one-card-flow-at-a-time guard while the hub loads and is open
-  const flow = await showTripDefaults({ onClose: () => { activeCardFlow = null; } });
+  const flow = await showTripDefaults({
+    onClose: () => {
+      activeCardFlow = null;
+      if (getLiveTripState()) loadLiveTripData().then(renderLiveTripUI); // its trips/actions may just have been edited
+    },
+  });
   if (activeCardFlow) activeCardFlow = flow;
 }
 
@@ -452,6 +457,7 @@ function liveActiveSession() {
 // session state (saveLiveSession, saveLiveEndSession).
 function updateLiveSessionButtons() {
   if (!liveMap || !liveMarkState) return; // not in Live mode (or it's been left) — applyModeChrome already hid all three
+  renderLiveTripUI(); // the trip's action buttons show active only while their session is
   const btnSession = document.getElementById("btnLiveSession");
   const btnEnd = document.getElementById("btnLiveEndSession");
   const btnCatch = document.getElementById("btnLiveCatch");
@@ -584,6 +590,196 @@ async function startLiveEndSession() {
     },
     onClose: finish,
   });
+}
+
+// --- Live trips (js/trip-defaults.js): Start Trip -> the trip's Actions as toolbar buttons -----------------
+// Tapping an Action starts a session from it (Session Start mark) and shows it active; tapping it again ends the session;
+// tapping another ends the active one first and starts the new one. Which Action is active is never stored as a flag: the
+// stored {actionId, sessionGroupId} only counts while liveActiveSession() really is that session, so ending it any other
+// way (End Session/Move, "+ Session") un-actives the button by itself.
+const LIVE_TRIP_KEY = "liveActiveTrip";
+let liveTripData = null; // {trips, actions, rodSetups}, loaded lazily
+let liveTripBusy = false;
+
+function getLiveTripState() {
+  try {
+    return JSON.parse(localStorage.getItem(LIVE_TRIP_KEY)) || null;
+  } catch {
+    return null;
+  }
+}
+function setLiveTripState(state) {
+  try {
+    if (state) localStorage.setItem(LIVE_TRIP_KEY, JSON.stringify(state));
+    else localStorage.removeItem(LIVE_TRIP_KEY);
+  } catch {
+    // storage unavailable: the trip just won't survive a reload
+  }
+}
+
+async function loadLiveTripData() {
+  try {
+    const [trips, actions, rodSetups] = await Promise.all([tdApi("/api/tripsetups"), tdApi("/api/tripactions"), tdApi("/api/rodsetups")]);
+    liveTripData = { trips, actions, rodSetups };
+  } catch (err) {
+    console.error("Could not load trips:", err);
+    showLiveToast("Couldn't load your trips: " + err.message, true);
+  }
+  return liveTripData;
+}
+
+// Start Trip / End Trip label, and the chosen trip's Actions as buttons (active = its session is the running one).
+function renderLiveTripUI() {
+  const btn = document.getElementById("btnStartTrip");
+  const box = document.getElementById("liveTripActions");
+  if (!btn || !box) return;
+  const state = getLiveTripState();
+  btn.textContent = state ? "End Trip" : "Start Trip";
+  if (!state) {
+    box.innerHTML = "";
+    return;
+  }
+  if (!liveTripData) {
+    loadLiveTripData().then(renderLiveTripUI);
+    return;
+  }
+  const trip = liveTripData.trips.find((t) => t.id === state.tripId);
+  if (!trip) {
+    setLiveTripState(null); // the trip was deleted in Trip Defaults
+    box.innerHTML = "";
+    btn.textContent = "Start Trip";
+    return;
+  }
+  const active = liveActiveSession();
+  const activeGroup = active && state.sessionGroupId && active.mark.sessionGroupId === state.sessionGroupId ? state.actionId : null;
+  box.innerHTML = tdActionsForTrip(liveTripData.actions, trip.id)
+    .map((a) => `<button type="button" class="btn-secondary live-quick-btn live-trip-action${a.id === activeGroup ? " active" : ""}" data-trip-action="${escapeHtml(a.id)}" aria-pressed="${a.id === activeGroup}"${liveTripBusy ? " disabled" : ""}>${escapeHtml(a.name)}</button>`)
+    .join("") || `<span class="map-toolbar-status">No actions in ${escapeHtml(trip.name)} yet — add some in Trip Defaults.</span>`;
+}
+
+// Ends `active` (a liveActiveSession()) at `position`: the Session End mark, saved and drawn. Null (with a toast) on failure.
+async function liveCloseActiveSession(active, position) {
+  const mark = buildSessionEndFromStart(active.mark, {
+    id: makeMarkId(), lat: position.lat, lng: position.lng, dateTime: nowAsNaiveString(), createdAt: nowAsNaiveString(),
+  }, active.number);
+  const result = await saveMarkToD1(mark, true);
+  if (!result.success) {
+    showLiveToast(`Couldn't end Session ${active.number}: ` + result.error, true);
+    return null;
+  }
+  addCatchToLiveMap(mark);
+  return mark;
+}
+
+// Tap Start Trip: pick one trip (one card). While a trip is running the same button is End Trip.
+async function onStartTripClick() {
+  if (activeCardFlow || liveTripBusy || !liveMap || !liveMarkState) return;
+  const state = getLiveTripState();
+  if (state) {
+    await endLiveTrip(state);
+    return;
+  }
+  const data = await loadLiveTripData();
+  if (!data) return;
+  if (!data.trips.length) {
+    showLiveToast("No trips yet — add one in Trip Defaults.", true);
+    return;
+  }
+  const finish = () => { activeCardFlow = null; };
+  let chosen = null;
+  activeCardFlow = showCardFlow({
+    getSteps: () => [{ id: "trip", title: "Start trip", prompt: "Which trip?", multi: false, options: data.trips.map((t) => t.name), selected: chosen ? [chosen.name] : [] }],
+    onChoose: (step, value) => { chosen = data.trips.find((t) => t.name === value) || null; },
+    onDone: () => {
+      activeCardFlow.close();
+      finish();
+      if (!chosen) return;
+      setLiveTripState({ tripId: chosen.id });
+      renderLiveTripUI();
+      showLiveToast(`${chosen.name} started`);
+    },
+    onClose: finish,
+    doneLabel: "Start",
+  });
+}
+
+// End Trip: closes the session this trip's Action started (if it is still running), then clears the trip.
+async function endLiveTrip(state) {
+  liveTripBusy = true;
+  try {
+    const active = liveActiveSession();
+    if (active && state.sessionGroupId && active.mark.sessionGroupId === state.sessionGroupId) {
+      const position = await getFreshGpsPosition();
+      if (!position) {
+        showLiveToast("Couldn't get your location — trip not ended.", true);
+        return;
+      }
+      const ended = await liveCloseActiveSession(active, position);
+      if (!ended) return;
+    }
+    setLiveTripState(null);
+    updateLiveSessionButtons();
+    showLiveToast("Trip ended");
+  } finally {
+    liveTripBusy = false;
+    renderLiveTripUI();
+  }
+}
+
+// Tap an Action button (see the section comment above for the three cases).
+async function onTripActionTap(actionId) {
+  if (liveTripBusy || activeCardFlow || !liveMap || !liveMarkState || !liveTripData) return;
+  const state = getLiveTripState();
+  const action = liveTripData.actions.find((a) => a.id === actionId);
+  if (!state || !action) return;
+  liveTripBusy = true;
+  renderLiveTripUI(); // buttons disabled while the GPS fix and saves run
+  try {
+    const position = await getFreshGpsPosition();
+    if (!position) {
+      showLiveToast("Couldn't get your location — nothing saved.", true);
+      return;
+    }
+    const active = liveActiveSession();
+    const wasThisAction = !!active && state.actionId === actionId && state.sessionGroupId === active.mark.sessionGroupId;
+    let ended = null;
+    if (active) {
+      // Whichever session is running is closed first (same as "+ Session"); stop here if that fails so nothing is left half done.
+      ended = await liveCloseActiveSession(active, position);
+      if (!ended) return;
+    }
+    if (wasThisAction) {
+      setLiveTripState({ tripId: state.tripId });
+      updateLiveSessionButtons();
+      showLiveToast(`${ended.name} saved`);
+      return;
+    }
+    let tide = {};
+    try {
+      tide = computeQuickMarkDefaults(getRowsForCurrentLoc());
+    } catch {
+      tide = {}; // no tide data for this spot: the save fills what it can from looked-up data
+    }
+    const now = nowAsNaiveString();
+    const mark = buildSessionStartFromAction(action, liveTripData.rodSetups, {
+      id: makeMarkId(), lat: position.lat, lng: position.lng, dateTime: now, createdAt: now, sessionGroupId: makeMarkId(),
+      sessionNumber: nextSessionNumber(liveSessionStarts() || [], parseNaive(now)), waterDepth: getLastMarkFieldValues().waterDepth ?? null,
+    }, tide);
+    const result = await saveMarkToD1(mark, true);
+    if (!result.success) {
+      showLiveToast("Session not saved: " + result.error, true);
+      if (ended) setLiveTripState({ tripId: state.tripId }); // the old one is closed, the new one never started
+      return;
+    }
+    saveLastMarkFieldValues(mark);
+    addCatchToLiveMap(mark);
+    setLiveTripState({ tripId: state.tripId, actionId, sessionGroupId: mark.sessionGroupId });
+    updateLiveSessionButtons();
+    showLiveToast(ended ? `${ended.name} saved; ${mark.name} saved` : `${mark.name} saved`);
+  } finally {
+    liveTripBusy = false;
+    renderLiveTripUI();
+  }
 }
 
 // Whether the panel's expanded content (ratings, timings, chart) is
@@ -878,6 +1074,11 @@ function liveInitOnce() {
   document.getElementById("btnCloseLiveHoverPanel").addEventListener("click", hideLiveHoverPanel);
   document.getElementById("btnSessionDefaults").addEventListener("click", openSessionDefaults);
   document.getElementById("btnTripDefaults").addEventListener("click", openTripDefaults);
+  document.getElementById("btnStartTrip").addEventListener("click", onStartTripClick);
+  document.getElementById("liveTripActions").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-trip-action]");
+    if (btn) onTripActionTap(btn.dataset.tripAction);
+  });
   document.getElementById("btnLiveSession").addEventListener("click", startLiveSession);
   document.getElementById("btnLiveEndSession").addEventListener("click", startLiveEndSession);
   document.getElementById("btnLiveCatch").addEventListener("click", startLiveCatch);

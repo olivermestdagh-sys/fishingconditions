@@ -172,7 +172,7 @@ const MARK_TYPE_FIELD_KEYS = {
   Mark: ["species"],
   Catch: [
     "species", "weatherCondition", "tideCondition", "tideExtreme", "waterCondition", "bait", "rig", "rod", "berley", "fishingMethod",
-    "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed", "notes", "released",
+    "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed", "notes", "released", "rigOptions",
   ],
 };
 MARK_TYPE_FIELD_KEYS.Fish = MARK_TYPE_FIELD_KEYS.Catch;
@@ -603,6 +603,7 @@ function buildMarkPopupViewHtml(mark) {
   for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
     if (applicable.includes(f.key)) row(f.displayLabel, mark[f.key]);
   }
+  if (applicable.includes("rigOptions")) row("Rig options", mark.rigOptions);
   if (applicable.includes("size")) row("Size", mark.size != null ? `${mark.size} cm` : null);
   if (applicable.includes("barometer")) row("Barometer", mark.barometer != null ? `${mark.barometer} hPa` : null);
   if (applicable.includes("temperature")) row("Temperature", mark.temperature != null ? `${mark.temperature}°C` : null);
@@ -1139,6 +1140,11 @@ function buildMarkPopupEditHtml(mark, markLists, opts = {}) {
         <div class="mark-edit-groups">
         ${cachedIsAdmin && mark.ownerUserId != null ? markEditGroupHtml("owner", "Owner", markPillRowHtml("ownerUserId", true) + hiddenSelect("ownerUserId", markOwnerOptionsHtml(mark.ownerUserId))) : ""}
         ${otherPickLists}
+        <div data-field-group="rigOptions">
+          <label class="mark-edit-field">Rig options
+            <input type="text" name="rigOptions" placeholder="e.g. 3in Paddle Tail, Vibe" value="${escapeHtml(mark.rigOptions || "")}" style="${MARK_POPUP_INPUT_STYLE}" />
+          </label>
+        </div>
         ${markEditGroupHtml("windDirection", "Wind Direction", markPillRowHtml("windDirection") + hiddenSelect("windDirection", windOptions), "windDirection")}
         ${markEditGroupHtml(
           "measurements",
@@ -1382,6 +1388,10 @@ function collectMarkFormValues(form, originalMark) {
       const windSpeedNum = Math.round(Number(windSpeedRaw));
       if (Number.isFinite(windSpeedNum)) updated.windSpeed = windSpeedNum; // whole km/h — see the field's own schema comment
     }
+  }
+  if (applicable.includes("rigOptions")) {
+    const rigOptions = val("rigOptions");
+    if (rigOptions) updated.rigOptions = rigOptions;
   }
   if (applicable.includes("notes")) {
     const notes = val("notes");
@@ -1927,6 +1937,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         Object.assign(mark, updated);
         for (const f of MARK_POPUP_OPTIONAL_FIELDS) if (!(f.key in updated)) delete mark[f.key];
         if (!("notes" in updated)) delete mark.notes;
+        if (!("rigOptions" in updated)) delete mark.rigOptions;
         if (!("released" in updated)) delete mark.released;
         if (!("size" in updated)) delete mark.size;
         if (!("barometer" in updated)) delete mark.barometer;

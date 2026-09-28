@@ -1318,7 +1318,7 @@ function rowToTripSetup(row) {
 }
 
 function validateTripSetupInput(body) {
-  for (const key of ["rodSetupIds", "species", "fishingMethod"]) {
+  for (const key of ["rodSetupIds", "species", "fishingMethod", "bait"]) {
     if (body[key] !== undefined && (!Array.isArray(body[key]) || body[key].some((v) => typeof v !== "string" || !v.trim()))) {
       return `${key} must be a list of option names.`;
     }
@@ -1428,6 +1428,7 @@ function rowToTripAction(row) {
     name: row.name,
     fishingMethod: parseSubList(row.fishing_method),
     berley: row.berley,
+    bait: parseSubList(row.bait),
     rodSetupIds: parseSubList(row.rod_setup_ids),
     species: parseSubList(row.species),
   };
@@ -1461,9 +1462,9 @@ async function handleTripActionsCollection(request, url, env) {
     const arr = (v) => (v && v.length ? JSON.stringify(v) : null);
     try {
       await env.DB.prepare(
-        "INSERT INTO user_trip_actions (id, user_id, trip_id, name, fishing_method, berley, rod_setup_ids, species, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO user_trip_actions (id, user_id, trip_id, name, fishing_method, berley, bait, rod_setup_ids, species, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       )
-        .bind(id, uid, body.tripId, body.name, arr(body.fishingMethod), body.berley ?? null, arr(body.rodSetupIds), arr(body.species), Date.now())
+        .bind(id, uid, body.tripId, body.name, arr(body.fishingMethod), body.berley ?? null, arr(body.bait), arr(body.rodSetupIds), arr(body.species), Date.now())
         .run();
     } catch (err) {
       return jsonResponse({ error: `This trip already has an action named "${body.name}".` }, 409, env);
@@ -1496,13 +1497,14 @@ async function handleTripActionItem(request, url, env, id) {
       name: body.name ?? existing.name,
       fishingMethod: body.fishingMethod !== undefined ? body.fishingMethod : parseSubList(existing.fishing_method),
       berley: body.berley !== undefined ? body.berley : existing.berley,
+      bait: body.bait !== undefined ? body.bait : parseSubList(existing.bait),
       rodSetupIds: body.rodSetupIds !== undefined ? body.rodSetupIds : parseSubList(existing.rod_setup_ids),
       species: body.species !== undefined ? body.species : parseSubList(existing.species),
     };
     const arr = (v) => (v && v.length ? JSON.stringify(v) : null);
     try {
-      await env.DB.prepare("UPDATE user_trip_actions SET name=?, fishing_method=?, berley=?, rod_setup_ids=?, species=? WHERE id = ? AND user_id = ?")
-        .bind(merged.name, arr(merged.fishingMethod), merged.berley ?? null, arr(merged.rodSetupIds), arr(merged.species), id, uid)
+      await env.DB.prepare("UPDATE user_trip_actions SET name=?, fishing_method=?, berley=?, bait=?, rod_setup_ids=?, species=? WHERE id = ? AND user_id = ?")
+        .bind(merged.name, arr(merged.fishingMethod), merged.berley ?? null, arr(merged.bait), arr(merged.rodSetupIds), arr(merged.species), id, uid)
         .run();
     } catch (err) {
       return jsonResponse({ error: `This trip already has an action named "${merged.name}".` }, 409, env);
@@ -2148,7 +2150,7 @@ async function handleMarkItem(request, url, env, id) {
       `UPDATE marks SET lat=?, lng=?, name=?, type=?, date_time=?, source=?, source_uuid=?, species=?, bait=?, rig=?,
                         rod=?, berley=?, notes=?, size=?, released=?, weather_condition=?, tide_condition=?, tide_extreme=?, water_condition=?,
                         water_depth=?, water_temperature=?, temperature=?, barometer=?, wind_direction=?, wind_speed=?,
-                        fishing_method=?, session_role=?, session_group_id=?, user_id=?
+                        fishing_method=?, rig_options=?, session_role=?, session_group_id=?, user_id=?
        WHERE id = ? AND user_id = ?`
     )
       .bind(
@@ -2156,7 +2158,7 @@ async function handleMarkItem(request, url, env, id) {
         merged.species, merged.bait, merged.rig, merged.rod, merged.berley, merged.notes, merged.size, merged.released,
         merged.weatherCondition, merged.tideCondition, merged.tideExtreme, merged.waterCondition, merged.waterDepth,
         merged.waterTemperature, merged.temperature, merged.barometer, merged.windDirection, merged.windSpeed,
-        merged.fishingMethod, merged.sessionRole, merged.sessionGroupId, newOwner,
+        merged.fishingMethod, merged.rigOptions, merged.sessionRole, merged.sessionGroupId, newOwner,
         id, uid
       )
       .run();
@@ -2177,8 +2179,8 @@ async function insertOrUpdateMark(env, id, uid, body, now) {
     `INSERT INTO marks (id, user_id, lat, lng, name, type, date_time, source, source_uuid, species, bait, rig, rod,
                          berley, notes, size, released, weather_condition, tide_condition, tide_extreme, water_condition, water_depth,
                          water_temperature, temperature, barometer, wind_direction, wind_speed,
-                         fishing_method, session_role, session_group_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                         fishing_method, rig_options, session_role, session_group_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       id, uid, body.lat, body.lng, body.name ?? null, body.type, body.dateTime, body.source ?? "manual",
@@ -2186,7 +2188,7 @@ async function insertOrUpdateMark(env, id, uid, body, now) {
       body.berley ?? null, body.notes ?? null, body.size ?? null, body.released ? 1 : 0, body.weatherCondition ?? null, body.tideCondition ?? null, body.tideExtreme ?? null,
       body.waterCondition ?? null, body.waterDepth ?? null, body.waterTemperature ?? null, body.temperature ?? null,
       body.barometer ?? null, body.windDirection ?? null, body.windSpeed ?? null,
-      body.fishingMethod ?? null, body.sessionRole ?? null, body.sessionGroupId ?? null, now
+      body.fishingMethod ?? null, body.rigOptions ?? null, body.sessionRole ?? null, body.sessionGroupId ?? null, now
     )
     .run();
 }
@@ -2213,6 +2215,7 @@ function mergeMarkFields(existing, body) {
     tideExtreme: body.tideExtreme !== undefined ? body.tideExtreme : existing.tide_extreme,
     waterCondition: body.waterCondition !== undefined ? body.waterCondition : existing.water_condition,
     fishingMethod: body.fishingMethod !== undefined ? body.fishingMethod : existing.fishing_method,
+    rigOptions: body.rigOptions !== undefined ? body.rigOptions : existing.rig_options,
     waterDepth: body.waterDepth !== undefined ? body.waterDepth : existing.water_depth,
     waterTemperature: body.waterTemperature !== undefined ? body.waterTemperature : existing.water_temperature,
     temperature: body.temperature !== undefined ? body.temperature : existing.temperature,
@@ -2247,6 +2250,7 @@ function rowToMark(row) {
     tideExtreme: row.tide_extreme,
     waterCondition: row.water_condition,
     fishingMethod: row.fishing_method,
+    rigOptions: row.rig_options,
     waterDepth: row.water_depth,
     waterTemperature: row.water_temperature,
     temperature: row.temperature,

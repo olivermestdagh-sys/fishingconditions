@@ -250,7 +250,11 @@ function applyModeChrome() {
     if (deviceToolsMenu) deviceToolsMenu.classList.remove("open");
   }
   document.getElementById("btnSessionDefaults").style.display = isLive ? "" : "none";
-  document.getElementById("btnTripDefaults").style.display = mapMode === "normal" && cachedIsSignedIn ? "" : "none";
+  document.getElementById("btnTripDefaults").style.display = (mapMode === "normal" || isLive) && cachedIsSignedIn ? "" : "none";
+  const liveTripShown = isLive && cachedIsSignedIn;
+  document.getElementById("btnStartTrip").style.display = liveTripShown ? "" : "none";
+  document.getElementById("liveTripActions").style.display = liveTripShown ? "" : "none";
+  if (liveTripShown && typeof renderLiveTripUI === "function") renderLiveTripUI(); // Start/End Trip label + the trip's action buttons
   document.getElementById("btnLiveSession").style.display = isLive && cachedIsSignedIn ? "" : "none";
   document.getElementById("btnRefreshLiveGps").style.display = isLive ? "" : "none";
   // End Session/Move and +Catch are never shown just because Live mode is on — only updateLiveSessionButtons
