@@ -50,7 +50,7 @@ test("buildSessionStartFromAction maps an Action and its rod setups onto a Sessi
     { id: "b", rod: "Heavy", rig: "Soft plastic rig", subListItems: ["Vibe"] },
   ];
   const action = { species: ["Bream", "Whiting"], fishingMethod: ["Lure"], berley: "Pilchard", bait: ["Prawn"], rodSetupIds: ["a", "b", "gone"] };
-  const ctx = { id: "m1", lat: -38, lng: 145, dateTime: "2026-09-29 06:00:00", createdAt: "2026-09-29 06:00:00", sessionGroupId: "g1", sessionNumber: 3, waterDepth: 2.5 };
+  const ctx = { id: "m1", lat: -38, lng: 145, dateTime: "2026-09-29 06:00:00", createdAt: "2026-09-29 06:00:00", sessionGroupId: "g1", sessionNumber: 3, water: "Clear", waterDepth: 2.5 };
   const mark = fns.buildSessionStartFromAction(action, rodSetups, ctx, { tideCondition: "Rising", tideExtreme: "HHW" });
   assert.equal(mark.name, "Session 3 Start");
   assert.equal(mark.type, "Session Start");
@@ -64,11 +64,12 @@ test("buildSessionStartFromAction maps an Action and its rod setups onto a Sessi
   assert.equal(mark.rig, "Soft plastic rig"); // de-duplicated
   assert.equal(mark.rigOptions, "Vibe, Paddle Tail");
   assert.equal(mark.waterDepth, 2.5);
+  assert.equal(mark.waterCondition, "Clear");
   assert.equal(mark.tideCondition, "Rising");
   assert.equal(mark.tideExtreme, "HHW");
 });
 
 test("buildSessionStartFromAction leaves off everything an Action doesn't set", () => {
   const mark = fns.buildSessionStartFromAction({}, [], { id: "m", lat: 0, lng: 0, dateTime: "d", createdAt: "d", sessionGroupId: "g", sessionNumber: 1, waterDepth: null }, {});
-  for (const key of ["species", "fishingMethod", "berley", "bait", "rod", "rig", "rigOptions", "waterDepth", "tideCondition"]) assert.equal(key in mark, false, key);
+  for (const key of ["species", "fishingMethod", "berley", "bait", "rod", "rig", "rigOptions", "waterDepth", "waterCondition", "tideCondition"]) assert.equal(key in mark, false, key);
 });

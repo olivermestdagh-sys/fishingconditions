@@ -203,7 +203,7 @@ function liveBuildMap(gpsPosition) {
       // with — liveRefreshGpsPosition (below) moves this same marker in place on a fresh fix without rebuilding
       // the map, so the parameter captured here goes stale the moment that happens; currentGpsPosition never does.
       onClick: () => {
-        const defaults = { ...getLastMarkFieldValues(), ...computeQuickMarkDefaults(getRowsForCurrentLoc()) };
+        const defaults = { ...getLastMarkFieldValues(), ...liveMarkDefaultsForMark(), ...computeQuickMarkDefaults(getRowsForCurrentLoc()) };
         handleMapClickForMarks(map, currentGpsPosition.lat, currentGpsPosition.lng, markLayerState, null, defaults);
       },
     });
@@ -263,29 +263,6 @@ function liveCatchContext() {
   const loaded = !!(state && state.markerLayer);
   const catches = catchesFromMarks(loaded ? state.marksById.values() : [], parseNaive);
   return { catches, run: loaded ? runCatches(catches, nowInNaiveEncoding()) : null };
-}
-
-async function openSessionDefaults() {
-  if (activeCardFlow) return;
-  const options = await liveLoadCardOptions();
-  let draft = getSessionDefaults(options);
-  const ctx = liveCatchContext();
-  const finish = () => { activeCardFlow = null; };
-  activeCardFlow = showCardFlow({
-    getSteps: () => buildSessionCardSteps(options, draft, ctx),
-    // Saved on every press, so closing part-way loses nothing.
-    onChoose: (step, value) => {
-      draft = applySessionCardChoice(draft, step.id, value);
-      saveSessionDefaults(draft);
-    },
-    onDone: () => {
-      activeCardFlow.close();
-      finish();
-      showLiveToast("Session defaults saved");
-    },
-    onClose: finish,
-    doneLabel: "Save",
-  });
 }
 
 // Map > Trip Defaults (Normal mode; js/trip-defaults.js): manage Trips, their Actions and Rod Setups.
@@ -354,7 +331,7 @@ async function saveLiveCatch(options, answers, defaults, gpsPromise, ctx) {
     rod: st.rod,
     tooSmall: st.tooSmall,
     released: st.released,
-  }, defaults, tide, getLastMarkFieldValues().waterDepth ?? null);
+  }, { ...defaults, water: getLiveMarkDefaults().water || defaults.water }, tide, getLiveMarkDefaults().depth ?? getLastMarkFieldValues().waterDepth ?? null);
   const result = await saveMarkToD1(mark, true);
   if (!result.success) {
     showLiveToast("Catch not saved: " + result.error, true);
@@ -456,140 +433,126 @@ function liveActiveSession() {
 // blank until a run is known. Called once loadAndRenderMarks resolves, and after every save that can change
 // session state (saveLiveSession, saveLiveEndSession).
 function updateLiveSessionButtons() {
-  if (!liveMap || !liveMarkState) return; // not in Live mode (or it's been left) — applyModeChrome already hid all three
+  if (!liveMap || !liveMarkState) return; // not in Live mode (or it's been left) — applyModeChrome already hid it
   renderLiveTripUI(); // the trip's action buttons show active only while their session is
-  const btnSession = document.getElementById("btnLiveSession");
-  const btnEnd = document.getElementById("btnLiveEndSession");
-  const btnCatch = document.getElementById("btnLiveCatch");
-  const starts = liveSessionStarts();
-  if (starts == null) {
-    btnEnd.style.display = "none";
-    btnCatch.style.display = "none";
-    return; // marks not loaded yet: leave + Session's base "+ Session" text alone rather than guess a number
-  }
-  btnSession.textContent = `+ Session ${nextSessionNumber(starts, nowInNaiveEncoding())}`;
-  const active = liveActiveSession();
-  if (active) {
-    btnEnd.textContent = `End Session ${active.number}/Move`;
-    btnEnd.style.display = "";
-    btnCatch.style.display = cachedIsSignedIn ? "" : "none";
-  } else {
-    btnEnd.style.display = "none";
-    btnCatch.style.display = "none";
-  }
+  // +Catch only makes sense once a session's actually underway to log the catch against; liveActiveSession() is null
+  // until the marks have loaded, so it stays hidden until then rather than guessing.
+  document.getElementById("btnLiveCatch").style.display = liveActiveSession() && cachedIsSignedIn ? "" : "none";
 }
 
-async function saveLiveSession(options, answers, defaults, gpsPromise) {
-  const position = await gpsPromise;
-  if (!position) {
-    showLiveToast("Couldn't get your location — session not saved.", true);
-    return;
-  }
-  let tide = {};
+// --- Live defaults: Water / Depth buttons -------------------------------------------------------------------
+// Two device-local defaults for the marks made in Live mode (Session Start from a trip Action, +Catch, and a tap on the
+// "You are here" marker): a Water Condition (the Water button cycles through the Settings list, then back to none) and a
+// water depth (the Depth button opens a stepper). Unset means "carry on as before" (Session/Catch defaults, last value).
+const LIVE_MARK_DEFAULTS_KEY = "liveMarkDefaults";
+let liveWaterOptions = null; // the Water Condition list, loaded on first use
+
+function getLiveMarkDefaults() {
   try {
-    tide = computeQuickMarkDefaults(getRowsForCurrentLoc());
+    const raw = JSON.parse(localStorage.getItem(LIVE_MARK_DEFAULTS_KEY)) || {};
+    return { water: typeof raw.water === "string" ? raw.water : "", depth: Number.isFinite(raw.depth) ? raw.depth : null };
   } catch {
-    tide = {}; // no tide data for this spot: the save fills what it can from looked-up data
+    return { water: "", depth: null };
   }
-  // Starting a new session closes out whichever one is still active, first — same values as its own Start, at
-  // this GPS fix, right now. Bail without starting the new one if that fails, so a session is never left silently
-  // un-closed just because the "next" one happened to save.
-  const active = liveActiveSession();
-  let endedMark = null;
-  if (active) {
-    endedMark = buildSessionEndFromStart(active.mark, {
-      id: makeMarkId(), lat: position.lat, lng: position.lng, dateTime: nowAsNaiveString(), createdAt: nowAsNaiveString(),
-    }, active.number);
-    const endResult = await saveMarkToD1(endedMark, true);
-    if (!endResult.success) {
-      showLiveToast(`Couldn't end Session ${active.number}: ` + endResult.error, true);
-      return;
-    }
-    addCatchToLiveMap(endedMark);
+}
+function setLiveMarkDefaults(next) {
+  try {
+    localStorage.setItem(LIVE_MARK_DEFAULTS_KEY, JSON.stringify(next));
+  } catch {
+    // storage unavailable: the default just won't survive a reload
   }
-  const sessionNumber = nextSessionNumber(liveSessionStarts() || [], parseNaive(answers.dateTime));
-  const mark = buildSessionStartFromCards({
-    id: makeMarkId(),
-    lat: position.lat,
-    lng: position.lng,
-    dateTime: answers.dateTime,
-    createdAt: nowAsNaiveString(),
-    sessionGroupId: makeMarkId(),
-    species: answers.species,
-    water: answers.water,
-    fishingMethod: answers.fishingMethod,
-    rods: answers.rods,
-    berley: answers.berley,
-    waterDepth: answers.waterDepth,
-    sessionNumber,
-  }, defaults, tide);
-  const result = await saveMarkToD1(mark, true);
-  if (!result.success) {
-    showLiveToast("Session not saved: " + result.error, true);
-    return;
-  }
-  saveLastMarkFieldValues(mark); // so this session's water depth carries forward to the next Session/End/Catch
-  addCatchToLiveMap(mark); // draws any mark type, not just Catch
-  updateLiveSessionButtons();
-  showLiveToast(endedMark ? `${endedMark.name} saved; ${mark.name} saved` : `${mark.name} saved`);
+}
+/** The set defaults as mark fields (for the tap-to-log quick mark). */
+function liveMarkDefaultsForMark() {
+  const d = getLiveMarkDefaults();
+  const out = {};
+  if (d.water) out.waterCondition = d.water;
+  if (d.depth != null) out.waterDepth = d.depth;
+  return out;
 }
 
-// Tap + Session: the GPS fix starts straight away (that is where the session starts), while the hub is answered.
-async function startLiveSession() {
-  if (activeCardFlow || !liveMap || !liveMarkState) return;
-  const gpsPromise = getFreshGpsPosition();
-  const options = await liveLoadCardOptions();
-  const defaults = getSessionDefaults(options);
-  const initialAnswers = emptySessionStartAnswers(defaults, nowAsNaiveString(), getLastMarkFieldValues().waterDepth ?? null);
-  const ctx = liveCatchContext();
-  const active = liveActiveSession();
-  const finish = () => { activeCardFlow = null; };
-  activeCardFlow = showSessionStartFlow({
-    options,
-    defaults,
-    initialAnswers,
-    run: ctx.run,
-    sessionNumberFor: (dateTime) => nextSessionNumber(liveSessionStarts() || [], parseNaive(dateTime)),
-    activeSessionNumber: active ? active.number : null,
-    onSave: (answers) => {
-      finish();
-      saveLiveSession(options, answers, defaults, gpsPromise);
-    },
-    onClose: finish,
-  });
+function renderLiveDefaultsUI() {
+  const water = document.getElementById("btnLiveWater");
+  const depth = document.getElementById("btnLiveDepth");
+  if (!water || !depth) return;
+  const d = getLiveMarkDefaults();
+  water.textContent = `Water: ${d.water || "—"}`;
+  depth.textContent = `Depth: ${d.depth != null ? d.depth.toFixed(1) + " m" : "—"}`;
 }
 
-// Tap End Session/Move: the GPS fix starts straight away (that is where the session ends), while the confirm is
-// answered. No-ops if there's somehow no active session (the button's hidden without one; stay safe regardless).
-async function startLiveEndSession() {
-  if (activeCardFlow || !liveMap || !liveMarkState) return;
-  const active = liveActiveSession();
-  if (!active) return;
-  const gpsPromise = getFreshGpsPosition();
+/** The next value when cycling `options` from `current`: each option in turn, then none ("") after the last. */
+function nextCycleValue(options, current) {
+  if (!options.length) return "";
+  const i = options.indexOf(current);
+  if (i === -1) return options[0];
+  return i + 1 < options.length ? options[i + 1] : "";
+}
+
+async function cycleLiveWater() {
+  if (!liveWaterOptions) liveWaterOptions = (await liveLoadCardOptions()).water;
+  const d = getLiveMarkDefaults();
+  setLiveMarkDefaults({ ...d, water: nextCycleValue(liveWaterOptions, d.water) });
+  renderLiveDefaultsUI();
+}
+
+// The Depth button: a full-screen stepper (same look as the old "+ Session" water depth card). Saved as it changes.
+function openLiveDepth() {
+  if (activeCardFlow) return;
+  const overlay = document.createElement("div");
+  overlay.className = "live-card-overlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  document.body.appendChild(overlay);
+  document.body.classList.add("live-card-open");
   const finish = () => { activeCardFlow = null; };
-  activeCardFlow = showEndSessionConfirm({
-    sessionNumber: active.number,
-    onConfirm: async () => {
-      finish();
-      const position = await gpsPromise;
-      if (!position) {
-        showLiveToast("Couldn't get your location — session not ended.", true);
-        return;
-      }
-      const mark = buildSessionEndFromStart(active.mark, {
-        id: makeMarkId(), lat: position.lat, lng: position.lng, dateTime: nowAsNaiveString(), createdAt: nowAsNaiveString(),
-      }, active.number);
-      const result = await saveMarkToD1(mark, true);
-      if (!result.success) {
-        showLiveToast("Session not ended: " + result.error, true);
-        return;
-      }
-      addCatchToLiveMap(mark);
-      updateLiveSessionButtons();
-      showLiveToast(`${mark.name} saved`);
-    },
-    onClose: finish,
-  });
+  const close = () => {
+    overlay.remove();
+    document.body.classList.remove("live-card-open");
+    finish();
+    renderLiveDefaultsUI();
+  };
+  activeCardFlow = { close };
+  const render = () => {
+    const depth = getLiveMarkDefaults().depth;
+    overlay.innerHTML = `
+      <div class="live-card">
+        <div class="live-card-head">
+          <h2 class="live-card-title">Water depth</h2>
+          <p class="live-card-prompt">Default depth for new marks${depth == null ? " (not set)" : ""}</p>
+        </div>
+        <div class="live-card-grid live-card-grid-stepper">
+          <div class="live-card-stepper">
+            <div class="live-card-stepper-row">
+              <button type="button" class="live-card-choice live-card-step-btn" data-depth="-1" aria-label="One metre shallower">&minus;</button>
+              <div class="live-card-stepper-value">${depth == null ? "—" : escapeHtml(depth.toFixed(1))}<span class="live-card-stepper-unit"> m</span></div>
+              <button type="button" class="live-card-choice live-card-step-btn" data-depth="1" aria-label="One metre deeper">+</button>
+            </div>
+            <div class="live-card-stepper-row-fine">
+              <button type="button" class="live-card-choice live-card-step-btn-fine" data-depth="-0.1">&minus; 0.1 m</button>
+              <button type="button" class="live-card-choice live-card-step-btn-fine" data-depth="0.1">+ 0.1 m</button>
+            </div>
+          </div>
+        </div>
+        <div class="live-card-nav live-card-nav-2">
+          <button type="button" class="live-card-nav-btn" data-depth-clear>Clear</button>
+          <button type="button" class="live-card-nav-btn live-card-next" data-depth-done>Done</button>
+        </div>
+      </div>`;
+    overlay.querySelectorAll("[data-depth]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const d = getLiveMarkDefaults();
+        const next = Math.max(0, Math.round(((d.depth ?? 0) + Number(btn.dataset.depth)) * 10) / 10);
+        setLiveMarkDefaults({ ...d, depth: next });
+        render();
+      })
+    );
+    overlay.querySelector("[data-depth-clear]").addEventListener("click", () => {
+      setLiveMarkDefaults({ ...getLiveMarkDefaults(), depth: null });
+      render();
+    });
+    overlay.querySelector("[data-depth-done]").addEventListener("click", close);
+  };
+  render();
 }
 
 // --- Live trips (js/trip-defaults.js): Start Trip -> the trip's Actions as toolbar buttons -----------------
@@ -763,7 +726,8 @@ async function onTripActionTap(actionId) {
     const now = nowAsNaiveString();
     const mark = buildSessionStartFromAction(action, liveTripData.rodSetups, {
       id: makeMarkId(), lat: position.lat, lng: position.lng, dateTime: now, createdAt: now, sessionGroupId: makeMarkId(),
-      sessionNumber: nextSessionNumber(liveSessionStarts() || [], parseNaive(now)), waterDepth: getLastMarkFieldValues().waterDepth ?? null,
+      sessionNumber: nextSessionNumber(liveSessionStarts() || [], parseNaive(now)),
+      water: getLiveMarkDefaults().water || "", waterDepth: getLiveMarkDefaults().depth ?? getLastMarkFieldValues().waterDepth ?? null,
     }, tide);
     const result = await saveMarkToD1(mark, true);
     if (!result.success) {
@@ -1072,15 +1036,14 @@ function liveInitOnce() {
   }
   document.getElementById("btnUpdateTimings").addEventListener("click", updateTimings);
   document.getElementById("btnCloseLiveHoverPanel").addEventListener("click", hideLiveHoverPanel);
-  document.getElementById("btnSessionDefaults").addEventListener("click", openSessionDefaults);
   document.getElementById("btnTripDefaults").addEventListener("click", openTripDefaults);
   document.getElementById("btnStartTrip").addEventListener("click", onStartTripClick);
   document.getElementById("liveTripActions").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-trip-action]");
     if (btn) onTripActionTap(btn.dataset.tripAction);
   });
-  document.getElementById("btnLiveSession").addEventListener("click", startLiveSession);
-  document.getElementById("btnLiveEndSession").addEventListener("click", startLiveEndSession);
+  document.getElementById("btnLiveWater").addEventListener("click", cycleLiveWater);
+  document.getElementById("btnLiveDepth").addEventListener("click", openLiveDepth);
   document.getElementById("btnLiveCatch").addEventListener("click", startLiveCatch);
   document.getElementById("liveHoverPanelBanner").addEventListener("click", () => setPanelExpanded(!isPanelExpanded));
   // Manual backup for whichever device/browser doesn't fire the visibilitychange refresh below reliably — same

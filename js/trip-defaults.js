@@ -30,7 +30,7 @@ function tdRigSublist(rigRow, overrides) {
  * The Session Start mark for a trip Action (Live mode): named "Session N Start" (the number nextSessionNumber gives), with
  * the Action's species / fishing method / berley / bait, and rod / rig / rigOptions gathered from its Rod Setups
  * (unique names, comma-joined; rigOptions = the rigs' sub-list items). `ctx` supplies what only the caller knows: id, lat,
- * lng, dateTime, createdAt, sessionGroupId, sessionNumber, waterDepth (carried from the last mark). `tide` is
+ * lng, dateTime, createdAt, sessionGroupId, sessionNumber, water (Water Condition default) and waterDepth (the Depth default, or the last mark's). `tide` is
  * {tideCondition, tideExtreme} worked out for the time.
  */
 function buildSessionStartFromAction(action, rodSetups, ctx, tide) {
@@ -50,6 +50,7 @@ function buildSessionStartFromAction(action, rodSetups, ctx, tide) {
   set("rod", uniq(setups.map((s) => s.rod)));
   set("rig", uniq(setups.map((s) => s.rig)));
   set("rigOptions", uniq(setups.flatMap((s) => s.subListItems || [])));
+  if (ctx.water) mark.waterCondition = ctx.water;
   if (ctx.waterDepth != null) mark.waterDepth = ctx.waterDepth;
   if (tide && tide.tideCondition) mark.tideCondition = tide.tideCondition;
   if (tide && tide.tideExtreme) mark.tideExtreme = tide.tideExtreme;

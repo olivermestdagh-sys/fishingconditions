@@ -249,18 +249,18 @@ function applyModeChrome() {
     const deviceToolsMenu = deviceTools.querySelector(".device-tools-menu");
     if (deviceToolsMenu) deviceToolsMenu.classList.remove("open");
   }
-  document.getElementById("btnSessionDefaults").style.display = isLive ? "" : "none";
   document.getElementById("btnTripDefaults").style.display = (mapMode === "normal" || isLive) && cachedIsSignedIn ? "" : "none";
   const liveTripShown = isLive && cachedIsSignedIn;
   document.getElementById("btnStartTrip").style.display = liveTripShown ? "" : "none";
   document.getElementById("liveTripActions").style.display = liveTripShown ? "" : "none";
+  document.getElementById("btnLiveWater").style.display = liveTripShown ? "" : "none";
+  document.getElementById("btnLiveDepth").style.display = liveTripShown ? "" : "none";
+  if (liveTripShown && typeof renderLiveDefaultsUI === "function") renderLiveDefaultsUI();
   if (liveTripShown && typeof renderLiveTripUI === "function") renderLiveTripUI(); // Start/End Trip label + the trip's action buttons
-  document.getElementById("btnLiveSession").style.display = isLive && cachedIsSignedIn ? "" : "none";
   document.getElementById("btnRefreshLiveGps").style.display = isLive ? "" : "none";
-  // End Session/Move and +Catch are never shown just because Live mode is on — only updateLiveSessionButtons
-  // (map-live.js) reveals them, once the marks have actually loaded and confirm there's an active session (+Catch
-  // only makes sense once a session's actually underway to log a catch against).
-  document.getElementById("btnLiveEndSession").style.display = "none";
+  // +Catch is never shown just because Live mode is on — only updateLiveSessionButtons (map-live.js) reveals it, once
+  // the marks have actually loaded and confirm there's an active session (a catch only makes sense once a session's
+  // actually underway to log it against).
   document.getElementById("btnLiveCatch").style.display = "none";
   document.getElementById("importReviewPanel").style.display = isImport ? "flex" : "none";
   document.getElementById("markDetailPanel").style.display = "none";
