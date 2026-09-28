@@ -5,7 +5,7 @@ import fs from "node:fs";
 
 const src = fs.readFileSync(new URL("../js/trip-defaults.js", import.meta.url), "utf8");
 const pure = src.slice(0, src.indexOf("// --- Backend"));
-const fns = new Function(pure + "\nreturn { tdToggle, tdToggleSingle, tdRigSublist, tdActionsForTrip, tdLiveRodSetupIds };")();
+const fns = new Function(pure + "\nreturn { tdToggle, tdToggleSingle, tdRigSublist, tdActionsForTrip, tdLiveRodSetupIds, tdDefaultName };")();
 
 test("tdToggle adds a missing value and removes a present one, without mutating", () => {
   const list = ["a"];
@@ -36,4 +36,10 @@ test("tdActionsForTrip only returns that trip's actions", () => {
 
 test("tdLiveRodSetupIds drops rod setups that no longer exist", () => {
   assert.deepEqual(fns.tdLiveRodSetupIds(["a", "gone", "b"], [{ id: "a" }, { id: "b" }]), ["a", "b"]);
+});
+
+test("tdDefaultName picks the first unused 'New x' name, ignoring case", () => {
+  assert.equal(fns.tdDefaultName("New trip", []), "New trip");
+  assert.equal(fns.tdDefaultName("New trip", ["New trip"]), "New trip 2");
+  assert.equal(fns.tdDefaultName("New trip", ["new trip", "New trip 2"]), "New trip 3");
 });

@@ -3889,7 +3889,7 @@ body.live-card-open { overflow: hidden; }
 .td-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .td-input { width: 100%; box-sizing: border-box; margin-bottom: 4px; }
 .td-add-row { display: flex; gap: 8px; margin-top: 10px; }
-.td-add-row .td-input { margin-bottom: 0; flex: 1 1 auto; min-width: 0; }
+
 .td-add-btn { flex: 0 0 auto; min-height: 52px; padding: 0 14px; font-size: 1rem; }
 .td-pills { display: flex; flex-wrap: wrap; gap: 8px; }
 .td-pill { display: inline-flex; align-items: stretch; border-radius: 999px; border: 2px solid rgba(255, 255, 255, 0.35); background: rgba(255, 255, 255, 0.08); color: #fff; overflow: hidden; }
