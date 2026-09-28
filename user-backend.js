@@ -239,6 +239,13 @@ export default {
       if (tripSetupMatch) {
         return handleTripSetupItem(request, url, env, tripSetupMatch[1]);
       }
+      if (url.pathname === "/api/tripactions") {
+        return handleTripActionsCollection(request, url, env);
+      }
+      const tripActionMatch = url.pathname.match(/^\/api\/tripactions\/([^/]+)$/);
+      if (tripActionMatch) {
+        return handleTripActionItem(request, url, env, tripActionMatch[1]);
+      }
       if (url.pathname === "/api/rig-sublist-overrides") {
         return handleRigSublistOverridesCollection(request, url, env);
       }
@@ -1399,7 +1406,113 @@ async function handleTripSetupItem(request, url, env, id) {
   }
 
   if (request.method === "DELETE") {
+    await env.DB.prepare("DELETE FROM user_trip_actions WHERE trip_id = ? AND user_id = ?").bind(id, uid).run();
     await env.DB.prepare("DELETE FROM user_trip_setups WHERE id = ? AND user_id = ?").bind(id, uid).run();
+    return new Response(null, { status: 204, headers: corsHeaders(env) });
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+// ---------------------------------------------------------------------
+// Trip Actions (schema-v2.sql user_trip_actions) — the steps within a Trip
+// (Map > Trip Defaults, js/trip-defaults.js): a name plus a Fishing Method
+// list, a Berley, the Rod Setups in use and the target Species. GET returns
+// every action the user has (the client groups them by tripId).
+// ---------------------------------------------------------------------
+
+function rowToTripAction(row) {
+  return {
+    id: row.id,
+    tripId: row.trip_id,
+    name: row.name,
+    fishingMethod: parseSubList(row.fishing_method),
+    berley: row.berley,
+    rodSetupIds: parseSubList(row.rod_setup_ids),
+    species: parseSubList(row.species),
+  };
+}
+
+const validateTripActionInput = validateTripSetupInput; // same list/string rules for fishingMethod, rodSetupIds, species, berley
+
+async function handleTripActionsCollection(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  if (request.method === "GET") {
+    const { results } = await env.DB.prepare("SELECT * FROM user_trip_actions WHERE user_id = ? ORDER BY created_at ASC").bind(uid).all();
+    return jsonResponse(results.map(rowToTripAction), 200, env);
+  }
+
+  if (request.method === "POST") {
+    const body = await readJsonBody(request);
+    if (!body || typeof body.name !== "string" || !body.name.trim()) {
+      return jsonResponse({ error: "name is required." }, 400, env);
+    }
+    if (typeof body.tripId !== "string" || !body.tripId) return jsonResponse({ error: "tripId is required." }, 400, env);
+    const trip = await env.DB.prepare("SELECT id FROM user_trip_setups WHERE id = ? AND user_id = ?").bind(body.tripId, uid).first();
+    if (!trip) return jsonResponse({ error: "Trip not found." }, 404, env);
+    const validationError = validateTripActionInput(body);
+    if (validationError) return jsonResponse({ error: validationError }, 400, env);
+    const id = crypto.randomUUID();
+    const arr = (v) => (v && v.length ? JSON.stringify(v) : null);
+    try {
+      await env.DB.prepare(
+        "INSERT INTO user_trip_actions (id, user_id, trip_id, name, fishing_method, berley, rod_setup_ids, species, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      )
+        .bind(id, uid, body.tripId, body.name, arr(body.fishingMethod), body.berley ?? null, arr(body.rodSetupIds), arr(body.species), Date.now())
+        .run();
+    } catch (err) {
+      return jsonResponse({ error: `This trip already has an action named "${body.name}".` }, 409, env);
+    }
+    const created = await env.DB.prepare("SELECT * FROM user_trip_actions WHERE id = ?").bind(id).first();
+    return jsonResponse(rowToTripAction(created), 201, env);
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+async function handleTripActionItem(request, url, env, id) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  const existing = await env.DB.prepare("SELECT * FROM user_trip_actions WHERE id = ? AND user_id = ?").bind(id, uid).first();
+  if (!existing) return jsonResponse({ error: "Action not found." }, 404, env);
+
+  if (request.method === "PUT") {
+    const body = await readJsonBody(request);
+    if (body.name !== undefined && (typeof body.name !== "string" || !body.name.trim())) {
+      return jsonResponse({ error: "name is required." }, 400, env);
+    }
+    const validationError = validateTripActionInput(body);
+    if (validationError) return jsonResponse({ error: validationError }, 400, env);
+    const merged = {
+      name: body.name ?? existing.name,
+      fishingMethod: body.fishingMethod !== undefined ? body.fishingMethod : parseSubList(existing.fishing_method),
+      berley: body.berley !== undefined ? body.berley : existing.berley,
+      rodSetupIds: body.rodSetupIds !== undefined ? body.rodSetupIds : parseSubList(existing.rod_setup_ids),
+      species: body.species !== undefined ? body.species : parseSubList(existing.species),
+    };
+    const arr = (v) => (v && v.length ? JSON.stringify(v) : null);
+    try {
+      await env.DB.prepare("UPDATE user_trip_actions SET name=?, fishing_method=?, berley=?, rod_setup_ids=?, species=? WHERE id = ? AND user_id = ?")
+        .bind(merged.name, arr(merged.fishingMethod), merged.berley ?? null, arr(merged.rodSetupIds), arr(merged.species), id, uid)
+        .run();
+    } catch (err) {
+      return jsonResponse({ error: `This trip already has an action named "${merged.name}".` }, 409, env);
+    }
+    const updated = await env.DB.prepare("SELECT * FROM user_trip_actions WHERE id = ?").bind(id).first();
+    return jsonResponse(rowToTripAction(updated), 200, env);
+  }
+
+  if (request.method === "DELETE") {
+    await env.DB.prepare("DELETE FROM user_trip_actions WHERE id = ? AND user_id = ?").bind(id, uid).run();
     return new Response(null, { status: 204, headers: corsHeaders(env) });
   }
 

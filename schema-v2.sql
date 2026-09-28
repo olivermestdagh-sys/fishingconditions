@@ -304,6 +304,24 @@ CREATE TABLE IF NOT EXISTS user_trip_setups (
 );
 CREATE INDEX IF NOT EXISTS idx_uts_user ON user_trip_setups(user_id);
 
+-- The steps ("Actions") within a Trip (Map > Trip Defaults, js/trip-defaults.js): a name plus Fishing
+-- Method(s), a Berley, the Rod Setups in use and the target Species. fishing_method/rod_setup_ids/species
+-- are JSON arrays of strings (rod_setup_ids is not a real FK, same tolerance as user_trip_setups).
+CREATE TABLE IF NOT EXISTS user_trip_actions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  trip_id TEXT NOT NULL REFERENCES user_trip_setups(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  fishing_method TEXT,
+  berley TEXT,
+  rod_setup_ids TEXT,
+  species TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE (trip_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_uta_user ON user_trip_actions(user_id);
+CREATE INDEX IF NOT EXISTS idx_uta_trip ON user_trip_actions(trip_id);
+
 -- A normal user's own private layer on top of a Rig they don't own (i.e. one of Public's) — lets
 -- them keep a personal sub list under a Public rig without needing write access to that row.
 -- Meaningless (and rejected) if user_id already owns the referenced rig — they'd just edit its own

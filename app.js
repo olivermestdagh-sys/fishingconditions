@@ -249,6 +249,7 @@ function applyModeChrome() {
     if (deviceToolsMenu) deviceToolsMenu.classList.remove("open");
   }
   document.getElementById("btnSessionDefaults").style.display = isLive ? "" : "none";
+  document.getElementById("btnTripDefaults").style.display = mapMode === "normal" && cachedIsSignedIn ? "" : "none";
   document.getElementById("btnLiveSession").style.display = isLive && cachedIsSignedIn ? "" : "none";
   document.getElementById("btnRefreshLiveGps").style.display = isLive ? "" : "none";
   // End Session/Move and +Catch are never shown just because Live mode is on — only updateLiveSessionButtons

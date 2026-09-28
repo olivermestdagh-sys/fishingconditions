@@ -288,6 +288,14 @@ async function openSessionDefaults() {
   });
 }
 
+// Map > Trip Defaults (Normal mode; js/trip-defaults.js): manage Trips, their Actions and Rod Setups.
+async function openTripDefaults() {
+  if (activeCardFlow) return;
+  activeCardFlow = { close() {} }; // holds the one-card-flow-at-a-time guard while the hub loads and is open
+  const flow = await showTripDefaults({ onClose: () => { activeCardFlow = null; } });
+  if (activeCardFlow) activeCardFlow = flow;
+}
+
 // Draws a just-saved Catch on the Live map like any other mark (clickable, editable), if that map is still showing.
 function addCatchToLiveMap(mark) {
   const state = liveMarkState;
@@ -869,6 +877,7 @@ function liveInitOnce() {
   document.getElementById("btnUpdateTimings").addEventListener("click", updateTimings);
   document.getElementById("btnCloseLiveHoverPanel").addEventListener("click", hideLiveHoverPanel);
   document.getElementById("btnSessionDefaults").addEventListener("click", openSessionDefaults);
+  document.getElementById("btnTripDefaults").addEventListener("click", openTripDefaults);
   document.getElementById("btnLiveSession").addEventListener("click", startLiveSession);
   document.getElementById("btnLiveEndSession").addEventListener("click", startLiveEndSession);
   document.getElementById("btnLiveCatch").addEventListener("click", startLiveCatch);
