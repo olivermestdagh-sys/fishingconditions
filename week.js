@@ -484,34 +484,8 @@ function showThresholdFilterModal(ctx) {
     overlay.innerHTML = `
       <div class="ww-candidate-dialog">
         <button type="button" class="ww-candidate-close" aria-label="Close">&times;</button>
-        <h3 style="margin:0 0 8px;">Thresholds &amp; filters</h3>
-        <p class="footnote" style="margin:0 0 12px;text-align:left;">
-          Every hourly forecast row that sits inside a run of consecutive hours meeting the thresholds below (evaluated per location).
-        </p>
-        <div class="filter-row thresholds-row">
-          <div>
-            <label for="minCondition">Min Condition rating</label>
-            <div class="rating-stepper">
-              <button type="button" class="rating-stepper-btn" id="minConditionDown" aria-label="Decrease min condition rating">−</button>
-              <div class="condition-badge rating-stepper-badge" id="minConditionBadge">3.0</div>
-              <button type="button" class="rating-stepper-btn" id="minConditionUp" aria-label="Increase min condition rating">+</button>
-              <input type="hidden" id="minCondition" min="1" max="5" value="3" />
-            </div>
-          </div>
-          <div>
-            <label for="minHours">Min consecutive hours</label>
-            <div class="rating-stepper">
-              <button type="button" class="rating-stepper-btn" id="minHoursDown" aria-label="Decrease min consecutive hours">−</button>
-              <div class="condition-badge rating-stepper-badge rating-stepper-badge-neutral" id="minHoursBadge">3.0</div>
-              <button type="button" class="rating-stepper-btn" id="minHoursUp" aria-label="Increase min consecutive hours">+</button>
-              <input type="hidden" id="minHours" min="1" max="24" value="3" />
-            </div>
-          </div>
-        </div>
-        <p class="footnote" style="margin:8px 0 12px;text-align:left;">
-          "Min consecutive hours" is a genuine clock-duration minimum — matches the session lengths below.
-        </p>
-        <p class="footnote" style="margin:0 0 12px;">Filters: tap once to require it, tap again to exclude it, tap again to clear.</p>
+        <h3 style="margin:0 0 8px;">Filters</h3>
+        <p class="footnote" style="margin:0 0 12px;">Tap once to require it, tap again to exclude it, tap again to clear.</p>
         <div data-facet-sections></div>
         <div style="display:flex;gap:8px;margin-top:6px;">
           <button type="button" id="facetFilterClearAll" class="btn-secondary" style="flex:1;">Clear all</button>
@@ -520,21 +494,6 @@ function showThresholdFilterModal(ctx) {
       </div>
     `;
     document.body.appendChild(overlay);
-
-    // Restore the currently-saved thresholds onto this fresh copy of the inputs before wiring the steppers,
-    // so the badges/buttons reflect reality immediately rather than the placeholder defaults above.
-    let savedThresholds = null;
-    try {
-      savedThresholds = JSON.parse(localStorage.getItem(THRESHOLDS_STORAGE_KEY) || "null");
-    } catch {
-      savedThresholds = null;
-    }
-    if (savedThresholds) {
-      if (savedThresholds.minCondition != null) document.getElementById("minCondition").value = savedThresholds.minCondition;
-      if (savedThresholds.minHours != null) document.getElementById("minHours").value = savedThresholds.minHours;
-    }
-    wireThresholdStepper("minCondition", 0.1, 1, 5, conditionColor);
-    wireThresholdStepper("minHours", 1, 1, 24, null);
 
     function sectionHtml(facet) {
       const values = facetCandidates(facet, allLocations, facetFilters);
@@ -578,7 +537,7 @@ function showThresholdFilterModal(ctx) {
     }
 
     function renderBody() {
-      overlay.querySelector("[data-facet-sections]").innerHTML = [sectionHtml("type"), sectionHtml("group"), sectionHtml("direction"), locationSectionHtml()].join("");
+      overlay.querySelector("[data-facet-sections]").innerHTML = [sectionHtml("group"), sectionHtml("direction"), locationSectionHtml()].join("");
       wireBody();
     }
 
@@ -646,7 +605,9 @@ function showThresholdFilterModal(ctx) {
       resolve();
     };
     overlay.querySelector("#facetFilterClearAll").addEventListener("click", () => {
-      for (const facet of Object.keys(facetFilters)) facetFilters[facet] = { include: new Set(), exclude: new Set() };
+      // Type is deliberately excluded — it's no longer shown in this modal, it has its own
+      // toolbar button (filtersTypeBtn) which the user resets independently by cycling it back to "All".
+      for (const facet of ["group", "direction", "location"]) facetFilters[facet] = { include: new Set(), exclude: new Set() };
       onChange();
       renderBody();
     });
@@ -658,23 +619,159 @@ function showThresholdFilterModal(ctx) {
   });
 }
 
+/**
+ * Thresholds-only popover (Min Condition rating, Min consecutive hours) — split out of
+ * showThresholdFilterModal above into its own toolbar button so the two values people adjust
+ * most often don't need the full Filters modal open. Same .ww-candidate-* shell, same
+ * wireThresholdStepper (persists via persistThresholds, js/week-tools.js) — just the steppers,
+ * no facet sections.
+ */
+function showThresholdsModal() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "ww-candidate-overlay";
+    overlay.innerHTML = `
+      <div class="ww-candidate-dialog">
+        <button type="button" class="ww-candidate-close" aria-label="Close">&times;</button>
+        <h3 style="margin:0 0 8px;">Thresholds</h3>
+        <p class="footnote" style="margin:0 0 12px;text-align:left;">
+          Every hourly forecast row that sits inside a run of consecutive hours meeting the thresholds below (evaluated per location).
+        </p>
+        <div class="filter-row thresholds-row">
+          <div>
+            <label for="minCondition">Min Condition rating</label>
+            <div class="rating-stepper">
+              <button type="button" class="rating-stepper-btn" id="minConditionDown" aria-label="Decrease min condition rating">−</button>
+              <div class="condition-badge rating-stepper-badge" id="minConditionBadge">3.0</div>
+              <button type="button" class="rating-stepper-btn" id="minConditionUp" aria-label="Increase min condition rating">+</button>
+              <input type="hidden" id="minCondition" min="1" max="5" value="3" />
+            </div>
+          </div>
+          <div>
+            <label for="minHours">Min consecutive hours</label>
+            <div class="rating-stepper">
+              <button type="button" class="rating-stepper-btn" id="minHoursDown" aria-label="Decrease min consecutive hours">−</button>
+              <div class="condition-badge rating-stepper-badge rating-stepper-badge-neutral" id="minHoursBadge">3.0</div>
+              <button type="button" class="rating-stepper-btn" id="minHoursUp" aria-label="Increase min consecutive hours">+</button>
+              <input type="hidden" id="minHours" min="1" max="24" value="3" />
+            </div>
+          </div>
+        </div>
+        <p class="footnote" style="margin:8px 0 12px;text-align:left;">
+          "Min consecutive hours" is a genuine clock-duration minimum — matches the session lengths shown.
+        </p>
+        <div style="display:flex;gap:8px;margin-top:6px;">
+          <button type="button" id="thresholdsDone" class="btn-primary" style="flex:1;">Done</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Restore the currently-saved thresholds onto this fresh copy of the inputs before wiring the steppers,
+    // so the badges/buttons reflect reality immediately rather than the placeholder defaults above.
+    let savedThresholds = null;
+    try {
+      savedThresholds = JSON.parse(localStorage.getItem(THRESHOLDS_STORAGE_KEY) || "null");
+    } catch {
+      savedThresholds = null;
+    }
+    if (savedThresholds) {
+      if (savedThresholds.minCondition != null) document.getElementById("minCondition").value = savedThresholds.minCondition;
+      if (savedThresholds.minHours != null) document.getElementById("minHours").value = savedThresholds.minHours;
+    }
+    wireThresholdStepper("minCondition", 0.1, 1, 5, conditionColor);
+    wireThresholdStepper("minHours", 1, 1, 24, null);
+
+    const cleanup = () => {
+      overlay.remove();
+      resolve();
+    };
+    overlay.querySelector("#thresholdsDone").addEventListener("click", cleanup);
+    overlay.querySelector(".ww-candidate-close").addEventListener("click", cleanup);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) cleanup();
+    });
+  });
+}
+
+/**
+ * The Type toolbar button's icon — a small self-contained SVG mirroring typeIconSvg
+ * (js/chart-base.js), using the SAME kayak/footprints glyphs and colors as the Map's own
+ * location pins. "All" (no filter) has no map-pin equivalent, so it shows both glyphs
+ * side-by-side in a neutral grey, matching the layout of the map's "both" pin icon but
+ * purely as a placeholder graphic — there's no functional "both" filter state.
+ */
+function typeFilterButtonIconSvg(typeState) {
+  if (typeState === "Kayak" || typeState === "Land based") return typeIconSvg(typeState, 16);
+  const grey = "#94a3b8";
+  return `<svg width="32" height="16" viewBox="0 0 48 24" fill="none" stroke="${grey}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <g>${KAYAK_ICON_PATHS.map((d) => `<path d="${d}"/>`).join("")}</g>
+    <g transform="translate(24,0)">${FOOTPRINTS_ICON_PATHS.map((d) => `<path d="${d}"/>`).join("")}</g>
+  </svg>`;
+}
+
+const TYPE_FILTER_STATES = [null, "Kayak", "Land based"];
+
+function currentTypeFilterState() {
+  const include = facetFilters.type.include;
+  if (include.has("Kayak")) return "Kayak";
+  if (include.has("Land based")) return "Land based";
+  return null;
+}
+
+function setTypeFilterState(state) {
+  facetFilters.type = state ? { include: new Set([state]), exclude: new Set() } : { include: new Set(), exclude: new Set() };
+}
+
+function renderTypeFilterButton() {
+  const btn = document.getElementById("filtersTypeBtn");
+  const state = currentTypeFilterState();
+  const label = state || "All";
+  btn.innerHTML = typeFilterButtonIconSvg(state);
+  btn.title = `Type: ${label}`;
+  btn.setAttribute("aria-label", `Type filter: ${label}. Tap to change.`);
+}
+
 function initFilterControls() {
   const gearBtn = document.getElementById("filtersGearBtn");
   const badge = document.getElementById("filtersGearBadge");
   const chipsContainer = document.getElementById("filtersActiveChips");
   const toggle = document.getElementById("filteringEnabledToggle");
+  const typeBtn = document.getElementById("filtersTypeBtn");
+  const thresholdsBtn = document.getElementById("filtersThresholdsBtn");
   toggle.checked = filteringEnabled;
 
   function refresh() {
-    renderActiveFacetFilterChips(chipsContainer, facetFilters, refresh);
-    const activeCount = countActiveFacetFilters(facetFilters);
+    // Type is shown by its own button (renderTypeFilterButton), not as a badge count or a
+    // removable chip here — this modal-facing view only covers Group/Direction/Location. A
+    // real (always-empty) type facet is still included since renderActiveFacetFilterChips/
+    // countActiveFacetFilters iterate FACET_LABELS (which still lists "type") and would throw
+    // on a missing key.
+    const modalFacetFilters = {
+      type: { include: new Set(), exclude: new Set() },
+      group: facetFilters.group,
+      direction: facetFilters.direction,
+      location: facetFilters.location,
+    };
+    renderActiveFacetFilterChips(chipsContainer, modalFacetFilters, refresh);
+    const activeCount = countActiveFacetFilters(modalFacetFilters);
     badge.textContent = activeCount > 0 ? `(${activeCount})` : "";
+    renderTypeFilterButton();
     persistFacetFilters(facetFilters);
     renderWeekView();
   }
 
   gearBtn.addEventListener("click", async () => {
     await showThresholdFilterModal({ allLocations, facetFilters, onChange: refresh });
+    refresh();
+  });
+  thresholdsBtn.addEventListener("click", async () => {
+    await showThresholdsModal();
+  });
+  typeBtn.addEventListener("click", () => {
+    const current = currentTypeFilterState();
+    const next = TYPE_FILTER_STATES[(TYPE_FILTER_STATES.indexOf(current) + 1) % TYPE_FILTER_STATES.length];
+    setTypeFilterState(next);
     refresh();
   });
   toggle.addEventListener("change", () => {
