@@ -487,16 +487,17 @@ function renderAdminMessages() {
     .map((m) => {
       const open = openAdminMessages.has(m.id);
       const who = m.senderName ? `${m.senderName} (${m.senderEmail || "no email"})` : m.senderEmail || "Unknown sender";
-      return `<div class="message-item${m.readAt ? "" : " is-unread"}" data-message-id="${escapeHtml(m.id)}">
-        <button type="button" class="message-head" data-message-toggle aria-expanded="${open}">
+      return `<div class="message-item${m.readAt ? "" : " is-unread"} mark-edit-group" data-message-id="${escapeHtml(m.id)}">
+        <button type="button" class="mark-edit-group-head" data-message-toggle aria-expanded="${open}">
+          <span class="mark-edit-caret" aria-hidden="true">▾</span>
           <span class="message-meta">${m.readAt ? "" : "● "}${escapeHtml(who)} · ${escapeHtml(formatMessageDate(m.createdAt))}${m.reply ? " · replied" : ""}</span>
-          <span class="message-preview">${escapeHtml(open ? "" : m.body.slice(0, 90) + (m.body.length > 90 ? "…" : ""))}</span>
+          <span class="mark-edit-summary">${open ? "" : escapeHtml(m.body.slice(0, 90) + (m.body.length > 90 ? "…" : ""))}</span>
         </button>
         <div class="message-actions">
           <button type="button" class="btn-secondary" data-message-open-reply>${m.reply ? "Edit reply" : "Reply"}</button>
           <button type="button" class="btn-secondary" data-message-delete style="color:#dc2626;">Delete</button>
         </div>
-        <div class="message-detail"${open ? "" : " hidden"}>
+        <div class="mark-edit-group-body"${open ? "" : " hidden"}>
           <div class="message-body">${escapeHtml(m.body)}</div>
           <label class="message-meta" style="display:block;margin-top:8px;">Your reply (shown to them on Settings)
             <textarea rows="3" maxlength="2000" class="contact-textarea" data-message-reply>${escapeHtml(m.reply || "")}</textarea>
@@ -1788,9 +1789,10 @@ function rigSublistHtml(entry, escAttr) {
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
   if (entry._isPublic) return publicRigSublistHtml(entry, esc);
   const toggleHtml = `
-    <label style="display:flex;align-items:center;gap:4px;font-size:0.7rem;flex-basis:100%;">
+    <label class="live-toggle" style="font-size:0.7rem;flex-basis:100%;">
       <input type="checkbox" class="mark-list-rig-sublist-toggle" data-value="${escAttr}"${entry.hasSublist ? " checked" : ""} />
-      Sub List
+      <span class="live-toggle-track" aria-hidden="true"></span>
+      <span>Sub List</span>
     </label>`;
   if (!entry.hasSublist) return toggleHtml;
   const items = entry.subList || [];
@@ -1887,9 +1889,10 @@ function publicRigSublistHtml(entry, esc) {
         <button type="button" class="mark-list-rig-override-clear" title="Remove this private sub list entirely"
           style="background:none;border:none;color:var(--grey-500);cursor:pointer;font-size:0.75rem;padding:0 4px;">Remove</button>
       </div>`
-    : `<label style="flex-basis:100%;display:flex;align-items:center;gap:4px;font-size:0.7rem;margin-top:2px;">
+    : `<label class="live-toggle" style="flex-basis:100%;font-size:0.7rem;margin-top:2px;">
         <input type="checkbox" class="mark-list-rig-override-start" data-rig-id="${entry.id}" />
-        Keep a private sub list for this rig (only visible to you)
+        <span class="live-toggle-track" aria-hidden="true"></span>
+        <span>Keep a private sub list for this rig (only visible to you)</span>
       </label>`;
 
   return `${publicHtml}${overrideHtml}`;
@@ -1950,19 +1953,58 @@ async function onClearRigSublistOverride(rigId) {
   setMarkListsSaveStatus("", false);
 }
 
+// Which collapsible groups below are expanded — kept across re-renders (all start collapsed), same
+// convention as the Map's own mark-filter groups (js/marks-tools.js) and mark edit form
+// (markEditGroupHtml, js/marks-core.js) — this is a third, page-local implementation of the same
+// shape (locations.html doesn't load js/marks-core.js, so it can't just call that function
+// directly), reusing the SAME global CSS (.mark-edit-group*, style.css) so it reads as the same
+// component everywhere on the site, not a lookalike.
+const settingsOpenGroups = new Set();
+
+/** One collapsible section (Mark Lists' 11 fields, the admin Messages inbox) — see settingsOpenGroups above. */
+function settingsGroupHtml(key, label, summaryHtml, bodyHtml) {
+  const open = settingsOpenGroups.has(key);
+  return `<div class="mark-edit-group" data-settings-group="${key}">
+    <button type="button" class="mark-edit-group-head" data-settings-toggle="${key}" aria-expanded="${open}">
+      <span class="mark-edit-caret" aria-hidden="true">▾</span>
+      <span class="mark-edit-group-label">${escapeHtml(label)}</span>
+      <span class="mark-edit-summary">${open ? "" : summaryHtml}</span>
+    </button>
+    <div class="mark-edit-group-body"${open ? "" : " hidden"}>${bodyHtml}</div>
+  </div>`;
+}
+
+// Delegated once — Mark Lists' 11 fields are the only current consumer of settingsGroupHtml/
+// data-settings-toggle (the admin Messages inbox keeps its own separate openAdminMessages Set/
+// data-message-toggle wiring below, since it also needs to mark a message read on first expand —
+// see renderAdminMessages' own click handler).
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-settings-toggle]");
+  if (!btn) return;
+  const key = btn.dataset.settingsToggle;
+  if (settingsOpenGroups.has(key)) settingsOpenGroups.delete(key);
+  else settingsOpenGroups.add(key);
+  renderMarkLists();
+});
+
 function renderMarkLists() {
   const container = document.getElementById("markListsGroups");
-  container.innerHTML = MARK_LIST_FIELDS.map(({ key, label }) => `
-    <div class="mark-list-field-group" style="margin-bottom:16px;">
-      <label class="loc-edit-label" style="display:block;margin-bottom:6px;">${label}</label>
+  // Collapsed by default (settingsOpenGroups) — the summary is a plain chip-per-value preview,
+  // computed separately from (and much simpler than) the second pass below, which renders each
+  // value as a full editable tile (shape/colour selects, tile colour, Public/override handling).
+  container.innerHTML = MARK_LIST_FIELDS.map(({ key, label }) => {
+    const summaryHtml = mergedMarkListsFor(label)
+      .map((v) => `<span class="loc-chip mark-edit-summary-chip">${escapeHtml(v.value)}</span>`)
+      .join("");
+    const bodyHtml = `
       <div class="mark-list-chip-row" data-field="${key}" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <input type="text" class="mark-list-new-value" data-field="${key}" placeholder="Add a ${label.toLowerCase()} option"
           style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
         <button type="button" class="btn-secondary mark-list-add-btn" data-field="${key}">+ Add</button>
-      </div>
-    </div>
-  `).join("");
+      </div>`;
+    return settingsGroupHtml(key, label, summaryHtml, bodyHtml);
+  }).join("");
 
   // Filled in a second pass (rather than inline above) purely so each
   // field's "no options yet" empty-state and chip list can be computed
