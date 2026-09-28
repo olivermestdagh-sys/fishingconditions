@@ -5,7 +5,7 @@ import fs from "node:fs";
 
 const src = fs.readFileSync(new URL("../js/trip-defaults.js", import.meta.url), "utf8");
 const pure = src.slice(0, src.indexOf("// --- Backend"));
-const fns = new Function(pure + "\nreturn { tdToggle, tdToggleSingle, tdRigSublist, tdActionsForTrip, tdLiveRodSetupIds, tdHasValue, buildSessionStartFromAction };")();
+const fns = new Function(pure + "\nreturn { tdToggle, tdToggleSingle, tdRigSublist, tdActionsForTrip, tdLiveRodSetupIds, tdHasValue, buildSessionStartFromAction, tdOtherTargets, tdCatchFieldsFromAction };")();
 
 test("tdToggle adds a missing value and removes a present one, without mutating", () => {
   const list = ["a"];
@@ -72,4 +72,23 @@ test("buildSessionStartFromAction maps an Action and its rod setups onto a Sessi
 test("buildSessionStartFromAction leaves off everything an Action doesn't set", () => {
   const mark = fns.buildSessionStartFromAction({}, [], { id: "m", lat: 0, lng: 0, dateTime: "d", createdAt: "d", sessionGroupId: "g", sessionNumber: 1, waterDepth: null }, {});
   for (const key of ["species", "fishingMethod", "berley", "bait", "rod", "rig", "rigOptions", "waterDepth", "waterCondition", "tideCondition"]) assert.equal(key in mark, false, key);
+});
+
+test("tdOtherTargets lists the trip's other actions' species, without the action's own or duplicates", () => {
+  const a1 = { id: "1", tripId: "t", species: ["Bream", "Whiting"] };
+  const actions = [a1, { id: "2", tripId: "t", species: ["Whiting", "Flathead"] }, { id: "3", tripId: "t", species: ["Flathead", "Salmon"] }, { id: "4", tripId: "other", species: ["Snapper"] }];
+  assert.deepEqual(fns.tdOtherTargets(actions, a1), ["Flathead", "Salmon"]);
+});
+
+test("tdCatchFieldsFromAction takes gear from the Action and the chosen (or only) rod setup", () => {
+  const setups = [
+    { id: "a", rod: "Light", rig: "Paternoster", subListItems: ["Vibe"] },
+    { id: "b", rod: "Heavy", rig: "Running sinker", subListItems: [] },
+  ];
+  const action = { rodSetupIds: ["a", "b"], berley: "Pilchard", bait: ["Prawn", "Squid"], fishingMethod: ["Bait"] };
+  assert.deepEqual(fns.tdCatchFieldsFromAction(action, setups, "b"), { berley: "Pilchard", fishingMethod: "Bait", bait: "Prawn, Squid", rod: "Heavy", rig: "Running sinker" });
+  // several setups and none chosen: no rod fields guessed
+  assert.deepEqual(fns.tdCatchFieldsFromAction(action, setups, null), { berley: "Pilchard", fishingMethod: "Bait", bait: "Prawn, Squid" });
+  // one setup: used without being chosen
+  assert.equal(fns.tdCatchFieldsFromAction({ rodSetupIds: ["a"] }, setups, null).rigOptions, "Vibe");
 });

@@ -308,6 +308,34 @@ function addCatchToLiveMap(mark) {
   state.markersById.set(mark.id, marker);
 }
 
+// The running trip Action (see "Live trips" below), or null when no Action's session is active.
+function liveActiveTripAction() {
+  const state = getLiveTripState();
+  const active = liveActiveSession();
+  if (!state || !state.actionId || !liveTripData || !active || active.mark.sessionGroupId !== state.sessionGroupId) return null;
+  return liveTripData.actions.find((a) => a.id === state.actionId) || null;
+}
+
+// Catch-card defaults from a trip Action: its targets (then the trip's other targets), berley, method and water; the Rod card
+// lists the Action's Rod Setups by name when there are several, and is skipped when there is one (or none).
+function liveCatchDefaultsForAction(options, action) {
+  const setups = tdLiveRodSetupIds(action.rodSetupIds, liveTripData.rodSetups).map((id) => liveTripData.rodSetups.find((r) => r.id === id));
+  return {
+    species: action.species || [],
+    otherTargets: tdOtherTargets(liveTripData.actions, action),
+    water: getLiveMarkDefaults().water || "",
+    berley: action.berley || "",
+    fishingMethod: action.fishingMethod || [],
+    rods: setups.length > 1 ? setups.map((s) => s.name) : [],
+    skipRod: setups.length <= 1,
+    rodTitle: "Rod setup",
+    rodPrompt: "Which rod setup?",
+    rodSetups: {},
+    tripAction: action,
+    tripRodSetups: setups,
+  };
+}
+
 async function saveLiveCatch(options, answers, defaults, gpsPromise, ctx) {
   const st = catchCardState(options, { ...ctx, answers }); // the same reading of the answers the cards showed
   const position = await gpsPromise;
@@ -328,10 +356,14 @@ async function saveLiveCatch(options, answers, defaults, gpsPromise, ctx) {
     dateTime: nowAsNaiveString(),
     species: st.species,
     size: st.tooSmall ? null : st.size,
-    rod: st.rod,
+    rod: defaults.tripAction ? "" : st.rod, // on a trip the rod/rig come from the chosen Rod Setup, below
     tooSmall: st.tooSmall,
     released: st.released,
-  }, { ...defaults, water: getLiveMarkDefaults().water || defaults.water }, tide, getLiveMarkDefaults().depth ?? getLastMarkFieldValues().waterDepth ?? null);
+  }, { ...defaults, water: getLiveMarkDefaults().water || defaults.water }, tide, st.depth);
+  if (defaults.tripAction) {
+    const chosen = defaults.tripRodSetups.find((s) => s.name === st.rod);
+    Object.assign(mark, tdCatchFieldsFromAction(defaults.tripAction, liveTripData.rodSetups, chosen ? chosen.id : null));
+  }
   const result = await saveMarkToD1(mark, true);
   if (!result.success) {
     showLiveToast("Catch not saved: " + result.error, true);
@@ -350,9 +382,13 @@ async function startLiveCatch() {
   if (activeCardFlow || !liveMap || !liveMarkState) return;
   const gpsPromise = getFreshGpsPosition();
   const options = await liveLoadCardOptions();
-  const defaults = getSessionDefaults(options);
+  const action = liveActiveTripAction();
+  // On a trip, the running Action decides everything: its targets first, then the other actions' targets, then the rest;
+  // its berley/method/bait; and its Rod Setup (asked only when the Action has more than one). Otherwise the saved Session
+  // defaults, as before.
+  const defaults = action ? liveCatchDefaultsForAction(options, action) : getSessionDefaults(options);
   const answers = {};
-  const ctx = liveCatchContext();
+  const ctx = { ...liveCatchContext(), depthDefault: getLiveMarkDefaults().depth ?? getLastMarkFieldValues().waterDepth ?? null };
   const finish = () => { activeCardFlow = null; };
   activeCardFlow = showCardFlow({
     getSteps: () => buildCatchCardSteps(options, defaults, { ...ctx, answers }),
@@ -365,6 +401,8 @@ async function startLiveCatch() {
         answers.species = answers.species === value ? "" : value;
       } else if (step.id === "fate") {
         answers.fate = value;
+      } else if (step.id === "depth") {
+        answers.depth = applyDepthAction(catchCardState(options, { ...ctx, answers }).depth, value);
       } else {
         answers[step.id] = answers[step.id] === value ? "" : value;
       }

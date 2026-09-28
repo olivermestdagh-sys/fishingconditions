@@ -57,6 +57,36 @@ function buildSessionStartFromAction(action, rodSetups, ctx, tide) {
   return mark;
 }
 
+/** Species targeted by the trip's OTHER actions (not `action` itself), in order, without duplicates. */
+function tdOtherTargets(actions, action) {
+  const seen = new Set(action.species || []);
+  const out = [];
+  for (const a of tdActionsForTrip(actions, action.tripId)) {
+    if (a.id === action.id) continue;
+    for (const s of a.species || []) if (!seen.has(s)) (seen.add(s), out.push(s));
+  }
+  return out;
+}
+
+/**
+ * The gear fields a Catch takes from a trip Action: berley, fishing method and bait from the Action itself, rod / rig /
+ * rigOptions from the chosen Rod Setup (`setupId`, or the Action's only one). Fields with nothing to say are left off.
+ */
+function tdCatchFieldsFromAction(action, rodSetups, setupId) {
+  const ids = tdLiveRodSetupIds(action.rodSetupIds, rodSetups);
+  const setup = (rodSetups || []).find((r) => r.id === (setupId || (ids.length === 1 ? ids[0] : null)));
+  const out = {};
+  if (action.berley) out.berley = action.berley;
+  if ((action.fishingMethod || []).length) out.fishingMethod = action.fishingMethod.join(", ");
+  if ((action.bait || []).length) out.bait = action.bait.join(", ");
+  if (setup) {
+    if (setup.rod) out.rod = setup.rod;
+    if (setup.rig) out.rig = setup.rig;
+    if ((setup.subListItems || []).length) out.rigOptions = setup.subListItems.join(", ");
+  }
+  return out;
+}
+
 /** Whether `list` already holds `value` (case-insensitive, trimmed) — new pick-list values must not duplicate. */
 function tdHasValue(list, value) {
   const v = String(value).trim().toLowerCase();

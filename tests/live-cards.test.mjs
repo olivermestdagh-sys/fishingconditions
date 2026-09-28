@@ -8,7 +8,7 @@ const limitsSrc = fs.readFileSync(new URL("../js/catch-limits.js", import.meta.u
 // Everything above the DOM section is pure; evaluate just that part.
 const pure = src.slice(0, src.indexOf("// --- DOM:"));
 const fns = new Function(
-  limitsSrc + "\n" + pure + "\nreturn { normaliseSessionDefaults, markListValues, sessionCardOptions, buildSessionCardSteps, applySessionCardChoice, buildCatchCardSteps, buildCatchFromCards, emptySessionDefaults, applySizeAction, catchCardState, sizeVerdictText, catchSavedMessage, speciesSublabels, speciesImagesFromMarkLists, allSpeciesImages, emptySessionStartAnswers, sessionStartFieldValueText, applySessionStartFieldChoice, buildSessionStartFromCards, buildSessionEndFromStart };"
+  limitsSrc + "\n" + pure + "\nreturn { normaliseSessionDefaults, markListValues, sessionCardOptions, buildSessionCardSteps, applySessionCardChoice, buildCatchCardSteps, buildCatchFromCards, emptySessionDefaults, applySizeAction, catchCardState, sizeVerdictText, catchSavedMessage, speciesSublabels, speciesImagesFromMarkLists, allSpeciesImages, emptySessionStartAnswers, sessionStartFieldValueText, applySessionStartFieldChoice, buildSessionStartFromCards, buildSessionEndFromStart, applyDepthAction };"
 )();
 
 const lists = [
@@ -90,19 +90,19 @@ test("deselecting a rod discards its rig and bait; the input draft is never muta
 test("catch cards: only target species and session rods; fall back to the full lists with a hint", () => {
   const defaults = { ...fns.emptySessionDefaults(), species: ["Whiting"], rods: ["Heavy"], rodSetups: { Heavy: { rig: "", bait: "" } } };
   const steps = fns.buildCatchCardSteps(options, defaults);
-  assert.deepEqual(steps.map((s) => s.id), ["species", "size", "fate", "rod"]);
+  assert.deepEqual(steps.map((s) => s.id), ["species", "size", "fate", "depth", "rod"]);
   // targets first, then a divider position, then every other species
   assert.deepEqual(steps[0].options, ["Whiting", "Bream"]);
-  assert.equal(steps[0].dividerAfter, 1);
-  assert.deepEqual(steps[3].options, ["Heavy"]);
-  assert.ok([steps[0], steps[2], steps[3]].every((s) => s.required), "species, keep/release and rod need an answer; the stepper always has a value");
+  assert.deepEqual(steps[0].dividers, [{ index: 1, label: "Other species" }]);
+  assert.deepEqual(steps[4].options, ["Heavy"]);
+  assert.ok([steps[0], steps[2], steps[4]].every((s) => s.required), "species, keep/release and rod need an answer; the steppers always have a value");
   assert.equal(steps[1].kind, "stepper");
   const fallback = fns.buildCatchCardSteps(options, fns.emptySessionDefaults());
   assert.deepEqual(fallback[0].options, options.species);
-  assert.equal(fallback[0].dividerAfter, 0);
+  assert.deepEqual(fallback[0].dividers, []);
   assert.ok(fallback[0].hint);
   const allTargets = fns.buildCatchCardSteps(options, { ...fns.emptySessionDefaults(), species: ["Bream", "Whiting"] });
-  assert.equal(allTargets[0].dividerAfter, 0, "no divider when every species is a target");
+  assert.deepEqual(allTargets[0].dividers, [], "no divider when every species is a target");
 });
 
 test("catch mark: type Catch, rig/bait from the rod, water/berley/fishing method from the session, size a number", () => {
@@ -294,7 +294,7 @@ test("the stepper starts at the min size and shows its verdict; Too small remove
   assert.equal(byId(small, "size").tooSmall, true);
   assert.equal(byId(small, "size").value, null);
   assert.equal(byId(small, "fate"), undefined, "Too small decides Release itself");
-  assert.deepEqual(small.map((s) => s.id), ["species", "size", "rod"]);
+  assert.deepEqual(small.map((s) => s.id), ["species", "size", "depth", "rod"]);
 });
 
 test("with no Min Size set, the stepper starts at 20", () => {
@@ -413,4 +413,29 @@ test("Session defaults' species card has no image gallery — 'Select by image' 
   const iopts = fns.sessionCardOptions(imageLists);
   const session = fns.buildSessionCardSteps(iopts, fns.emptySessionDefaults(), { run: null });
   assert.equal(byId(session, "species").images, undefined);
+});
+test("catch species: this action's targets, then the other actions' targets, then the rest — no species twice", () => {
+  const defaults = { ...fns.emptySessionDefaults(), species: ["Whiting"], otherTargets: ["Bream", "Whiting"] };
+  const species = fns.buildCatchCardSteps(options, defaults)[0];
+  assert.deepEqual(species.options, ["Whiting", "Bream", ...options.species.filter((s) => s !== "Whiting" && s !== "Bream")]);
+  assert.equal(new Set(species.options).size, species.options.length);
+  assert.deepEqual(species.dividers, [{ index: 1, label: "Other actions' targets" }, ...(options.species.length > 2 ? [{ index: 2, label: "Other species" }] : [])]);
+});
+
+test("the catch flow has a water depth card starting from the default, and no rod card when the rod comes from the action", () => {
+  const defaults = { ...fns.emptySessionDefaults(), species: ["Whiting"], skipRod: true };
+  const steps = fns.buildCatchCardSteps(options, defaults, { depthDefault: 3.5 });
+  const depth = steps.find((s) => s.id === "depth");
+  assert.equal(depth.kind, "depth");
+  assert.equal(depth.value, 3.5);
+  assert.equal(steps.find((s) => s.id === "rod"), undefined);
+  assert.equal(fns.buildCatchCardSteps(options, defaults, { answers: { depth: 4 }, depthDefault: 3.5 }).find((s) => s.id === "depth").value, 4);
+  assert.equal(fns.buildCatchCardSteps(options, defaults).find((s) => s.id === "depth").value, null);
+});
+
+test("depth card actions: whole tenths, never below 0, starting from nothing at 0", () => {
+  assert.equal(fns.applyDepthAction(null, "depth:1"), 1);
+  assert.equal(fns.applyDepthAction(2.3, "depth:0.1"), 2.4);
+  assert.equal(fns.applyDepthAction(0.4, "depth:-1"), 0);
+  assert.equal(fns.applyDepthAction(2, "bogus"), 2);
 });

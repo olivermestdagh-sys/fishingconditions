@@ -198,7 +198,18 @@ function catchCardState(options, ctx) {
   const counts = ctx.run && species ? speciesCounts(ctx.run, limits, species) : null;
   const rec = recommendFate({ lim, size: tooSmall ? null : size, counts, tooSmall });
   const fate = tooSmall ? "Release" : answers.fate || rec.fate;
-  return { species, lim, start, size, tooSmall, counts, rec, fate, released: fate === "Release", rod: answers.rod || "" };
+  // Water depth: what was set on its card, else the default for new marks (ctx.depthDefault), else unknown.
+  const depth = typeof answers.depth === "number" ? answers.depth : Number.isFinite(ctx.depthDefault) ? ctx.depthDefault : null;
+  return { species, lim, start, size, tooSmall, counts, rec, fate, released: fate === "Release", rod: answers.rod || "", depth };
+}
+
+/** A press on the water depth card ("depth:-1", "depth:0.1", ...). `current` is the depth so far (metres) or null; a press
+ * from nothing starts from 0. Whole tenths of a metre, never negative. Returns the new depth. */
+function applyDepthAction(current, action) {
+  const delta = Number(String(action).split(":")[1]);
+  if (!Number.isFinite(delta)) return current;
+  const base = Number.isFinite(current) ? current : 0;
+  return Math.max(0, Math.round((base + delta) * 10) / 10);
 }
 
 /** The line under the stepper number: how the size measures against the species' limits. */
@@ -222,17 +233,23 @@ function buildCatchCardSteps(options, defaults, ctx = {}) {
   const limits = options.limits || {};
   const answers = ctx.answers || {};
   const st = catchCardState(options, ctx);
-  // Targets first, then a divider, then every other species for a quick pick of something unexpected.
-  const others = options.species.filter((s) => !defaults.species.includes(s));
-  const speciesList = [...defaults.species, ...others];
+  // This action's/session's targets first, then (on a trip) the other actions' targets, then every remaining species — no
+  // species twice — each group under its own divider.
+  const targets = [...new Set(defaults.species)];
+  const otherTargets = [...new Set(defaults.otherTargets || [])].filter((s) => !targets.includes(s));
+  const rest = options.species.filter((s) => !targets.includes(s) && !otherTargets.includes(s));
+  const speciesList = [...targets, ...otherTargets, ...rest];
+  const dividers = [];
+  if (targets.length && otherTargets.length) dividers.push({ index: targets.length, label: "Other actions' targets" });
+  if ((targets.length || otherTargets.length) && rest.length) dividers.push({ index: targets.length + otherTargets.length, label: "Other species" });
   const rodList = defaults.rods.length ? defaults.rods : options.rods;
   const steps = [
     {
       id: "species", title: "Species", prompt: "What did you catch?", multi: false, required: true, options: speciesList,
       selected: answers.species ? [answers.species] : [],
       sublabels: speciesSublabels(speciesList, limits, ctx.run || null),
-      dividerAfter: defaults.species.length && others.length ? defaults.species.length : 0, // index of the first "other" species, 0 = no divider
-      hint: defaults.species.length ? "" : "No target species set — showing every species. Set them in Session defaults.",
+      dividers, // [{index, label}]: a labelled divider before the species at each index
+      hint: targets.length ? "" : "No target species set — showing every species.",
       images: allSpeciesImages(options.images), // every species picture, for "Select by image" — not just the targets
     },
     {
@@ -247,10 +264,15 @@ function buildCatchCardSteps(options, defaults, ctx = {}) {
       selected: [st.fate], sublabels: { [st.rec.fate]: { line1: "Recommended", line2: "", tone: "" } }, hint: st.rec.reason,
     });
   }
-  if (rodList.length) {
+  // Water depth: a card of its own, starting from the default for new marks.
+  steps.push({
+    id: "depth", kind: "depth", title: "Water depth", prompt: "How deep is the water?", multi: false, required: false,
+    options: [], selected: [], value: st.depth,
+  });
+  if (rodList.length && !defaults.skipRod) {
     steps.push({
-      id: "rod", title: "Rod", prompt: "Which rod?", multi: false, required: true, options: rodList, selected: answers.rod ? [answers.rod] : [],
-      hint: defaults.rods.length ? "" : "No rods set — showing every rod. Set them in Session defaults.",
+      id: "rod", title: defaults.rodTitle || "Rod", prompt: defaults.rodPrompt || "Which rod?", multi: false, required: true, options: rodList, selected: answers.rod ? [answers.rod] : [],
+      hint: defaults.rods.length ? "" : "No rods set — showing every rod.",
     });
   }
   return steps;
@@ -569,13 +591,33 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
           </div>
         </div>`;
     };
+    // A labelled divider before option i: from step.dividers ([{index, label}]), or the older single dividerAfter ("Other species").
+    const dividerHtml = (i) => {
+      const label = step.dividers ? (step.dividers.find((d) => d.index === i) || {}).label : step.dividerAfter && i === step.dividerAfter ? "Other species" : "";
+      return label ? `<div class="live-card-divider" role="separator">${escapeHtml(label)}</div>` : "";
+    };
+    // The water depth card: a - / + row in whole metres, and a fine row in tenths.
+    const depthHtml = () => `
+      <div class="live-card-stepper">
+        <div class="live-card-stepper-row">
+          <button type="button" class="live-card-choice live-card-step-btn" data-stepper="depth:-1" aria-label="One metre shallower">&minus;</button>
+          <div class="live-card-stepper-value">${step.value == null ? "—" : escapeHtml(step.value.toFixed(1))}<span class="live-card-stepper-unit"> m</span></div>
+          <button type="button" class="live-card-choice live-card-step-btn" data-stepper="depth:1" aria-label="One metre deeper">+</button>
+        </div>
+        <div class="live-card-stepper-row-fine">
+          <button type="button" class="live-card-choice live-card-step-btn-fine" data-stepper="depth:-0.1">&minus; 0.1 m</button>
+          <button type="button" class="live-card-choice live-card-step-btn-fine" data-stepper="depth:0.1">+ 0.1 m</button>
+        </div>
+      </div>`;
     const hasGallery = Array.isArray(step.images) && step.images.length > 0;
     const buttons = step.kind === "stepper"
       ? stepperHtml()
-      : gallery
+      : step.kind === "depth"
+        ? depthHtml()
+        : gallery
         ? galleryHtml()
         : step.options.length
-          ? step.options.map((value, i) => (step.dividerAfter && i === step.dividerAfter ? `<div class="live-card-divider" role="separator">Other species</div>` : "") + optionButton(value, i)).join("")
+          ? step.options.map((value, i) => dividerHtml(i) + optionButton(value, i)).join("")
           : `<p class="live-card-empty">Nothing to choose yet — add options for this on the Settings tab.</p>`;
     const galleryToggleHtml = hasGallery
       ? `<button type="button" class="live-card-gallery-toggle" data-gallery-toggle>${gallery ? "&larr; Back to the list" : "Select by image &rarr;"}</button>`
@@ -589,7 +631,7 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
           ${step.hint ? `<p class="live-card-hint">${escapeHtml(step.hint)}</p>` : ""}
           ${galleryToggleHtml}
         </div>
-        <div class="live-card-grid${step.kind === "stepper" ? " live-card-grid-stepper" : ""}${gallery ? " live-card-grid-gallery" : ""}">${buttons}</div>
+        <div class="live-card-grid${step.kind === "stepper" || step.kind === "depth" ? " live-card-grid-stepper" : ""}${gallery ? " live-card-grid-gallery" : ""}">${buttons}</div>
         <div class="live-card-nav">
           <button type="button" class="live-card-nav-btn" data-nav="prev"${index === 0 ? " disabled" : ""}>Prev</button>
           <button type="button" class="live-card-nav-btn live-card-close" data-nav="close">Close</button>
