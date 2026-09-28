@@ -332,14 +332,16 @@ function togglePin(name) {
 }
 
 /**
- * Turns a hidden number input into a stepper: a circular badge (styled
- * like the Location/Fishing rating circles on session rows) showing the
- * current value, with +/− buttons either side. For Min Condition, the
- * badge is colored via conditionColor() — the exact same function that
- * colors those row badges — so a "3.0" here looks like a "3.0" would
- * anywhere else on the page. Min consecutive hours isn't a 1-5 condition
- * rating, so colorFn is null there — same badge shape, fixed neutral color
- * (see .rating-stepper-badge-neutral), purely for visual consistency.
+ * Turns a hidden number input into a stepper: a value display (id+"Badge")
+ * showing the current value, with +/− buttons (id+"Up"/id+"Down") either
+ * side — purely DOM-id-driven, so it doesn't care what the caller's own
+ * markup/classes around those ids look like (showSessionCriteriaModal's
+ * .live-card-stepper-value, styled like the Map/Live tab's own numeric
+ * steppers). For Min Condition, the value display is colored via
+ * conditionColor() — the exact same function that colors the Location/
+ * Fishing rating circles on session rows — so a "3.0" here looks like a
+ * "3.0" would anywhere else on the page. Min consecutive hours isn't a 1-5
+ * condition rating, so colorFn is null there — no background color applied.
  */
 function wireThresholdStepper(id, step, min, max, colorFn) {
   const input = document.getElementById(id);
@@ -593,52 +595,58 @@ function showFacetCardPanel(facet, ctx) {
 }
 
 /**
- * Thresholds-only popover (Min Condition rating, Min consecutive hours) — split out of
- * showThresholdFilterModal above into its own toolbar button so the two values people adjust
- * most often don't need the full Filters modal open. Same .ww-candidate-* shell, same
- * wireThresholdStepper (persists via persistThresholds, js/week-tools.js) — just the steppers,
- * no facet sections.
+ * "Session Criteria" panel (Min Condition rating, Min consecutive hours — together they define
+ * what counts as a qualifying session, hence the name; "Thresholds" was the old, less clear
+ * label) — split out of showThresholdFilterModal (now showFacetCardPanel's three buttons) into
+ * its own toolbar button so the two values people adjust most often don't need a bigger modal
+ * open. Same .live-card-* visual language as showFacetCardPanel and the Map/Live tab's own
+ * Session defaults cards — the two steppers are modeled directly on js/live-cards.js's Water
+ * depth card (renderWaterDepth), the existing precedent for a numeric stepper in this shell.
+ *
+ * wireThresholdStepper (week.js) and persistThresholds/THRESHOLDS_STORAGE_KEY (js/week-tools.js)
+ * are unchanged — they only look up elements by id (minCondition/minConditionBadge/.../minHours*),
+ * so restyling the markup around those same ids needed no changes to that logic at all.
  */
-function showThresholdsModal() {
+function showSessionCriteriaModal() {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
-    overlay.className = "ww-candidate-overlay";
+    overlay.className = "live-card-overlay";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
     overlay.innerHTML = `
-      <div class="ww-candidate-dialog">
-        <button type="button" class="ww-candidate-close" aria-label="Close">&times;</button>
-        <h3 style="margin:0 0 8px;">Thresholds</h3>
-        <p class="footnote" style="margin:0 0 12px;text-align:left;">
-          Every hourly forecast row that sits inside a run of consecutive hours meeting the thresholds below (evaluated per location).
-        </p>
-        <div class="filter-row thresholds-row">
-          <div>
-            <label for="minCondition">Min Condition rating</label>
-            <div class="rating-stepper">
-              <button type="button" class="rating-stepper-btn" id="minConditionDown" aria-label="Decrease min condition rating">−</button>
-              <div class="condition-badge rating-stepper-badge" id="minConditionBadge">3.0</div>
-              <button type="button" class="rating-stepper-btn" id="minConditionUp" aria-label="Increase min condition rating">+</button>
-              <input type="hidden" id="minCondition" min="1" max="5" value="3" />
+      <div class="live-card">
+        <div class="live-card-head">
+          <h2 class="live-card-title">Session Criteria</h2>
+          <p class="live-card-prompt">Every hourly forecast row that sits inside a run of consecutive hours meeting both minimums below counts as a qualifying session (evaluated per location).</p>
+        </div>
+        <div class="live-card-grid">
+          <div class="live-card-stepper">
+            <div class="live-card-digit-caption">Min Condition rating</div>
+            <div class="live-card-stepper-row">
+              <button type="button" class="live-card-choice live-card-step-btn" id="minConditionDown" aria-label="Decrease min condition rating">&minus;</button>
+              <div class="live-card-stepper-value" id="minConditionBadge">3.0</div>
+              <button type="button" class="live-card-choice live-card-step-btn" id="minConditionUp" aria-label="Increase min condition rating">+</button>
             </div>
+            <input type="hidden" id="minCondition" min="1" max="5" value="3" />
           </div>
-          <div>
-            <label for="minHours">Min consecutive hours</label>
-            <div class="rating-stepper">
-              <button type="button" class="rating-stepper-btn" id="minHoursDown" aria-label="Decrease min consecutive hours">−</button>
-              <div class="condition-badge rating-stepper-badge rating-stepper-badge-neutral" id="minHoursBadge">3.0</div>
-              <button type="button" class="rating-stepper-btn" id="minHoursUp" aria-label="Increase min consecutive hours">+</button>
-              <input type="hidden" id="minHours" min="1" max="24" value="3" />
+          <div class="live-card-stepper">
+            <div class="live-card-digit-caption">Min consecutive hours</div>
+            <div class="live-card-stepper-row">
+              <button type="button" class="live-card-choice live-card-step-btn" id="minHoursDown" aria-label="Decrease min consecutive hours">&minus;</button>
+              <div class="live-card-stepper-value" id="minHoursBadge">3.0</div>
+              <button type="button" class="live-card-choice live-card-step-btn" id="minHoursUp" aria-label="Increase min consecutive hours">+</button>
             </div>
+            <input type="hidden" id="minHours" min="1" max="24" value="3" />
           </div>
         </div>
-        <p class="footnote" style="margin:8px 0 12px;text-align:left;">
-          "Min consecutive hours" is a genuine clock-duration minimum — matches the session lengths shown.
-        </p>
-        <div style="display:flex;gap:8px;margin-top:6px;">
-          <button type="button" id="thresholdsDone" class="btn-primary" style="flex:1;">Done</button>
+        <p class="live-card-prompt" style="font-size:0.8rem;opacity:0.75;">"Min consecutive hours" is a genuine clock-duration minimum — matches the session lengths shown.</p>
+        <div class="live-card-nav live-card-nav-1">
+          <button type="button" class="live-card-nav-btn live-card-next" data-nav="done">Done</button>
         </div>
       </div>
     `;
     document.body.appendChild(overlay);
+    document.body.classList.add("live-card-open");
 
     // Restore the currently-saved thresholds onto this fresh copy of the inputs before wiring the steppers,
     // so the badges/buttons reflect reality immediately rather than the placeholder defaults above.
@@ -657,10 +665,10 @@ function showThresholdsModal() {
 
     const cleanup = () => {
       overlay.remove();
+      document.body.classList.remove("live-card-open");
       resolve();
     };
-    overlay.querySelector("#thresholdsDone").addEventListener("click", cleanup);
-    overlay.querySelector(".ww-candidate-close").addEventListener("click", cleanup);
+    overlay.querySelector('[data-nav="done"]').addEventListener("click", cleanup);
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) cleanup();
     });
@@ -714,7 +722,7 @@ function facetCount(f) {
 function initFilterControls() {
   const toggle = document.getElementById("filteringEnabledToggle");
   const typeBtn = document.getElementById("filtersTypeBtn");
-  const thresholdsBtn = document.getElementById("filtersThresholdsBtn");
+  const sessionCriteriaBtn = document.getElementById("filtersThresholdsBtn");
   const facetButtons = {
     group: { btn: document.getElementById("filtersGroupBtn"), badge: document.getElementById("filtersGroupBadge") },
     direction: { btn: document.getElementById("filtersDirectionBtn"), badge: document.getElementById("filtersDirectionBadge") },
@@ -738,8 +746,8 @@ function initFilterControls() {
       refresh();
     });
   }
-  thresholdsBtn.addEventListener("click", async () => {
-    await showThresholdsModal();
+  sessionCriteriaBtn.addEventListener("click", async () => {
+    await showSessionCriteriaModal();
   });
   typeBtn.addEventListener("click", () => {
     const current = currentTypeFilterState();

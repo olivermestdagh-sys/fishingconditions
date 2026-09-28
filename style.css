@@ -3811,6 +3811,10 @@ body.live-card-open { overflow: hidden; }
   cursor: pointer;
 }
 .live-card-pin-btn.pinned { color: #fde68a; }
+/* Week Ahead's Session Criteria panel (week.js's showSessionCriteriaModal) hits real min/max
+   bounds (Min Condition 1-5, Min consecutive hours 1-24) — Water depth's own steppers never
+   clamp, so this disabled look was never needed until now. */
+.live-card-step-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .live-card-stepper { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 12px; }
 .live-card-stepper-value { text-align: center; font-size: 3.6rem; font-weight: 800; line-height: 1.1; padding-top: 6px; }
 .live-card-stepper-value.small { color: #fca5a5; font-size: 2.6rem; }
