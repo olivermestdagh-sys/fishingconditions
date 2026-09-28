@@ -370,6 +370,11 @@ async function saveLiveCatch(options, answers, defaults, gpsPromise, ctx) {
     return;
   }
   saveLastMarkFieldValues(mark);
+  // A depth changed on the catch's own card becomes the Live page's Depth default too (the Depth button follows it).
+  if (typeof answers.depth === "number") {
+    setLiveMarkDefaults({ ...getLiveMarkDefaults(), depth: answers.depth });
+    renderLiveDefaultsUI();
+  }
   addCatchToLiveMap(mark);
   // Say where the bag stands now (the new catch is on the map, so it is part of the run).
   const after = liveCatchContext();

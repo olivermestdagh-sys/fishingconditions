@@ -61,8 +61,13 @@ function hashStringToHue(str) {
 const MARK_NO_VALUE_STYLE = { color: "#374151", fillColor: "#9ca3af", radius: 4, weight: 1 };
 
 function markStyleFor(mark, state) {
-  const groupField = MARK_LIST_FIELDS.find((f) => f.key === state.groupByKey) || MARK_LIST_FIELDS[0];
-  const value = mark[state.groupByKey];
+  // A Session Start/End's species are its TARGETS, not what it is: coloured by species, every session aimed at (say) Whiting
+  // would wear Whiting's colour and the Start/End types would be indistinguishable. While colouring by Species they take
+  // their Mark Type's colour instead (Session Start / Session End in Settings); any other Colour by field applies as usual.
+  const sessionByType = isSessionType(mark.type) && state.groupByKey === "species";
+  const groupKey = sessionByType ? "type" : state.groupByKey;
+  const groupField = MARK_LIST_FIELDS.find((f) => f.key === groupKey) || MARK_LIST_FIELDS[0];
+  const value = mark[groupKey];
   if (!value) return MARK_NO_VALUE_STYLE;
   // A resolved Mark COLOUR Format's own colour (a real hex value — see
   // "an icon + a colour picker for the web site" in locationsadmin.js's
@@ -76,7 +81,7 @@ function markStyleFor(mark, state) {
   // resolve. Shape is handled entirely separately (see shapeNameForMark)
   // — this function only ever decides colour.
   const format = state.groupByKey === "species" || state.groupByKey === "type"
-    ? resolveMarkColorFormat(mark, state.markLists)
+    ? resolveMarkColorFormat(sessionByType ? { ...mark, species: "" } : mark, state.markLists)
     : resolveColorFormatForFieldValue(groupField.label, value, state.markLists);
   if (format && format.color) {
     return { color: "#374151", fillColor: format.color, radius: 5, weight: 1.5 };
