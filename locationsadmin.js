@@ -865,29 +865,43 @@ function markListValuesFor(label) {
   return mergedMarkListsFor(label).map((r) => r.value);
 }
 
-/** The "add a new setup" row's Rod/Rig <select>s — kept in sync with Fishing Mark Lists' own Rod/Rig
- * options on every mark-list change (see renderMarkLists' own call to this), same as the per-row selects
- * built fresh in renderRodSetupsList. */
+/** The "add a new setup" row's Rod/Rig pickers — kept in sync with Fishing Mark Lists' own Rod/Rig
+ * options on every mark-list change (see renderMarkLists' own call to this), same as the per-row
+ * pills built fresh in renderRodSetupsList. Rendered as pills (pillRowHtml) into
+ * #newRodSetupRodPills/#newRodSetupRigPills, same look as the per-row pickers; the actual chosen
+ * value lives in a hidden <input> (#newRodSetupRodSelect/#newRodSetupRigSelect, same ids as the old
+ * <select>s) so onAddRodSetup (locationsadmin.js) keeps reading/resetting `.value` with no changes
+ * needed there at all. */
 function renderNewRodSetupSelects() {
-  const rodSelect = document.getElementById("newRodSetupRodSelect");
-  const rigSelect = document.getElementById("newRodSetupRigSelect");
-  if (!rodSelect || !rigSelect) return;
-  const fill = (select, placeholder, options) => {
-    const prev = select.value;
-    select.innerHTML = `<option value="">${placeholder}</option>${options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join("")}`;
-    if (options.includes(prev)) select.value = prev;
+  const rodInput = document.getElementById("newRodSetupRodSelect");
+  const rigInput = document.getElementById("newRodSetupRigSelect");
+  const rodPills = document.getElementById("newRodSetupRodPills");
+  const rigPills = document.getElementById("newRodSetupRigPills");
+  if (!rodInput || !rigInput || !rodPills || !rigPills) return;
+  const fill = (input, pillsContainer, field, options) => {
+    if (!options.includes(input.value)) input.value = "";
+    pillsContainer.innerHTML = pillRowHtml("data-new-setup-field", field, options, input.value, { allowNone: true });
   };
-  fill(rodSelect, "Rod…", markListValuesFor("Rod"));
-  fill(rigSelect, "Rig…", markListValuesFor("Rig"));
+  fill(rodInput, rodPills, "rod", markListValuesFor("Rod"));
+  fill(rigInput, rigPills, "rig", markListValuesFor("Rig"));
 }
+
+// Delegated once (same reasoning as the other pill wiring above) — picking a pill here just sets
+// the matching hidden input's value and re-renders both pill rows to refresh the highlighted
+// state; onAddRodSetup reads the hidden inputs directly when "+ Add setup" is pressed.
+document.addEventListener("click", (e) => {
+  const pillEl = e.target.closest("[data-new-setup-field] .mark-pill");
+  if (!pillEl) return;
+  const field = pillEl.closest("[data-new-setup-field]").dataset.newSetupField;
+  document.getElementById(field === "rod" ? "newRodSetupRodSelect" : "newRodSetupRigSelect").value = pillEl.dataset.value;
+  renderNewRodSetupSelects();
+});
 
 function renderRodSetupsList() {
   const list = document.getElementById("rodSetupsList");
   if (!list) return; // not on this page load yet (loadRodSetups can resolve before init() finishes wiring)
   const rodOptions = markListValuesFor("Rod");
   const rigOptions = markListValuesFor("Rig");
-  const optionsHtml = (options, current) =>
-    `<option value="">—</option>${options.map((o) => `<option value="${escapeHtml(o)}"${o === current ? " selected" : ""}>${escapeHtml(o)}</option>`).join("")}`;
 
   list.innerHTML = "";
   if (rodSetups.length === 0) {
@@ -904,20 +918,18 @@ function renderRodSetupsList() {
       <div style="flex:2;min-width:140px;">
         <input type="text" data-setup-name="${idx}" value="${escapeHtml(setup.name)}" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);" />
       </div>
-      <div style="flex:1;min-width:120px;">
+      <div style="flex:1;min-width:160px;">
         <label class="footnote" style="margin:0;display:block;">Rod</label>
-        <select data-setup-rod="${idx}" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);">${optionsHtml(rodOptions, setup.rod)}</select>
+        ${pillRowHtml("data-setup-rod", idx, rodOptions, setup.rod, { allowNone: true })}
       </div>
-      <div style="flex:1;min-width:120px;">
+      <div style="flex:1;min-width:160px;">
         <label class="footnote" style="margin:0;display:block;">Rig</label>
-        <select data-setup-rig="${idx}" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);">${optionsHtml(rigOptions, setup.rig)}</select>
+        ${pillRowHtml("data-setup-rig", idx, rigOptions, setup.rig, { allowNone: true })}
       </div>
       ${sublistOptions.length ? `
-      <div style="flex:1;min-width:140px;">
+      <div style="flex-basis:100%;">
         <label class="footnote" style="margin:0;display:block;">${escapeHtml(setup.rig)}</label>
-        <select data-setup-sublist="${idx}" multiple size="${Math.min(4, sublistOptions.length)}" style="width:100%;padding:4px;border-radius:8px;border:1px solid var(--grey-200);">
-          ${sublistOptions.map((o) => `<option value="${escapeHtml(o)}"${(setup.subListItems || []).includes(o) ? " selected" : ""}>${escapeHtml(o)}</option>`).join("")}
-        </select>
+        ${multiPillRowHtml("data-setup-sublist", idx, sublistOptions, setup.subListItems || [])}
       </div>` : ""}
       <button type="button" data-remove-setup="${idx}" class="btn-secondary">Remove</button>
     `;
@@ -927,25 +939,39 @@ function renderRodSetupsList() {
   list.querySelectorAll("[data-setup-name]").forEach((input) => {
     input.addEventListener("change", (e) => onRodSetupFieldChange(Number(e.currentTarget.dataset.setupName), "name", e.currentTarget.value));
   });
-  list.querySelectorAll("[data-setup-rod]").forEach((select) => {
-    select.addEventListener("change", (e) => onRodSetupFieldChange(Number(e.currentTarget.dataset.setupRod), "rod", e.currentTarget.value));
-  });
-  list.querySelectorAll("[data-setup-rig]").forEach((select) => {
-    select.addEventListener("change", (e) => {
-      // A different rig may have a different (or no) sub list — clears any previously chosen items, then re-renders.
-      onRodSetupFieldChange(Number(e.currentTarget.dataset.setupRig), "rig", e.currentTarget.value, { subListItems: [] });
-    });
-  });
-  list.querySelectorAll("[data-setup-sublist]").forEach((select) => {
-    select.addEventListener("change", (e) => {
-      const chosen = Array.from(e.currentTarget.selectedOptions).map((o) => o.value);
-      onRodSetupFieldChange(Number(e.currentTarget.dataset.setupSublist), "subListItems", chosen);
-    });
-  });
   list.querySelectorAll("[data-remove-setup]").forEach((btn) => {
     btn.addEventListener("click", (e) => onRemoveRodSetup(Number(e.currentTarget.dataset.removeSetup)));
   });
 }
+
+// Delegated once (pills are recreated on every renderRodSetupsList() call, same reasoning as the
+// settingsGroupHtml wiring above) — reads which row (data-setup-rod/-rig/-sublist, set by
+// pillRowHtml/multiPillRowHtml on the wrapping .mark-pill-row) and which option (data-value, on
+// the pill itself) was tapped, then calls the SAME onRodSetupFieldChange the old <select> "change"
+// handlers called — only how the click is captured changed, not what happens with it.
+document.getElementById("rodSetupsList").addEventListener("click", (e) => {
+  const pillEl = e.target.closest(".mark-pill");
+  if (!pillEl) return;
+  const value = pillEl.dataset.value;
+  const rodRow = pillEl.closest("[data-setup-rod]");
+  if (rodRow) {
+    onRodSetupFieldChange(Number(rodRow.dataset.setupRod), "rod", value);
+    return;
+  }
+  const rigRow = pillEl.closest("[data-setup-rig]");
+  if (rigRow) {
+    // A different rig may have a different (or no) sub list — clears any previously chosen items, then re-renders.
+    onRodSetupFieldChange(Number(rigRow.dataset.setupRig), "rig", value, { subListItems: [] });
+    return;
+  }
+  const sublistRow = pillEl.closest("[data-setup-sublist]");
+  if (sublistRow) {
+    const idx = Number(sublistRow.dataset.setupSublist);
+    const current = rodSetups[idx].subListItems || [];
+    const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
+    onRodSetupFieldChange(idx, "subListItems", next);
+  }
+});
 
 /** Saves one field of an existing setup; `extra` merges in additional fields in the same request (e.g. clearing
  * subListItems when the rig itself changes) without needing a second round trip. */
@@ -1986,6 +2012,37 @@ document.addEventListener("click", (e) => {
   else settingsOpenGroups.add(key);
   renderMarkLists();
 });
+
+/**
+ * A single-select field as a row of tappable pills — same look as the Map's own location editor
+ * (js/location-editor.js's `pill()`/`.mark-pill-row`, reusing its already-global CSS:
+ * .loc-chip.mark-pill/.is-on, style.css ~2852). Unlike that file (every field there always has a
+ * value), Rod Setups' Rod/Rig can genuinely be unset, so `allowNone` adds an explicit "None" pill
+ * rather than relying on "tap the current pill again to clear" (which reads ambiguously for a
+ * single-select — that gesture is reserved for genuinely multi-select fields, see
+ * multiPillRowHtml below). `rowAttr`/`rowIdx` go on the wrapping row (not each pill) so one
+ * delegated click handler can identify which row/setup a pill belongs to; each pill itself only
+ * carries the option's own value in `data-value`. `rowIdx` is a trusted internal integer, not run
+ * through escapeHtml — escapeHtml("0") would otherwise collapse to "" (its `str || ""` fallback
+ * treats 0 as falsy), silently breaking row 0's own attribute.
+ */
+function pillRowHtml(rowAttr, rowIdx, options, current, { allowNone, noneLabel = "None" } = {}) {
+  const pill = (value, label, on) =>
+    `<span class="loc-chip mark-pill${on ? " is-on" : ""}" data-value="${escapeHtml(value)}" role="button" aria-pressed="${on}">${escapeHtml(label)}</span>`;
+  const noneHtml = allowNone ? pill("", noneLabel, !current) : "";
+  return `<div class="mark-pill-row" ${rowAttr}="${rowIdx}">${noneHtml}${options.map((o) => pill(o, o, o === current)).join("")}</div>`;
+}
+
+/** A multi-select field as pills — clicking one toggles its membership in `selected`. Same notes as
+ * pillRowHtml above re: rowAttr/rowIdx. No "None" pill (there's nothing to disambiguate — every
+ * option is independently on or off) and no "keep at least one" guard (matches this site's existing
+ * Location Groups/mark-edit multi-select precedent, not location-editor.js's Types field, which is
+ * a special case guarded because a location needs at least one type). */
+function multiPillRowHtml(rowAttr, rowIdx, options, selected) {
+  const pill = (value, on) =>
+    `<span class="loc-chip mark-pill${on ? " is-on" : ""}" data-value="${escapeHtml(value)}" role="button" aria-pressed="${on}">${escapeHtml(value)}</span>`;
+  return `<div class="mark-pill-row" ${rowAttr}="${rowIdx}">${options.map((o) => pill(o, selected.includes(o))).join("")}</div>`;
+}
 
 function renderMarkLists() {
   const container = document.getElementById("markListsGroups");

@@ -147,9 +147,17 @@
       <div id="rodSetupsList"></div>
       <div class="filter-row" style="margin-top:8px;flex-wrap:wrap;">
         <input type="text" id="newRodSetupNameInput" placeholder="Setup name" style="flex:2;min-width:140px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);" />
-        <select id="newRodSetupRodSelect" style="flex:1;min-width:120px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);"></select>
-        <select id="newRodSetupRigSelect" style="flex:1;min-width:120px;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);"></select>
         <button id="btnAddRodSetup" class="btn-secondary">+ Add setup</button>
+        <input type="hidden" id="newRodSetupRodSelect" />
+        <input type="hidden" id="newRodSetupRigSelect" />
+      </div>
+      <div style="margin-top:8px;">
+        <label class="footnote" style="margin:0;display:block;">Rod</label>
+        <div id="newRodSetupRodPills"></div>
+      </div>
+      <div style="margin-top:8px;">
+        <label class="footnote" style="margin:0;display:block;">Rig</label>
+        <div id="newRodSetupRigPills"></div>
       </div>
       <div id="rodSetupsStatus" style="margin-top:10px;font-size:0.85rem;"></div>
     </div>
