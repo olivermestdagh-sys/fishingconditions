@@ -113,9 +113,6 @@ let moonPhasesData = {};
 // facetFilters: {type, group, direction, location}, each {include: Set, exclude: Set} — see
 // locationMatchesFacetFilters/emptyFacetFilters/migrateLegacyFacetFilters (js/week-tools.js).
 let facetFilters = emptyFacetFilters();
-// Master on/off for the four facet filters above (not the thresholds — see initFilterControls'
-// own comment on why thresholds are never bypassed by this). ON by default, matching pre-toggle behavior.
-let filteringEnabled = true;
 let pinnedOrder = []; // location NAMES, in the order they were pinned — oldest pin first
 
 // computedSessions, armedLocationName and armedMode (the click-arm-then-
@@ -430,14 +427,6 @@ async function init() {
   facetFilters = migrateLegacyFacetFilters(allNames);
   persistFacetFilters(facetFilters); // writes the migrated shape straight back, so a second load doesn't re-migrate
 
-  let savedFilteringEnabled = null;
-  try {
-    savedFilteringEnabled = localStorage.getItem(FILTERING_ENABLED_STORAGE_KEY);
-  } catch {
-    savedFilteringEnabled = null;
-  }
-  filteringEnabled = savedFilteringEnabled == null ? true : savedFilteringEnabled === "1";
-
   // Drop any pinned name that no longer exists in the data (a location was
   // renamed/removed in Settings since the last visit) — same defensive
   // pattern as the saved-locations filter above.
@@ -447,16 +436,6 @@ async function init() {
   renderWeekView();
 }
 
-/**
- * Wires the toolbar's toggle switch and its filter buttons (the Week Ahead
- * equivalent of the Map's Live toggle + Filters gear, initMarkControls in
- * js/marks-tools.js) — the toggle is a master on/off for the four facet
- * filters ONLY, never the Min Condition/Min Hours thresholds: those define
- * what a "qualifying session" IS at all (the page's core computation), not
- * a show/hide restriction, so switching them off would make every hour
- * qualifying and defeat the page's purpose, unlike a facet filter which
- * only narrows which already-computed locations are shown.
- */
 /**
  * One facet's own full-screen selection panel (Location Group, Shore
  * Direction or Locations — each has its own toolbar button now, Type
@@ -720,7 +699,6 @@ function facetCount(f) {
 }
 
 function initFilterControls() {
-  const toggle = document.getElementById("filteringEnabledToggle");
   const typeBtn = document.getElementById("filtersTypeBtn");
   const sessionCriteriaBtn = document.getElementById("filtersThresholdsBtn");
   const facetButtons = {
@@ -728,7 +706,6 @@ function initFilterControls() {
     direction: { btn: document.getElementById("filtersDirectionBtn"), badge: document.getElementById("filtersDirectionBadge") },
     location: { btn: document.getElementById("filtersLocationsBtn"), badge: document.getElementById("filtersLocationsBadge") },
   };
-  toggle.checked = filteringEnabled;
 
   function refresh() {
     renderTypeFilterButton();
@@ -753,11 +730,6 @@ function initFilterControls() {
     const current = currentTypeFilterState();
     const next = TYPE_FILTER_STATES[(TYPE_FILTER_STATES.indexOf(current) + 1) % TYPE_FILTER_STATES.length];
     setTypeFilterState(next);
-    refresh();
-  });
-  toggle.addEventListener("change", () => {
-    filteringEnabled = toggle.checked;
-    Prefs.set(FILTERING_ENABLED_STORAGE_KEY, filteringEnabled ? "1" : "0");
     refresh();
   });
 
@@ -793,10 +765,9 @@ function sortLocationsForDisplay(locationEntries) {
 function computeLocationRows() {
   // Thresholds are read from storage (via computeQualifyingSessions's own null-means-"read the
   // saved values" fallback), not from #minCondition/#minHours directly — those inputs only exist
-  // while the thresholds/filters modal happens to be open, so a DOM read here would break the
-  // moment it's closed. Never bypassed by filteringEnabled — see initFilterControls' own comment
-  // on why thresholds aren't part of that toggle.
-  const filtered = filteringEnabled ? allLocations.filter((loc) => locationMatchesFacetFilters(loc, facetFilters)) : allLocations.slice();
+  // while the Session Criteria panel happens to be open, so a DOM read here would break the
+  // moment it's closed.
+  const filtered = allLocations.filter((loc) => locationMatchesFacetFilters(loc, facetFilters));
   const ordered = sortLocationsForDisplay(filtered);
 
   return ordered.map((loc) => {

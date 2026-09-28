@@ -7,7 +7,6 @@ const LOC_FILTER_STORAGE_KEY = "goodConditionsSelectedLocations";
 const TYPE_FILTER_STORAGE_KEY = "goodConditionsSelectedTypes";
 const GROUP_FILTER_STORAGE_KEY = "goodConditionsSelectedGroups";
 const DIRECTION_FILTER_STORAGE_KEY = "goodConditionsSelectedDirections";
-const FILTERING_ENABLED_STORAGE_KEY = "goodConditionsFilteringEnabled";
 const THRESHOLDS_STORAGE_KEY = "goodConditionsThresholds";
 
 // Locations without any Location Group assigned yet (or before this field
