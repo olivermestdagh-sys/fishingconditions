@@ -193,7 +193,6 @@ async function init() {
   // curated set, so there's even less reason to default them open.
   makeCollapsible(document.getElementById("groupsSection"), "settingsCollapsed:groups", true);
   makeCollapsible(document.getElementById("markListsSection"), "settingsCollapsed:markLists", true);
-  makeCollapsible(document.getElementById("tripsSection"), "settingsCollapsed:trips", true);
   makeCollapsible(document.getElementById("adminMessagesSection"), "settingsCollapsed:adminMessages", false);
   makeCollapsible(document.getElementById("usersSection"), "settingsCollapsed:users", true);
   makeCollapsible(document.getElementById("tiersSection"), "settingsCollapsed:tiers", true);
@@ -216,20 +215,6 @@ async function init() {
   document.getElementById("btnAddMarkShapeFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Shape Format", "newMarkShapeFormatInput"));
   document.getElementById("btnAddMarkColorFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Colour Format", "newMarkColorFormatInput"));
   document.getElementById("btnAddTier").addEventListener("click", onAddTier);
-  document.getElementById("btnAddRodSetup").addEventListener("click", onAddRodSetup);
-  document.getElementById("newRodSetupNameInput").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      onAddRodSetup();
-    }
-  });
-  document.getElementById("btnAddTripSetup").addEventListener("click", onAddTripSetup);
-  document.getElementById("newTripSetupNameInput").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      onAddTripSetup();
-    }
-  });
   document.getElementById("btnSendMessage").addEventListener("click", onSendMessage);
   document.getElementById("contactMessageInput").addEventListener("input", (e) => {
     document.getElementById("contactCharCount").textContent = `${e.target.value.length} / 2000`;
@@ -306,9 +291,7 @@ async function refreshPageForCurrentUser() {
 
   await Promise.all([
     loadLocationGroups(),
-    // Rod Setups' Rod/Rig options (and a rig's own sub list) come from markLists, so it loads after;
-    // Trip Setups' Rod Setups multi-select needs rodSetups itself, so it loads after that in turn.
-    loadMarkLists().then(() => loadRodSetups()).then(() => loadTripSetups()),
+    loadMarkLists(),
     loadUsers(),
     loadTiers(),
     loadMyMessages(),
@@ -825,421 +808,6 @@ async function onRemoveTier(idx) {
 
 function setTiersStatus(text, isError) {
   const el = document.getElementById("tiersStatus");
-  el.textContent = text;
-  el.style.color = isError ? "var(--red-600, #c0392b)" : "var(--grey-500)";
-}
-
-// ---------------------------------------------------------------------
-// Trips > Rod Setups (user_rod_setups) — a named rod+rig combo, available
-// to any signed-in user (same as Location Groups/Fishing Mark Lists, not
-// Admin-only like Tiers/Users). Its Rod/Rig <select>s, and the conditional
-// sub-list multi-select, are built from `markLists` (loaded by
-// loadMarkLists() above) — see renderRodSetupsList().
-// ---------------------------------------------------------------------
-let rodSetups = []; // [{id, name, rod, rig, subListItems}]
-
-async function loadRodSetups() {
-  if (!currentUser) {
-    rodSetups = [];
-    document.getElementById("tripsSection").style.display = "none";
-    return;
-  }
-  try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/rodsetups${effectiveUserIdParam()}`, { credentials: "include" });
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    rodSetups = await res.json();
-  } catch (err) {
-    console.error("Failed to load rod setups:", err);
-    rodSetups = [];
-    setRodSetupsStatus("Couldn't load rod setups — try reloading the page.", true);
-  }
-  document.getElementById("tripsSection").style.display = "block";
-  renderNewRodSetupSelects();
-  renderRodSetupsList();
-}
-
-/** Every value under one MARK_LIST_FIELDS label (e.g. "Rod", "Rig"), own account first then Public's
- * own (own wins on a name clash) — a Rod Setup can reference Public's gear too, same as everywhere
- * else this merged view applies. See mergedMarkListsFor. */
-function markListValuesFor(label) {
-  return mergedMarkListsFor(label).map((r) => r.value);
-}
-
-/** The "add a new setup" row's Rod/Rig pickers — kept in sync with Fishing Mark Lists' own Rod/Rig
- * options on every mark-list change (see renderMarkLists' own call to this), same as the per-row
- * pills built fresh in renderRodSetupsList. Rendered as pills (pillRowHtml) into
- * #newRodSetupRodPills/#newRodSetupRigPills, same look as the per-row pickers; the actual chosen
- * value lives in a hidden <input> (#newRodSetupRodSelect/#newRodSetupRigSelect, same ids as the old
- * <select>s) so onAddRodSetup (locationsadmin.js) keeps reading/resetting `.value` with no changes
- * needed there at all. */
-function renderNewRodSetupSelects() {
-  const rodInput = document.getElementById("newRodSetupRodSelect");
-  const rigInput = document.getElementById("newRodSetupRigSelect");
-  const rodPills = document.getElementById("newRodSetupRodPills");
-  const rigPills = document.getElementById("newRodSetupRigPills");
-  if (!rodInput || !rigInput || !rodPills || !rigPills) return;
-  const fill = (input, pillsContainer, field, options) => {
-    if (!options.includes(input.value)) input.value = "";
-    pillsContainer.innerHTML = pillRowHtml("data-new-setup-field", field, options, input.value, { allowNone: true });
-  };
-  fill(rodInput, rodPills, "rod", markListValuesFor("Rod"));
-  fill(rigInput, rigPills, "rig", markListValuesFor("Rig"));
-}
-
-// Delegated once (same reasoning as the other pill wiring above) — picking a pill here just sets
-// the matching hidden input's value and re-renders both pill rows to refresh the highlighted
-// state; onAddRodSetup reads the hidden inputs directly when "+ Add setup" is pressed.
-document.addEventListener("click", (e) => {
-  const pillEl = e.target.closest("[data-new-setup-field] .mark-pill");
-  if (!pillEl) return;
-  const field = pillEl.closest("[data-new-setup-field]").dataset.newSetupField;
-  document.getElementById(field === "rod" ? "newRodSetupRodSelect" : "newRodSetupRigSelect").value = pillEl.dataset.value;
-  renderNewRodSetupSelects();
-});
-
-function renderRodSetupsList() {
-  const list = document.getElementById("rodSetupsList");
-  if (!list) return; // not on this page load yet (loadRodSetups can resolve before init() finishes wiring)
-  const rodOptions = markListValuesFor("Rod");
-  const rigOptions = markListValuesFor("Rig");
-
-  list.innerHTML = "";
-  if (rodSetups.length === 0) {
-    list.innerHTML = `<p class="footnote" style="margin:0;text-align:left;">No rod setups yet — add one below.</p>`;
-  }
-  rodSetups.forEach((setup, idx) => {
-    const rig = mergedMarkListsFor("Rig").find((r) => r.value === setup.rig);
-    // Your own rig: its own Sub List. Public's rig: YOUR private override on top of it, if you have one.
-    const sublistOptions = rig ? (rig._isPublic ? rigSublistOverrides.get(rig.id) || [] : rig.hasSublist ? rig.subList || [] : []) : [];
-    const row = document.createElement("div");
-    row.className = "filter-row";
-    row.style.cssText = "align-items:center;flex-wrap:wrap;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--grey-200);";
-    row.innerHTML = `
-      <div style="flex:2;min-width:140px;">
-        <input type="text" data-setup-name="${idx}" value="${escapeHtml(setup.name)}" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);" />
-      </div>
-      <div style="flex:1;min-width:160px;">
-        <label class="footnote" style="margin:0;display:block;">Rod</label>
-        ${pillRowHtml("data-setup-rod", idx, rodOptions, setup.rod, { allowNone: true })}
-      </div>
-      <div style="flex:1;min-width:160px;">
-        <label class="footnote" style="margin:0;display:block;">Rig</label>
-        ${pillRowHtml("data-setup-rig", idx, rigOptions, setup.rig, { allowNone: true })}
-      </div>
-      ${sublistOptions.length ? `
-      <div style="flex-basis:100%;">
-        <label class="footnote" style="margin:0;display:block;">${escapeHtml(setup.rig)}</label>
-        ${multiPillRowHtml("data-setup-sublist", idx, sublistOptions, setup.subListItems || [])}
-      </div>` : ""}
-      <button type="button" data-remove-setup="${idx}" class="btn-secondary">Remove</button>
-    `;
-    list.appendChild(row);
-  });
-
-  list.querySelectorAll("[data-setup-name]").forEach((input) => {
-    input.addEventListener("change", (e) => onRodSetupFieldChange(Number(e.currentTarget.dataset.setupName), "name", e.currentTarget.value));
-  });
-  list.querySelectorAll("[data-remove-setup]").forEach((btn) => {
-    btn.addEventListener("click", (e) => onRemoveRodSetup(Number(e.currentTarget.dataset.removeSetup)));
-  });
-}
-
-// Delegated once (pills are recreated on every renderRodSetupsList() call, same reasoning as the
-// settingsGroupHtml wiring above) — reads which row (data-setup-rod/-rig/-sublist, set by
-// pillRowHtml/multiPillRowHtml on the wrapping .mark-pill-row) and which option (data-value, on
-// the pill itself) was tapped, then calls the SAME onRodSetupFieldChange the old <select> "change"
-// handlers called — only how the click is captured changed, not what happens with it.
-document.getElementById("rodSetupsList").addEventListener("click", (e) => {
-  const pillEl = e.target.closest(".mark-pill");
-  if (!pillEl) return;
-  const value = pillEl.dataset.value;
-  const rodRow = pillEl.closest("[data-setup-rod]");
-  if (rodRow) {
-    onRodSetupFieldChange(Number(rodRow.dataset.setupRod), "rod", value);
-    return;
-  }
-  const rigRow = pillEl.closest("[data-setup-rig]");
-  if (rigRow) {
-    // A different rig may have a different (or no) sub list — clears any previously chosen items, then re-renders.
-    onRodSetupFieldChange(Number(rigRow.dataset.setupRig), "rig", value, { subListItems: [] });
-    return;
-  }
-  const sublistRow = pillEl.closest("[data-setup-sublist]");
-  if (sublistRow) {
-    const idx = Number(sublistRow.dataset.setupSublist);
-    const current = rodSetups[idx].subListItems || [];
-    const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
-    onRodSetupFieldChange(idx, "subListItems", next);
-  }
-});
-
-/** Saves one field of an existing setup; `extra` merges in additional fields in the same request (e.g. clearing
- * subListItems when the rig itself changes) without needing a second round trip. */
-async function onRodSetupFieldChange(idx, field, value, extra) {
-  const setup = rodSetups[idx];
-  const body = { [field]: value, ...extra };
-  try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/rodsetups/${setup.id}${effectiveUserIdParam()}`, {
-      method: "PUT",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error || `status ${res.status}`);
-    }
-    rodSetups[idx] = await res.json();
-    setRodSetupsStatus("Saved.", false);
-    renderRodSetupsList();
-    renderTripSetupsList(); // a Trip Setup's Rod Setups multi-select shows this setup's name
-  } catch (err) {
-    console.error("Failed to save rod setup:", err);
-    setRodSetupsStatus(`Couldn't save: ${err.message}`, true);
-    renderRodSetupsList();
-  }
-}
-
-async function onAddRodSetup() {
-  const nameInput = document.getElementById("newRodSetupNameInput");
-  const rodSelect = document.getElementById("newRodSetupRodSelect");
-  const rigSelect = document.getElementById("newRodSetupRigSelect");
-  const name = nameInput.value.trim();
-  if (!name) {
-    setRodSetupsStatus("Enter a name for the setup.", true);
-    return;
-  }
-  try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/rodsetups${effectiveUserIdParam()}`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, rod: rodSelect.value || null, rig: rigSelect.value || null }),
-    });
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error || `status ${res.status}`);
-    }
-    rodSetups.push(await res.json());
-    nameInput.value = "";
-    rodSelect.value = "";
-    rigSelect.value = "";
-    setRodSetupsStatus("Added.", false);
-    renderRodSetupsList();
-    renderTripSetupsList(); // a new Rod Setup is now selectable in a Trip Setup
-  } catch (err) {
-    console.error("Failed to add rod setup:", err);
-    setRodSetupsStatus(`Couldn't add: ${err.message}`, true);
-  }
-}
-
-async function onRemoveRodSetup(idx) {
-  const setup = rodSetups[idx];
-  if (!confirm(`Remove the "${setup.name}" rod setup?`)) return;
-  try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/rodsetups/${setup.id}${effectiveUserIdParam()}`, { method: "DELETE", credentials: "include" });
-    if (!res.ok && res.status !== 404) {
-      const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error || `status ${res.status}`);
-    }
-    rodSetups.splice(idx, 1);
-    setRodSetupsStatus("Removed.", false);
-    renderRodSetupsList();
-    renderTripSetupsList(); // any Trip Setup referencing it just stops offering it as selected
-  } catch (err) {
-    console.error("Failed to remove rod setup:", err);
-    setRodSetupsStatus(`Couldn't remove: ${err.message}`, true);
-  }
-}
-
-function setRodSetupsStatus(text, isError) {
-  const el = document.getElementById("rodSetupsStatus");
-  el.textContent = text;
-  el.style.color = isError ? "var(--red-600, #c0392b)" : "var(--grey-500)";
-}
-
-// ---------------------------------------------------------------------
-// Trips > Trip Setups (user_trip_setups) — a named bundle of Rod Setups
-// plus everything else Session Defaults (Map tab, js/live-cards.js
-// liveSessionDefaults) controls outside a per-rod rig/bait pick: Species,
-// Water Condition, Berley, Fishing Method. Available to any signed-in
-// user, same as Rod Setups — not merged with Public's data (this is
-// personal, unlike Fishing Mark Lists/Location Groups).
-// ---------------------------------------------------------------------
-let tripSetups = []; // [{id, name, rodSetupIds, species, water, berley, fishingMethod}]
-
-async function loadTripSetups() {
-  if (!currentUser) {
-    tripSetups = [];
-    return;
-  }
-  try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/tripsetups${effectiveUserIdParam()}`, { credentials: "include" });
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    tripSetups = await res.json();
-  } catch (err) {
-    console.error("Failed to load trip setups:", err);
-    tripSetups = [];
-    setTripSetupsStatus("Couldn't load trip setups — try reloading the page.", true);
-  }
-  renderTripSetupsList();
-}
-
-function renderTripSetupsList() {
-  const list = document.getElementById("tripSetupsList");
-  if (!list) return; // not on this page load yet (loadTripSetups can resolve before init() finishes wiring)
-  const speciesOptions = mergedMarkListsFor("Species").map((r) => r.value);
-  const waterOptions = mergedMarkListsFor("Water Condition").map((r) => r.value);
-  const berleyOptions = mergedMarkListsFor("Berley").map((r) => r.value);
-  const fishingMethodOptions = mergedMarkListsFor("Fishing Method").map((r) => r.value);
-  const singleOptionsHtml = (options, current) =>
-    `<option value="">—</option>${options.map((o) => `<option value="${escapeHtml(o)}"${o === current ? " selected" : ""}>${escapeHtml(o)}</option>`).join("")}`;
-  const multiOptionsHtml = (options, current) =>
-    options.map((o) => `<option value="${escapeHtml(o)}"${(current || []).includes(o) ? " selected" : ""}>${escapeHtml(o)}</option>`).join("");
-  const multiSelectHtml = (dataAttr, idx, options, current, label) => `
-    <div style="flex:1;min-width:130px;">
-      <label class="footnote" style="margin:0;display:block;">${label}</label>
-      <select ${dataAttr}="${idx}" multiple size="${Math.min(4, Math.max(2, options.length))}" style="width:100%;padding:4px;border-radius:8px;border:1px solid var(--grey-200);">
-        ${multiOptionsHtml(options, current)}
-      </select>
-    </div>`;
-
-  list.innerHTML = "";
-  if (tripSetups.length === 0) {
-    list.innerHTML = `<p class="footnote" style="margin:0;text-align:left;">No trip setups yet — add one below.</p>`;
-  }
-  tripSetups.forEach((setup, idx) => {
-    const row = document.createElement("div");
-    row.className = "filter-row";
-    row.style.cssText = "align-items:center;flex-wrap:wrap;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--grey-200);";
-    row.innerHTML = `
-      <div style="flex:2;min-width:140px;">
-        <input type="text" data-trip-name="${idx}" value="${escapeHtml(setup.name)}" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);" />
-      </div>
-      <div style="flex:1;min-width:160px;">
-        <label class="footnote" style="margin:0;display:block;">Rod Setups</label>
-        <select data-trip-rodsetups="${idx}" multiple size="${Math.min(4, Math.max(2, rodSetups.length))}" style="width:100%;padding:4px;border-radius:8px;border:1px solid var(--grey-200);">
-          ${rodSetups.map((rs) => `<option value="${rs.id}"${(setup.rodSetupIds || []).includes(rs.id) ? " selected" : ""}>${escapeHtml(rs.name)}</option>`).join("")}
-        </select>
-      </div>
-      ${multiSelectHtml("data-trip-species", idx, speciesOptions, setup.species, "Species")}
-      <div style="flex:1;min-width:120px;">
-        <label class="footnote" style="margin:0;display:block;">Water</label>
-        <select data-trip-water="${idx}" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);">${singleOptionsHtml(waterOptions, setup.water)}</select>
-      </div>
-      <div style="flex:1;min-width:120px;">
-        <label class="footnote" style="margin:0;display:block;">Berley</label>
-        <select data-trip-berley="${idx}" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--grey-200);">${singleOptionsHtml(berleyOptions, setup.berley)}</select>
-      </div>
-      ${multiSelectHtml("data-trip-fishingmethod", idx, fishingMethodOptions, setup.fishingMethod, "Fishing Method")}
-      <button type="button" data-remove-trip="${idx}" class="btn-secondary">Remove</button>
-    `;
-    list.appendChild(row);
-  });
-
-  list.querySelectorAll("[data-trip-name]").forEach((input) => {
-    input.addEventListener("change", (e) => onTripSetupFieldChange(Number(e.currentTarget.dataset.tripName), "name", e.currentTarget.value));
-  });
-  list.querySelectorAll("[data-trip-rodsetups]").forEach((select) => {
-    select.addEventListener("change", (e) => {
-      const chosen = Array.from(e.currentTarget.selectedOptions).map((o) => o.value);
-      onTripSetupFieldChange(Number(e.currentTarget.dataset.tripRodsetups), "rodSetupIds", chosen);
-    });
-  });
-  list.querySelectorAll("[data-trip-species]").forEach((select) => {
-    select.addEventListener("change", (e) => {
-      const chosen = Array.from(e.currentTarget.selectedOptions).map((o) => o.value);
-      onTripSetupFieldChange(Number(e.currentTarget.dataset.tripSpecies), "species", chosen);
-    });
-  });
-  list.querySelectorAll("[data-trip-water]").forEach((select) => {
-    select.addEventListener("change", (e) => onTripSetupFieldChange(Number(e.currentTarget.dataset.tripWater), "water", e.currentTarget.value));
-  });
-  list.querySelectorAll("[data-trip-berley]").forEach((select) => {
-    select.addEventListener("change", (e) => onTripSetupFieldChange(Number(e.currentTarget.dataset.tripBerley), "berley", e.currentTarget.value));
-  });
-  list.querySelectorAll("[data-trip-fishingmethod]").forEach((select) => {
-    select.addEventListener("change", (e) => {
-      const chosen = Array.from(e.currentTarget.selectedOptions).map((o) => o.value);
-      onTripSetupFieldChange(Number(e.currentTarget.dataset.tripFishingmethod), "fishingMethod", chosen);
-    });
-  });
-  list.querySelectorAll("[data-remove-trip]").forEach((btn) => {
-    btn.addEventListener("click", (e) => onRemoveTripSetup(Number(e.currentTarget.dataset.removeTrip)));
-  });
-}
-
-async function onTripSetupFieldChange(idx, field, value) {
-  const setup = tripSetups[idx];
-  try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/tripsetups/${setup.id}${effectiveUserIdParam()}`, {
-      method: "PUT",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ [field]: value }),
-    });
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error || `status ${res.status}`);
-    }
-    tripSetups[idx] = await res.json();
-    setTripSetupsStatus("Saved.", false);
-    renderTripSetupsList();
-  } catch (err) {
-    console.error("Failed to save trip setup:", err);
-    setTripSetupsStatus(`Couldn't save: ${err.message}`, true);
-    renderTripSetupsList();
-  }
-}
-
-async function onAddTripSetup() {
-  const nameInput = document.getElementById("newTripSetupNameInput");
-  const name = nameInput.value.trim();
-  if (!name) {
-    setTripSetupsStatus("Enter a name for the trip setup.", true);
-    return;
-  }
-  try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/tripsetups${effectiveUserIdParam()}`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error || `status ${res.status}`);
-    }
-    tripSetups.push(await res.json());
-    nameInput.value = "";
-    setTripSetupsStatus("Added.", false);
-    renderTripSetupsList();
-  } catch (err) {
-    console.error("Failed to add trip setup:", err);
-    setTripSetupsStatus(`Couldn't add: ${err.message}`, true);
-  }
-}
-
-async function onRemoveTripSetup(idx) {
-  const setup = tripSetups[idx];
-  if (!confirm(`Remove the "${setup.name}" trip setup?`)) return;
-  try {
-    const res = await fetch(`${USER_BACKEND_URL}/api/tripsetups/${setup.id}${effectiveUserIdParam()}`, { method: "DELETE", credentials: "include" });
-    if (!res.ok && res.status !== 404) {
-      const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error || `status ${res.status}`);
-    }
-    tripSetups.splice(idx, 1);
-    setTripSetupsStatus("Removed.", false);
-    renderTripSetupsList();
-  } catch (err) {
-    console.error("Failed to remove trip setup:", err);
-    setTripSetupsStatus(`Couldn't remove: ${err.message}`, true);
-  }
-}
-
-function setTripSetupsStatus(text, isError) {
-  const el = document.getElementById("tripSetupsStatus");
   el.textContent = text;
   el.style.color = isError ? "var(--red-600, #c0392b)" : "var(--grey-500)";
 }
@@ -1806,7 +1374,7 @@ async function onChangeSpeciesLinks(speciesValue, detailsEl) {
   }
 }
 
-/** A Rig's own free-form sub list (Settings > Trips > Rod Setups reads it): a "Sub List" checkbox, and
+/** A Rig's own free-form sub list (the Map's Trip Defaults reads it): a "Sub List" checkbox, and
  * — once ticked — the option chips themselves plus an add row. `escAttr` is the rig value already escaped
  * for an HTML attribute (the caller's own, so it matches exactly what's in the surrounding chip markup).
  * A Public-sourced rig (entry._isPublic) gets a different, read-only-plus-private treatment instead —
@@ -2132,7 +1700,7 @@ function renderMarkLists() {
             </label>`).join("")}</div>
           ${isPublic ? "" : speciesLinksHtml(v)}`
         : "";
-      // Rig values can each maintain their own free-form sub list (Settings > Trips > Rod Setups reads
+      // Rig values can each maintain their own free-form sub list (the Map's Trip Defaults reads
       // it: choosing that rig there reveals a multi-pick of exactly these items). A Public rig instead
       // shows Public's own sub list read-only, plus your own PRIVATE layer on top (rigSublistHtml).
       const sublistHtml = key === "rig" ? rigSublistHtml(v, escAttr) : "";
@@ -2270,12 +1838,6 @@ function renderMarkLists() {
   });
   makeCollapsible(document.getElementById("markShapeFormatsFieldGroup"), "settingsCollapsed:markShapeFormats", true);
   makeCollapsible(document.getElementById("markColorFormatsFieldGroup"), "settingsCollapsed:markColorFormats", true);
-
-  // Rod/Rig options (and a rig's own sub list) just changed — keep Trips > Rod Setups in sync.
-  renderNewRodSetupSelects();
-  renderRodSetupsList();
-  // Species/Water/Berley/Fishing Method options just changed — keep Trip Setups in sync too.
-  renderTripSetupsList();
 }
 
 async function onAddMarkListValue(key) {
