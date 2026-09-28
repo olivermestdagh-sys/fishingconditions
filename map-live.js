@@ -1048,7 +1048,7 @@ function liveInitOnce() {
   document.getElementById("liveHoverPanelBanner").addEventListener("click", () => setPanelExpanded(!isPanelExpanded));
   // Manual backup for whichever device/browser doesn't fire the visibilitychange refresh below reliably — same
   // function either way, so there's nothing to keep in sync between the two triggers.
-  document.getElementById("btnRefreshLiveGps").addEventListener("click", liveRefreshGpsPosition);
+  document.getElementById("btnRefreshLiveGps").addEventListener("click", () => liveRefreshGpsPosition({ center: true }));
   // The automatic trigger itself — see liveRefreshGpsPosition's own comment for why this is scoped here (not
   // folded into app.js's unrelated syncAppHeight visibilitychange listener) and why resume-only, not a timer.
   document.addEventListener("visibilitychange", () => {
@@ -1167,7 +1167,7 @@ function liveExit() {
  * and back", not "keep silently polling GPS the whole time the screen's on".
  */
 let liveGpsRefreshInFlight = false;
-async function liveRefreshGpsPosition() {
+async function liveRefreshGpsPosition({ center = false } = {}) { // center: the Refresh button also pans the map to the new fix (the automatic refreshes leave the view alone)
   if (mapMode !== "live" || !liveMap || liveGpsRefreshInFlight) return;
   liveGpsRefreshInFlight = true;
   setGpsStatus("Refreshing your location…");
@@ -1193,6 +1193,7 @@ async function liveRefreshGpsPosition() {
       // Same spot: just correct the distance readout, no need to touch anything else about the open panel.
       updateDistanceDisplay(currentLoc);
     }
+    if (center) liveMap.setView([fresh.lat, fresh.lng], liveMap.getZoom()); // after any location switch above, which can move the view itself
     setGpsStatus("");
   } finally {
     liveGpsRefreshInFlight = false;
