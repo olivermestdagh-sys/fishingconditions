@@ -213,6 +213,7 @@ function teardownMode() {
   detachHomes();
   cancelPinMove();
   document.getElementById("markFilterBtn").style.display = "none";
+  document.getElementById("markColourBtn").style.display = "none";
   document.getElementById("exportStatus").textContent = "";
 }
 

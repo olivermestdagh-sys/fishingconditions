@@ -218,7 +218,8 @@ function renderActiveFilterChips(container, state, onChange) {
 const markFilterOpenGroups = new Set();
 const COLOUR_BY_GROUP = "__colourBy"; // the Colour By group's key in that set — can't clash with a real field key
 
-function showMarkFilterModal(state) {
+function showMarkFilterModal(state, mode = "filter") {
+  const colourOnly = mode === "colour"; // the palette button: just Colour By. The funnel button: everything else.
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.className = "ww-candidate-overlay";
@@ -304,26 +305,26 @@ function showMarkFilterModal(state) {
       MARK_LIST_FIELDS.map(({ key, label }) => sectionHtml(key, label, state.markLists.filter((r) => r.field === label).map((r) => r.value))).join("") +
       MARK_FILTER_ONLY_FIELDS.filter((f) => f.key !== "owner").map(filterOnlySection).join("");
 
-    // Colour By: a group like the filters, but its pills pick exactly ONE field (tapping the selected one keeps it —
-    // one is always active). Not a filter, so it never counts toward the gear's number; applied when the dialog closes.
-    const colourByHtml = groupHtml(
-      COLOUR_BY_GROUP,
-      "Colour By",
-      `<div style="display:flex;flex-wrap:wrap;gap:6px;">${MARK_LIST_FIELDS.map(({ key, label }) => {
-        const on = key === state.groupByKey;
-        return `<span class="loc-chip mark-colour-by-chip" data-colour-by="${key}" aria-pressed="${on}" style="cursor:pointer;${on ? chipStyleFor("range") : ""}">${label}</span>`;
-      }).join("")}</div>`
-    );
+    // Colour By: its pills pick exactly ONE field (tapping the selected one keeps it — one is always active). Not a
+    // filter, so it never counts toward the funnel's number; applied when the dialog closes. Shown on its own, always
+    // open, by the palette button.
+    const colourByHtml = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">${MARK_LIST_FIELDS.map(({ key, label }) => {
+      const on = key === state.groupByKey;
+      return `<span class="loc-chip mark-colour-by-chip" data-colour-by="${key}" aria-pressed="${on}" style="cursor:pointer;${on ? chipStyleFor("range") : ""}">${label}</span>`;
+    }).join("")}</div>`;
 
     overlay.innerHTML = `
       <div class="ww-candidate-dialog">
         <button type="button" class="ww-candidate-close" aria-label="Close">&times;</button>
-        <h3 style="margin:0 0 8px;">Filter marks</h3>
-        ${colourByHtml}
-        <p class="footnote" style="margin:0 0 12px;">Filters: tap once to require it, tap again to exclude it, tap again to clear.</p>
-        ${sectionsHtml || `<p class="footnote" style="margin:0;">No pick-list options set up yet — add some on the Settings tab first.</p>`}
+        <h3 style="margin:0 0 8px;">${colourOnly ? "Colour marks by" : "Filter marks"}</h3>
+        ${
+          colourOnly
+            ? `<p class="footnote" style="margin:0 0 10px;">Pick the field the marks are coloured by.</p>${colourByHtml}`
+            : `<p class="footnote" style="margin:0 0 12px;">Filters: tap once to require it, tap again to exclude it, tap again to clear.</p>
+        ${sectionsHtml || `<p class="footnote" style="margin:0;">No pick-list options set up yet — add some on the Settings tab first.</p>`}`
+        }
         <div style="display:flex;gap:8px;margin-top:6px;">
-          <button type="button" id="markFilterClearAll" class="btn-secondary" style="flex:1;">Clear all</button>
+          ${colourOnly ? "" : `<button type="button" id="markFilterClearAll" class="btn-secondary" style="flex:1;">Clear all</button>`}
           <button type="button" id="markFilterDone" class="btn-primary" style="flex:1;">Done</button>
         </div>
       </div>
@@ -375,7 +376,6 @@ function showMarkFilterModal(state) {
           c.setAttribute("aria-pressed", String(on));
           c.style.cssText = `cursor:pointer;${on ? chipStyleFor("range") : ""}`;
         });
-        refreshSummary(COLOUR_BY_GROUP);
       });
     });
 
@@ -411,7 +411,8 @@ function showMarkFilterModal(state) {
       });
     }
 
-    overlay.querySelector("#markFilterClearAll").addEventListener("click", () => {
+    const clearAllBtn = overlay.querySelector("#markFilterClearAll");
+    if (clearAllBtn) clearAllBtn.addEventListener("click", () => {
       for (const key of Object.keys(state.filters)) {
         state.filters[key] = key === "dateTime" ? { from: "", to: "" } : { include: new Set(), exclude: new Set() };
       }
@@ -421,7 +422,6 @@ function showMarkFilterModal(state) {
       });
       dateInputs.forEach((input) => (input.value = ""));
       overlay.querySelectorAll("[data-summary]").forEach((el) => (el.innerHTML = ""));
-      refreshSummary(COLOUR_BY_GROUP); // Colour By isn't a filter: Clear all leaves it as it is
     });
     overlay.querySelector("#markFilterDone").addEventListener("click", cleanup);
     overlay.querySelector(".ww-candidate-close").addEventListener("click", cleanup);
@@ -442,8 +442,10 @@ function showMarkFilterModal(state) {
 function initMarkControls(map, state) {
   const bar = document.getElementById("markControlsBar");
   const filterBtn = document.getElementById("markFilterBtn");
-  if (!bar || !filterBtn) return; // page doesn't have the controls markup (shouldn't happen on Location/Live, defensive)
+  const colourBtn = document.getElementById("markColourBtn");
+  if (!bar || !filterBtn || !colourBtn) return; // page doesn't have the controls markup (shouldn't happen on Location/Live, defensive)
   filterBtn.style.display = "";
+  colourBtn.style.display = "";
 
   const chipsContainer = document.getElementById("markActiveFilterChips");
   const badge = document.getElementById("markFilterBadge");
@@ -462,7 +464,11 @@ function initMarkControls(map, state) {
   // onclick, not addEventListener: this runs again every time marks reload (each mode switch), and the button
   // must act on the newest state only, not stack a handler per load.
   filterBtn.onclick = async () => {
-    await showMarkFilterModal(state);
+    await showMarkFilterModal(state, "filter");
+    refresh();
+  };
+  colourBtn.onclick = async () => {
+    await showMarkFilterModal(state, "colour");
     refresh();
   };
 

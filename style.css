@@ -2977,8 +2977,8 @@ main.wide {
   max-width: calc(100vw - 65px);
 }
 
-/* Compact icon-button style shared by the Map toolbar's gear button (Filters and Colour by —
-   the active-filter count follows the gear as "(5)", empty/hidden when no filter is on) and its
+/* Compact icon-button style shared by the Map toolbar's palette (Colour by) and funnel (Filters) buttons —
+   the active-filter count follows the funnel as "(5)", empty/hidden when no filter is on) and its
    Import/Export button (see .device-tools-menu below). */
 .map-toolbar .map-filter-btn {
   display: inline-flex;
