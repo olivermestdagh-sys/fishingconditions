@@ -33,6 +33,12 @@ function tdDefaultName(base, existingNames) {
   for (let n = 2; ; n++) if (!taken.has(`${base} ${n}`.toLowerCase())) return `${base} ${n}`;
 }
 
+/** Whether `list` already holds `value` (case-insensitive, trimmed) — new pick-list values must not duplicate. */
+function tdHasValue(list, value) {
+  const v = String(value).trim().toLowerCase();
+  return (list || []).some((x) => String(x).trim().toLowerCase() === v);
+}
+
 /** The Actions of one Trip, oldest first. */
 function tdActionsForTrip(actions, tripId) {
   return (actions || []).filter((a) => a.tripId === tripId);
@@ -59,12 +65,21 @@ async function tdApi(path, method = "GET", body) {
   return data;
 }
 
+/** Public's mark lists (tagged _isPublic: read-only for a normal user) merged with the signed-in user's own — own wins on a clash. */
+async function tdLoadMarkLists() {
+  const [pub, own] = await Promise.all([tdApi("/api/marklists?userId=public").catch(() => []), tdApi("/api/marklists").catch(() => [])]);
+  const merged = new Map();
+  for (const row of pub) merged.set(`${row.field}|${row.value}`, { ...row, _isPublic: true });
+  for (const row of own) merged.set(`${row.field}|${row.value}`, row);
+  return Array.from(merged.values());
+}
+
 async function tdLoadAll() {
   const [trips, actions, rodSetups, lists, overrides] = await Promise.all([
     tdApi("/api/tripsetups"),
     tdApi("/api/tripactions"),
     tdApi("/api/rodsetups"),
-    fetchUnionedMarkLists().catch(() => []),
+    tdLoadMarkLists(),
     tdApi("/api/rig-sublist-overrides").catch(() => []),
   ]);
   return {
@@ -103,6 +118,9 @@ async function showTripDefaults({ onClose } = {}) {
 
   let view = { name: "trips" }; // trips | trip {tripId} | action {tripId, actionId} | rod {tripId, actionId, rodId}
   let status = "";
+  let adding = null; // {kind, viewKey}: which "+ Add" pill is open as an inline text box, and on which screen
+  const viewKey = () => JSON.stringify(view);
+  const addingKind = () => (adding && adding.viewKey === viewKey() ? adding.kind : null);
   const close = () => {
     overlay.remove();
     document.body.classList.remove("live-card-open");
@@ -127,7 +145,13 @@ async function showTripDefaults({ onClose } = {}) {
 
   const choice = (label, attrs, selected) =>
     `<button type="button" class="live-card-choice${selected ? " selected" : ""}" ${attrs} aria-pressed="${!!selected}"><span>${esc(label)}</span></button>`;
-  const section = (title, body) => `<div class="td-section"><div class="td-section-title">${esc(title)}</div><div class="td-choices">${body}</div></div>`;
+  const section = (title, body, kind) =>
+    `<div class="td-section"><div class="td-section-title">${esc(title)}</div><div class="td-choices">${body}${kind ? addValuePill(kind) : ""}</div></div>`;
+  // A "+ Add" pill at the end of a pick-list; tapped, it becomes a text box with Add/Cancel in place.
+  const addValuePill = (kind) =>
+    addingKind() === kind
+      ? `<span class="td-inline-add"><input type="text" class="live-card-datetime-input td-input" data-new-value maxlength="80" placeholder="New name" /><button type="button" class="live-card-choice" data-save-value="${kind}">Add</button><button type="button" class="live-card-choice" data-cancel-value>Cancel</button></span>`
+      : `<button type="button" class="live-card-choice td-add-pill" data-add-value="${kind}">+ Add</button>`;
   const nameInput = (value, placeholder) =>
     `<input type="text" class="live-card-datetime-input td-input" data-name-input value="${esc(value)}" placeholder="${esc(placeholder)}" maxlength="80" />`;
   const addRow = (buttonLabel) => `
@@ -184,8 +208,8 @@ async function showTripDefaults({ onClose } = {}) {
       title: a.name,
       prompt: "Action name",
       body: `${nameInput(a.name, "Action name")}
-        ${section("Fishing method", o.fishingMethod.map((m) => choice(m, `data-method="${esc(m)}"`, a.fishingMethod.includes(m))).join("") || `<p class="live-card-empty">Nothing to choose yet.</p>`)}
-        ${section("Berley", o.berley.map((b) => choice(b, `data-berley="${esc(b)}"`, a.berley === b)).join("") || `<p class="live-card-empty">Nothing to choose yet.</p>`)}
+        ${section("Fishing method", o.fishingMethod.map((m) => choice(m, `data-method="${esc(m)}"`, a.fishingMethod.includes(m))).join("") || "", "method")}
+        ${section("Berley", o.berley.map((b) => choice(b, `data-berley="${esc(b)}"`, a.berley === b)).join("") || "", "berley")}
         <div class="td-section"><div class="td-section-title">Rod setups</div><div class="td-pills">${pills}</div>${addRow("+ Add rod setup")}</div>
         ${section("Species", o.species.map((s) => choice(s, `data-species="${esc(s)}"`, a.species.includes(s))).join("") || `<p class="live-card-empty">Nothing to choose yet.</p>`)}
         ${confirmDeleteHtml("Delete this action")}`,
@@ -202,9 +226,9 @@ async function showTripDefaults({ onClose } = {}) {
       title: r.name,
       prompt: "Rod setup name",
       body: `${nameInput(r.name, "Rod setup name")}
-        ${section("Rod", o.rods.map((v) => choice(v, `data-rod="${esc(v)}"`, r.rod === v)).join("") || `<p class="live-card-empty">Nothing to choose yet.</p>`)}
-        ${section("Rig", o.rigs.map((v) => choice(v, `data-rig="${esc(v)}"`, r.rig === v)).join("") || `<p class="live-card-empty">Nothing to choose yet.</p>`)}
-        ${sub.length ? section(`${r.rig} options`, sub.map((v) => choice(v, `data-sub="${esc(v)}"`, r.subListItems.includes(v))).join("")) : ""}
+        ${section("Rod", o.rods.map((v) => choice(v, `data-rod="${esc(v)}"`, r.rod === v)).join("") || "", "rod")}
+        ${section("Rig", o.rigs.map((v) => choice(v, `data-rig="${esc(v)}"`, r.rig === v)).join("") || "", "rig")}
+        ${r.rig ? section(`${r.rig} options`, sub.map((v) => choice(v, `data-sub="${esc(v)}"`, r.subListItems.includes(v))).join(""), "sub") : ""}
         ${confirmDeleteHtml("Delete this rod setup")}`,
       nav: navHtml("Back"),
     };
@@ -232,6 +256,8 @@ async function showTripDefaults({ onClose } = {}) {
       </div>`;
     overlay.querySelector(".live-card-grid").scrollTop = scrollTop;
     wire();
+    const newValueEl = overlay.querySelector("[data-new-value]");
+    if (newValueEl) newValueEl.focus();
   }
 
   function goBack() {
@@ -326,6 +352,58 @@ async function showTripDefaults({ onClose } = {}) {
     on("[data-rod]", (el) => setRod({ rod: tdToggleSingle(rod().rod, el.dataset.rod) }));
     on("[data-rig]", (el) => setRod({ rig: tdToggleSingle(rod().rig, el.dataset.rig), subListItems: [] }));
     on("[data-sub]", (el) => setRod({ subListItems: tdToggle(rod().subListItems, el.dataset.sub) }));
+
+    // "+ Add" on a pick-list: open the inline box, or save what was typed under the signed-in user and select it.
+    on("[data-add-value]", (el) => {
+      adding = { kind: el.dataset.addValue, viewKey: viewKey() };
+      render();
+    });
+    on("[data-cancel-value]", () => {
+      adding = null;
+      render();
+    });
+    const newValueInput = overlay.querySelector("[data-new-value]");
+    const saveNewValue = () => {
+      const value = newValueInput.value.trim();
+      const kind = addingKind();
+      adding = null;
+      if (!value) return render();
+      attempt(async () => {
+        if (kind === "sub") {
+          const rigRow = data.rigRows.find((row) => row.value === rod().rig);
+          if (!rigRow) throw new Error("Choose a rig first.");
+          const current = tdRigSublist(rigRow, data.overrides);
+          if (tdHasValue(current, value)) throw new Error(`"${value}" is already an option.`);
+          const subList = [...current, value];
+          if (rigRow._isPublic) {
+            // Not your rig: a private sub-list layered on top of Public's, same as Settings did.
+            const saved = await tdApi(`/api/rig-sublist-overrides/${rigRow.id}`, "PUT", { subList });
+            data.overrides.set(rigRow.id, saved.subList);
+          } else {
+            Object.assign(rigRow, await tdApi(`/api/marklists/${rigRow.id}`, "PUT", { hasSublist: true, subList }));
+          }
+          await put("/api/rodsetups", data.rodSetups, view.rodId, { subListItems: tdToggle(rod().subListItems, value) });
+          return;
+        }
+        const field = { method: "Fishing Method", berley: "Berley", rod: "Rod", rig: "Rig" }[kind];
+        if (tdHasValue(data.lists.filter((r) => r.field === field).map((r) => r.value), value)) throw new Error(`"${value}" already exists under ${field}.`);
+        const created = await tdApi("/api/marklists", "POST", { field, value });
+        data.lists.push(created);
+        data.options = sessionCardOptions(data.lists);
+        data.rigRows = data.lists.filter((r) => r.field === "Rig");
+        // The new value is picked straight away.
+        if (kind === "method") await put("/api/tripactions", data.actions, view.actionId, { fishingMethod: tdToggle(action().fishingMethod, value) });
+        else if (kind === "berley") await put("/api/tripactions", data.actions, view.actionId, { berley: value });
+        else if (kind === "rod") await put("/api/rodsetups", data.rodSetups, view.rodId, { rod: value });
+        else await put("/api/rodsetups", data.rodSetups, view.rodId, { rig: value, subListItems: [] });
+      });
+    };
+    on("[data-save-value]", saveNewValue);
+    if (newValueInput) {
+      newValueInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") saveNewValue();
+      });
+    }
 
     // Delete (two taps)
     on("[data-delete]", (el) => {

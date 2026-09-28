@@ -5,7 +5,7 @@ import fs from "node:fs";
 
 const src = fs.readFileSync(new URL("../js/trip-defaults.js", import.meta.url), "utf8");
 const pure = src.slice(0, src.indexOf("// --- Backend"));
-const fns = new Function(pure + "\nreturn { tdToggle, tdToggleSingle, tdRigSublist, tdActionsForTrip, tdLiveRodSetupIds, tdDefaultName };")();
+const fns = new Function(pure + "\nreturn { tdToggle, tdToggleSingle, tdRigSublist, tdActionsForTrip, tdLiveRodSetupIds, tdDefaultName, tdHasValue };")();
 
 test("tdToggle adds a missing value and removes a present one, without mutating", () => {
   const list = ["a"];
@@ -42,4 +42,10 @@ test("tdDefaultName picks the first unused 'New x' name, ignoring case", () => {
   assert.equal(fns.tdDefaultName("New trip", []), "New trip");
   assert.equal(fns.tdDefaultName("New trip", ["New trip"]), "New trip 2");
   assert.equal(fns.tdDefaultName("New trip", ["new trip", "New trip 2"]), "New trip 3");
+});
+
+test("tdHasValue is a trimmed, case-insensitive membership check", () => {
+  assert.equal(fns.tdHasValue(["Running Sinker"], " running sinker "), true);
+  assert.equal(fns.tdHasValue(["Running Sinker"], "Paternoster"), false);
+  assert.equal(fns.tdHasValue(undefined, "x"), false);
 });
