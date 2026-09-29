@@ -2805,6 +2805,17 @@ main.wide {
   margin-right: 4px;
 }
 
+/* Save/Cancel stay pinned to the bottom of the scrolling popup while editing. */
+.mark-edit-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: 10px;
+  padding: 6px 0;
+  background: #fff;
+  border-top: 1px solid var(--grey-200);
+}
+
 /* Mark edit form (buildMarkPopupEditHtml, js/marks-core.js): collapsible sections and single/multi-choice pills,
    laid out like the map's filter dialog. The real <select>s / tick-boxes stay in the form, hidden — the pills
    drive them (syncMarkFormPills). */

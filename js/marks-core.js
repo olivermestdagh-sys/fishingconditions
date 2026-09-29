@@ -1269,11 +1269,13 @@ function buildMarkPopupEditHtml(mark, markLists, opts = {}) {
         <div data-limit-warning class="mark-limit-warning" role="status" style="display:none;"></div>
         <div class="mark-edit-source">Source: ${escapeHtml(mark.source || "—")}</div>
       </form>
-      <div style="display:flex;gap:8px;margin-top:10px;">
-        <button type="button" class="btn-primary" data-mark-save style="padding:4px 10px;font-size:0.85rem;">Save</button>
-        <button type="button" class="btn-secondary" data-mark-cancel style="padding:4px 10px;font-size:0.85rem;">Cancel</button>
+      <div class="mark-edit-actions">
+        <div style="display:flex;gap:8px;">
+          <button type="button" class="btn-primary" data-mark-save style="padding:4px 10px;font-size:0.85rem;">Save</button>
+          <button type="button" class="btn-secondary" data-mark-cancel style="padding:4px 10px;font-size:0.85rem;">Cancel</button>
+        </div>
+        <div data-mark-save-status style="margin-top:6px;font-size:0.8rem;"></div>
       </div>
-      <div data-mark-save-status style="margin-top:6px;font-size:0.8rem;"></div>
     </div>
   `;
 }
