@@ -895,9 +895,11 @@ function renderBulkEditForm(map, state) {
             <textarea name="notes" placeholder="No change" rows="2" style="${MARK_POPUP_INPUT_STYLE}"></textarea>
           </label>
         </div>
-        <div data-bulk-edit-status style="margin:8px 0;font-size:0.85rem;"></div>
-        <button type="button" data-bulk-edit-save class="btn-primary" style="margin-right:8px;">Save to ${count} mark${count === 1 ? "" : "s"}</button>
-        <button type="button" data-bulk-edit-cancel class="btn-secondary">Cancel</button>
+        <div class="bulk-edit-actions">
+          <div data-bulk-edit-status style="margin:0 0 8px;font-size:0.85rem;"></div>
+          <button type="button" data-bulk-edit-save class="btn-primary" style="margin-right:8px;">Save to ${count} mark${count === 1 ? "" : "s"}</button>
+          <button type="button" data-bulk-edit-cancel class="btn-secondary">Cancel</button>
+        </div>
       </form>
     </div>
   `;

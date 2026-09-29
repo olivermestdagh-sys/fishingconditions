@@ -2805,6 +2805,18 @@ main.wide {
   margin-right: 4px;
 }
 
+/* Bulk edit form (renderBulkEditForm, js/marks-tools.js): Save/Cancel stay pinned to the bottom of the scrolling
+   .mark-detail-panel; the negative bottom offset cancels that panel's own 14px padding so the bar sits flush. */
+.bulk-edit-actions {
+  position: sticky;
+  bottom: -14px;
+  z-index: 2;
+  margin: 8px 0 -14px;
+  padding: 8px 0 14px;
+  background: var(--white);
+  border-top: 1px solid var(--grey-200);
+}
+
 /* Save/Cancel stay pinned to the bottom of the scrolling popup while editing. */
 .mark-edit-actions {
   position: sticky;
