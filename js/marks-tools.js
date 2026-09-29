@@ -323,7 +323,7 @@ function showMarkFilterModal(state, mode = "filter") {
             : `<p class="footnote" style="margin:0 0 12px;">Filters: tap once to require it, tap again to exclude it, tap again to clear.</p>
         ${sectionsHtml || `<p class="footnote" style="margin:0;">No pick-list options set up yet — add some on the Settings tab first.</p>`}`
         }
-        <div style="display:flex;gap:8px;margin-top:6px;">
+        <div class="mark-filter-actions" style="display:flex;gap:8px;">
           ${colourOnly ? "" : `<button type="button" id="markFilterClearAll" class="btn-secondary" style="flex:1;">Clear all</button>`}
           <button type="button" id="markFilterDone" class="btn-primary" style="flex:1;">Done</button>
         </div>

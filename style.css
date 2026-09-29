@@ -3127,6 +3127,18 @@ main.wide {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
 }
 
+/* Filter dialog (showMarkFilterModal, js/marks-tools.js): Clear all / Done stay pinned to the bottom of the
+   scrolling dialog; the negative offsets cancel the dialog's own 20px padding so the bar sits flush. */
+.mark-filter-actions {
+  position: sticky;
+  bottom: -20px;
+  z-index: 2;
+  margin: 6px -20px -20px;
+  padding: 10px 20px 20px;
+  background: var(--white);
+  border-top: 1px solid var(--grey-200);
+}
+
 .ww-candidate-close {
   position: absolute;
   top: 10px;
