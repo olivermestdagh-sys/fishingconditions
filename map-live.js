@@ -519,9 +519,17 @@ function renderLiveDefaultsUI() {
   const depth = document.getElementById("btnLiveDepth");
   if (!water || !depth) return;
   const d = getLiveMarkDefaults();
-  water.textContent = `Water: ${d.water || "—"}`;
-  depth.textContent = `Depth: ${d.depth != null ? d.depth.toFixed(1) + " m" : "—"}`;
+  const waterText = d.water || "—";
+  const depthText = d.depth != null ? d.depth.toFixed(1) + " m" : "—";
+  water.innerHTML = `${LIVE_WATER_ICON}<span>${escapeHtml(waterText)}</span>`;
+  depth.innerHTML = `${LIVE_DEPTH_ICON}<span>${escapeHtml(depthText)}</span>`;
+  water.setAttribute("aria-label", `Water condition: ${waterText}`);
+  depth.setAttribute("aria-label", `Water depth: ${depthText}`);
 }
+
+// The Water and Depth buttons swap their words for Lucide icons (waves; arrow-down-to-line) and keep the value beside them.
+const LIVE_WATER_ICON = '<svg class="btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/></svg>';
+const LIVE_DEPTH_ICON = '<svg class="btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17V3"/><path d="m6 11 6 6 6-6"/><path d="M19 21H5"/></svg>';
 
 /** The next value when cycling `options` from `current`: each option in turn, then none ("") after the last. */
 function nextCycleValue(options, current) {
