@@ -3948,6 +3948,10 @@ body.live-card-open { overflow: hidden; }
 .td-exit-btn { min-height: 0; padding: 10px 18px; border-radius: 999px; font-size: 1rem; font-weight: 600; }
 /* Live mode trips (map-live.js): the chosen trip's Actions as toolbar buttons; the running one is green. */
 .live-trip-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.map-toolbar .live-trip-action { background: var(--blue-900); border-color: var(--blue-900); color: #fff; }
+.map-toolbar #btnStartTrip.trip-start { background: #16a34a; border-color: #16a34a; color: #fff; }
+.map-toolbar #btnStartTrip.trip-stop { background: #dc2626; border-color: #dc2626; color: #fff; }
+#btnStartTrip svg { display: block; }
 .map-toolbar .live-trip-action.active { background: #16a34a; border-color: #16a34a; color: #fff; }
 .map-toolbar .live-trip-action:disabled { opacity: 0.55; }
 .map-toolbar #btnLiveWater, .map-toolbar #btnLiveDepth { font-weight: 600; }

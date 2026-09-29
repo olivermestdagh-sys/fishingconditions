@@ -250,6 +250,11 @@ function applyModeChrome() {
     if (deviceToolsMenu) deviceToolsMenu.classList.remove("open");
   }
   document.getElementById("btnTripDefaults").style.display = (mapMode === "normal" || isLive) && cachedIsSignedIn ? "" : "none";
+  const addHomeBtn = document.getElementById("btnAddHome");
+  if (isLive) {
+    if (addHomeBtn) addHomeBtn.style.display = "none"; // no adding homes in Live mode
+    if (typeof setHomeAddArmed === "function") setHomeAddArmed(false);
+  }
   const liveTripShown = isLive && cachedIsSignedIn;
   document.getElementById("btnStartTrip").style.display = liveTripShown ? "" : "none";
   document.getElementById("liveTripActions").style.display = liveTripShown ? "" : "none";

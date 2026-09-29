@@ -634,7 +634,19 @@ async function loadLiveTripData() {
   return liveTripData;
 }
 
-// Start Trip / End Trip label, and the chosen trip's Actions as buttons (active = its session is the running one).
+// The Start/End Trip button is icon-only: a green play (start) or a red stop (end).
+const LIVE_TRIP_PLAY_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></svg>';
+const LIVE_TRIP_STOP_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
+function setLiveTripButton(btn, running) {
+  btn.innerHTML = running ? LIVE_TRIP_STOP_ICON : LIVE_TRIP_PLAY_ICON;
+  const label = running ? "End Trip" : "Start Trip";
+  btn.title = label;
+  btn.setAttribute("aria-label", label);
+  btn.classList.toggle("trip-stop", running);
+  btn.classList.toggle("trip-start", !running);
+}
+
+// Start Trip / End Trip button, and the chosen trip's Actions as buttons (active = its session is the running one).
 function renderLiveTripUI() {
   const btn = document.getElementById("btnStartTrip");
   const box = document.getElementById("liveTripActions");
