@@ -625,6 +625,7 @@ function initMarkSelectionBoxDrag(map, state) {
     for (const markId of state.marksById.keys()) {
       const mark = state.marksById.get(markId);
       if (mark.lat == null || mark.lng == null) continue;
+      if (!markMatchesFilters(mark, state.filters)) continue; // filtered-out marks are hidden, so a box mustn't grab them
       if (bounds.contains([mark.lat, mark.lng])) toggleMarkSelectionSilent(state, markId);
     }
     renderSelectionPanel(map, state);
