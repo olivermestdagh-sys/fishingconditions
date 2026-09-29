@@ -3953,7 +3953,8 @@ body.live-card-open { overflow: hidden; }
 .map-toolbar #btnStartTrip.trip-start { background: #16a34a; border-color: #16a34a; color: #fff; }
 .map-toolbar #btnStartTrip.trip-stop { background: #dc2626; border-color: #dc2626; color: #fff; }
 #btnStartTrip svg { display: block; }
-#btnLiveWater, #btnLiveDepth { display: inline-flex; align-items: center; gap: 6px; }.map-toolbar .live-trip-action.active { background: #16a34a; border-color: #16a34a; color: #fff; }
+#btnLiveWater, #btnLiveDepth { display: inline-flex; align-items: center; gap: 6px; }
+.map-toolbar .live-trip-action.active { background: #16a34a; border-color: #16a34a; color: #fff; }
 .map-toolbar .live-trip-action:disabled { opacity: 0.55; }
 .map-toolbar #btnLiveWater, .map-toolbar #btnLiveDepth { font-weight: 600; }
 .mark-edit-sublabel { font-size: 0.75rem; font-weight: 600; margin: 8px 0 3px; opacity: 0.85; }
