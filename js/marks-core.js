@@ -1528,7 +1528,7 @@ function collectMarkFormValues(form, originalMark) {
  * throws, same contract saveMarkToGitHub had, so the popup's own Save
  * handler needed no changes beyond the function name itself.
  */
-async function saveMarkToD1(updatedMark, isNew) {
+async function saveMarkToD1(updatedMark, isNew, fullForm = false) {
   try {
     // A new mark gets its blank conditions filled from looked-up data first (mark-lookup.js; it can
     // only leave them blank, never fail the save). Editing an existing mark never re-fills a field
@@ -1537,11 +1537,22 @@ async function saveMarkToD1(updatedMark, isNew) {
     const url = isNew
       ? `${USER_BACKEND_URL}/api/marks`
       : `${USER_BACKEND_URL}/api/marks/${updatedMark.id}`;
+    // The Worker's PUT keeps any field that's absent from the body, so a field the user cleared (or that no longer
+    // applies to the type) has to go up as an explicit null, or it silently comes back after a refresh.
+    let payload = updatedMark;
+    if (!isNew && fullForm) {
+      payload = { ...updatedMark };
+      const clearable = [
+        ...MARK_POPUP_OPTIONAL_FIELDS.map((f) => f.key),
+        "notes", "rigOptions", "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed",
+      ];
+      for (const key of clearable) if (!(key in payload)) payload[key] = null;
+    }
     const res = await fetch(url, {
       method: isNew ? "POST" : "PUT",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(updatedMark),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
@@ -2026,7 +2037,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
       statusEl.textContent = "Saving…";
       statusEl.style.color = "";
 
-      const result = await saveMarkToD1(updated, options.isNew);
+      const result = await saveMarkToD1(updated, options.isNew, true);
       if (result.success) {
         // Captured before Object.assign overwrites mark's own lat/lng below — the marker itself is still sitting
         // at the OLD position at this point, so this is the only place that still knows whether it needs to move.
