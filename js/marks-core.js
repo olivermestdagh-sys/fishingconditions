@@ -230,7 +230,7 @@ function typeAllowsMultipleSpecies(type) {
 
 /** Fields where a Session can hold several values (stored comma-joined, the
  * same convention the Sync import already uses for bait/rig/rod/berley). */
-const SESSION_MULTI_VALUE_FIELDS = ["species", "bait", "rig", "rod", "berley", "fishingMethod"];
+const SESSION_MULTI_VALUE_FIELDS = ["species", "bait", "rig", "rod", "berley", "fishingMethod", "rigOptions"];
 function typeAllowsMultipleValues(type, key) {
   return isSessionType(type) && SESSION_MULTI_VALUE_FIELDS.includes(key);
 }
@@ -683,6 +683,56 @@ function markOwnerOptionsHtml(currentOwnerId) {
 // Which edit-form sections are open — kept across openings (all start collapsed), like the filter dialog's groups.
 const markEditOpenGroups = new Set();
 
+// The synthetic mark-list "field" the Rig options pills/tick-boxes are built under (their options come from a Rig's own Sub List,
+// not from a list of their own).
+const RIG_OPTIONS_LIST = "__rigOptions";
+
+/** {rig value: [its sub-options]} for every Rig in `markLists`: a rig's own Sub List when it has one, plus your private
+ * sub-list on a rig you don't own (rigSublistOverridesMap, js/backend.js). Rigs with none are left out. */
+function rigSublistMapFor(markLists) {
+  const out = {};
+  const overrides = typeof rigSublistOverridesMap !== "undefined" ? rigSublistOverridesMap : new Map();
+  for (const row of markLists || []) {
+    if (row.field !== "Rig") continue;
+    const items = [...(row.hasSublist && Array.isArray(row.subList) ? row.subList : []), ...(overrides.get(row.id) || [])];
+    const unique = [...new Set(items.map((v) => String(v).trim()).filter(Boolean))];
+    if (unique.length) out[row.value] = unique;
+  }
+  return out;
+}
+
+/** Keeps the Rig options pills in step with the chosen Rig(s): when the rig selection changes, the options become that rig's
+ * sub-options and any picked option that no longer belongs to it is dropped; the row hides when there are none. A no-op
+ * while the rig selection is unchanged (so it never disturbs what was picked). Called from syncMarkFormPills. */
+function refreshRigOptionsControls(form) {
+  const holder = form.querySelector("[data-rig-sublists]");
+  const rigState = markPillState(form, "rig");
+  const select = form.querySelector('select[name="rigOptions"]');
+  if (!holder || !rigState || !select) return;
+  const rigKey = JSON.stringify(rigState.selected);
+  if (holder.dataset.rigKey === rigKey) return;
+  let map = {};
+  try {
+    map = JSON.parse(holder.dataset.rigSublists || "{}");
+  } catch {
+    map = {};
+  }
+  const allowed = [...new Set(rigState.selected.flatMap((r) => map[r] || []))];
+  const lists = allowed.map((v) => ({ field: RIG_OPTIONS_LIST, value: v }));
+  const multiWrap = form.querySelector('[data-multi-multi="rigOptions"]');
+  const multiActive = !!multiWrap && multiWrap.dataset.active === "1";
+  const chosen = (multiActive ? Array.from(multiWrap.querySelectorAll("[data-multi-check]:checked")).map((b) => b.value) : select.value ? [select.value] : []).filter((v) => allowed.includes(v));
+  select.innerHTML = markListOptionsHtml(lists, RIG_OPTIONS_LIST, "");
+  if (!multiActive && chosen[0]) select.value = chosen[0];
+  if (multiWrap) {
+    const box = multiWrap.lastElementChild;
+    if (box) box.innerHTML = multiCheckboxesHtml(lists, RIG_OPTIONS_LIST, chosen.join(", "), "rigOptions");
+  }
+  const row = holder.querySelector("[data-rig-options-row]");
+  if (row) row.style.display = allowed.length ? "" : "none";
+  holder.dataset.rigKey = rigKey;
+}
+
 /** One collapsible section of the mark edit form, styled like the filter dialog's groups (see showMarkFilterModal,
  * js/marks-tools.js). While closed, its header shows what's set inside (syncMarkFormPills fills that in).
  * `fieldGroup` makes the whole section a `data-field-group`, so applyMarkFieldVisibility hides it for a type it
@@ -792,11 +842,20 @@ function markGpsFieldHtml(mark) {
     </label>
     <button type="button" class="btn-secondary mark-gps-copy" data-copy-gps="${escapeHtml(value)}" title="Copy the GPS coordinates">Copy</button>
   </div>`;
-  return (
-    row("GPS (DD)", "gps", markGpsText(mark), "-38.123456, 145.123456") +
-    row("GPS (DMS)", "gpsDms", markGpsDmsText(mark), `38°07'24.4"S, 145°17'33.6"E`) +
-    row("GPS (DDM)", "gpsDdm", markGpsDdmText(mark), `38°07.408'S, 145°17.560'E`)
-  );
+  // A collapsible GPS box: DD is always showing; the header opens the DMS and DDM versions.
+  const open = markEditOpenGroups.has("gps");
+  return `
+        <div class="mark-edit-group" data-edit-group="gps" style="margin-top:6px;">
+          <button type="button" class="mark-edit-group-head" data-edit-toggle="gps" aria-expanded="${open}">
+            <span class="mark-edit-caret" aria-hidden="true">▾</span>
+            <span class="mark-edit-group-label">GPS</span>
+          </button>
+          <div style="padding:0 9px 6px;">${row("GPS (DD)", "gps", markGpsText(mark), "-38.123456, 145.123456")}</div>
+          <div class="mark-edit-group-body" data-edit-body="gps"${open ? "" : " hidden"}>
+            ${row("GPS (DMS)", "gpsDms", markGpsDmsText(mark), `38°07'24.4"S, 145°17'33.6"E`)}
+            ${row("GPS (DDM)", "gpsDdm", markGpsDdmText(mark), `38°07.408'S, 145°17.560'E`)}
+          </div>
+        </div>`;
 }
 
 /** The reverse of markGpsText: "lat, lng" (any reasonable whitespace around the comma) back into {lat, lng}, or
@@ -940,6 +999,7 @@ function markPillState(form, name) {
  * (wireMarkPopupButtons, sync.js) and the async condition look-ups that fill fields in (js/marks-tools.js). */
 function syncMarkFormPills(form) {
   if (!form) return;
+  refreshRigOptionsControls(form);
   form.querySelectorAll("[data-pills-for]").forEach((row) => {
     const s = markPillState(form, row.dataset.pillsFor);
     if (!s) return;
@@ -1078,11 +1138,11 @@ for (const type of ["change", "input"]) {
 const MANUAL_MARK_TYPES = ["Catch", "Mark", "POI"];
 
 /**
- * Editable form version of the same popup, laid out as one deliberate sequence rather than a flat list: Type
- * first (nothing else can be decided before it), then Species right after it for a type that needs one (Catch/
- * Mark) — picking it defaults Name — then Name itself, Date/Time and the GPS position (editable — see
- * markGpsFieldHtml/parseGpsFieldValue — with its Copy button), then everything else as collapsible sections,
- * pick-lists as pills, each showing what's set while closed. Source is read-only metadata. See applyMarkEntryGate
+ * Editable form version of the same popup, in this order: Name, Type, Species, Size, Gear/Setup (bait, rig, the rig's
+ * sub-options, rod, berley, method), Weather (weather, tide, tide extreme, wind, water and the numeric readings),
+ * Date/Time, GPS (DD always showing, DMS/DDM one tap away — see markGpsFieldHtml/parseGpsFieldValue), Owner and
+ * Notes. Gear/Setup and Weather are collapsible sections whose pick-lists are pills, each showing what's set while
+ * closed. Type still has to be chosen first, then Species (picking it defaults Name). Source is read-only metadata. See applyMarkEntryGate
  * for the two-step "Type, then Species" lock this order exists to serve — Oliver's own request.
  *
  * `opts.allowAllTypes` (sync.js's GPX import review only — see MANUAL_MARK_TYPES) offers every configured Mark
@@ -1114,29 +1174,84 @@ function buildMarkPopupEditHtml(mark, markLists, opts = {}) {
             </label>
           </div>`;
   const speciesField = MARK_POPUP_OPTIONAL_FIELDS.find((f) => f.key === "species");
-  const otherPickLists = MARK_POPUP_OPTIONAL_FIELDS.filter((f) => f.key !== "species").map((f) => pickListGroup(f)).join("");
-  const windOptions = `<option value=""></option>${SHORE_OPTIONS.map((d) => `<option value="${d}" ${mark.windDirection === d ? "selected" : ""}>${d}</option>`).join("")}`;
+  const fieldByKey = (key) => MARK_POPUP_OPTIONAL_FIELDS.find((f) => f.key === key);
+  // A pick-list inside a section: a small label over its pill row (the real <select>, and a Session's tick-boxes, stay hidden
+  // beside it). Unlike pickListGroup it is not collapsible itself — the section it sits in is.
+  const pickListRow = (f) => `
+          <div data-field-group="${f.key}">
+            <div class="mark-edit-sublabel">${escapeHtml(f.displayLabel)}</div>
+            ${markPillRowHtml(f.key)}<div class="mark-edit-hidden-controls">${multiCapableControlsHtml(f, markLists, mark[f.key])}</div>
+          </div>`;
+  // Rig options: the sub-options of whichever Rig(s) are chosen (Settings > Fishing Mark Lists > a rig's Sub List). The list
+  // for every rig travels in data-rig-sublists so the options can follow a rig change live (refreshRigOptionsControls).
+  const rigSublistMap = rigSublistMapFor(markLists);
+  const splitCsv = (v) => String(v || "").split(",").map((x) => x.trim()).filter(Boolean);
+  const currentRigs = splitCsv(mark.rig);
+  const currentRigOptions = splitCsv(mark.rigOptions);
+  const rigOptionValues = [...new Set([...currentRigs.flatMap((r) => rigSublistMap[r] || []), ...currentRigOptions])];
+  const rigOptionLists = rigOptionValues.map((v) => ({ field: RIG_OPTIONS_LIST, value: v }));
+  const rigOptionsField = { key: "rigOptions", listLabel: RIG_OPTIONS_LIST, displayLabel: "Rig options" };
+  const rigOptionsRow = `
+          <div data-field-group="rigOptions" data-rig-sublists="${escapeHtml(JSON.stringify(rigSublistMap))}" data-rig-key="${escapeHtml(JSON.stringify(currentRigs))}">
+            <div data-rig-options-row style="display:${rigOptionValues.length ? "" : "none"};">
+              <div class="mark-edit-sublabel">Rig options</div>
+              ${markPillRowHtml("rigOptions")}<div class="mark-edit-hidden-controls">${multiCapableControlsHtml(rigOptionsField, rigOptionLists, mark.rigOptions)}</div>
+            </div>
+          </div>`;
+  const windRow = `
+          <div data-field-group="windDirection">
+            <div class="mark-edit-sublabel">Wind direction</div>
+            ${markPillRowHtml("windDirection")}${hiddenSelect("windDirection", `<option value=""></option>${SHORE_OPTIONS.map((d) => `<option value="${d}" ${mark.windDirection === d ? "selected" : ""}>${d}</option>`).join("")}`)}
+          </div>`;
   const typeMarkLists = opts.allowAllTypes ? markLists : markLists.filter((r) => r.field !== "Mark Type" || MANUAL_MARK_TYPES.includes(r.value));
 
+  // Field order: Name, Type, Species, Size, Gear/Setup, Weather, Date/Time, GPS, Owner, Notes.
   return `
     <div data-mark-id="${escapeHtml(mark.id)}" class="mark-edit" style="min-width:230px;max-width:280px;">
       <form data-mark-form class="mark-edit-form" onsubmit="return false;">
         <div data-type-first-prompt style="display:none;margin:0 0 6px;padding:6px 8px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:0.8rem;color:#854d0e;">Choose a type first — the rest of the form unlocks once it's set.</div>
-        <div class="mark-edit-groups" style="margin-top:0;">
+        <label class="mark-edit-field" style="margin-top:0;">Name
+          <input type="text" name="name" value="${escapeHtml(mark.name || "")}" style="${MARK_POPUP_INPUT_STYLE}" />
+        </label>
+        <div class="mark-edit-groups">
         ${markEditGroupHtml("type", "Type", markPillRowHtml("type", true) + hiddenSelect("type", markListOptionsHtml(typeMarkLists, "Mark Type", mark.type), "data-mark-type-select"))}
         </div>
         <div data-species-first-prompt style="display:none;margin:6px 0;padding:6px 8px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:0.8rem;color:#854d0e;">Choose a species first — the rest of the form unlocks once it's set.</div>
         <div class="mark-edit-groups" data-field-group="species">
         ${pickListGroup(speciesField)}
         </div>
-        ${numberField("size", "Size (cm)", " cm", 'min="0" step="1"')}
-        <label class="mark-edit-field">Name
-          <input type="text" name="name" value="${escapeHtml(mark.name || "")}" style="${MARK_POPUP_INPUT_STYLE}" />
-        </label>
         <div data-species-name-sync-confirm style="display:none;margin:6px 0;padding:6px 8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:0.8rem;">
           <div data-species-name-sync-text style="margin-bottom:4px;"></div>
           <button type="button" class="btn-secondary" data-species-name-sync-yes style="padding:2px 8px;font-size:0.8rem;">Yes, change it</button>
           <button type="button" class="btn-secondary" data-species-name-sync-no style="padding:2px 8px;font-size:0.8rem;">No, keep it</button>
+        </div>
+        ${numberField("size", "Size (cm)", " cm", 'min="0" step="1"')}
+        <div data-field-group="released">
+          <label class="mark-edit-field" style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" name="released" data-summary="Released" ${mark.released ? "checked" : ""} />
+            Released
+          </label>
+        </div>
+        <div class="mark-edit-groups">
+        ${markEditGroupHtml(
+          "gear",
+          "Gear/Setup",
+          pickListRow(fieldByKey("bait")) + pickListRow(fieldByKey("rig")) + rigOptionsRow + pickListRow(fieldByKey("rod")) + pickListRow(fieldByKey("berley")) + pickListRow(fieldByKey("fishingMethod"))
+        )}
+        ${markEditGroupHtml(
+          "weather",
+          "Weather",
+          pickListRow(fieldByKey("weatherCondition")) +
+            pickListRow(fieldByKey("tideCondition")) +
+            pickListRow(fieldByKey("tideExtreme")) +
+            windRow +
+            pickListRow(fieldByKey("waterCondition")) +
+            numberField("barometer", "Barometer (hPa)", " hPa", 'min="0" step="0.1"') +
+            numberField("temperature", "Temperature (°C)", "°C", 'step="0.1"') +
+            numberField("waterTemperature", "Water Temp (°C)", "°C water", 'step="0.1"') +
+            numberField("waterDepth", "Water Depth (m)", " m", 'min="0" step="0.1"') +
+            numberField("windSpeed", "Wind Speed (km/h)", " km/h", 'min="0" step="1"')
+        )}
         </div>
         <label class="mark-edit-field">Date/Time
           <input type="datetime-local" name="dateTime" step="1" value="${naiveToDatetimeLocal(mark.dateTime)}" style="${MARK_POPUP_INPUT_STYLE}" />
@@ -1144,29 +1259,6 @@ function buildMarkPopupEditHtml(mark, markLists, opts = {}) {
         ${markGpsFieldHtml(mark)}
         <div class="mark-edit-groups">
         ${cachedIsAdmin && mark.ownerUserId != null ? markEditGroupHtml("owner", "Owner", markPillRowHtml("ownerUserId", true) + hiddenSelect("ownerUserId", markOwnerOptionsHtml(mark.ownerUserId))) : ""}
-        ${otherPickLists}
-        <div data-field-group="rigOptions">
-          <label class="mark-edit-field">Rig options
-            <input type="text" name="rigOptions" placeholder="e.g. 3in Paddle Tail, Vibe" value="${escapeHtml(mark.rigOptions || "")}" style="${MARK_POPUP_INPUT_STYLE}" />
-          </label>
-        </div>
-        ${markEditGroupHtml("windDirection", "Wind Direction", markPillRowHtml("windDirection") + hiddenSelect("windDirection", windOptions), "windDirection")}
-        ${markEditGroupHtml(
-          "measurements",
-          "Measurements",
-            numberField("barometer", "Barometer (hPa)", " hPa", 'min="0" step="0.1"') +
-            numberField("temperature", "Temperature (°C)", "°C", 'step="0.1"') +
-            numberField("waterTemperature", "Water Temp (°C)", "°C water", 'step="0.1"') +
-            numberField("waterDepth", "Water Depth (m)", " m", 'min="0" step="0.1"') +
-            numberField("windSpeed", "Wind Speed (km/h)", " km/h", 'min="0" step="1"') +
-            `
-          <div data-field-group="released">
-            <label class="mark-edit-field" style="display:flex;align-items:center;gap:6px;">
-              <input type="checkbox" name="released" data-summary="Released" ${mark.released ? "checked" : ""} />
-              Released
-            </label>
-          </div>`
-        )}
         ${markEditGroupHtml(
           "notes",
           "Notes",
@@ -1395,7 +1487,10 @@ function collectMarkFormValues(form, originalMark) {
     }
   }
   if (applicable.includes("rigOptions")) {
-    const rigOptions = val("rigOptions");
+    let rigOptions = val("rigOptions");
+    if (typeAllowsMultipleValues(type, "rigOptions")) {
+      rigOptions = Array.from(form.querySelectorAll('[data-multi-check="rigOptions"]:checked')).map((el) => el.value).join(", ");
+    }
     if (rigOptions) updated.rigOptions = rigOptions;
   }
   if (applicable.includes("notes")) {

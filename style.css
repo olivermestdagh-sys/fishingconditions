@@ -3914,3 +3914,4 @@ body.live-card-open { overflow: hidden; }
 .map-toolbar .live-trip-action.active { background: #16a34a; border-color: #16a34a; color: #fff; }
 .map-toolbar .live-trip-action:disabled { opacity: 0.55; }
 .map-toolbar #btnLiveWater, .map-toolbar #btnLiveDepth { font-weight: 600; }
+.mark-edit-sublabel { font-size: 0.75rem; font-weight: 600; margin: 8px 0 3px; opacity: 0.85; }

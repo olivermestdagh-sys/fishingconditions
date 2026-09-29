@@ -513,6 +513,10 @@ const MARK_LISTS_FILE_PATH = `${USER_BACKEND_URL}/api/public/marklists`;
  * clash between the two — more likely to be the intentionally-current
  * one, having just been curated or moved there.
  */
+// Your private sub-lists on Rigs you don't own (Public's): rigId -> [items]. Refreshed by every fetchUnionedMarkLists call, and read
+// by rigSublistMapFor (js/marks-core.js) to offer a rig's sub-options on the mark edit form.
+let rigSublistOverridesMap = new Map();
+
 async function fetchUnionedMarkLists() {
   let publicList = [];
   let ownList = [];
@@ -527,6 +531,12 @@ async function fetchUnionedMarkLists() {
     if (res.ok) ownList = await res.json();
   } catch (err) {
     console.error("Could not load the signed-in account's own mark lists:", err);
+  }
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/rig-sublist-overrides?_=${Date.now()}`, { credentials: "include", cache: "no-store" });
+    if (res.ok) rigSublistOverridesMap = new Map((await res.json()).map((r) => [r.rigId, r.subList]));
+  } catch (err) {
+    console.error("Could not load rig sub-list overrides:", err);
   }
   const merged = new Map(); // "field|value" -> row, own account wins on a clash
   for (const row of publicList) merged.set(`${row.field}|${row.value}`, row);
