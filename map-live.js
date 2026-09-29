@@ -652,7 +652,7 @@ function renderLiveTripUI() {
   const box = document.getElementById("liveTripActions");
   if (!btn || !box) return;
   const state = getLiveTripState();
-  btn.textContent = state ? "End Trip" : "Start Trip";
+  setLiveTripButton(btn, !!state);
   if (!state) {
     box.innerHTML = "";
     return;
@@ -665,7 +665,7 @@ function renderLiveTripUI() {
   if (!trip) {
     setLiveTripState(null); // the trip was deleted in Trip Defaults
     box.innerHTML = "";
-    btn.textContent = "Start Trip";
+    setLiveTripButton(btn, false);
     return;
   }
   const active = liveActiveSession();
