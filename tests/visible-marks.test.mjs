@@ -10,7 +10,7 @@ const fn = (name) => {
   return m[0];
 };
 const getVisibleMarks = new Function(
-  [fn("markOwnerLabel"), fn("markFieldValue"), fn("markMatchesFilters"), fn("getVisibleMarks"), "return getVisibleMarks;"].join("\n")
+  [fn("markOwnerLabel"), fn("markFieldValue"), "const MARK_FILTER_MULTI_VALUE_KEYS = [\"species\", \"bait\", \"rig\", \"rod\", \"berley\", \"fishingMethod\", \"rigOptions\"];", fn("markFieldValues"), fn("markMatchesFilters"), fn("getVisibleMarks"), "return getVisibleMarks;"].join("\n")
 )();
 
 function stateWith(marks, filters) {
@@ -80,4 +80,15 @@ test("Owner filter follows the owner the Worker sent; a mark with none yet (unsa
   assert.deepEqual(ids(getVisibleMarks(stateWith(owned, only("Public", "exclude")))), ["c", "o", "p"]);
   const both = { owner: { include: new Set(["Mine", "Public"]), exclude: new Set() } };
   assert.deepEqual(ids(getVisibleMarks(stateWith(owned, both))), ["c", "m", "p"]); // either one
+});
+test("a comma-joined multi-value field (Session bait) matches each of its picks", () => {
+  const sessions = [
+    { id: "s1", bait: "Squid Jig, Prawn, Squid" },
+    { id: "s2", bait: "Prawn" },
+    { id: "s3" },
+  ];
+  const inc = { bait: { include: new Set(["Squid Jig"]), exclude: new Set() } };
+  assert.deepEqual(ids(getVisibleMarks(stateWith(sessions, inc))), ["s1"]);
+  const exc = { bait: { include: new Set(), exclude: new Set(["Squid Jig"]) } };
+  assert.deepEqual(ids(getVisibleMarks(stateWith(sessions, exc))), ["s2", "s3"]);
 });

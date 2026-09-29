@@ -765,13 +765,25 @@ function markFieldValue(mark, key) {
   return key === "owner" ? markOwnerLabel(mark) : mark[key];
 }
 
+/** A mark's value(s) for a filterable field as a list: a Session's multi-value fields (species, bait, rig, rod, berley,
+ * method, rig options) are stored comma-joined, so each pick counts separately — filtering on "Squid Jig" has to find
+ * "Squid Jig, Prawn, Squid" too. */
+const MARK_FILTER_MULTI_VALUE_KEYS = ["species", "bait", "rig", "rod", "berley", "fishingMethod", "rigOptions"];
+function markFieldValues(mark, key) {
+  const value = markFieldValue(mark, key);
+  if (!value) return [];
+  if (typeof value === "string" && MARK_FILTER_MULTI_VALUE_KEYS.includes(key)) {
+    return value.split(",").map((v) => v.trim()).filter(Boolean);
+  }
+  return [value];
+}
+
 /** Sorted list of every distinct non-empty value a given field actually
  * has across the currently-loaded marks — see MARK_FILTER_ONLY_FIELDS. */
 function distinctValuesForField(marksById, key) {
   const values = new Set();
   marksById.forEach((mark) => {
-    const value = markFieldValue(mark, key);
-    if (value) values.add(value);
+    for (const value of markFieldValues(mark, key)) values.add(value);
   });
   return [...values].sort();
 }

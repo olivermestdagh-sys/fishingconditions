@@ -92,12 +92,12 @@ function markMatchesFilters(mark, filters) {
       if (to && dt.slice(0, to.length) > to) return false;
       continue;
     }
-    const value = markFieldValue(mark, key);
+    const values = markFieldValues(mark, key);
     if (f.include && f.include.size > 0) {
-      if (!value || !f.include.has(value)) return false;
+      if (!values.some((v) => f.include.has(v))) return false;
     }
     if (f.exclude && f.exclude.size > 0) {
-      if (value && f.exclude.has(value)) return false;
+      if (values.some((v) => f.exclude.has(v))) return false;
     }
   }
   return true;
