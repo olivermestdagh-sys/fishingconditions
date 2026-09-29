@@ -838,19 +838,19 @@ function markGpsDdmText(mark) {
 function markGpsFieldHtml(mark) {
   const row = (label, name, value, placeholder) => `<div class="mark-gps-row" style="align-items:flex-end;">
     <label class="mark-edit-field" style="flex:1;margin:0;">${label}
-      <input type="text" name="${name}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" style="${MARK_POPUP_INPUT_STYLE}" />
+      <input type="text" name="${name}"${label ? "" : ' aria-label="GPS (DD)"'} value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" style="${MARK_POPUP_INPUT_STYLE}" />
     </label>
     <button type="button" class="btn-secondary mark-gps-copy" data-copy-gps="${escapeHtml(value)}" title="Copy the GPS coordinates">Copy</button>
   </div>`;
-  // A collapsible GPS box: DD is always showing; the header opens the DMS and DDM versions.
+  // A collapsible GPS box titled "GPS (DD)" (no separate GPS label): the DD field is always showing; the header opens the DMS and DDM versions.
   const open = markEditOpenGroups.has("gps");
   return `
         <div class="mark-edit-group" data-edit-group="gps" style="margin-top:6px;">
           <button type="button" class="mark-edit-group-head" data-edit-toggle="gps" aria-expanded="${open}">
             <span class="mark-edit-caret" aria-hidden="true">▾</span>
-            <span class="mark-edit-group-label">GPS</span>
+            <span class="mark-edit-group-label">GPS (DD)</span>
           </button>
-          <div style="padding:0 9px 6px;">${row("GPS (DD)", "gps", markGpsText(mark), "-38.123456, 145.123456")}</div>
+          <div style="padding:0 9px 6px;">${row("", "gps", markGpsText(mark), "-38.123456, 145.123456")}</div>
           <div class="mark-edit-group-body" data-edit-body="gps"${open ? "" : " hidden"}>
             ${row("GPS (DMS)", "gpsDms", markGpsDmsText(mark), `38°07'24.4"S, 145°17'33.6"E`)}
             ${row("GPS (DDM)", "gpsDdm", markGpsDdmText(mark), `38°07.408'S, 145°17.560'E`)}
