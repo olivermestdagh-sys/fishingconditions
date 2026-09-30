@@ -259,6 +259,9 @@ function applyModeChrome() {
     if (addHomeBtn) addHomeBtn.style.display = "none"; // no adding homes in Live mode
     if (typeof setHomeAddArmed === "function") setHomeAddArmed(false);
   }
+  const graphModeBtn = document.getElementById("btnLiveGraphMode");
+  graphModeBtn.style.display = isLive ? "" : "none"; // Nearest / Current Location graph toggle — Live mode only
+  if (isLive) renderLiveGraphModeUI();
   const liveTripShown = isLive && cachedIsSignedIn;
   document.getElementById("btnStartTrip").style.display = liveTripShown ? "" : "none";
   document.getElementById("liveTripActions").style.display = liveTripShown ? "" : "none";

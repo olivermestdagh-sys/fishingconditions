@@ -51,6 +51,126 @@ function getFreshGpsPosition() {
   });
 }
 
+// --- Live graph source: the Nearest / Current Location toggle (#btnLiveGraphMode) -----------------------------
+// "nearest" (default): take the GPS fix and show the graph of the closest SAVED location. "current": show a
+// WillyWeather preview graph for the GPS point itself, exactly what "View the conditions graph for this spot" gives
+// a tapped point on the Normal map (previewLocationOnMap, app.js) — drawn in Live's own panel, with a Kayak default and
+// the auto-guessed shore. Device-local (localStorage), like the Water/Depth defaults.
+const LIVE_GRAPH_MODE_KEY = "liveGraphMode";
+function getLiveGraphMode() {
+  try {
+    return localStorage.getItem(LIVE_GRAPH_MODE_KEY) === "current" ? "current" : "nearest";
+  } catch (err) {
+    return "nearest";
+  }
+}
+function setLiveGraphMode(mode) {
+  try {
+    localStorage.setItem(LIVE_GRAPH_MODE_KEY, mode);
+  } catch (err) {
+    // storage unavailable: the choice just won't survive a reload
+  }
+}
+function renderLiveGraphModeUI() {
+  const btn = document.getElementById("btnLiveGraphMode");
+  if (!btn) return;
+  const current = getLiveGraphMode() === "current";
+  btn.textContent = current ? "Current" : "Nearest";
+  btn.title = current
+    ? "Graph for your current location (tap for the nearest saved location)"
+    : "Graph for the nearest saved location (tap for your current location)";
+  btn.setAttribute("aria-label", current ? "Graph source: current location" : "Graph source: nearest location");
+  btn.setAttribute("aria-pressed", String(current));
+}
+
+let liveGraphRequestId = 0; // bumped per request so a slow preview can't land after a newer one (or after leaving Live)
+/**
+ * Puts the right graph on the Live panel for a GPS fix, per the toggle. Nearest: the closest saved spot (switching only
+ * when a different spot became the nearest, else just the distance readout). Current: the preview for this point,
+ * re-fetched only for a new spot, a forced refresh (button/toggle) or after moving 100 m+.
+ */
+async function liveShowGraphForPosition(position, { force = false } = {}) {
+  if (!position || !liveData) return;
+  const requestId = ++liveGraphRequestId;
+  if (getLiveGraphMode() === "current") {
+    await liveShowCurrentSpotGraph(position, requestId, force);
+    return;
+  }
+  const match = findNearestLocation(liveData.locations || [], position.lat, position.lng);
+  if (match && match.location.name !== currentLocationName) {
+    // Closer to a different tracked spot (or coming back from a Current preview) — switch to it, keeping whichever
+    // type (Kayak/Land based) was already selected rather than resetting to Kayak.
+    selectLocationAndType(match.location.name, currentType || "Kayak");
+  } else if (currentLoc) {
+    updateDistanceDisplay(currentLoc);
+  }
+}
+
+async function liveShowCurrentSpotGraph(position, requestId, force) {
+  const stale = () => requestId !== liveGraphRequestId || mapMode !== "live" || getLiveGraphMode() !== "current";
+  const nameEl = document.getElementById("liveHoverPanelLocationName");
+  const showing = currentLoc && currentLoc._preview ? currentLoc : null;
+  if (showing && !force && distanceKm(position.lat, position.lng, showing.lat, showing.lng) < 0.1) return; // hasn't moved
+  if (!showing) nameEl.textContent = "Current location…";
+  showLiveHoverPanel();
+  document.getElementById("liveHoverPanelDistance").textContent = "Loading the conditions graph…";
+
+  const candidates = await fetchWillyWeatherCandidates(position.lat, position.lng);
+  if (stale()) return;
+  if (!candidates || candidates.length === 0) {
+    document.getElementById("liveHoverPanelDistance").textContent = "No WillyWeather location found near you.";
+    return;
+  }
+  let candidate = candidates[0];
+  if (candidates.length > 1) {
+    const picked = await showLocationCandidatePicker(candidates, { allowManual: false });
+    if (stale()) return;
+    if (picked.action !== "pick") {
+      document.getElementById("liveHoverPanelDistance").textContent = "";
+      return;
+    }
+    candidate = picked.candidate;
+  }
+  const preview = await fetchWillyWeatherPreviewRows(candidate.id, position.lat, position.lng, candidate.lat, candidate.lng);
+  if (stale()) return;
+  if (!preview || preview.rows.length === 0) {
+    document.getElementById("liveHoverPanelDistance").textContent = "Couldn't load the graph for your location just now.";
+    return;
+  }
+  attachConditionScores(preview.rows, "Kayak", preview.shoreGuess);
+
+  const sameSpot = showing && showing._candidateId === candidate.id;
+  currentLoc = {
+    name: candidate.name,
+    type: "Kayak",
+    lat: position.lat,
+    lng: position.lng,
+    tideMaxObserved: preview.tideMaxObserved,
+    minTideHeight: null,
+    tideOffset: null,
+    _preview: true,
+    _candidateId: candidate.id,
+    _rows: preview.rows,
+    _sunTimes: preview.sunTimes,
+  };
+  currentLocationName = null; // not a saved spot — so the Nearest mode treats whatever it picks next as a switch
+  currentType = "Kayak";
+  stopFishingTime = null;
+  disarmSchedule();
+  document.getElementById("typePickerSection").style.display = "none"; // a preview has no Kayak/Land-based variants
+  nameEl.textContent = `${candidate.name} (current location)`;
+  document.getElementById("liveHoverPanelDistance").textContent = "";
+  setTimingsStatus("");
+  showLiveHoverPanel();
+  if (sameSpot && isPanelExpanded) {
+    renderForLocation(currentLoc);
+  } else if (!sameSpot) {
+    hasCenteredLiveChartOnNow = false;
+    hasRenderedExpandedContentForCurrentLoc = false;
+    setPanelExpanded(false); // a new spot starts collapsed, like a saved one
+  }
+}
+
 function setTimingsStatus(html, isError) {
   const el = document.getElementById("timingsStatus");
   if (!el) return;
@@ -849,7 +969,9 @@ function setPanelExpanded(expanded) {
 
 function updateDistanceDisplay(loc) {
   const el = document.getElementById("liveHoverPanelDistance");
-  if (currentGpsPosition && loc.lat != null && loc.lng != null) {
+  if (loc._preview) {
+    el.textContent = ""; // a Current Location preview is at your own position
+  } else if (currentGpsPosition && loc.lat != null && loc.lng != null) {
     const d = distanceKm(currentGpsPosition.lat, currentGpsPosition.lng, loc.lat, loc.lng);
     el.textContent = `${d.toFixed(1)}km away`;
   } else {
@@ -958,6 +1080,7 @@ let hasCenteredLiveChartOnNow = false;
 // _t-annotated rows for currentLoc.
 function getRowsForCurrentLoc() {
   if (!currentLoc) return [];
+  if (currentLoc._preview) return currentLoc._rows; // a Current Location preview carries its own rows (already _t-sorted)
   return (liveData.rows || [])
     .filter((r) => r["Location Name"] === currentLoc.name && r["Type"] === currentLoc.type)
     .map((r) => ({ ...r, _t: parseNaive(r.dateTime) }))
@@ -1020,7 +1143,7 @@ function renderForLocation(loc) {
   frame.style.display = "block";
   emptyState.style.display = "none";
 
-  const sunTimes = (liveData.sunTimes && liveData.sunTimes[loc.name]) || [];
+  const sunTimes = loc._preview ? loc._sunTimes || [] : (liveData.sunTimes && liveData.sunTimes[loc.name]) || [];
 
   const canvas = document.getElementById("liveChart");
   // Sets the WRAPPER's width, not the canvas's own — Chart.js's own
@@ -1060,7 +1183,7 @@ function renderForLocation(loc) {
     // the horizontal midpoint of the canvas, which the mobile centering scroll below depends on.
     xRange: { min: windowStart, max: windowEnd },
   });
-  renderLiveScheduleControls(loc);
+  renderLiveScheduleControls(loc._preview ? null : loc); // a preview has no saved timings to schedule from
 
   if (isMobileDevice && !hasCenteredLiveChartOnNow) {
     hasCenteredLiveChartOnNow = true;
@@ -1104,6 +1227,18 @@ function liveInitOnce() {
   document.getElementById("liveTripActions").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-trip-action]");
     if (btn) onTripActionTap(btn.dataset.tripAction);
+  });
+  document.getElementById("btnLiveGraphMode").addEventListener("click", async () => {
+    setLiveGraphMode(getLiveGraphMode() === "current" ? "nearest" : "current");
+    renderLiveGraphModeUI();
+    if (mapMode !== "live" || !liveMap) return;
+    const position = currentGpsPosition || (await getFreshGpsPosition());
+    if (!position) {
+      showLiveToast("Couldn't get your location — check location permission.", true);
+      return;
+    }
+    currentGpsPosition = position;
+    liveShowGraphForPosition(position, { force: true });
   });
   document.getElementById("btnLiveWater").addEventListener("click", cycleLiveWater);
   document.getElementById("btnLiveDepth").addEventListener("click", openLiveDepth);
@@ -1187,6 +1322,11 @@ async function liveEnter(isStale) {
 
   const match = findNearestLocation(locations, currentGpsPosition.lat, currentGpsPosition.lng);
   const built = liveBuildMap(currentGpsPosition);
+  if (getLiveGraphMode() === "current") {
+    setGpsStatus("");
+    liveShowGraphForPosition(currentGpsPosition, { force: true }); // not awaited — the map is usable while the graph loads
+    return built;
+  }
   if (!match) {
     setGpsStatus(`Got your location, but no configured spots have coordinates yet.`);
     return built;
@@ -1208,6 +1348,7 @@ function liveExit() {
   liveMap = null;
   liveMarkState = null;
   liveGpsMarker = null;
+  liveGraphRequestId++; // drop any Current Location preview still loading
   if (liveChart) {
     liveChart.destroy();
     liveChart = null;
@@ -1251,15 +1392,9 @@ async function liveRefreshGpsPosition({ center = false } = {}) { // center: the 
     }
     currentGpsPosition = fresh;
     if (liveGpsMarker) liveGpsMarker.setLatLng([fresh.lat, fresh.lng]);
-    const match = findNearestLocation(liveData.locations || [], fresh.lat, fresh.lng);
-    if (match && match.location.name !== currentLocationName) {
-      // Moved far enough (paddled/walked) to now be closer to a different tracked spot — switch to it, keeping
-      // whichever type (Kayak/Land based) was already selected rather than resetting to Kayak.
-      selectLocationAndType(match.location.name, currentType || "Kayak");
-    } else if (currentLoc) {
-      // Same spot: just correct the distance readout, no need to touch anything else about the open panel.
-      updateDistanceDisplay(currentLoc);
-    }
+    // Nearest: switch spot if a different one is now closest, else just correct the distance readout. Current: refresh
+    // the preview for the new position (see liveShowGraphForPosition).
+    await liveShowGraphForPosition(fresh, { force: center });
     if (center) liveMap.setView([fresh.lat, fresh.lng], liveMap.getZoom()); // after any location switch above, which can move the view itself
     setGpsStatus("");
   } finally {
