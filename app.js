@@ -249,7 +249,11 @@ function applyModeChrome() {
     const deviceToolsMenu = deviceTools.querySelector(".device-tools-menu");
     if (deviceToolsMenu) deviceToolsMenu.classList.remove("open");
   }
-  document.getElementById("btnTripDefaults").style.display = (mapMode === "normal" || isLive) && cachedIsSignedIn ? "" : "none";
+  const tripDefaultsBtn = document.getElementById("btnTripDefaults");
+  tripDefaultsBtn.style.display = (mapMode === "normal" || isLive) && cachedIsSignedIn ? "" : "none";
+  // Blue only in Live mode; in Normal mode it's the plain grey of the other toolbar buttons.
+  tripDefaultsBtn.classList.toggle("btn-primary", isLive);
+  tripDefaultsBtn.classList.toggle("btn-secondary", !isLive);
   const addHomeBtn = document.getElementById("btnAddHome");
   if (isLive) {
     if (addHomeBtn) addHomeBtn.style.display = "none"; // no adding homes in Live mode
