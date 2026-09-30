@@ -297,13 +297,18 @@ function showMarkFilterModal(state, mode = "filter") {
       );
     }
 
-    // Mark Owner comes first, then Date/Time, then the pick-list fields, then the remaining filter-only ones (Source).
+    // Mark Owner comes first, then Date/Time, then the pick-list fields (Rig Options straight after Rig), then the
+    // remaining filter-only ones (Source).
     const filterOnlySection = ({ key, label }) => sectionHtml(key, label, distinctValuesForField(state.marksById, key));
+    const rigOptionsField = MARK_FILTER_ONLY_FIELDS.find((f) => f.key === "rigOptions");
     const sectionsHtml =
       MARK_FILTER_ONLY_FIELDS.filter((f) => f.key === "owner").map(filterOnlySection).join("") +
       dateSectionHtml() +
-      MARK_LIST_FIELDS.map(({ key, label }) => sectionHtml(key, label, state.markLists.filter((r) => r.field === label).map((r) => r.value))).join("") +
-      MARK_FILTER_ONLY_FIELDS.filter((f) => f.key !== "owner").map(filterOnlySection).join("");
+      MARK_LIST_FIELDS.map(({ key, label }) =>
+        sectionHtml(key, label, state.markLists.filter((r) => r.field === label).map((r) => r.value)) +
+        (key === "rig" && rigOptionsField ? filterOnlySection(rigOptionsField) : "")
+      ).join("") +
+      MARK_FILTER_ONLY_FIELDS.filter((f) => f.key !== "owner" && f.key !== "rigOptions").map(filterOnlySection).join("");
 
     // Colour By: its pills pick exactly ONE field (tapping the selected one keeps it — one is always active). Not a
     // filter, so it never counts toward the funnel's number; applied when the dialog closes. Shown on its own, always

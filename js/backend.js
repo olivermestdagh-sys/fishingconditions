@@ -741,6 +741,7 @@ const MARK_LIST_FIELDS = [
  */
 const MARK_FILTER_ONLY_FIELDS = [
   { key: "source", label: "Source" },
+  { key: "rigOptions", label: "Rig Options" }, // the chosen Rig's Sub List items; the options come from the marks themselves, like Source
   { key: "owner", label: "Mark Owner" }, // "Mine", "Public" (Mark, POI) or, Admin only, "Other" (a different real user's own mark, now that Admin can see those too) — see markOwnerLabel
 ];
 
