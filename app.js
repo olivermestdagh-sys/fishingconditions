@@ -262,7 +262,7 @@ function applyModeChrome() {
   document.getElementById("btnLiveDepth").style.display = liveTripShown ? "" : "none";
   if (liveTripShown && typeof renderLiveDefaultsUI === "function") renderLiveDefaultsUI();
   if (liveTripShown && typeof renderLiveTripUI === "function") renderLiveTripUI(); // Start/End Trip label + the trip's action buttons
-  document.getElementById("btnRefreshLiveGps").style.display = isLive ? "" : "none";
+  document.getElementById("btnRefreshLiveGps").style.display = isLive || mapMode === "normal" ? "" : "none"; // Normal mode: the find-my-location button
   // +Catch is never shown just because Live mode is on — only updateLiveSessionButtons (map-live.js) reveals it, once
   // the marks have actually loaded and confirm there's an active session (a catch only makes sense once a session's
   // actually underway to log it against).
@@ -450,6 +450,33 @@ function renderLocationMap() {
   // somewhere to read marksById/markersById/markLists from once this
   // finishes loading them, without a second callback.
   loadAndRenderMarks(map, markLayerState);
+}
+
+// Normal mode's find-my-location button (the same #btnRefreshLiveGps Live mode uses to refresh its fix). Nothing in
+// Normal mode asks for the device's position on its own — only a press does: one fresh GPS fix, a "You are here"
+// dot (display only; unlike Live's, tapping it doesn't start a mark) and the map centred on it.
+let normalGpsMarker = null;
+let normalLocateInFlight = false;
+async function locateMeOnNormalMap() {
+  const map = leafletMapInstances["locationMap"];
+  if (mapMode !== "normal" || !map || normalLocateInFlight) return;
+  normalLocateInFlight = true;
+  try {
+    const fresh = await getFreshGpsPosition(); // map-live.js
+    if (mapMode !== "normal" || leafletMapInstances["locationMap"] !== map) return; // the map was left/rebuilt meanwhile
+    if (!fresh) {
+      showLiveToast("Couldn't get your location — check location permission.", true);
+      return;
+    }
+    if (normalGpsMarker && normalGpsMarker._map === map) {
+      normalGpsMarker.setLatLng([fresh.lat, fresh.lng]);
+    } else {
+      normalGpsMarker = L.marker([fresh.lat, fresh.lng], { icon: buildCurrentPositionDivIcon(), interactive: false }).addTo(map);
+    }
+    map.setView([fresh.lat, fresh.lng], Math.max(map.getZoom(), 13));
+  } finally {
+    normalLocateInFlight = false;
+  }
 }
 
 /**

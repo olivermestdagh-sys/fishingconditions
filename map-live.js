@@ -1111,7 +1111,11 @@ function liveInitOnce() {
   document.getElementById("liveHoverPanelBanner").addEventListener("click", () => setPanelExpanded(!isPanelExpanded));
   // Manual backup for whichever device/browser doesn't fire the visibilitychange refresh below reliably — same
   // function either way, so there's nothing to keep in sync between the two triggers.
-  document.getElementById("btnRefreshLiveGps").addEventListener("click", () => liveRefreshGpsPosition({ center: true }));
+  // Outside Live mode (Normal) the same button is the ONLY thing that ever asks for the device's position: see locateMeOnNormalMap, app.js.
+  document.getElementById("btnRefreshLiveGps").addEventListener("click", () => {
+    if (mapMode === "live") liveRefreshGpsPosition({ center: true });
+    else if (typeof locateMeOnNormalMap === "function") locateMeOnNormalMap();
+  });
   // The automatic trigger itself — see liveRefreshGpsPosition's own comment for why this is scoped here (not
   // folded into app.js's unrelated syncAppHeight visibilitychange listener) and why resume-only, not a timer.
   document.addEventListener("visibilitychange", () => {
