@@ -75,12 +75,12 @@ function renderLiveGraphModeUI() {
   const btn = document.getElementById("btnLiveGraphMode");
   if (!btn) return;
   const current = getLiveGraphMode() === "current";
-  btn.textContent = current ? "Current" : "Nearest";
+  btn.textContent = current ? "Current location" : "Nearest location";
   btn.title = current
     ? "Graph for your current location (tap for the nearest saved location)"
     : "Graph for the nearest saved location (tap for your current location)";
   btn.setAttribute("aria-label", current ? "Graph source: current location" : "Graph source: nearest location");
-  btn.setAttribute("aria-pressed", String(current));
+  btn.setAttribute("aria-checked", String(current));
 }
 
 let liveGraphRequestId = 0; // bumped per request so a slow preview can't land after a newer one (or after leaving Live)
@@ -1228,7 +1228,16 @@ function liveInitOnce() {
     const btn = e.target.closest("[data-trip-action]");
     if (btn) onTripActionTap(btn.dataset.tripAction);
   });
-  document.getElementById("btnLiveGraphMode").addEventListener("click", async () => {
+  const graphModeToggle = document.getElementById("btnLiveGraphMode");
+  graphModeToggle.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault(); // also stops the banner button's own Enter/Space from expanding the panel
+      e.stopPropagation();
+      graphModeToggle.click();
+    }
+  });
+  graphModeToggle.addEventListener("click", async (e) => {
+    e.stopPropagation(); // don't also expand/collapse the panel (this sits inside its banner button)
     setLiveGraphMode(getLiveGraphMode() === "current" ? "nearest" : "current");
     renderLiveGraphModeUI();
     if (mapMode !== "live" || !liveMap) return;

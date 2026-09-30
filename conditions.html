@@ -49,7 +49,6 @@
   <button type="button" id="btnStartTrip" class="btn-primary live-quick-btn trip-start" style="display:none;" title="Start Trip" aria-label="Start Trip"></button>
   <button type="button" id="btnLiveWater" class="btn-secondary live-quick-btn" style="display:none;" title="Default water condition for new marks — tap to cycle">Water: —</button>
   <button type="button" id="btnLiveDepth" class="btn-secondary live-quick-btn" style="display:none;" title="Default water depth for new marks">Depth: —</button>
-  <button type="button" id="btnLiveGraphMode" class="btn-secondary live-quick-btn" style="display:none;" title="Graph for the nearest saved location (tap for your current location)" aria-pressed="false">Nearest</button>
   <span id="liveTripActions"class="live-trip-actions" style="display:none;"></span>
   <button type="button" id="btnLiveCatch" class="btn-primary live-quick-btn" style="display:none;">+ Catch</button>
   <button type="button" id="btnRefreshLiveGps" class="btn-secondary live-quick-btn" style="display:none;" title="Find my location" aria-label="Find my location"><svg class="btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="2" x2="5" y1="12" y2="12"/><line x1="19" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="5"/><line x1="12" x2="12" y1="19" y2="22"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg></button>
@@ -189,6 +188,8 @@
       <button type="button" id="liveHoverPanelBanner" class="live-hover-banner" aria-expanded="false">
         <div>
           <h2 id="liveHoverPanelLocationName">&nbsp;</h2>
+          <!-- A span, not a <button>: it sits inside the banner button (which expands the panel); its click doesn't bubble. -->
+          <span id="btnLiveGraphMode" class="live-graph-mode" role="switch" tabindex="0" aria-checked="false">Nearest location</span>
           <p id="liveHoverPanelDistance" class="summary-sub" style="margin:0;"></p>
         </div>
         <span id="liveHoverPanelChevron" class="live-hover-chevron" aria-hidden="true">▾</span>
