@@ -110,7 +110,10 @@ async function liveShowCurrentSpotGraph(position, requestId, force) {
   const stale = () => requestId !== liveGraphRequestId || mapMode !== "live" || getLiveGraphMode() !== "current";
   const nameEl = document.getElementById("liveHoverPanelLocationName");
   const showing = currentLoc && currentLoc._preview ? currentLoc : null;
-  if (showing && !force && distanceKm(position.lat, position.lng, showing.lat, showing.lng) < 0.1) return; // hasn't moved
+  if (showing && !force && distanceKm(position.lat, position.lng, showing.lat, showing.lng) < 0.1) {
+    updateDistanceDisplay(showing); // hasn't moved enough to re-fetch; the readout still tracks the latest fix
+    return;
+  }
   if (!showing) nameEl.textContent = "Current location…";
   showLiveHoverPanel();
   document.getElementById("liveHoverPanelDistance").textContent = "Loading the conditions graph…";
@@ -150,6 +153,8 @@ async function liveShowCurrentSpotGraph(position, requestId, force) {
     tideOffset: null,
     _preview: true,
     _candidateId: candidate.id,
+    _wwLat: candidate.lat, // where the WillyWeather location the graph is for actually is (lat/lng above are YOUR position)
+    _wwLng: candidate.lng,
     _rows: preview.rows,
     _sunTimes: preview.sunTimes,
   };
@@ -159,7 +164,7 @@ async function liveShowCurrentSpotGraph(position, requestId, force) {
   disarmSchedule();
   document.getElementById("typePickerSection").style.display = "none"; // a preview has no Kayak/Land-based variants
   nameEl.textContent = `${candidate.name} (current location)`;
-  document.getElementById("liveHoverPanelDistance").textContent = "";
+  updateDistanceDisplay(currentLoc);
   setTimingsStatus("");
   showLiveHoverPanel();
   if (sameSpot && isPanelExpanded) {
@@ -970,7 +975,9 @@ function setPanelExpanded(expanded) {
 function updateDistanceDisplay(loc) {
   const el = document.getElementById("liveHoverPanelDistance");
   if (loc._preview) {
-    el.textContent = ""; // a Current Location preview is at your own position
+    // A Current Location preview: how far you are from the WillyWeather location the graph is actually for.
+    const from = currentGpsPosition || loc;
+    el.textContent = loc._wwLat != null && loc._wwLng != null ? `${distanceKm(from.lat, from.lng, loc._wwLat, loc._wwLng).toFixed(1)}km away` : "";
   } else if (currentGpsPosition && loc.lat != null && loc.lng != null) {
     const d = distanceKm(currentGpsPosition.lat, currentGpsPosition.lng, loc.lat, loc.lng);
     el.textContent = `${d.toFixed(1)}km away`;
