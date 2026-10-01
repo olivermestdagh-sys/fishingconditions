@@ -203,7 +203,7 @@ async function showTripDefaults({ onClose, start } = {}) {
 
   // `thumb` ({id, version}, optional): the value's first picture, shown beside its name.
   const choice = (label, attrs, selected, thumb) =>
-    `<button type="button" class="live-card-choice${selected ? " selected" : ""}${thumb ? " has-thumb" : ""}" ${attrs} aria-pressed="${!!selected}">${thumb ? `<img class="live-card-choice-thumb" src="${esc(speciesImageUrl(thumb))}" alt="" loading="lazy" />` : ""}<span>${esc(label)}</span></button>`;
+    `<button type="button" class="live-card-choice${selected ? " selected" : ""}${thumb ? " has-thumb" : ""}" ${attrs} aria-pressed="${!!selected}">${thumb ? `<img class="live-card-choice-thumb" src="${esc(speciesImageUrl(thumb))}" alt="" data-caption="${esc(label)}" loading="lazy" />` : ""}<span>${esc(label)}</span></button>`;
   const section = (title, body, kind) =>
     `<div class="td-section"><div class="td-section-title">${esc(title)}</div><div class="td-choices">${body}${kind ? addValuePill(kind) : ""}</div></div>`;
   // A "+ Add" pill at the end of a pick-list; tapped, it becomes a text box with Add/Cancel in place.

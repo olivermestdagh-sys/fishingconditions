@@ -184,10 +184,51 @@ function positionHoverImagePreview(e) {
   el.style.top = `${y}px`;
 }
 
-/** Hovering a choice's thumbnail (img.live-card-choice-thumb inside `root`) shows the same picture large beside the pointer. Mouse only. */
+/** True on a touch screen (no hover): there a choice's thumbnail opens a larger picture on tap instead of on hover. */
+function isTouchOnlyDevice() {
+  return typeof window.matchMedia === "function" && window.matchMedia("(hover: none)").matches;
+}
+
+/** Full-screen larger picture (same dark look as the Settings viewer); tapping anywhere or the × closes it. */
+function showImageLightbox(src, caption) {
+  const overlay = document.createElement("div");
+  overlay.className = "species-image-viewer";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  const top = document.createElement("div");
+  top.className = "species-image-viewer-top";
+  const title = document.createElement("span");
+  title.textContent = caption || "";
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.setAttribute("aria-label", "Close");
+  closeBtn.innerHTML = "&times;";
+  top.append(title, closeBtn);
+  const stage = document.createElement("div");
+  stage.className = "species-image-viewer-stage";
+  const big = document.createElement("img");
+  big.alt = caption || "";
+  big.src = src;
+  stage.appendChild(big);
+  overlay.append(top, stage);
+  overlay.addEventListener("click", () => overlay.remove());
+  document.body.appendChild(overlay);
+}
+
+/**
+ * A choice's thumbnail (img.live-card-choice-thumb inside `root`) can be seen larger: with a mouse, hovering shows the same picture beside
+ * the pointer; on a touch screen, tapping the small picture opens it full screen (and does NOT pick the choice — tap the name for that).
+ */
 function wireHoverImagePreview(root) {
   root.querySelectorAll("img.live-card-choice-thumb").forEach((img) => {
+    img.addEventListener("click", (e) => {
+      if (!isTouchOnlyDevice()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      showImageLightbox(img.src, img.dataset.caption || "");
+    });
     img.addEventListener("mouseenter", (e) => {
+      if (isTouchOnlyDevice()) return; // a tap also fires mouseenter; touch screens use the tap preview above
       hideHoverImagePreview();
       const big = document.createElement("img");
       big.className = "hover-image-preview";
