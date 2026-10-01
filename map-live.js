@@ -391,10 +391,11 @@ function liveCatchContext() {
 }
 
 // Map > Trip Defaults (Normal mode; js/trip-defaults.js): manage Trips, their Actions and Rod Setups.
-async function openTripDefaults() {
+async function openTripDefaults(start) {
   if (activeCardFlow) return;
   activeCardFlow = { close() {} }; // holds the one-card-flow-at-a-time guard while the hub loads and is open
   const flow = await showTripDefaults({
+    start: start && start.actionId ? start : undefined, // the toolbar's gear passes {tripId, actionId}; the Trip Defaults button passes a click event, which has neither
     onClose: () => {
       activeCardFlow = null;
       if (getLiveTripState()) loadLiveTripData().then(renderLiveTripUI); // its trips/actions may just have been edited
@@ -804,7 +805,13 @@ function renderLiveTripUI() {
   const active = liveActiveSession();
   const activeGroup = active && state.sessionGroupId && active.mark.sessionGroupId === state.sessionGroupId ? state.actionId : null;
   box.innerHTML = tdActionsForTrip(liveTripData.actions, trip.id)
-    .map((a) => `<button type="button" class="btn-secondary live-quick-btn live-trip-action${a.id === activeGroup ? " active" : ""}" data-trip-action="${escapeHtml(a.id)}" aria-pressed="${a.id === activeGroup}"${liveTripBusy ? " disabled" : ""}>${escapeHtml(a.name)}</button>`)
+    .map((a) => {
+      const on = a.id === activeGroup ? " active" : "";
+      const off = liveTripBusy ? " disabled" : "";
+      // The action pill: its name starts/ends the session; the gear on its right opens that Action for editing.
+      return `<span class="live-trip-pill"><button type="button" class="btn-secondary live-quick-btn live-trip-action${on}" data-trip-action="${escapeHtml(a.id)}" aria-pressed="${a.id === activeGroup}"${off}>${escapeHtml(a.name)}</button>` +
+        `<button type="button" class="btn-secondary live-quick-btn live-trip-action live-trip-gear${on}" data-trip-action-edit="${escapeHtml(a.id)}" aria-label="Edit ${escapeHtml(a.name)}" title="Edit action"${off}>${TD_GEAR_SVG}</button></span>`;
+    })
     .join("") || `<span class="map-toolbar-status">No actions in ${escapeHtml(trip.name)} yet — add some in Trip Defaults.</span>`;
 }
 
@@ -1232,6 +1239,12 @@ function liveInitOnce() {
   document.getElementById("btnTripDefaults").addEventListener("click", openTripDefaults);
   document.getElementById("btnStartTrip").addEventListener("click", onStartTripClick);
   document.getElementById("liveTripActions").addEventListener("click", (e) => {
+    const edit = e.target.closest("[data-trip-action-edit]");
+    if (edit) {
+      const state = getLiveTripState();
+      if (state) openTripDefaults({ tripId: state.tripId, actionId: edit.dataset.tripActionEdit });
+      return;
+    }
     const btn = e.target.closest("[data-trip-action]");
     if (btn) onTripActionTap(btn.dataset.tripAction);
   });

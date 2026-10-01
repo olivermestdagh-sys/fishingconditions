@@ -154,7 +154,7 @@ const TD_GEAR_SVG =
   '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>';
 
 /** Opens the hub. Returns {close}. `onClose` runs when it is closed. */
-async function showTripDefaults({ onClose } = {}) {
+async function showTripDefaults({ onClose, start } = {}) {
   let data;
   try {
     data = await tdLoadAll();
@@ -171,12 +171,15 @@ async function showTripDefaults({ onClose } = {}) {
   document.body.appendChild(overlay);
   document.body.classList.add("live-card-open");
 
-  let view = { name: "trips" }; // trips | trip {tripId} | action {tripId, actionId} | rod {tripId, actionId, rodId}
+  // `start` ({tripId, actionId}) opens straight on that Action (the Live toolbar's gear); Back from it then closes the hub.
+  const direct = start && data.actions.some((a) => a.id === start.actionId) ? { name: "action", tripId: start.tripId, actionId: start.actionId } : null;
+  let view = direct || { name: "trips" }; // trips | trip {tripId} | action {tripId, actionId} | rod {tripId, actionId, rodId}
   let status = "";
   let adding = null; // {kind, viewKey}: which "+ Add" pill is open as an inline text box, and on which screen
   const viewKey = () => JSON.stringify(view);
   const addingKind = () => (adding && adding.viewKey === viewKey() ? adding.kind : null);
   const close = () => {
+    hideHoverImagePreview();
     overlay.remove();
     document.body.classList.remove("live-card-open");
     if (onClose) onClose();
@@ -306,6 +309,7 @@ async function showTripDefaults({ onClose } = {}) {
   }
 
   function render() {
+    hideHoverImagePreview(); // the picture under the pointer is about to be replaced
     const scroll = overlay.querySelector(".live-card-grid");
     const scrollTop = scroll ? scroll.scrollTop : 0;
     const screen = view.name === "trips" ? tripsScreen() : view.name === "trip" ? tripScreen() : view.name === "action" ? actionScreen() : rodScreen();
@@ -321,12 +325,17 @@ async function showTripDefaults({ onClose } = {}) {
       </div>`;
     overlay.querySelector(".live-card-grid").scrollTop = scrollTop;
     wire();
+    wireHoverImagePreview(overlay); // hover a choice's picture to see it large
     const newValueEl = overlay.querySelector("[data-new-value]");
     if (newValueEl) newValueEl.focus();
   }
 
   function goBack() {
     status = "";
+    if (view.name === "action" && direct && view.actionId === direct.actionId) {
+      close();
+      return;
+    }
     if (view.name === "rod") view = { name: "action", tripId: view.tripId, actionId: view.actionId };
     else if (view.name === "action") view = { name: "trip", tripId: view.tripId };
     else view = { name: "trips" };

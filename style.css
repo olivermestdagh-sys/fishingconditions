@@ -3937,6 +3937,8 @@ body.live-card-open { overflow: hidden; }
 .live-card-choice-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; flex: 0 0 auto; background: rgba(255, 255, 255, 0.9); }
 .td-choices .live-card-choice.has-thumb { flex-direction: row; gap: 8px; padding: 6px 16px 6px 6px; }
 .td-choices .live-card-choice-thumb { width: 34px; height: 34px; border-radius: 999px; }
+/* The large picture shown while the pointer is over a choice's thumbnail in Trip Defaults (js/species-image.js's wireHoverImagePreview). */
+.hover-image-preview { position: fixed; z-index: 10050; max-width: min(380px, 60vw); max-height: min(380px, 70vh); border-radius: 12px; border: 3px solid #fff; background: #fff; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55); pointer-events: none; object-fit: contain; }
 /* Map > Trip Defaults (js/trip-defaults.js): reuses the .live-card-* look; these are its own sections, name inputs and
    Rod Setup pills (a selectable pill with a gear on its right that opens the setup's editor). */
 .td-grid { display: block; }
@@ -3974,6 +3976,11 @@ body.live-card-open { overflow: hidden; }
 .map-toolbar #btnStartTrip.trip-stop { background: #dc2626; border-color: #dc2626; color: #fff; }
 #btnStartTrip svg { display: block; }
 #btnLiveWater, #btnLiveDepth { display: inline-flex; align-items: center; gap: 6px; }
+/* An action pill: the name button plus a gear button on its right that edits the action. */
+.live-trip-pill { display: inline-flex; align-items: stretch; }
+.map-toolbar .live-trip-pill .live-trip-action:not(.live-trip-gear) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.map-toolbar .live-trip-pill .live-trip-gear { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 1px solid rgba(255, 255, 255, 0.35); padding-left: 8px; padding-right: 8px; display: inline-flex; align-items: center; }
+.live-trip-gear svg { display: block; width: 16px; height: 16px; }
 .map-toolbar .live-trip-action.active { background: #16a34a; border-color: #16a34a; color: #fff; }
 .map-toolbar .live-trip-action:disabled { opacity: 0.55; }
 .map-toolbar #btnLiveWater, .map-toolbar #btnLiveDepth { font-weight: 600; }

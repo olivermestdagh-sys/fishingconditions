@@ -163,6 +163,46 @@ async function deleteRigOptionImage(rigId, option, imageId, userParam, scope) {
   return res.json();
 }
 
+let hoverImagePreviewEl = null; // the large picture shown while the pointer is over a choice's thumbnail
+
+function hideHoverImagePreview() {
+  if (hoverImagePreviewEl) hoverImagePreviewEl.remove();
+  hoverImagePreviewEl = null;
+}
+
+/** Puts the large preview beside the pointer (right of it, or left when there's no room), kept inside the window. */
+function positionHoverImagePreview(e) {
+  const el = hoverImagePreviewEl;
+  if (!el) return;
+  const gap = 18;
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  let x = e.clientX + gap;
+  if (x + w > window.innerWidth - 8) x = Math.max(8, e.clientX - gap - w);
+  const y = Math.min(Math.max(8, e.clientY - h / 2), Math.max(8, window.innerHeight - h - 8));
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+}
+
+/** Hovering a choice's thumbnail (img.live-card-choice-thumb inside `root`) shows the same picture large beside the pointer. Mouse only. */
+function wireHoverImagePreview(root) {
+  root.querySelectorAll("img.live-card-choice-thumb").forEach((img) => {
+    img.addEventListener("mouseenter", (e) => {
+      hideHoverImagePreview();
+      const big = document.createElement("img");
+      big.className = "hover-image-preview";
+      big.alt = "";
+      big.addEventListener("load", () => positionHoverImagePreview(e)); // its size is only known once loaded
+      big.src = img.src;
+      document.body.appendChild(big);
+      hoverImagePreviewEl = big;
+      positionHoverImagePreview(e);
+    });
+    img.addEventListener("mousemove", positionHoverImagePreview);
+    img.addEventListener("mouseleave", hideHoverImagePreview);
+  });
+}
+
 /** Opens the file picker and resolves to the chosen File, or null if it was cancelled. */
 function pickImageFile() {
   return new Promise((resolve) => {
