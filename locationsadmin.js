@@ -1677,7 +1677,7 @@ function renderMarkLists() {
         <select class="mark-list-colorformat-select" data-field-label="${label}" data-value="${escAttr}"${overrideAttr} title="Mark Colour Format (optional)"
           style="font-size:0.7rem;padding:1px 3px;border-radius:5px;border:1px solid var(--grey-200);background:var(--white);color:var(--grey-500);">
           <option value=""${currentColor ? "" : " selected"}>Colour…</option>
-          ${colorNames.map((f) => `<option value="${f.replace(/"/g, "&quot;")}" ${f === currentColor ? "selected" : ""}>${f.replace(/</g, "&lt;")}</option>`).join("")}
+          ${colorNames.map((f) => `<option value="${f.replace(/"/g, "&quot;")}" ${f === currentColor ? "selected" : ""}${colorOptionStyle(f)}>${f.replace(/</g, "&lt;")}</option>`).join("")}
         </select>`;
       // Mark Type, Tide Condition and Tide Extreme values can't be deleted — they're kept for shaping/colouring.
       // A Public-sourced value is never removable here either — editing Public's own rows only ever
@@ -1839,6 +1839,24 @@ function renderMarkLists() {
   makeCollapsible(document.getElementById("markColorFormatsFieldGroup"), "settingsCollapsed:markColorFormats", true);
 }
 
+/** A random Mark Colour Format name not yet used by any value in this field's list (merged Public + own), so a new
+ * value starts out visually distinct. White is left out (poor on the map); once every colour is taken it just
+ * picks any at random. Returns null when no colour formats exist. */
+function pickUnusedColorFormat(fieldLabel) {
+  const all = mergedMarkListsFor("Mark Colour Format").filter((f) => f.color && f.color.toLowerCase() !== "#ffffff").map((f) => f.value);
+  if (all.length === 0) return null;
+  const used = new Set(mergedMarkListsFor(fieldLabel).map((v) => v.colorFormat).filter(Boolean));
+  const free = all.filter((n) => !used.has(n));
+  const pool = free.length ? free : all;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/** Inline style for one <option> in a colour dropdown: the format's own colour behind it, readable text on top. */
+function colorOptionStyle(formatName) {
+  const f = mergedMarkListsFor("Mark Colour Format").find((r) => r.value === formatName);
+  return f && f.color ? ` style="background:${f.color};color:${pickReadableTextColor(f.color)};"` : "";
+}
+
 async function onAddMarkListValue(key) {
   const fieldDef = MARK_LIST_FIELDS.find((f) => f.key === key);
   if (!fieldDef) return;
@@ -1857,7 +1875,7 @@ async function onAddMarkListValue(key) {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ field: fieldDef.label, value }),
+      body: JSON.stringify({ field: fieldDef.label, value, colorFormat: pickUnusedColorFormat(fieldDef.label) }),
     });
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
