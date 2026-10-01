@@ -132,6 +132,37 @@ async function deleteSpeciesImage(listId, imageId, userParam) {
   return res.json();
 }
 
+/** The URL of a Rig option's pictures (`imageId` for one picture). `scope` "private" = your own override of a Public rig; otherwise `userParam` ("?userId=..." or "") picks whose rig. */
+function rigOptionImageUrl(rigId, option, imageId, userParam, scope) {
+  const path = `${USER_BACKEND_URL}/api/marklists/${rigId}/options/${encodeURIComponent(option)}/images${imageId ? `/${encodeURIComponent(imageId)}` : ""}`;
+  return scope === "private" ? `${path}?scope=private` : `${path}${userParam || ""}`;
+}
+
+/** Adds (or, with `imageId`, replaces) a picture of one option of a Rig's sub list. Resolves to the updated rig row, or for scope "private" to {rigId, subList, optionImages}. */
+async function uploadRigOptionImage(rigId, option, blob, imageId, userParam, scope) {
+  const res = await fetch(rigOptionImageUrl(rigId, option, imageId, userParam, scope), {
+    method: imageId ? "PUT" : "POST",
+    credentials: "include",
+    headers: { "Content-Type": "image/jpeg" },
+    body: blob,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `status ${res.status}`);
+  }
+  return res.json();
+}
+
+/** Removes one picture of a Rig option. Same results as uploadRigOptionImage. */
+async function deleteRigOptionImage(rigId, option, imageId, userParam, scope) {
+  const res = await fetch(rigOptionImageUrl(rigId, option, imageId, userParam, scope), { method: "DELETE", credentials: "include" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `status ${res.status}`);
+  }
+  return res.json();
+}
+
 /** Opens the file picker and resolves to the chosen File, or null if it was cancelled. */
 function pickImageFile() {
   return new Promise((resolve) => {

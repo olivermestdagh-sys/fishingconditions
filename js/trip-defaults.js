@@ -144,6 +144,7 @@ async function tdLoadAll() {
     options: sessionCardOptions(lists),
     rigRows: lists.filter((r) => r.field === "Rig"),
     overrides: new Map(overrides.map((r) => [r.rigId, r.subList])),
+    overrideImages: new Map(overrides.map((r) => [r.rigId, r.optionImages || {}])), // pictures on the options of your private sub lists
   };
 }
 
@@ -197,8 +198,9 @@ async function showTripDefaults({ onClose } = {}) {
     render();
   }
 
-  const choice = (label, attrs, selected) =>
-    `<button type="button" class="live-card-choice${selected ? " selected" : ""}" ${attrs} aria-pressed="${!!selected}"><span>${esc(label)}</span></button>`;
+  // `thumb` ({id, version}, optional): the value's first picture, shown beside its name.
+  const choice = (label, attrs, selected, thumb) =>
+    `<button type="button" class="live-card-choice${selected ? " selected" : ""}${thumb ? " has-thumb" : ""}" ${attrs} aria-pressed="${!!selected}">${thumb ? `<img class="live-card-choice-thumb" src="${esc(speciesImageUrl(thumb))}" alt="" loading="lazy" />` : ""}<span>${esc(label)}</span></button>`;
   const section = (title, body, kind) =>
     `<div class="td-section"><div class="td-section-title">${esc(title)}</div><div class="td-choices">${body}${kind ? addValuePill(kind) : ""}</div></div>`;
   // A "+ Add" pill at the end of a pick-list; tapped, it becomes a text box with Add/Cancel in place.
@@ -269,9 +271,9 @@ async function showTripDefaults({ onClose } = {}) {
       title: a.name,
       prompt: "Action name",
       body: `${nameInput(a.name, "Action name")}
-        ${section("Fishing method", o.fishingMethod.map((m) => choice(m, `data-method="${esc(m)}"`, a.fishingMethod.includes(m))).join("") || "", "method")}
-        ${section("Berley", o.berley.map((b) => choice(b, `data-berley="${esc(b)}"`, a.berley === b)).join("") || "", "berley")}
-        ${section("Bait", o.baits.map((b) => choice(b, `data-bait="${esc(b)}"`, (a.bait || []).includes(b))).join("") || "", "bait")}
+        ${section("Fishing method", o.fishingMethod.map((m) => choice(m, `data-method="${esc(m)}"`, a.fishingMethod.includes(m), o.thumbs.fishingMethod[m])).join("") || "", "method")}
+        ${section("Berley", o.berley.map((b) => choice(b, `data-berley="${esc(b)}"`, a.berley === b, o.thumbs.berley[b])).join("") || "", "berley")}
+        ${section("Bait", o.baits.map((b) => choice(b, `data-bait="${esc(b)}"`, (a.bait || []).includes(b), o.thumbs.baits[b])).join("") || "", "bait")}
         <div class="td-section"><div class="td-section-title">Rod setups</div><div class="td-pills">${pills}</div>${addRow("rodsetup", "+ Add rod setup")}</div>
         ${section("Species", o.species.map((s) => choice(s, `data-species="${esc(s)}"`, a.species.includes(s))).join("") || `<p class="live-card-empty">Nothing to choose yet.</p>`)}
         ${confirmDeleteHtml("Delete this action")}`,
@@ -284,13 +286,14 @@ async function showTripDefaults({ onClose } = {}) {
     const o = data.options;
     const rigRow = data.rigRows.find((row) => row.value === r.rig);
     const sub = tdRigSublist(rigRow, data.overrides);
+    const subThumbs = rigOptionThumbs(rigRow, data.overrideImages);
     return {
       title: r.name,
       prompt: "Rod setup name",
       body: `${nameInput(r.name, "Rod setup name")}
-        ${section("Rod", o.rods.map((v) => choice(v, `data-rod="${esc(v)}"`, r.rod === v)).join("") || "", "rod")}
-        ${section("Rig", o.rigs.map((v) => choice(v, `data-rig="${esc(v)}"`, r.rig === v)).join("") || "", "rig")}
-        ${r.rig ? section(`${r.rig} options`, sub.map((v) => choice(v, `data-sub="${esc(v)}"`, r.subListItems.includes(v))).join(""), "sub") : ""}
+        ${section("Rod", o.rods.map((v) => choice(v, `data-rod="${esc(v)}"`, r.rod === v, o.thumbs.rods[v])).join("") || "", "rod")}
+        ${section("Rig", o.rigs.map((v) => choice(v, `data-rig="${esc(v)}"`, r.rig === v, o.thumbs.rigs[v])).join("") || "", "rig")}
+        ${r.rig ? section(`${r.rig} options`, sub.map((v) => choice(v, `data-sub="${esc(v)}"`, r.subListItems.includes(v), subThumbs[v])).join(""), "sub") : ""}
         ${confirmDeleteHtml("Delete this rod setup")}`,
       nav: navHtml("Back"),
     };

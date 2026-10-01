@@ -28,8 +28,10 @@ const worker = (await import(pathToFileURL(tmp).href)).default;
 const SITE = "https://site.example";
 
 /** A tiny in-memory stand-in for the two tables involved. `signedIn` false = no session. */
-function makeEnv({ field = "Species", index = null, signedIn = true } = {}) {
-  const list = { id: "sp1", user_id: "public", field, value: "Snapper", image_index: index };
+function makeEnv({ field = "Species", index = null, signedIn = true, subList = null, optionImages = null, override = null } = {}) {
+  const list = { id: "sp1", user_id: "public", field, value: "Snapper", image_index: index, sub_list: subList ? JSON.stringify(subList) : null, option_images: optionImages ? JSON.stringify(optionImages) : null };
+  // `override` = the signed-in user's private sub list on this rig: {subList, optionImages}
+  const ov = override ? { id: "ov1", user_id: "admin-id", rig_id: "sp1", sub_list: JSON.stringify(override.subList), option_images: override.optionImages ? JSON.stringify(override.optionImages) : null } : null;
   const images = new Map();
   const batches = [];
   const runs = [];
@@ -42,6 +44,7 @@ function makeEnv({ field = "Species", index = null, signedIn = true } = {}) {
       async first() {
         if (/FROM sessions/.test(sql)) return signedIn ? { id: "admin-id", role: "admin" } : null;
         if (/FROM user_mark_lists WHERE id/.test(sql)) return args[0] === list.id ? { ...list } : null;
+        if (/FROM user_rig_sublist_overrides/.test(sql)) return ov ? { ...ov } : null;
         if (/FROM species_images WHERE id/.test(sql)) return images.get(args[0]) || null;
         return null;
       },
@@ -52,9 +55,11 @@ function makeEnv({ field = "Species", index = null, signedIn = true } = {}) {
     if (/INSERT INTO species_images/.test(s.sql)) images.set(s.args[0], { content_type: s.args[2], data: s.args[3], updated_at: s.args[4] });
     else if (/DELETE FROM species_images/.test(s.sql)) images.delete(s.args[0]);
     else if (/UPDATE user_mark_lists SET image_index/.test(s.sql)) list.image_index = s.args[0];
+    else if (/UPDATE user_mark_lists SET option_images/.test(s.sql)) list.option_images = s.args[0];
+    else if (/UPDATE user_rig_sublist_overrides SET option_images/.test(s.sql)) ov.option_images = s.args[0];
   };
   return {
-    list, images, batches, runs,
+    list, ov, images, batches, runs,
     ALLOWED_ORIGIN: SITE,
     DB: {
       prepare: stmt,
@@ -137,8 +142,8 @@ test("bad uploads are refused and nothing is saved", async () => {
     assert.equal(res.status, status, label);
     assert.deepEqual(env.batches, [], label);
   }
-  const notSpecies = makeEnv({ field: "Bait" });
-  assert.equal((await call(notSpecies, "POST", "/api/marklists/sp1/images")).status, 400);
+  const notAllowed = makeEnv({ field: "Water Condition" });
+  assert.equal((await call(notAllowed, "POST", "/api/marklists/sp1/images")).status, 400);
   const signedOut = makeEnv({ signedIn: false });
   assert.equal((await call(signedOut, "POST", "/api/marklists/sp1/images")).status, 401);
   assert.equal((await call(makeEnv(), "POST", "/api/marklists/missing/images")).status, 404);
@@ -164,4 +169,123 @@ test("deleting a species also deletes its images", async () => {
   const res = await call(env, "DELETE", "/api/marklists/sp1?userId=public", { type: "" });
   assert.equal(res.status, 204);
   assert.ok(env.runs.some((r) => /DELETE FROM species_images WHERE list_id = \?/.test(r.sql) && r.args[0] === "sp1"));
+});
+
+test("Bait, Rig, Rod, Berley and Fishing Method entries can hold pictures too", async () => {
+  for (const field of ["Bait", "Rig", "Rod", "Berley", "Fishing Method"]) {
+    const env = makeEnv({ field });
+    const res = await call(env, "POST", "/api/marklists/sp1/images?userId=public");
+    assert.equal(res.status, 201, field);
+    assert.equal((await res.json()).images.length, 1, field);
+  }
+});
+
+// --- Rig option pictures ------------------------------------------------------------------------------------------
+const json = (obj) => ({ type: "application/json", body: JSON.stringify(obj) });
+const optPath = (option, rest = "") => `/api/marklists/sp1/options/${encodeURIComponent(option)}/images${rest}`;
+
+test("a picture on a rig option is stored, indexed per option and returned as optionImages", async () => {
+  const env = makeEnv({ field: "Rig", subList: ["Vibe", "Paddle Tail"] });
+  const res = await call(env, "POST", optPath("Paddle Tail") + "?userId=public");
+  assert.equal(res.status, 201);
+  const row = await res.json();
+  assert.equal(row.optionImages["Paddle Tail"].length, 1);
+  assert.equal(row.optionImages.Vibe, undefined);
+  assert.deepEqual(row.images, [], "the rig's own pictures are separate");
+  const stored = JSON.parse(env.list.option_images);
+  assert.equal(stored["Paddle Tail"][0].id, row.optionImages["Paddle Tail"][0].id);
+  assert.equal(env.images.has(stored["Paddle Tail"][0].id), true);
+});
+
+test("option pictures can be replaced and deleted; the index empties back to none", async () => {
+  const env = makeEnv({ field: "Rig", subList: ["Vibe"] });
+  const a = (await (await call(env, "POST", optPath("Vibe") + "?userId=public")).json()).optionImages.Vibe[0];
+  await new Promise((r) => setTimeout(r, 5));
+  const replaced = await (await call(env, "PUT", optPath("Vibe", `/${a.id}`) + "?userId=public", { body: new Uint8Array([7, 7]) })).json();
+  assert.ok(replaced.optionImages.Vibe[0].version > a.version);
+  const gone = await (await call(env, "DELETE", optPath("Vibe", `/${a.id}`) + "?userId=public")).json();
+  assert.deepEqual(gone.optionImages, {});
+  assert.equal(env.list.option_images, null);
+  assert.equal(env.images.has(a.id), false);
+});
+
+test("option pictures are refused for an option that isn't in the sub list, and for a non-Rig", async () => {
+  const env = makeEnv({ field: "Rig", subList: ["Vibe"] });
+  assert.equal((await call(env, "POST", optPath("Nope") + "?userId=public")).status, 404);
+  const bait = makeEnv({ field: "Bait", subList: ["Vibe"] });
+  assert.equal((await call(bait, "POST", optPath("Vibe") + "?userId=public")).status, 404);
+  assert.equal((await call(makeEnv({ field: "Rig", subList: ["Vibe"], signedIn: false }), "POST", optPath("Vibe"))).status, 401);
+});
+
+test("removing an option from a rig's sub list deletes its pictures but keeps the others", async () => {
+  const env = makeEnv({
+    field: "Rig",
+    subList: ["Vibe", "Paddle Tail"],
+    optionImages: { Vibe: [{ id: "v1", v: 1 }], "Paddle Tail": [{ id: "p1", v: 1 }, { id: "p2", v: 1 }] },
+  });
+  env.images.set("v1", {});
+  env.images.set("p1", {});
+  env.images.set("p2", {});
+  const res = await call(env, "PUT", "/api/marklists/sp1?userId=public", json({ subList: ["Vibe"] }));
+  assert.equal(res.status, 200);
+  assert.equal(env.images.has("v1"), true);
+  assert.equal(env.images.has("p1"), false);
+  assert.equal(env.images.has("p2"), false);
+  assert.deepEqual(Object.keys(JSON.parse(env.list.option_images)), ["Vibe"]);
+});
+
+test("deleting a rig deletes every picture stored against it, option pictures included", async () => {
+  const env = makeEnv({ field: "Rig", subList: ["Vibe"], optionImages: { Vibe: [{ id: "v1", v: 1 }] } });
+  const res = await call(env, "DELETE", "/api/marklists/sp1?userId=public", { type: "" });
+  assert.equal(res.status, 204);
+  assert.ok(env.runs.some((r) => /DELETE FROM species_images WHERE list_id = \?/.test(r.sql) && r.args[0] === "sp1"));
+});
+
+test("private override options: pictures live on the override, not the Public rig", async () => {
+  const env = makeEnv({ field: "Rig", subList: ["Public option"], override: { subList: ["Mine"] } });
+  const res = await call(env, "POST", optPath("Mine") + "?scope=private");
+  assert.equal(res.status, 201);
+  const body = await res.json();
+  assert.equal(body.rigId, "sp1");
+  assert.equal(body.optionImages.Mine.length, 1);
+  assert.equal(env.list.option_images, null, "Public's row is untouched");
+  assert.equal(Object.keys(JSON.parse(env.ov.option_images)).join(), "Mine");
+  // an option that is only in Public's list isn't one of YOURS
+  assert.equal((await call(env, "POST", optPath("Public option") + "?scope=private")).status, 404);
+  // no override at all
+  assert.equal((await call(makeEnv({ field: "Rig", subList: ["X"] }), "POST", optPath("X") + "?scope=private")).status, 404);
+});
+
+test("removing an option from your private sub list (PUT) or the whole override (DELETE) deletes its pictures", async () => {
+  const mk = () => {
+    const env = makeEnv({ field: "Rig", override: { subList: ["Mine", "Other"], optionImages: { Mine: [{ id: "m1", v: 1 }], Other: [{ id: "o1", v: 1 }] } } });
+    env.images.set("m1", {});
+    env.images.set("o1", {});
+    return env;
+  };
+  const env = mk();
+  const put = await call(env, "PUT", "/api/rig-sublist-overrides/sp1", json({ subList: ["Other"] }));
+  assert.equal(put.status, 200);
+  assert.deepEqual(Object.keys((await put.json()).optionImages), ["Other"]);
+  assert.equal(env.images.has("m1"), false);
+  assert.equal(env.images.has("o1"), true);
+
+  const env2 = mk();
+  const del = await call(env2, "DELETE", "/api/rig-sublist-overrides/sp1", { type: "" });
+  assert.equal(del.status, 204);
+  assert.equal(env2.images.has("m1") || env2.images.has("o1"), false);
+});
+
+test("the overrides list carries each override's option pictures", async () => {
+  const env = makeEnv({ field: "Rig" });
+  const original = env.DB.prepare;
+  env.DB.prepare = (sql) => {
+    const s = original(sql);
+    if (/SELECT rig_id, sub_list, option_images FROM user_rig_sublist_overrides/.test(sql)) {
+      s.all = async () => ({ results: [{ rig_id: "sp1", sub_list: '["Mine"]', option_images: '{"Mine":[{"id":"m1","v":5}]}' }] });
+    }
+    return s;
+  };
+  const res = await call(env, "GET", "/api/rig-sublist-overrides", { type: "" });
+  assert.deepEqual(await res.json(), [{ rigId: "sp1", subList: ["Mine"], optionImages: { Mine: [{ id: "m1", version: 5 }] } }]);
 });

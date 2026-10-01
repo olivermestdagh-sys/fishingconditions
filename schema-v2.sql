@@ -247,18 +247,20 @@ CREATE TABLE IF NOT EXISTS user_mark_lists (
   big_max_qty INTEGER,               -- how many "big" fish (at least big_size) count within the limit
   big_size REAL,                     -- length, cm, from which a fish counts as "big"
   qty_group TEXT,                    -- species rows sharing a value share ONE combined max_qty (e.g. School + Gummy shark); NULL = not combined
-  image_index TEXT,                  -- Species rows only: JSON [{"id":"<species_images.id>","v":<updated_at ms>}, ...] in display order; NULL = no images
+  image_index TEXT,                  -- Species/Bait/Rig/Rod/Berley/Fishing Method rows: JSON [{"id":"<species_images.id>","v":<updated_at ms>}, ...] in display order; NULL = no images
   -- Rig rows only (added later via ALTER TABLE) — a rig can maintain its own free-form sub list
   -- (e.g. Rig "Soft plastic rig" -> "3in Paddle Tail", "Vibe"), picked from when building a Rod Setup:
   has_sublist INTEGER,               -- 0/1: whether this rig maintains a sub list
   sub_list TEXT,                     -- JSON array of option strings; NULL when empty/not applicable
+  option_images TEXT,                -- Rig rows only (added later via ALTER TABLE): JSON {"<sub-list option>": [{"id","v"}, ...]} — pictures of that option,
+                                      -- bytes in species_images against THIS row's id; NULL = none. Image index of the plain fields stays in image_index.
   created_at INTEGER NOT NULL,
   UNIQUE (user_id, field, value)
 );
 
 CREATE INDEX IF NOT EXISTS idx_uml_user_field ON user_mark_lists(user_id, field);
 
--- The pictures of a species (Settings > Species). Bytes are kept apart from user_mark_lists so the list stays light; the
+-- The pictures of a list value (Settings > Mark Lists: Species, Bait, Rig, Rod, Berley, Fishing Method) or of a Rig's sub-list option (see option_images). Bytes are kept apart from user_mark_lists so the list stays light; the
 -- list row carries only image_index. `data` is the base64 of a JPEG/PNG/WebP the browser has already shrunk (<= ~700 KB).
 CREATE TABLE IF NOT EXISTS species_images (
   id TEXT PRIMARY KEY,
@@ -332,6 +334,7 @@ CREATE TABLE IF NOT EXISTS user_rig_sublist_overrides (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   rig_id TEXT NOT NULL REFERENCES user_mark_lists(id) ON DELETE CASCADE,
   sub_list TEXT NOT NULL,
+  option_images TEXT,                -- added later via ALTER TABLE: JSON {"<option>": [{"id","v"}, ...]} pictures of YOUR options (bytes in species_images, list_id = rig_id)
   created_at INTEGER NOT NULL,
   UNIQUE (user_id, rig_id)
 );

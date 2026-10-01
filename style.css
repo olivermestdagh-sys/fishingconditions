@@ -3932,6 +3932,11 @@ body.live-card-open { overflow: hidden; }
 .species-image-viewer-actions button { min-width: 120px; padding: 12px 18px; border-radius: 10px; border: 2px solid rgba(255, 255, 255, 0.6); background: transparent; color: #fff; font-size: 1rem; font-weight: 700; cursor: pointer; }
 .species-image-viewer-actions button.danger { border-color: #f87171; color: #fca5a5; }
 .species-image-viewer-actions button.primary { background: #16a34a; border-color: #bbf7d0; }
+/* A pick-card choice that has a picture (the first picture of that rod/rig/bait/berley/method/rig option, js/live-cards.js): picture above the name; in
+   Trip Defaults' pill-shaped choices it sits to the left of the name instead. */
+.live-card-choice-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; flex: 0 0 auto; background: rgba(255, 255, 255, 0.9); }
+.td-choices .live-card-choice.has-thumb { flex-direction: row; gap: 8px; padding: 6px 16px 6px 6px; }
+.td-choices .live-card-choice-thumb { width: 34px; height: 34px; border-radius: 999px; }
 /* Map > Trip Defaults (js/trip-defaults.js): reuses the .live-card-* look; these are its own sections, name inputs and
    Rod Setup pills (a selectable pill with a gear on its right that opens the setup's editor). */
 .td-grid { display: block; }

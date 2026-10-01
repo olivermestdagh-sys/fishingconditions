@@ -50,6 +50,7 @@ let publicLocationGroups = []; // Public's own group names, shown alongside loca
                           // user-backend.js), so js/location-editor.js's own group-tag picker (which reads
                           // locationGroups directly) must keep seeing ONLY your own groups.
 let publicMarkLists = []; // Public's own Fishing Mark Lists rows, same read-only-badge treatment — see mergedMarkListsFor
+let rigOverrideOptionImages = new Map(); // rigId -> {option: [{id, version}]}: pictures on the options of your own private sub list on a Rig you don't own
 let rigSublistOverrides = new Map(); // rigId -> your own private sub list on a Rig you don't own (Public's) — see saveRigSublistOverride
 let markListFormatOverrides = new Map(); // publicRowId -> {shapeFormat, colorFormat, icon, colorValue} (only the ones you've actually
                           // overridden) — your own pick of Shape/Colour Format for a Public value, or your own
@@ -1067,6 +1068,7 @@ async function loadMarkLists() {
     markLists = [];
     publicMarkLists = [];
     rigSublistOverrides = new Map();
+    rigOverrideOptionImages = new Map();
     markListFormatOverrides = new Map();
     document.getElementById("markListsSection").style.display = "none";
     return;
@@ -1085,6 +1087,7 @@ async function loadMarkLists() {
   if (isAdmin && viewingAsPublic) {
     publicMarkLists = [];
     rigSublistOverrides = new Map();
+    rigOverrideOptionImages = new Map();
     markListFormatOverrides = new Map();
   } else {
     try {
@@ -1096,10 +1099,13 @@ async function loadMarkLists() {
     }
     try {
       const res = await fetch(`${USER_BACKEND_URL}/api/rig-sublist-overrides`, { credentials: "include" });
-      rigSublistOverrides = res.ok ? new Map((await res.json()).map((r) => [r.rigId, r.subList])) : new Map();
+      const overrides = res.ok ? await res.json() : [];
+      rigSublistOverrides = new Map(overrides.map((r) => [r.rigId, r.subList]));
+      rigOverrideOptionImages = new Map(overrides.map((r) => [r.rigId, r.optionImages || {}]));
     } catch (err) {
       console.error("Failed to load your private rig sub lists:", err);
       rigSublistOverrides = new Map();
+      rigOverrideOptionImages = new Map();
     }
     try {
       const res = await fetch(`${USER_BACKEND_URL}/api/marklist-format-overrides`, { credentials: "include" });
@@ -1170,64 +1176,126 @@ const SPECIES_LIMIT_FIELDS = [
 ];
 
 // Species whose Max Qty is one combined limit share a `qtyGroup` (see planSpeciesLinks, user-backend.js).
-// --- Species pictures (several per species; see js/species-image.js and handleMarkListImages in user-backend.js) ---
+// --- Pictures on list values and Rig options (see js/species-image.js and handleMarkListImages / handleRigOptionImages in user-backend.js) ---
+//
+// A picture "target" says whose pictures a thumbnail row belongs to: a list value ({field, value}, field = the list's label, e.g.
+// "Species", "Bait", "Fishing Method"), or one option of a Rig's sub list ({field: "Rig", value: <rig>, option}), where scope
+// "private" means your own private override of a Public rig. imageHolder resolves a target to its current pictures and the
+// calls that change them; the rows below carry the target in data-img-* attributes so one set of click handlers serves all.
 
-function speciesEntry(value) {
-  return markLists.find((r) => r.field === "Species" && r.value === value);
+const IMAGE_FIELD_KEYS = ["species", "bait", "rig", "rod", "berley", "fishingMethod"]; // MARK_LIST_FIELDS keys whose values can carry pictures
+
+function imageTargetAttrs(target) {
+  const esc = escapeHtml;
+  return `data-img-field="${esc(target.field)}" data-img-value="${esc(target.value)}"${target.option != null ? ` data-img-option="${esc(target.option)}"` : ""}${target.scope ? ` data-img-scope="${esc(target.scope)}"` : ""}`;
 }
 
-/** The pictures row on a species: a thumbnail per picture (tap to maximise) and an Add Image button. */
-function speciesImagesHtml(entry) {
-  const images = entry.images || [];
+function imageTargetFromEl(el) {
+  const d = el.dataset;
+  return { field: d.imgField, value: d.imgValue, option: d.imgOption !== undefined ? d.imgOption : null, scope: d.imgScope || "" };
+}
+
+function imageTargetLabel(target) {
+  return target.option != null ? `${target.value} — ${target.option}` : target.value;
+}
+
+/** The pictures of a target and how to change them, or null when its list value / rig isn't there. `canEdit` is false for Public's own rows
+ * (you only view those; they're edited as Public). */
+function imageHolder(target) {
+  const row = mergedMarkListsFor(target.field).find((r) => r.value === target.value);
+  if (!row) return null;
+  const userParam = effectiveUserIdParam();
+  if (target.option == null) {
+    return {
+      images: row.images || [],
+      canEdit: !row._isPublic && !!row.id,
+      upload: async (blob, imageId) => void Object.assign(row, await uploadSpeciesImage(row.id, blob, imageId, userParam)),
+      remove: async (imageId) => void Object.assign(row, await deleteSpeciesImage(row.id, imageId, userParam)),
+    };
+  }
+  if (target.scope === "private") {
+    const keep = (res) => rigOverrideOptionImages.set(row.id, res.optionImages || {});
+    return {
+      images: (rigOverrideOptionImages.get(row.id) || {})[target.option] || [],
+      canEdit: true,
+      upload: async (blob, imageId) => keep(await uploadRigOptionImage(row.id, target.option, blob, imageId, "", "private")),
+      remove: async (imageId) => keep(await deleteRigOptionImage(row.id, target.option, imageId, "", "private")),
+    };
+  }
+  return {
+    images: (row.optionImages || {})[target.option] || [],
+    canEdit: !row._isPublic && !!row.id,
+    upload: async (blob, imageId) => void Object.assign(row, await uploadRigOptionImage(row.id, target.option, blob, imageId, userParam, "")),
+    remove: async (imageId) => void Object.assign(row, await deleteRigOptionImage(row.id, target.option, imageId, userParam, "")),
+  };
+}
+
+/** A thumbnail per picture (tap to maximise) and, when editable, an Add Image button. Nothing at all when read-only with no pictures. */
+function imagesRowHtml(target, images, canEdit, { fullWidth = true } = {}) {
+  const attrs = imageTargetAttrs(target);
+  const label = escapeHtml(imageTargetLabel(target));
   const thumbs = images
-    .map((img, i) => `<button type="button" class="species-thumb" data-value="${escapeHtml(entry.value)}" data-index="${i}" aria-label="View picture ${i + 1} of ${escapeHtml(entry.value)}"><img src="${escapeHtml(speciesImageUrl(img))}" alt="${escapeHtml(entry.value)}" loading="lazy" /></button>`)
+    .map((img, i) => `<button type="button" class="species-thumb" ${attrs} data-index="${i}" aria-label="View picture ${i + 1} of ${label}"><img src="${escapeHtml(speciesImageUrl(img))}" alt="${label}" loading="lazy" /></button>`)
     .join("");
-  const add = images.length < SPECIES_IMAGE_MAX_COUNT ? `<button type="button" class="species-add-image" data-value="${escapeHtml(entry.value)}">Add Image</button>` : "";
-  return `<div class="mark-list-images" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">${thumbs}${add}</div>`;
+  const add = canEdit && images.length < SPECIES_IMAGE_MAX_COUNT ? `<button type="button" class="species-add-image" ${attrs}>Add Image</button>` : "";
+  if (!thumbs && !add) return "";
+  return `<div class="mark-list-images" style="${fullWidth ? "flex-basis:100%;" : ""}display:flex;flex-wrap:wrap;gap:6px;align-items:center;">${thumbs}${add}</div>`;
+}
+
+/** The pictures row on a list value (Species, Bait, Rig, Rod, Berley, Fishing Method). */
+function listImagesHtml(entry) {
+  return imagesRowHtml({ field: entry.field, value: entry.value }, entry.images || [], !entry._isPublic);
+}
+
+/** The pictures row under one option chip of a Rig's sub list: `scope` "" = the rig's own list, "private" = your override, "public" = Public's (view only). */
+function rigOptionImagesHtml(rig, option, scope) {
+  const target = { field: "Rig", value: rig.value, option, scope: scope === "private" ? "private" : "" };
+  const images = scope === "private" ? (rigOverrideOptionImages.get(rig.id) || {})[option] || [] : (rig.optionImages || {})[option] || [];
+  return imagesRowHtml(target, images, scope !== "public", { fullWidth: false });
 }
 
 /**
- * Asks for a picture file, shrinks and uploads it: as a new picture of the species, or in place of `imageId`. Updates the
- * species in place and redraws the list. Resolves to true when it saved, false if cancelled or it failed (the status line
- * says why).
+ * Asks for a picture file, shrinks and uploads it: as a new picture of the target, or in place of `imageId`. Redraws the list.
+ * Resolves to true when it saved, false if cancelled or it failed (the status line says why).
  */
-async function runSpeciesImageUpload(value, imageId) {
-  const entry = speciesEntry(value);
-  if (!entry || !entry.id) return false;
+async function runImageUpload(target, imageId) {
+  const holder = imageHolder(target);
+  if (!holder || !holder.canEdit) return false;
   const file = await pickImageFile();
   if (!file) return false;
   setMarkListsSaveStatus("Uploading image…", false);
   try {
     const blob = await fileToJpegBlob(file);
-    Object.assign(entry, await uploadSpeciesImage(entry.id, blob, imageId, effectiveUserIdParam()));
+    await holder.upload(blob, imageId);
     setMarkListsSaveStatus("", false);
     renderMarkLists();
     return true;
   } catch (err) {
-    console.error("Failed to upload species image:", err);
+    console.error("Failed to upload image:", err);
     setMarkListsSaveStatus(err.message === "unreadable" ? "Couldn't read that image — try a JPEG or PNG." : "Upload failed: " + err.message, true);
     return false;
   }
 }
 
-let speciesImageViewerClose = null; // closes the open viewer, if any
+let imageViewerClose = null; // closes the open viewer, if any
 
-/** Full-screen viewer for one species' pictures: previous/next (when there are several), Replace, Delete and Close. */
-function openSpeciesImageViewer(value, startIndex) {
-  if (speciesImageViewerClose) speciesImageViewerClose();
+/** Full-screen viewer for one target's pictures: previous/next (when there are several), Replace and Delete (when editable) and Close. */
+function openImageViewer(target, startIndex) {
+  if (imageViewerClose) imageViewerClose();
   const overlay = document.createElement("div");
   overlay.className = "species-image-viewer";
   overlay.setAttribute("role", "dialog");
   overlay.setAttribute("aria-modal", "true");
   document.body.appendChild(overlay);
   let index = startIndex;
+  const title = imageTargetLabel(target);
 
   const close = () => {
     document.removeEventListener("keydown", onKey);
     overlay.remove();
-    speciesImageViewerClose = null;
+    imageViewerClose = null;
   };
-  speciesImageViewerClose = close;
+  imageViewerClose = close;
   const onKey = (e) => {
     if (e.key === "Escape") close();
     else if (e.key === "ArrowLeft") step(-1);
@@ -1235,7 +1303,8 @@ function openSpeciesImageViewer(value, startIndex) {
   };
   document.addEventListener("keydown", onKey);
   const step = (d) => {
-    const count = (speciesEntry(value) || {}).images ? speciesEntry(value).images.length : 0;
+    const holder = imageHolder(target);
+    const count = holder ? holder.images.length : 0;
     if (count > 1) {
       index = (index + d + count) % count;
       render();
@@ -1243,8 +1312,8 @@ function openSpeciesImageViewer(value, startIndex) {
   };
 
   function render() {
-    const entry = speciesEntry(value);
-    const images = entry && entry.images ? entry.images : [];
+    const holder = imageHolder(target);
+    const images = holder ? holder.images : [];
     if (!images.length) {
       close();
       return;
@@ -1253,36 +1322,37 @@ function openSpeciesImageViewer(value, startIndex) {
     const many = images.length > 1;
     overlay.innerHTML = `
       <div class="species-image-viewer-top">
-        <span>${escapeHtml(value)}${many ? ` · ${index + 1} / ${images.length}` : ""}</span>
+        <span>${escapeHtml(title)}${many ? ` · ${index + 1} / ${images.length}` : ""}</span>
         <button type="button" data-v="close" aria-label="Close">&times;</button>
       </div>
       <div class="species-image-viewer-stage">
         ${many ? `<button type="button" class="species-image-nav" data-v="prev" aria-label="Previous picture">&lsaquo;</button>` : ""}
-        <img src="${escapeHtml(speciesImageUrl(images[index]))}" alt="${escapeHtml(value)}" />
+        <img src="${escapeHtml(speciesImageUrl(images[index]))}" alt="${escapeHtml(title)}" />
         ${many ? `<button type="button" class="species-image-nav" data-v="next" aria-label="Next picture">&rsaquo;</button>` : ""}
       </div>
-      <div class="species-image-viewer-actions">
+      ${holder.canEdit ? `<div class="species-image-viewer-actions">
         <button type="button" data-v="replace">Replace</button>
         <button type="button" data-v="delete" class="danger">Delete</button>
-      </div>`;
+      </div>` : ""}`;
     wireImagePictureFallback(overlay.querySelector("img"));
     overlay.querySelector('[data-v="close"]').addEventListener("click", close);
     const prev = overlay.querySelector('[data-v="prev"]');
     const next = overlay.querySelector('[data-v="next"]');
     if (prev) prev.addEventListener("click", () => step(-1));
     if (next) next.addEventListener("click", () => step(1));
+    if (!holder.canEdit) return;
     overlay.querySelector('[data-v="replace"]').addEventListener("click", async () => {
-      if (await runSpeciesImageUpload(value, images[index].id)) render();
+      if (await runImageUpload(target, images[index].id)) render();
     });
     overlay.querySelector('[data-v="delete"]').addEventListener("click", async () => {
-      if (!confirm(`Delete this picture of ${value}?`)) return;
+      if (!confirm(`Delete this picture of ${title}?`)) return;
       try {
-        Object.assign(entry, await deleteSpeciesImage(entry.id, images[index].id, effectiveUserIdParam()));
+        await holder.remove(images[index].id);
         setMarkListsSaveStatus("", false);
         renderMarkLists();
         render(); // shows the next picture, or closes when that was the last
       } catch (err) {
-        console.error("Failed to delete species image:", err);
+        console.error("Failed to delete image:", err);
         setMarkListsSaveStatus("Couldn't delete the picture: " + err.message, true);
       }
     });
@@ -1392,10 +1462,13 @@ function rigSublistHtml(entry, escAttr) {
   const items = entry.subList || [];
   const chipsHtml = items.length
     ? items.map((item, i) => `
-        <span class="loc-chip" style="cursor:default;display:inline-flex;align-items:center;gap:6px;">
-          <span>${esc(item)}</span>
-          <button type="button" class="mark-list-rig-sublist-remove" data-index="${i}" aria-label="Remove ${esc(item)}"
-            style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>
+        <span class="rig-option-item" style="display:inline-flex;flex-direction:column;align-items:flex-start;gap:4px;">
+          <span class="loc-chip" style="cursor:default;display:inline-flex;align-items:center;gap:6px;">
+            <span>${esc(item)}</span>
+            <button type="button" class="mark-list-rig-sublist-remove" data-index="${i}" aria-label="Remove ${esc(item)}"
+              style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>
+          </span>
+          ${rigOptionImagesHtml(entry, item, "")}
         </span>`).join("")
     : `<span class="footnote" style="margin:0;">No options yet.</span>`;
   return `${toggleHtml}
@@ -1459,7 +1532,7 @@ function publicRigSublistHtml(entry, esc) {
     ? `<div style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:2px;">
         <span style="font-size:0.65rem;color:var(--grey-500);">Public's Sub List:</span>
         ${(entry.subList || []).length
-          ? entry.subList.map((item) => `<span class="loc-chip" style="cursor:default;opacity:0.75;border:1px dashed var(--grey-400, #9ca3af);">${esc(item)}</span>`).join("")
+          ? entry.subList.map((item) => `<span class="rig-option-item" style="display:inline-flex;flex-direction:column;align-items:flex-start;gap:4px;"><span class="loc-chip" style="cursor:default;opacity:0.75;border:1px dashed var(--grey-400, #9ca3af);">${esc(item)}</span>${rigOptionImagesHtml(entry, item, "public")}</span>`).join("")
           : `<span class="footnote" style="margin:0;">No options yet.</span>`}
       </div>`
     : "";
@@ -1469,10 +1542,13 @@ function publicRigSublistHtml(entry, esc) {
     ? `<div class="mark-list-rig-override" data-rig-id="${entry.id}" title="Private — only visible to you" style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px;padding:6px 8px;border-radius:8px;background:var(--white);color:#111827;">
         ${override.length
           ? override.map((item, i) => `
-              <span class="loc-chip" style="cursor:default;display:inline-flex;align-items:center;gap:6px;">
-                <span>${esc(item)}</span>
-                <button type="button" class="mark-list-rig-override-remove" data-index="${i}" aria-label="Remove ${esc(item)}"
-                  style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>
+              <span class="rig-option-item" style="display:inline-flex;flex-direction:column;align-items:flex-start;gap:4px;">
+                <span class="loc-chip" style="cursor:default;display:inline-flex;align-items:center;gap:6px;">
+                  <span>${esc(item)}</span>
+                  <button type="button" class="mark-list-rig-override-remove" data-index="${i}" aria-label="Remove ${esc(item)}"
+                    style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0;">×</button>
+                </span>
+                ${rigOptionImagesHtml(entry, item, "private")}
               </span>`).join("")
           : `<span class="footnote" style="margin:0;">No options yet.</span>`}
         <span style="display:inline-flex;gap:4px;">
@@ -1523,6 +1599,7 @@ async function saveRigSublistOverride(rigId, subList) {
     }
     const saved = await res.json();
     rigSublistOverrides.set(rigId, saved.subList);
+    rigOverrideOptionImages.set(rigId, saved.optionImages || {});
     renderMarkLists(); // also refreshes Rod Setups' own selects
     setMarkListsSaveStatus("", false);
   } catch (err) {
@@ -1543,6 +1620,7 @@ async function onClearRigSublistOverride(rigId) {
     return;
   }
   rigSublistOverrides.delete(rigId);
+  rigOverrideOptionImages.delete(rigId);
   renderMarkLists();
   setMarkListsSaveStatus("", false);
 }
@@ -1691,7 +1769,7 @@ function renderMarkLists() {
       // Public's own species show the same limits, disabled — informational, not editable — and skip
       // the "Combined with" control entirely (combining only ever applies to your own species).
       const limitsHtml = key === "species"
-        ? `${speciesImagesHtml(v)}<div class="mark-list-limits" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;margin-top:2px;">${SPECIES_LIMIT_FIELDS.map((f) => `
+        ? `<div class="mark-list-limits" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;margin-top:2px;">${SPECIES_LIMIT_FIELDS.map((f) => `
             <label style="display:flex;flex-direction:column;font-size:0.65rem;gap:1px;">${f.label}
               <input type="number" class="mark-list-limit-input" data-limit-prop="${f.prop}" data-value="${escAttr}" value="${v[f.prop] ?? ""}"
                 min="0" step="${f.integer ? "1" : "any"}" inputmode="${f.integer ? "numeric" : "decimal"}" title="${f.title}"${isPublic ? " disabled" : ""}
@@ -1703,19 +1781,21 @@ function renderMarkLists() {
       // it: choosing that rig there reveals a multi-pick of exactly these items). A Public rig instead
       // shows Public's own sub list read-only, plus your own PRIVATE layer on top (rigSublistHtml).
       const sublistHtml = key === "rig" ? rigSublistHtml(v, escAttr) : "";
+      const imagesHtml = IMAGE_FIELD_KEYS.includes(key) ? listImagesHtml(v) : "";
       const combinedBadge = key === "species" && v.qtyGroup
         ? `<span title="Max qty shared with: ${speciesLinkedNames(v).join(", ").replace(/"/g, "&quot;").replace(/</g, "&lt;")}" style="font-size:0.65rem;opacity:0.85;">qty shared</span>`
         : "";
       const publicBadgeHtml = isPublic ? `<span style="font-size:0.65rem;font-weight:600;">Public</span>` : "";
       const publicStyle = isPublic ? "opacity:0.75;border:1px dashed var(--grey-400, #9ca3af);" : "";
       return `
-      <span class="loc-chip" data-field="${key}" data-value="${escAttr}"${isPublic ? ' title="From the Public account — read-only"' : ""} style="display:inline-flex;align-items:center;gap:6px;${key === "species" || key === "rig" ? "flex-wrap:wrap;border-radius:16px;" : ""}${colorStyle}${publicStyle}">
+      <span class="loc-chip" data-field="${key}" data-value="${escAttr}"${isPublic ? ' title="From the Public account — read-only"' : ""} style="display:inline-flex;align-items:center;gap:6px;${IMAGE_FIELD_KEYS.includes(key) ? "flex-wrap:wrap;border-radius:16px;" : ""}${colorStyle}${publicStyle}">
         <span>${escText}</span>${tileIconHtml(v)}
         ${publicBadgeHtml}
         ${combinedBadge}
         ${shapeSelectHtml}
         ${colorSelectHtml}
         ${removeBtnHtml}
+        ${imagesHtml}
         ${limitsHtml}
         ${sublistHtml}
       </span>
@@ -1752,11 +1832,11 @@ function renderMarkLists() {
     input.addEventListener("input", (e) => onSetSpeciesLimit(e.currentTarget));
   });
   container.querySelectorAll(".species-thumb").forEach((btn) => {
-    btn.addEventListener("click", () => openSpeciesImageViewer(btn.dataset.value, Number(btn.dataset.index)));
+    btn.addEventListener("click", () => openImageViewer(imageTargetFromEl(btn), Number(btn.dataset.index)));
     wireImagePictureFallback(btn.querySelector("img")); // a picture just uploaded can briefly 404 — see that function's own comment
   });
   container.querySelectorAll(".species-add-image").forEach((btn) => {
-    btn.addEventListener("click", () => runSpeciesImageUpload(btn.dataset.value, null));
+    btn.addEventListener("click", () => runImageUpload(imageTargetFromEl(btn), null));
   });
   container.querySelectorAll(".mark-list-links").forEach((details) => {
     details.addEventListener("toggle", () => {

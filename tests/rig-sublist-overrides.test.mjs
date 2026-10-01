@@ -74,10 +74,10 @@ test("create, list and update a private override on a rig you don't own", async 
 
   let res = await req(env, "PUT", "/api/rig-sublist-overrides/rig1", { subList: ["3in Paddle Tail"] });
   assert.equal(res.status, 201);
-  assert.deepEqual(await res.json(), { rigId: "rig1", subList: ["3in Paddle Tail"] });
+  assert.deepEqual(await res.json(), { rigId: "rig1", subList: ["3in Paddle Tail"], optionImages: {} });
 
   res = await req(env, "GET", "/api/rig-sublist-overrides");
-  assert.deepEqual(await res.json(), [{ rigId: "rig1", subList: ["3in Paddle Tail"] }]);
+  assert.deepEqual(await res.json(), [{ rigId: "rig1", subList: ["3in Paddle Tail"], optionImages: {} }]);
 
   res = await req(env, "PUT", "/api/rig-sublist-overrides/rig1", { subList: ["3in Paddle Tail", "Vibe"] });
   assert.equal(res.status, 200);

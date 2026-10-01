@@ -280,6 +280,10 @@ export default {
       if (markListMatch) {
         return handleMarkListItem(request, url, env, markListMatch[1]);
       }
+      const rigOptionImageMatch = url.pathname.match(/^\/api\/marklists\/([^/]+)\/options\/([^/]+)\/images(?:\/([^/]+))?$/);
+      if (rigOptionImageMatch) {
+        return handleRigOptionImages(request, url, env, rigOptionImageMatch[1], decodeURIComponent(rigOptionImageMatch[2]), rigOptionImageMatch[3]);
+      }
       const markListImageMatch = url.pathname.match(/^\/api\/marklists\/([^/]+)\/images(?:\/([^/]+))?$/);
       if (markListImageMatch) {
         return handleMarkListImages(request, url, env, markListImageMatch[1], markListImageMatch[2]);
@@ -1535,8 +1539,8 @@ async function handleRigSublistOverridesCollection(request, url, env) {
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
 
   if (request.method === "GET") {
-    const { results } = await env.DB.prepare("SELECT rig_id, sub_list FROM user_rig_sublist_overrides WHERE user_id = ?").bind(user.id).all();
-    return jsonResponse(results.map((r) => ({ rigId: r.rig_id, subList: parseSubList(r.sub_list) })), 200, env);
+    const { results } = await env.DB.prepare("SELECT rig_id, sub_list, option_images FROM user_rig_sublist_overrides WHERE user_id = ?").bind(user.id).all();
+    return jsonResponse(results.map((r) => ({ rigId: r.rig_id, subList: parseSubList(r.sub_list), optionImages: optionImagesForClient(parseOptionImages(r.option_images)) })), 200, env);
   }
 
   return jsonResponse({ error: "Method not allowed." }, 405, env);
@@ -1554,18 +1558,31 @@ async function handleRigSublistOverrideItem(request, url, env, rigId) {
     const rig = await env.DB.prepare("SELECT user_id, field FROM user_mark_lists WHERE id = ?").bind(rigId).first();
     if (!rig || rig.field !== "Rig") return jsonResponse({ error: "Rig not found." }, 404, env);
     if (rig.user_id === user.id) return jsonResponse({ error: "You own this rig — edit its Sub List directly." }, 400, env);
-    const existing = await env.DB.prepare("SELECT id FROM user_rig_sublist_overrides WHERE user_id = ? AND rig_id = ?").bind(user.id, rigId).first();
+    const existing = await env.DB.prepare("SELECT id, option_images FROM user_rig_sublist_overrides WHERE user_id = ? AND rig_id = ?").bind(user.id, rigId).first();
+    let optionImages = {};
     if (existing) {
       await env.DB.prepare("UPDATE user_rig_sublist_overrides SET sub_list = ? WHERE id = ?").bind(JSON.stringify(body.subList), existing.id).run();
+      // An option that left the list takes its pictures with it.
+      const pruneStatements = optionImagePruneStatements(env, rigId, existing.option_images, body.subList, (text) =>
+        env.DB.prepare("UPDATE user_rig_sublist_overrides SET option_images = ? WHERE id = ?").bind(text, existing.id)
+      );
+      if (pruneStatements.length) await env.DB.batch(pruneStatements);
+      optionImages = optionImagesForClient(pruneOptionImages(parseOptionImages(existing.option_images), body.subList).next);
     } else {
       await env.DB.prepare("INSERT INTO user_rig_sublist_overrides (id, user_id, rig_id, sub_list, created_at) VALUES (?, ?, ?, ?, ?)")
         .bind(crypto.randomUUID(), user.id, rigId, JSON.stringify(body.subList), Date.now())
         .run();
     }
-    return jsonResponse({ rigId, subList: body.subList }, existing ? 200 : 201, env);
+    return jsonResponse({ rigId, subList: body.subList, optionImages }, existing ? 200 : 201, env);
   }
 
   if (request.method === "DELETE") {
+    const existing = await env.DB.prepare("SELECT id, option_images FROM user_rig_sublist_overrides WHERE user_id = ? AND rig_id = ?").bind(user.id, rigId).first();
+    if (existing) {
+      // Its pictures go with it.
+      const { removedIds } = pruneOptionImages(parseOptionImages(existing.option_images), []);
+      if (removedIds.length) await env.DB.batch(removedIds.map((id) => env.DB.prepare("DELETE FROM species_images WHERE id = ? AND list_id = ?").bind(id, rigId)));
+    }
     await env.DB.prepare("DELETE FROM user_rig_sublist_overrides WHERE user_id = ? AND rig_id = ?").bind(user.id, rigId).run();
     return new Response(null, { status: 204, headers: corsHeaders(env) });
   }
@@ -1762,6 +1779,13 @@ async function handleMarkListItem(request, url, env, id) {
     } catch (err) {
       return jsonResponse({ error: `"${merged.value}" already exists under ${merged.field}.` }, 409, env);
     }
+    if (body.subList !== undefined) {
+      // An option that left the sub list takes its pictures with it.
+      const pruneStatements = optionImagePruneStatements(env, id, existing.option_images, merged.subList, (text) =>
+        env.DB.prepare("UPDATE user_mark_lists SET option_images = ? WHERE id = ? AND user_id = ?").bind(text, id, uid)
+      );
+      if (pruneStatements.length) await env.DB.batch(pruneStatements);
+    }
     if (body.linkedSpecies !== undefined) {
       // "Combined with" — see planSpeciesLinks. Applied as one batch so a link or unlink is all-or-nothing.
       if (merged.field !== "Species") return jsonResponse({ error: "Only species can be combined." }, 400, env);
@@ -1843,38 +1867,71 @@ function base64ToBytes(text) {
   return bytes;
 }
 
+// Mark list fields whose values can carry pictures. A Rig's options (its sub list) carry their own, see handleRigOptionImages.
+const IMAGE_FIELDS = ["Species", "Bait", "Rig", "Rod", "Berley", "Fishing Method"];
+
+/** The option_images column ('{"<option>": [{id, v}, ...]}', Rig rows and Rig sub-list overrides) as an object; never throws. */
+function parseOptionImages(text) {
+  try {
+    const obj = JSON.parse(text || "{}");
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return {};
+    const out = {};
+    for (const [option, list] of Object.entries(obj)) {
+      const kept = Array.isArray(list) ? list.filter((i) => i && typeof i.id === "string") : [];
+      if (kept.length) out[option] = kept;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Splits an option_images object into what stays (options still in `keep`) and the ids of the picture rows to delete. */
+function pruneOptionImages(index, keep) {
+  const next = {};
+  const removedIds = [];
+  for (const [option, list] of Object.entries(index)) {
+    if (keep.includes(option)) next[option] = list;
+    else removedIds.push(...list.map((i) => i.id));
+  }
+  return { next, removedIds };
+}
+
+/** An option_images object as sent to the browser: {"<option>": [{id, version}]}. */
+function optionImagesForClient(index) {
+  return Object.fromEntries(Object.entries(index).map(([option, list]) => [option, list.map((i) => ({ id: i.id, version: i.v ?? null }))]));
+}
+
 /**
- * Add (POST .../images), replace (PUT .../images/:imageId) or remove (DELETE .../images/:imageId) one picture of a Species
- * list entry. Same sign-in and ownership rules as editing the entry itself. The body of an add/replace is the raw image
- * (Content-Type jpeg/png/webp); the table row and the entry's image_index change together in one batch. Returns the updated
- * list row, which lists the pictures as images: [{id, version}].
+ * Statements that delete the pictures of options that are no longer in `keep` and store the trimmed option_images
+ * (`saveStmt(textOrNull)` builds the UPDATE for whichever row holds it). Empty when nothing was removed.
  */
-async function handleMarkListImages(request, url, env, listId, imageId) {
-  const user = await requireUser(request, env);
-  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
-  const resolved = resolveEffectiveUserId(url, user);
-  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
-  const uid = resolved.id;
+function optionImagePruneStatements(env, listId, optionImagesText, keep, saveStmt) {
+  const { next, removedIds } = pruneOptionImages(parseOptionImages(optionImagesText), keep);
+  if (!removedIds.length) return [];
+  return [
+    ...removedIds.map((id) => env.DB.prepare("DELETE FROM species_images WHERE id = ? AND list_id = ?").bind(id, listId)),
+    saveStmt(Object.keys(next).length ? JSON.stringify(next) : null),
+  ];
+}
 
-  const list = await env.DB.prepare("SELECT * FROM user_mark_lists WHERE id = ? AND user_id = ?").bind(listId, uid).first();
-  if (!list) return jsonResponse({ error: "Mark list entry not found." }, 404, env);
-  if (list.field !== "Species") return jsonResponse({ error: "Only species can have images." }, 400, env);
-
-  const index = parseImageIndex(list.image_index);
-  const saveIndex = (next) => env.DB.prepare("UPDATE user_mark_lists SET image_index = ? WHERE id = ? AND user_id = ?").bind(next.length ? JSON.stringify(next) : null, listId, uid);
-  let status = 200;
-
+/**
+ * The add / replace / delete work shared by a list entry's pictures and a Rig option's. `index` is the current picture
+ * index ([{id, v}, ...]); `saveIndex(next)` returns the statement that stores a new one. Resolves to a Response when the
+ * request is refused, otherwise {status, next} once the picture row and the index have been saved in one batch.
+ */
+async function applyImageChange(request, env, listId, index, imageId, saveIndex, noun) {
   if (request.method === "DELETE" && imageId) {
     if (!index.some((i) => i.id === imageId)) return jsonResponse({ error: "Image not found." }, 404, env);
-    await env.DB.batch([
-      env.DB.prepare("DELETE FROM species_images WHERE id = ? AND list_id = ?").bind(imageId, listId),
-      saveIndex(index.filter((i) => i.id !== imageId)),
-    ]);
-  } else if ((request.method === "POST" && !imageId) || (request.method === "PUT" && imageId)) {
+    const next = index.filter((i) => i.id !== imageId);
+    await env.DB.batch([env.DB.prepare("DELETE FROM species_images WHERE id = ? AND list_id = ?").bind(imageId, listId), saveIndex(next)]);
+    return { status: 200, next };
+  }
+  if ((request.method === "POST" && !imageId) || (request.method === "PUT" && imageId)) {
     const type = (request.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
     if (!SPECIES_IMAGE_TYPES.includes(type)) return jsonResponse({ error: "The image must be a JPEG, PNG or WebP." }, 400, env);
     if (request.method === "POST" && index.length >= MAX_SPECIES_IMAGES) {
-      return jsonResponse({ error: `A species can have at most ${MAX_SPECIES_IMAGES} images.` }, 409, env);
+      return jsonResponse({ error: `A ${noun} can have at most ${MAX_SPECIES_IMAGES} images.` }, 409, env);
     }
     if (request.method === "PUT" && !index.some((i) => i.id === imageId)) return jsonResponse({ error: "Image not found." }, 404, env);
     if (Number(request.headers.get("Content-Length")) > MAX_SPECIES_IMAGE_BYTES) return jsonResponse({ error: "That image is too large." }, 413, env);
@@ -1891,13 +1948,86 @@ async function handleMarkListImages(request, url, env, listId, imageId) {
       ).bind(id, listId, type, bytesToBase64(bytes), now),
       saveIndex(next),
     ]);
-    status = request.method === "POST" ? 201 : 200;
-  } else {
-    return jsonResponse({ error: "Method not allowed." }, 405, env);
+    return { status: request.method === "POST" ? 201 : 200, next };
   }
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+/**
+ * Add (POST .../images), replace (PUT .../images/:imageId) or remove (DELETE .../images/:imageId) one picture of a list
+ * entry (Species, Bait, Rig, Rod, Berley or Fishing Method). Same sign-in and ownership rules as editing the entry itself.
+ * The body of an add/replace is the raw image (Content-Type jpeg/png/webp); the table row and the entry's image_index
+ * change together in one batch. Returns the updated list row, which lists the pictures as images: [{id, version}].
+ */
+async function handleMarkListImages(request, url, env, listId, imageId) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  const list = await env.DB.prepare("SELECT * FROM user_mark_lists WHERE id = ? AND user_id = ?").bind(listId, uid).first();
+  if (!list) return jsonResponse({ error: "Mark list entry not found." }, 404, env);
+  if (!IMAGE_FIELDS.includes(list.field)) return jsonResponse({ error: "This field can't have images." }, 400, env);
+
+  const saveIndex = (next) => env.DB.prepare("UPDATE user_mark_lists SET image_index = ? WHERE id = ? AND user_id = ?").bind(next.length ? JSON.stringify(next) : null, listId, uid);
+  const result = await applyImageChange(request, env, listId, parseImageIndex(list.image_index), imageId, saveIndex, list.field === "Species" ? "species" : "value");
+  if (result instanceof Response) return result;
 
   const updated = await env.DB.prepare("SELECT * FROM user_mark_lists WHERE id = ?").bind(listId).first();
-  return jsonResponse(rowToMarkList(updated), status, env);
+  return jsonResponse(rowToMarkList(updated), result.status, env);
+}
+
+/**
+ * The same add / replace / delete for one OPTION of a Rig's sub list (/api/marklists/:rigId/options/:option/images[/:imageId]).
+ * Options are plain strings, so their pictures are indexed per option in option_images: on the rig row itself (a rig you
+ * own, or Public's when acting as Public), or — with ?scope=private — on YOUR private override of a Public rig
+ * (user_rig_sublist_overrides), which is always the caller's own, never "on behalf of" anyone. The picture bytes live in
+ * species_images against the rig's id either way. Returns the updated rig row (rowToMarkList), or for private scope
+ * {rigId, subList, optionImages}.
+ */
+async function handleRigOptionImages(request, url, env, rigId, option, imageId) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const priv = url.searchParams.get("scope") === "private";
+
+  let all;
+  let subList;
+  let saveAll;
+  if (priv) {
+    const rig = await env.DB.prepare("SELECT * FROM user_mark_lists WHERE id = ?").bind(rigId).first();
+    if (!rig || rig.field !== "Rig") return jsonResponse({ error: "Rig not found." }, 404, env);
+    if (rig.user_id === user.id) return jsonResponse({ error: "You own this rig — add pictures to its options directly." }, 400, env);
+    const override = await env.DB.prepare("SELECT * FROM user_rig_sublist_overrides WHERE user_id = ? AND rig_id = ?").bind(user.id, rigId).first();
+    subList = override ? parseSubList(override.sub_list) : [];
+    if (!override || !subList.includes(option)) return jsonResponse({ error: "Option not found." }, 404, env);
+    all = parseOptionImages(override.option_images);
+    saveAll = (text) => env.DB.prepare("UPDATE user_rig_sublist_overrides SET option_images = ? WHERE id = ?").bind(text, override.id);
+  } else {
+    const resolved = resolveEffectiveUserId(url, user);
+    if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+    const uid = resolved.id;
+    const rig = await env.DB.prepare("SELECT * FROM user_mark_lists WHERE id = ? AND user_id = ?").bind(rigId, uid).first();
+    if (!rig || rig.field !== "Rig") return jsonResponse({ error: "Rig not found." }, 404, env);
+    subList = parseSubList(rig.sub_list);
+    if (!subList.includes(option)) return jsonResponse({ error: "Option not found." }, 404, env);
+    all = parseOptionImages(rig.option_images);
+    saveAll = (text) => env.DB.prepare("UPDATE user_mark_lists SET option_images = ? WHERE id = ? AND user_id = ?").bind(text, rigId, uid);
+  }
+
+  let saved = all;
+  const saveIndex = (next) => {
+    saved = { ...all };
+    if (next.length) saved[option] = next;
+    else delete saved[option];
+    return saveAll(Object.keys(saved).length ? JSON.stringify(saved) : null);
+  };
+  const result = await applyImageChange(request, env, rigId, all[option] || [], imageId, saveIndex, "option");
+  if (result instanceof Response) return result;
+
+  if (priv) return jsonResponse({ rigId, subList, optionImages: optionImagesForClient(saved) }, result.status, env);
+  const updated = await env.DB.prepare("SELECT * FROM user_mark_lists WHERE id = ?").bind(rigId).first();
+  return jsonResponse(rowToMarkList(updated), result.status, env);
 }
 
 /** One species picture, for <img> tags anywhere (public, like the species list itself). The URL carries ?v=<version>, so it can be cached for good. */
@@ -1929,6 +2059,7 @@ function rowToMarkList(row) {
     bigSize: row.big_size ?? null,
     qtyGroup: row.qty_group ?? null,
     images: parseImageIndex(row.image_index).map((i) => ({ id: i.id, version: i.v ?? null })),
+    optionImages: optionImagesForClient(parseOptionImages(row.option_images)), // a Rig's per-option pictures, see handleRigOptionImages
     hasSublist: !!row.has_sublist,
     subList: parseSubList(row.sub_list),
   };

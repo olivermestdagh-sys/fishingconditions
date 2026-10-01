@@ -8,7 +8,7 @@ const limitsSrc = fs.readFileSync(new URL("../js/catch-limits.js", import.meta.u
 // Everything above the DOM section is pure; evaluate just that part.
 const pure = src.slice(0, src.indexOf("// --- DOM:"));
 const fns = new Function(
-  limitsSrc + "\n" + pure + "\nreturn { normaliseSessionDefaults, markListValues, sessionCardOptions, buildSessionCardSteps, applySessionCardChoice, buildCatchCardSteps, buildCatchFromCards, emptySessionDefaults, applySizeAction, catchCardState, sizeVerdictText, catchSavedMessage, speciesSublabels, speciesImagesFromMarkLists, allSpeciesImages, emptySessionStartAnswers, sessionStartFieldValueText, applySessionStartFieldChoice, buildSessionStartFromCards, buildSessionEndFromStart, applyDepthAction };"
+  limitsSrc + "\n" + pure + "\nreturn { normaliseSessionDefaults, markListValues, sessionCardOptions, buildSessionCardSteps, applySessionCardChoice, buildCatchCardSteps, buildCatchFromCards, emptySessionDefaults, applySizeAction, catchCardState, sizeVerdictText, catchSavedMessage, speciesSublabels, speciesImagesFromMarkLists, allSpeciesImages, emptySessionStartAnswers, sessionStartFieldValueText, applySessionStartFieldChoice, buildSessionStartFromCards, buildSessionEndFromStart, applyDepthAction, thumbsFromMarkLists, rigOptionThumbs, stepThumbs };"
 )();
 
 const lists = [
@@ -438,4 +438,45 @@ test("depth card actions: whole tenths, never below 0, starting from nothing at 
   assert.equal(fns.applyDepthAction(2.3, "depth:0.1"), 2.4);
   assert.equal(fns.applyDepthAction(0.4, "depth:-1"), 0);
   assert.equal(fns.applyDepthAction(2, "bogus"), 2);
+});
+
+// --- pictures beside rod / rig / bait / berley / method buttons ---------------------------------------------------
+const pic = (id, version = 1) => ({ id, version });
+const picLists = [
+  { field: "Bait", value: "Squid", images: [pic("b1", 3), pic("b2")] },
+  { field: "Bait", value: "Prawn", images: [] },
+  { field: "Rod", value: "Light", images: [pic("r1")] },
+  { field: "Rig", value: "Lure", images: [pic("g1")] },
+  { field: "Berley", value: "Pilchard" },
+  { field: "Fishing Method", value: "Jigging", images: [pic("m1")] },
+  { field: "Species", value: "Bream", images: [pic("s1")] },
+];
+
+test("thumbnails are the first picture of each value, per card option key; values without pictures are left out", () => {
+  const t = fns.thumbsFromMarkLists(picLists);
+  assert.deepEqual(t.baits, { Squid: { id: "b1", version: 3 } });
+  assert.deepEqual(t.rods, { Light: { id: "r1", version: 1 } });
+  assert.deepEqual(t.rigs, { Lure: { id: "g1", version: 1 } });
+  assert.deepEqual(t.berley, {});
+  assert.deepEqual(t.fishingMethod, { Jigging: { id: "m1", version: 1 } });
+  assert.equal(t.species, undefined, "species keep their own gallery");
+});
+
+test("session cards get thumbs only when that field has pictures, so cards without any are unchanged", () => {
+  const withPics = fns.sessionCardOptions(picLists);
+  const steps = fns.buildSessionCardSteps(withPics, { ...fns.emptySessionDefaults(), rods: ["Light"], rodSetups: { Light: { rig: "", bait: "" } } });
+  const byId = Object.fromEntries(steps.map((s) => [s.id, s]));
+  assert.deepEqual(Object.keys(byId["bait:Light"].thumbs), ["Squid"]);
+  assert.deepEqual(Object.keys(byId["rig:Light"].thumbs), ["Lure"]);
+  assert.deepEqual(Object.keys(byId.rods.thumbs), ["Light"]);
+  assert.equal(byId.berley.thumbs, undefined);
+  assert.equal("thumbs" in fns.buildSessionCardSteps(options, fns.emptySessionDefaults())[2], false);
+});
+
+test("a rig option's thumbnail: your private override's picture wins over the rig's own, per option", () => {
+  const rig = { id: "rig1", value: "Soft plastic", optionImages: { Vibe: [pic("v1")], Paddle: [pic("p1")], Empty: [] } };
+  const overrides = new Map([["rig1", { Vibe: [pic("mine", 9)], Mine: [pic("o1")] }]]);
+  assert.deepEqual(fns.rigOptionThumbs(rig, overrides), { Vibe: { id: "mine", version: 9 }, Paddle: { id: "p1", version: 1 }, Mine: { id: "o1", version: 1 } });
+  assert.deepEqual(fns.rigOptionThumbs(rig, undefined), { Vibe: { id: "v1", version: 1 }, Paddle: { id: "p1", version: 1 } });
+  assert.deepEqual(fns.rigOptionThumbs(null, overrides), {});
 });

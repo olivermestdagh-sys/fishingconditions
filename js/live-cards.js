@@ -85,6 +85,45 @@ function allSpeciesImages(imagesBySpecies) {
   return out;
 }
 
+/** The pick-card option keys that can show a picture beside each value, and the Mark List field each one lists. */
+const THUMB_FIELDS = { rods: "Rod", rigs: "Rig", baits: "Bait", berley: "Berley", fishingMethod: "Fishing Method" };
+
+/** The first picture ({id, version}) of each value, per card option key: {baits: {"Squid": {id, version}}, ...}. Values without pictures are left out. */
+function thumbsFromMarkLists(markLists) {
+  const out = {};
+  for (const [key, field] of Object.entries(THUMB_FIELDS)) {
+    out[key] = {};
+    for (const row of markLists || []) {
+      if (!row || row.field !== field || !Array.isArray(row.images) || !row.images.length) continue;
+      out[key][row.value] = { id: row.images[0].id, version: row.images[0].version ?? null };
+    }
+  }
+  return out;
+}
+
+/**
+ * The first picture of each option of one Rig ({option: {id, version}}). Pictures come from the rig's own `optionImages`; your private
+ * override of a Public rig (`overrideImages`: rigId -> {option: [{id, version}]}) wins for an option it has pictures for.
+ */
+function rigOptionThumbs(rigRow, overrideImages) {
+  const out = {};
+  if (!rigRow) return out;
+  const take = (byOption) => {
+    for (const [option, list] of Object.entries(byOption || {})) {
+      if (Array.isArray(list) && list.length) out[option] = { id: list[0].id, version: list[0].version ?? null };
+    }
+  };
+  take(rigRow.optionImages);
+  take(overrideImages && typeof overrideImages.get === "function" ? overrideImages.get(rigRow.id) : null);
+  return out;
+}
+
+/** Spread into a card step to give it its thumbnails: {thumbs} when that field has any pictures, else nothing (so the step is unchanged). */
+function stepThumbs(options, key) {
+  const map = options && options.thumbs && options.thumbs[key];
+  return map && Object.keys(map).length ? { thumbs: map } : {};
+}
+
 /** Everything the cards can offer, keyed the way normaliseSessionDefaults expects. */
 function sessionCardOptions(markLists) {
   return {
@@ -97,6 +136,7 @@ function sessionCardOptions(markLists) {
     baits: markListValues(markLists, "Bait"),
     limits: limitsFromMarkLists(markLists), // per-species limits (js/catch-limits.js), shown under species and used by the Catch flow
     images: speciesImagesFromMarkLists(markLists), // species pictures (js/species-image.js), used by the Catch flow's "Select by image"
+    thumbs: thumbsFromMarkLists(markLists), // first picture of each rod/rig/bait/berley/method, shown beside its button
   };
 }
 
@@ -126,14 +166,14 @@ function buildSessionCardSteps(options, draft, ctx = {}) {
       sublabels: speciesSublabels(options.species, options.limits || {}, ctx.run || null),
     },
     { id: "water", title: "Water", prompt: "What is the water like?", multi: false, options: options.water, selected: draft.water ? [draft.water] : [] },
-    { id: "berley", title: "Berley", prompt: "Which berley are you using?", multi: false, options: options.berley, selected: draft.berley ? [draft.berley] : [] },
-    { id: "fishingMethod", title: "Fishing method", prompt: "Which method(s) do you usually use?", multi: true, options: options.fishingMethod, selected: draft.fishingMethod },
-    { id: "rods", title: "Active rods", prompt: "Which rods are you fishing?", multi: true, options: options.rods, selected: draft.rods },
+    { id: "berley", title: "Berley", prompt: "Which berley are you using?", multi: false, options: options.berley, selected: draft.berley ? [draft.berley] : [], ...stepThumbs(options, "berley") },
+    { id: "fishingMethod", title: "Fishing method", prompt: "Which method(s) do you usually use?", multi: true, options: options.fishingMethod, selected: draft.fishingMethod, ...stepThumbs(options, "fishingMethod") },
+    { id: "rods", title: "Active rods", prompt: "Which rods are you fishing?", multi: true, options: options.rods, selected: draft.rods, ...stepThumbs(options, "rods") },
   ];
   for (const rod of draft.rods) {
     const setup = draft.rodSetups[rod] || {};
-    steps.push({ id: `rig:${rod}`, title: rod, prompt: `Which rig is on ${rod}?`, multi: false, options: options.rigs, selected: setup.rig ? [setup.rig] : [] });
-    steps.push({ id: `bait:${rod}`, title: rod, prompt: `Which bait is on ${rod}?`, multi: false, options: options.baits, selected: setup.bait ? [setup.bait] : [] });
+    steps.push({ id: `rig:${rod}`, title: rod, prompt: `Which rig is on ${rod}?`, multi: false, options: options.rigs, selected: setup.rig ? [setup.rig] : [], ...stepThumbs(options, "rigs") });
+    steps.push({ id: `bait:${rod}`, title: rod, prompt: `Which bait is on ${rod}?`, multi: false, options: options.baits, selected: setup.bait ? [setup.bait] : [], ...stepThumbs(options, "baits") });
   }
   return steps;
 }
@@ -271,7 +311,7 @@ function buildCatchCardSteps(options, defaults, ctx = {}) {
   });
   if (rodList.length && !defaults.skipRod) {
     steps.push({
-      id: "rod", title: defaults.rodTitle || "Rod", prompt: defaults.rodPrompt || "Which rod?", multi: false, required: true, options: rodList, selected: answers.rod ? [answers.rod] : [],
+      id: "rod", title: defaults.rodTitle || "Rod", prompt: defaults.rodPrompt || "Which rod?", multi: false, required: true, options: rodList, selected: answers.rod ? [answers.rod] : [], ...stepThumbs(options, "rods"),
       hint: defaults.rods.length ? "" : "No rods set — showing every rod.",
     });
   }
@@ -447,7 +487,7 @@ function buildSessionEndFromStart(startMark, { id, lat, lng, dateTime, createdAt
 /**
  * The full-screen "is this the one?" check shown after the first tap on a picture in the Species card's image gallery
  * (showCardFlow below). Reuses the Settings picture viewer's own CSS skeleton (`.species-image-viewer*`, see
- * openSpeciesImageViewer in locationsadmin.js) — same full-screen dark layout with the picture centered and scaled to
+ * openImageViewer in locationsadmin.js) — same full-screen dark layout with the picture centered and scaled to
  * fit — just with "This one" / "Not this one" instead of Replace/Delete. `sublabel`, when given, is the species' own
  * limits/kept-so-far blurb (the same text already shown under its name on the plain list) — worth having right here,
  * since it can be exactly what decides "keep it or try another picture". `onConfirm` runs on "This one"; the backdrop,
@@ -561,7 +601,9 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
       const lines = sub
         ? `${sub.line1 ? `<span class="live-card-choice-sub">${escapeHtml(sub.line1)}</span>` : ""}${sub.line2 ? `<span class="live-card-choice-sub">${escapeHtml(sub.line2)}</span>` : ""}`
         : "";
-      return `<button type="button" class="live-card-choice${step.selected.includes(value) ? " selected" : ""}${tone}" data-choice="${i}" aria-pressed="${step.selected.includes(value)}"><span>${escapeHtml(value)}</span>${lines}</button>`;
+      const thumb = step.thumbs && step.thumbs[value];
+      const thumbHtml = thumb ? `<img class="live-card-choice-thumb" src="${escapeHtml(speciesImageUrl(thumb))}" alt="" loading="lazy" />` : "";
+      return `<button type="button" class="live-card-choice${step.selected.includes(value) ? " selected" : ""}${tone}${thumb ? " has-thumb" : ""}" data-choice="${i}" aria-pressed="${step.selected.includes(value)}">${thumbHtml}<span>${escapeHtml(value)}</span>${lines}</button>`;
     };
     const stepperHtml = () => {
       const verdict = step.verdict || { text: "", tone: "" };
@@ -656,6 +698,8 @@ function showCardFlow({ getSteps, onChoose, onDone, onClose, doneLabel = "Done" 
         overlay.querySelector(".live-card-grid").scrollTop = scrollTop;
       })
     );
+    // A choice's own thumbnail that fails to load is simply dropped (the name is still there).
+    overlay.querySelectorAll(".live-card-choice-thumb").forEach((img) => img.addEventListener("error", () => img.remove()));
     // A picture just uploaded can briefly 404 (see wireImagePictureFallback) — every gallery thumbnail gets the same retry/fallback.
     overlay.querySelectorAll(".live-card-gallery-item img").forEach((img) => wireImagePictureFallback(img));
     // A picture's first tap opens it full screen to confirm, rather than selecting straight away — small thumbnails can
