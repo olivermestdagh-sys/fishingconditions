@@ -175,6 +175,7 @@ async function showTripDefaults({ onClose, start } = {}) {
   const direct = start && data.actions.some((a) => a.id === start.actionId) ? { name: "action", tripId: start.tripId, actionId: start.actionId } : null;
   let view = direct || { name: "trips" }; // trips | trip {tripId} | action {tripId, actionId} | rod {tripId, actionId, rodId}
   let status = "";
+  let actionCategory = null; // quick-edit only (see actionScreen): which category's options are open
   let adding = null; // {kind, viewKey}: which "+ Add" pill is open as an inline text box, and on which screen
   const viewKey = () => JSON.stringify(view);
   const addingKind = () => (adding && adding.viewKey === viewKey() ? adding.kind : null);
@@ -265,20 +266,51 @@ async function showTripDefaults({ onClose, start } = {}) {
     </div>`;
   }
 
+  // Opened from a running trip's gear (`direct`): the Action's active choices show as chips at the top, one per category; tapping a chip
+  // opens just that category's options below (tap it again to close), so a quick change is two taps.
+  const QUICK_CATEGORIES = [
+    { key: "method", label: "Method" },
+    { key: "berley", label: "Berley" },
+    { key: "bait", label: "Bait" },
+    { key: "rods", label: "Rod setups" },
+    { key: "species", label: "Species" },
+  ];
+
   function actionScreen() {
     const a = action();
     const o = data.options;
     const ids = tdLiveRodSetupIds(a.rodSetupIds, data.rodSetups);
     const pills = data.rodSetups.length ? data.rodSetups.map((r) => rodSetupPill(r, ids.includes(r.id))).join("") : `<p class="live-card-empty">No rod setups yet.</p>`;
+    const sections = {
+      method: section("Fishing method", o.fishingMethod.map((m) => choice(m, `data-method="${esc(m)}"`, a.fishingMethod.includes(m), o.thumbs.fishingMethod[m])).join("") || "", "method"),
+      berley: section("Berley", o.berley.map((b) => choice(b, `data-berley="${esc(b)}"`, a.berley === b, o.thumbs.berley[b])).join("") || "", "berley"),
+      bait: section("Bait", o.baits.map((b) => choice(b, `data-bait="${esc(b)}"`, (a.bait || []).includes(b), o.thumbs.baits[b])).join("") || "", "bait"),
+      rods: `<div class="td-section"><div class="td-section-title">Rod setups</div><div class="td-pills">${pills}</div>${addRow("rodsetup", "+ Add rod setup")}</div>`,
+      species: section("Species", o.species.map((s) => choice(s, `data-species="${esc(s)}"`, a.species.includes(s))).join("") || `<p class="live-card-empty">Nothing to choose yet.</p>`),
+    };
+    let choicesHtml = QUICK_CATEGORIES.map((c) => sections[c.key]).join("");
+    if (direct) {
+      const rodNames = data.rodSetups.filter((r) => ids.includes(r.id)).map((r) => r.name);
+      const values = {
+        method: a.fishingMethod.join(", "),
+        berley: a.berley || "",
+        bait: (a.bait || []).join(", "),
+        rods: rodNames.join(", "),
+        species: a.species.join(", "),
+      };
+      const chips = QUICK_CATEGORIES.map(
+        (c) =>
+          `<button type="button" class="live-card-choice td-summary-chip${actionCategory === c.key ? " selected" : ""}" data-quick-cat="${c.key}" aria-pressed="${actionCategory === c.key}"><span class="td-summary-label">${esc(c.label)}</span><span class="td-summary-value">${esc(values[c.key] || "none")}</span></button>`
+      ).join("");
+      choicesHtml = `<div class="td-summary">${chips}</div>${
+        actionCategory && sections[actionCategory] ? sections[actionCategory] : `<p class="live-card-empty">Tap a choice above to change it.</p>`
+      }`;
+    }
     return {
       title: a.name,
       prompt: "Action name",
       body: `${nameInput(a.name, "Action name")}
-        ${section("Fishing method", o.fishingMethod.map((m) => choice(m, `data-method="${esc(m)}"`, a.fishingMethod.includes(m), o.thumbs.fishingMethod[m])).join("") || "", "method")}
-        ${section("Berley", o.berley.map((b) => choice(b, `data-berley="${esc(b)}"`, a.berley === b, o.thumbs.berley[b])).join("") || "", "berley")}
-        ${section("Bait", o.baits.map((b) => choice(b, `data-bait="${esc(b)}"`, (a.bait || []).includes(b), o.thumbs.baits[b])).join("") || "", "bait")}
-        <div class="td-section"><div class="td-section-title">Rod setups</div><div class="td-pills">${pills}</div>${addRow("rodsetup", "+ Add rod setup")}</div>
-        ${section("Species", o.species.map((s) => choice(s, `data-species="${esc(s)}"`, a.species.includes(s))).join("") || `<p class="live-card-empty">Nothing to choose yet.</p>`)}
+        ${choicesHtml}
         ${confirmDeleteHtml("Delete this action")}`,
       nav: navHtml("Back"),
     };
@@ -378,6 +410,11 @@ async function showTripDefaults({ onClose, start } = {}) {
     }
 
     // Add (trip / action / rod setup, depending on the screen)
+    // Quick-edit summary chips: open (or close) one category's options
+    on("[data-quick-cat]", (el) => {
+      actionCategory = actionCategory === el.dataset.quickCat ? null : el.dataset.quickCat;
+      render();
+    });
     // Action fields
     const setAction = (patch) => attempt(() => put("/api/tripactions", data.actions, view.actionId, patch));
     on("[data-method]", (el) => setAction({ fishingMethod: tdToggle(action().fishingMethod, el.dataset.method) }));

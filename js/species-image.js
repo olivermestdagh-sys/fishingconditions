@@ -189,30 +189,27 @@ function isTouchOnlyDevice() {
   return typeof window.matchMedia === "function" && window.matchMedia("(hover: none)").matches;
 }
 
-/** Full-screen larger picture (same dark look as the Settings viewer); tapping anywhere or the × closes it. */
+/** A larger picture in a small popup over a dimmed page (not full screen); tapping anywhere closes it. */
 function showImageLightbox(src, caption) {
-  const overlay = document.createElement("div");
-  overlay.className = "species-image-viewer";
-  overlay.setAttribute("role", "dialog");
-  overlay.setAttribute("aria-modal", "true");
-  const top = document.createElement("div");
-  top.className = "species-image-viewer-top";
-  const title = document.createElement("span");
-  title.textContent = caption || "";
-  const closeBtn = document.createElement("button");
-  closeBtn.type = "button";
-  closeBtn.setAttribute("aria-label", "Close");
-  closeBtn.innerHTML = "&times;";
-  top.append(title, closeBtn);
-  const stage = document.createElement("div");
-  stage.className = "species-image-viewer-stage";
+  const backdrop = document.createElement("div");
+  backdrop.className = "image-popup-backdrop";
+  backdrop.setAttribute("role", "dialog");
+  backdrop.setAttribute("aria-modal", "true");
+  const card = document.createElement("div");
+  card.className = "image-popup";
   const big = document.createElement("img");
   big.alt = caption || "";
   big.src = src;
-  stage.appendChild(big);
-  overlay.append(top, stage);
-  overlay.addEventListener("click", () => overlay.remove());
-  document.body.appendChild(overlay);
+  card.appendChild(big);
+  if (caption) {
+    const label = document.createElement("div");
+    label.className = "image-popup-caption";
+    label.textContent = caption;
+    card.appendChild(label);
+  }
+  backdrop.appendChild(card);
+  backdrop.addEventListener("click", () => backdrop.remove());
+  document.body.appendChild(backdrop);
 }
 
 /**
