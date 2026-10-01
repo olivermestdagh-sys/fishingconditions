@@ -416,6 +416,7 @@ async function loadAndRenderMarks(map, state) {
     // (this layer holds canvas CircleMarker/Path shapes, not plain L.Markers).
   });
   map.addLayer(state.markerLayer);
+  attachClusterBreakdownTooltip(state.markerLayer, state);
 
   // Hovering a cluster lists the marks inside it. Reuses each child's own
   // already-bound (and already-escaped) tooltip text, so it stays in step
@@ -750,106 +751,100 @@ function clearSessionHighlight(map, state) {
 }
 
 /**
- * Breaks a cluster's icon down into small "satellite" shapes arranged
- * around a centre — one satellite per distinct (shape, colour)
- * combination actually present among its marks (POI/Mark/Catch shape ×
- * whatever the current "Colour by" field resolves to), each showing a
- * small count badge when more than one mark shares that exact
- * combination. This is deliberately richer than a single aggregate
- * number: at a glance it shows not just HOW MANY marks are grouped here
- * but roughly WHAT KIND, without needing to zoom in or spiderfy first.
- *
- * Reads each child marker's shape straight off `_markShapeName` (tagged
- * once at creation — see createMarkShapeLayer) and its CURRENT colour
- * straight off `marker.options.fillColor` (kept live by setStyle
- * whenever the "Colour by" field changes — see applyMarkFiltersAndGrouping
- * — so this always reflects what's on screen right now, not whatever it
- * was when the mark was first created).
- *
- * Capped at MAX_SATELLITES distinct combinations so a cluster spanning a
- * dozen species doesn't turn into an unreadable ring of slivers — the
- * smallest-count groups beyond that cap collapse into one grey "+N"
- * overflow satellite instead of being dropped silently.
+ * Groups items ({key, color, label}) into slices — one per distinct `key`, largest first, each with its count and
+ * share of the total. Any slice under `minShare` of the total is folded into one grey "Other" slice at the end
+ * (kept only when it would merge two or more groups, so a lone small slice keeps its own colour). Pure: no DOM,
+ * no Leaflet — shared by the cluster donut (grouped by colour) and its hover breakdown (grouped by value).
  */
-const MAX_CLUSTER_SATELLITES = 6;
-
-function createMarkClusterIcon(cluster) {
-  const children = cluster.getAllChildMarkers();
-  const groups = new Map(); // "shape|colour" -> {shape, color, count}
-  for (const child of children) {
-    const shape = child._markShapeName || "circle";
-    const color = (child.options && child.options.fillColor) || "#6b7280";
-    const key = `${shape}|${color}`;
-    const existing = groups.get(key);
-    if (existing) existing.count++;
-    else groups.set(key, { shape, color, count: 1 });
+function clusterSlices(items, minShare) {
+  const total = items.length;
+  const byKey = new Map();
+  for (const it of items) {
+    const g = byKey.get(it.key);
+    if (g) g.count++;
+    else byKey.set(it.key, { key: it.key, color: it.color, label: it.label, count: 1 });
   }
+  const sorted = Array.from(byKey.values()).sort((a, b) => b.count - a.count);
+  const big = sorted.filter((g) => g.count / total >= minShare);
+  const small = sorted.filter((g) => g.count / total < minShare);
+  const slices = small.length > 1 ? [...big, { key: "__other", color: "#9ca3af", label: "Other", count: small.reduce((n, g) => n + g.count, 0) }] : sorted;
+  return slices.map((g) => ({ ...g, share: g.count / total }));
+}
 
-  let entries = Array.from(groups.values()).sort((a, b) => b.count - a.count);
-  if (entries.length > MAX_CLUSTER_SATELLITES) {
-    const kept = entries.slice(0, MAX_CLUSTER_SATELLITES - 1);
-    const overflowCount = entries.slice(MAX_CLUSTER_SATELLITES - 1).reduce((sum, g) => sum + g.count, 0);
-    entries = [...kept, { shape: "circle", color: "#6b7280", count: overflowCount, isOverflow: true }];
-  }
+/** Pixel diameter of a cluster's donut: grows with the log of its mark count so big clusters read bigger without swamping the map. */
+function clusterIconSize(count) {
+  return Math.round(Math.min(64, Math.max(30, 26 + 8 * Math.log2(Math.max(count, 1)))));
+}
 
-  const size = 60;
-  const center = size / 2;
-  // Fewer, bigger satellites when there's not much to show; smaller once
-  // several distinct combinations need to fit around the same ring.
-  const satelliteSize = entries.length <= 2 ? 24 : entries.length <= 4 ? 20 : 16;
-  const radius = entries.length === 1 ? 0 : center - satelliteSize / 2 - 3;
-
-  const satellitesHtml = entries
-    .map((g, i) => {
-      const angle = (360 / entries.length) * i - 90; // first satellite straight up, rest clockwise
-      const rad = (angle * Math.PI) / 180;
-      const x = center + radius * Math.cos(rad) - satelliteSize / 2;
-      const y = center + radius * Math.sin(rad) - satelliteSize / 2;
-      const badge =
-        g.count > 1
-          ? `<div class="mark-cluster-satellite-badge" style="position:absolute;bottom:-4px;right:-4px;min-width:14px;height:14px;padding:0 2px;
-               border-radius:50%;background:var(--blue-900,#0b2a4a);color:#fff;border:1.5px solid #fff;
-               font-size:0.6rem;font-weight:600;line-height:14px;text-align:center;">${g.count}</div>`
-          : "";
-      return `<div style="position:absolute;left:${x}px;top:${y}px;width:${satelliteSize}px;height:${satelliteSize}px;">
-        ${markShapeToCssHtml(g.shape, satelliteSize, g.color)}
-        ${badge}
-      </div>`;
+/** The SVG for a cluster donut: one arc per slice around a white hub that carries the total count. One slice = a solid ring. */
+function clusterDonutSvg(slices, size, count) {
+  const c = size / 2;
+  const stroke = Math.max(7, Math.round(size * 0.24));
+  const r = c - stroke / 2 - 1;
+  const circ = 2 * Math.PI * r;
+  let offset = 0;
+  const arcs = slices
+    .map((s) => {
+      const len = s.share * circ;
+      const arc = `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${stroke}" stroke-dasharray="${len.toFixed(2)} ${(circ - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 ${c} ${c})"/>`;
+      offset += len;
+      return arc;
     })
     .join("");
+  const hubR = r - stroke / 2;
+  const fontSize = Math.max(9, Math.round(size * 0.27));
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.45));">
+    <circle cx="${c}" cy="${c}" r="${c - 0.5}" fill="#fff"/>${arcs}
+    <circle cx="${c}" cy="${c}" r="${hubR}" fill="#fff"/>
+    <text x="${c}" y="${c}" text-anchor="middle" dominant-baseline="central" font-size="${fontSize}" font-weight="700" fill="#111827" font-family="system-ui,sans-serif">${count}</text>
+  </svg>`;
+}
 
+/** The value a mark is coloured by right now, as text — the same field markStyleFor reads (a Session Start/End counts as its Mark Type while colouring by Species). */
+function clusterValueLabel(mark, state) {
+  const key = isSessionType(mark.type) && state.groupByKey === "species" ? "type" : state.groupByKey;
+  return mark[key] || "(none)";
+}
+
+/**
+ * A cluster's icon: a donut whose slices are the share of its marks in each colour of the current "Colour by" field
+ * (read live off each child's `options.fillColor`, which applyMarkFiltersAndGrouping keeps current), sized by how many
+ * marks it holds, with the count in the middle. Zoomed out this keeps the colours meaningful — "mostly red here" —
+ * rather than a grey count. What each colour stands for is on hover (see attachClusterBreakdownTooltip).
+ */
+function createMarkClusterIcon(cluster) {
+  const children = cluster.getAllChildMarkers();
+  const items = children.map((m) => {
+    const color = (m.options && m.options.fillColor) || "#6b7280";
+    return { key: color, color, label: color };
+  });
+  const size = clusterIconSize(children.length);
   return L.divIcon({
-    html: `<div style="position:relative;width:${size}px;height:${size}px;">${satellitesHtml}</div>`,
-    className: "mark-cluster-icon", // no default plugin styling — see MarkerCluster.Default.css override, style.css
+    html: clusterDonutSvg(clusterSlices(items, 0.04), size, children.length),
+    className: "mark-cluster-icon", // no default plugin styling — see the MarkerCluster.Default.css override, style.css
     iconSize: L.point(size, size),
   });
 }
 
-/**
- * One satellite's own little shape, as a plain absolutely-filled div —
- * matches the five real shapes this site draws on the map itself
- * (circle/diamond/cross/square/triangle — see createMarkShapeLayer and the
- * getXMarkerClass functions above) as closely as CSS reasonably allows,
- * without pulling in an actual SVG or Canvas render for something this
- * small. Diamond is a rotated square; cross and triangle use a clip-path
- * polygon (a standard CSS technique — no image/font dependency); square is
- * the same box with no rotation, so it stays visually distinct from diamond.
- */
-function markShapeToCssHtml(shape, size, color) {
-  const shared = `width:100%;height:100%;background:${color};box-shadow:0 1px 3px rgba(0,0,0,0.45);`;
-  if (shape === "diamond") {
-    return `<div style="${shared}border:1.5px solid #fff;transform:rotate(45deg);box-sizing:border-box;"></div>`;
-  }
-  if (shape === "cross") {
-    return `<div style="${shared}clip-path:polygon(35% 0%,65% 0%,65% 35%,100% 35%,100% 65%,65% 65%,65% 100%,35% 100%,35% 65%,0% 65%,0% 35%,35% 35%);"></div>`;
-  }
-  if (shape === "square") {
-    return `<div style="${shared}border:1.5px solid #fff;box-sizing:border-box;"></div>`;
-  }
-  if (shape === "triangle") {
-    return `<div style="${shared}clip-path:polygon(0% 0%,100% 50%,0% 100%);"></div>`;
-  }
-  return `<div style="${shared}border:1.5px solid #fff;border-radius:50%;box-sizing:border-box;"></div>`;
+/** Hovering a cluster lists its top values for the current "Colour by" field (count and share), built on demand rather than for every icon. */
+function attachClusterBreakdownTooltip(group, state) {
+  group.on("clustermouseover", (e) => {
+    const cluster = e.layer;
+    const items = [];
+    for (const m of cluster.getAllChildMarkers()) {
+      const mark = state.marksById.get(m._markId);
+      if (!mark) continue;
+      const label = clusterValueLabel(mark, state);
+      items.push({ key: label, label, color: (m.options && m.options.fillColor) || "#6b7280" });
+    }
+    if (items.length === 0) return;
+    const slices = clusterSlices(items, 0.04).slice(0, 6);
+    const rows = slices
+      .map((s) => `<div style="display:flex;align-items:center;gap:6px;"><span style="width:10px;height:10px;border-radius:50%;background:${s.color};border:1px solid #374151;flex:0 0 auto;"></span><span>${escapeHtml(s.label)}</span><span style="margin-left:auto;padding-left:10px;opacity:0.8;">${s.count} · ${Math.round(s.share * 100)}%</span></div>`)
+      .join("");
+    cluster.unbindTooltip();
+    cluster.bindTooltip(`<div style="font-size:0.8rem;min-width:140px;"><strong>${items.length} marks</strong>${rows}</div>`, { direction: "top" }).openTooltip();
+  });
 }
 
 /**
