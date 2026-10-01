@@ -215,6 +215,7 @@ async function init() {
   });
   document.getElementById("btnAddMarkShapeFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Shape Format", "newMarkShapeFormatInput"));
   document.getElementById("btnAddMarkColorFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Colour Format", "newMarkColorFormatInput"));
+  document.getElementById("btnRestoreMissingValues").addEventListener("click", onOpenRestorePanel);
   document.getElementById("btnAddTier").addEventListener("click", onAddTier);
   document.getElementById("btnSendMessage").addEventListener("click", onSendMessage);
   document.getElementById("contactMessageInput").addEventListener("input", (e) => {
@@ -1497,9 +1498,12 @@ function onAddRigSublistItem(value, raw) {
   saveRigSublist(entry, { subList: [...list, item] });
 }
 
-function onRemoveRigSublistItem(value, index) {
+async function onRemoveRigSublistItem(value, index) {
   const entry = markLists.find((r) => r.field === "Rig" && r.value === value);
   if (!entry || !entry.id) return;
+  const option = (entry.subList || [])[index];
+  const pictures = ((entry.optionImages || {})[option] || []).length;
+  if (!(await confirmRemoveListItem({ rig: value, option, pictures }))) return;
   saveRigSublist(entry, { subList: (entry.subList || []).filter((_, i) => i !== index) });
 }
 
@@ -1580,8 +1584,12 @@ function onAddRigSublistOverrideItem(rigId, raw) {
   saveRigSublistOverride(rigId, [...list, item]);
 }
 
-function onRemoveRigSublistOverrideItem(rigId, index) {
+async function onRemoveRigSublistOverrideItem(rigId, index) {
   const list = rigSublistOverrides.get(rigId) || [];
+  const option = list[index];
+  const rig = mergedMarkListsFor("Rig").find((r) => r.id === rigId);
+  const pictures = ((rigOverrideOptionImages.get(rigId) || {})[option] || []).length;
+  if (!(await confirmRemoveListItem({ rig: rig ? rig.value : "this rig", option, pictures }))) return;
   saveRigSublistOverride(rigId, list.filter((_, i) => i !== index));
 }
 
@@ -1610,7 +1618,8 @@ async function saveRigSublistOverride(rigId, subList) {
 }
 
 async function onClearRigSublistOverride(rigId) {
-  if (!confirm("Remove your private sub list for this rig?")) return;
+  const pictureCount = Object.values(rigOverrideOptionImages.get(rigId) || {}).reduce((n, list) => n + list.length, 0);
+  if (!confirm(`Remove your private sub list for this rig?${pictureCount ? `\n\nIts ${pictureCount} picture${pictureCount === 1 ? "" : "s"} will be deleted too.` : ""}`)) return;
   try {
     const res = await fetch(`${USER_BACKEND_URL}/api/rig-sublist-overrides/${rigId}`, { method: "DELETE", credentials: "include" });
     if (!res.ok && res.status !== 404) throw new Error(`status ${res.status}`);
@@ -2375,11 +2384,216 @@ async function onRemoveMarkSubFormat(fieldName, value) {
 // editor on this page yet for it to reach into. That's a fine degrade for
 // now: an existing mark keeping a since-removed value just won't offer that
 // value as a pick again, it isn't broken or hidden.
+// --- Safer deletes: a confirm that says what goes, and "Restore missing values" ---------------------------------------------
+
+let marksForCountsCache = null; // {at, marks}: your marks as the Settings page last fetched them (for the confirm prompts and Restore)
+
+/** Your marks (own plus the shared ones you can see), fetched on demand and reused for a minute; null when they couldn't be loaded. */
+async function loadMarksForCounts({ fresh = false } = {}) {
+  if (!fresh && marksForCountsCache && Date.now() - marksForCountsCache.at < 60000) return marksForCountsCache.marks;
+  try {
+    const res = await fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store", credentials: "include" });
+    const marks = res.ok ? await res.json() : null;
+    marksForCountsCache = marks ? { at: Date.now(), marks } : null;
+    return marks;
+  } catch (err) {
+    console.error("Could not load marks for the delete prompt:", err);
+    return null;
+  }
+}
+
+/**
+ * How many marks use a list value. `key` is the MARK_LIST_FIELDS key ("bait", "rigOptions", ...); multi-value fields count each
+ * pick separately (a Session's "Prawn, Squid" uses both). `rig` narrows a Rig option's count to marks on that rig. Case-insensitive.
+ */
+function marksUsingValue(marks, key, value, rig) {
+  const wanted = String(value).toLowerCase();
+  const wantedRig = rig ? String(rig).toLowerCase() : "";
+  let count = 0;
+  for (const mark of marks || []) {
+    if (wantedRig && !markFieldValues(mark, "rig").some((r) => String(r).toLowerCase() === wantedRig)) continue;
+    if (markFieldValues(mark, key).some((v) => String(v).toLowerCase() === wanted)) count++;
+  }
+  return count;
+}
+
+/**
+ * Asks before removing a list value (`value` under `key`/`label`) or a Rig's sub-list option (`option` of rig `rig`), saying what goes
+ * with it: its pictures and how many marks use it. Resolves to true when the person confirms. `pictures` is the number of pictures that
+ * would be deleted too.
+ */
+async function confirmRemoveListItem({ label, key, value, option, rig, pictures }) {
+  const isOption = option != null;
+  const marks = await loadMarksForCounts();
+  const used = marks ? marksUsingValue(marks, isOption ? "rigOptions" : key, isOption ? option : value, isOption ? rig : undefined) : null;
+  const lines = [isOption ? `Remove "${option}" from ${rig}'s sub list?` : `Remove "${value}" from ${label}?`];
+  if (pictures) lines.push(`Its ${pictures} picture${pictures === 1 ? "" : "s"} will be deleted too.`);
+  if (used) lines.push(`${used} of your marks use it. They keep the name, but this can't be undone — "Restore missing values" only brings back the name.`);
+  else lines.push("This can't be undone.");
+  return confirm(lines.join("\n\n"));
+}
+
+/**
+ * What your marks use that the lists no longer have: {values: [{field, key, value}], rigOptions: [{rig, option}]}. `has(label, value)` says
+ * whether a value is in that field's list (case-insensitive; own and Public's), `rigOptionsOf(rig)` the options the rig already has. Mark
+ * Type and the tide fields are locked (never removable), so they're skipped. Rig options are only taken from marks with exactly one rig,
+ * so it's clear which rig they belong to.
+ */
+function findMissingListValues(marks, has, rigOptionsOf) {
+  const values = new Map();
+  const rigOptions = new Map();
+  for (const mark of marks || []) {
+    for (const { key, label } of MARK_LIST_FIELDS) {
+      if (LOCKED_MARK_LIST_KEYS.includes(key)) continue;
+      for (const value of markFieldValues(mark, key)) {
+        if (has(label, value)) continue;
+        const id = `${label}|${String(value).toLowerCase()}`;
+        if (!values.has(id)) values.set(id, { field: label, key, value });
+      }
+    }
+    const rigs = markFieldValues(mark, "rig");
+    if (rigs.length !== 1) continue;
+    const have = (rigOptionsOf(rigs[0]) || []).map((o) => String(o).toLowerCase());
+    for (const option of markFieldValues(mark, "rigOptions")) {
+      if (have.includes(String(option).toLowerCase())) continue;
+      const id = `${String(rigs[0]).toLowerCase()}|${String(option).toLowerCase()}`;
+      if (!rigOptions.has(id)) rigOptions.set(id, { rig: rigs[0], option });
+    }
+  }
+  return { values: [...values.values()], rigOptions: [...rigOptions.values()] };
+}
+
+let restoreFound = null; // what the open "Restore missing values" panel is offering
+
+/** The options a rig has now: its own sub list plus your private one (when it is a Public rig). */
+function rigOptionsNow(rigName) {
+  const row = mergedMarkListsFor("Rig").find((r) => r.value.toLowerCase() === String(rigName).toLowerCase());
+  if (!row) return [];
+  return [...(row.subList || []), ...(rigSublistOverrides.get(row.id) || [])];
+}
+
+function closeRestorePanel() {
+  const panel = document.getElementById("markListsRestorePanel");
+  panel.style.display = "none";
+  panel.innerHTML = "";
+  restoreFound = null;
+}
+
+/** Opens the panel listing the values your marks use that the lists no longer have. */
+async function onOpenRestorePanel() {
+  const panel = document.getElementById("markListsRestorePanel");
+  panel.style.display = "block";
+  panel.innerHTML = `<p class="footnote" style="margin:0;text-align:left;">Checking your marks…</p>`;
+  const marks = await loadMarksForCounts({ fresh: true });
+  if (!marks) {
+    panel.innerHTML = `<p class="footnote" style="margin:0;text-align:left;color:#dc2626;">Couldn't load your marks — try again.</p>`;
+    return;
+  }
+  const found = findMissingListValues(
+    marks,
+    (label, value) => mergedMarkListsFor(label).some((r) => r.value.toLowerCase() === String(value).toLowerCase()),
+    rigOptionsNow
+  );
+  restoreFound = found;
+  const box = "border:1px solid var(--grey-200);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:var(--white);color:#111827;";
+  if (!found.values.length && !found.rigOptions.length) {
+    panel.innerHTML = `<div style="${box}"><p style="margin:0 0 8px;">Nothing is missing — every value your marks use is in the lists.</p><button type="button" class="btn-secondary" data-restore-cancel>Close</button></div>`;
+    panel.querySelector("[data-restore-cancel]").addEventListener("click", closeRestorePanel);
+    return;
+  }
+  const pill = (attr, index, text, count) =>
+    `<label class="loc-chip" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;"><input type="checkbox" ${attr}="${index}" checked /><span>${escapeHtml(text)}</span><span style="opacity:0.7;font-size:0.75rem;">${count} mark${count === 1 ? "" : "s"}</span></label>`;
+  const groups = MARK_LIST_FIELDS.map(({ label, key }) => {
+    const items = found.values.map((v, i) => ({ v, i })).filter(({ v }) => v.field === label);
+    if (!items.length) return "";
+    return `<div style="margin-bottom:8px;"><div style="font-weight:600;font-size:0.85rem;margin-bottom:4px;">${escapeHtml(label)}</div><div style="display:flex;flex-wrap:wrap;gap:6px;">${items
+      .map(({ v, i }) => pill("data-restore-value", i, v.value, marksUsingValue(marks, key, v.value)))
+      .join("")}</div></div>`;
+  }).join("");
+  const optionItems = found.rigOptions
+    .map((o, i) => pill("data-restore-option", i, `${o.rig} › ${o.option}`, marksUsingValue(marks, "rigOptions", o.option, o.rig)))
+    .join("");
+  const optionsGroup = optionItems
+    ? `<div style="margin-bottom:8px;"><div style="font-weight:600;font-size:0.85rem;margin-bottom:4px;">Rig options</div><div style="display:flex;flex-wrap:wrap;gap:6px;">${optionItems}</div></div>`
+    : "";
+  panel.innerHTML = `<div style="${box}">
+    <div style="font-weight:600;margin-bottom:4px;">Restore missing values</div>
+    <p class="footnote" style="margin:0 0 10px;text-align:left;">Your marks use these, but they're no longer in the lists. Names only: each gets a new colour, and pictures and species limits can't be recovered.</p>
+    ${groups}${optionsGroup}
+    <div style="display:flex;gap:8px;margin-top:6px;"><button type="button" class="btn-secondary" data-restore-go>Restore selected</button><button type="button" class="btn-secondary" data-restore-cancel>Cancel</button></div>
+  </div>`;
+  panel.querySelector("[data-restore-cancel]").addEventListener("click", closeRestorePanel);
+  panel.querySelector("[data-restore-go]").addEventListener("click", onRestoreSelected);
+}
+
+/** Adds one value to a list as your own row (a random unused colour, like a value added by hand). */
+async function addListValueRequest(label, value) {
+  const res = await fetch(`${USER_BACKEND_URL}/api/marklists${effectiveUserIdParam()}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ field: label, value, colorFormat: pickUnusedColorFormat(label) }),
+  });
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    throw new Error(errBody.error || `status ${res.status}`);
+  }
+  const created = await res.json();
+  markLists.push(created);
+  return created;
+}
+
+/** Restores the ticked values (one request at a time, so each new colour avoids the ones just given), then the ticked rig options. */
+async function onRestoreSelected() {
+  const panel = document.getElementById("markListsRestorePanel");
+  if (!restoreFound) return;
+  const values = Array.from(panel.querySelectorAll("[data-restore-value]:checked")).map((el) => restoreFound.values[Number(el.dataset.restoreValue)]);
+  const options = Array.from(panel.querySelectorAll("[data-restore-option]:checked")).map((el) => restoreFound.rigOptions[Number(el.dataset.restoreOption)]);
+  if (!values.length && !options.length) return;
+  setMarkListsSaveStatus("Restoring…", false);
+  let failed = 0;
+  for (const v of values) {
+    try {
+      await addListValueRequest(v.field, v.value);
+    } catch (err) {
+      failed++;
+      console.error("Failed to restore a value:", err);
+    }
+  }
+  // Rig options, rig by rig: into the rig's own sub list, or — for one of Public's rigs — into your private sub list on it.
+  const byRig = new Map();
+  for (const o of options) byRig.set(o.rig, [...(byRig.get(o.rig) || []), o.option]);
+  for (const [rigName, added] of byRig) {
+    const row = mergedMarkListsFor("Rig").find((r) => r.value.toLowerCase() === rigName.toLowerCase());
+    if (!row) {
+      failed += added.length; // the rig itself isn't in the list (and wasn't restored)
+      continue;
+    }
+    try {
+      if (row._isPublic) {
+        await saveRigSublistOverride(row.id, [...(rigSublistOverrides.get(row.id) || []), ...added]);
+      } else {
+        await saveRigSublist(row, { hasSublist: true, subList: [...(row.subList || []), ...added] });
+      }
+    } catch (err) {
+      failed++;
+      console.error("Failed to restore rig options:", err);
+    }
+  }
+  marksForCountsCache = null;
+  closeRestorePanel();
+  renderMarkLists();
+  setMarkListsSaveStatus(failed ? `Restored, but ${failed} couldn't be added — see the console.` : "Restored.", !!failed);
+}
+
 async function onRemoveMarkListValue(key, value) {
   const fieldDef = MARK_LIST_FIELDS.find((f) => f.key === key);
   if (!fieldDef || LOCKED_MARK_LIST_KEYS.includes(key)) return;
   const entry = markLists.find((r) => r.field === fieldDef.label && r.value === value);
   if (!entry || !entry.id) return;
+  // A rig's option pictures go with it too.
+  const pictures = (entry.images || []).length + Object.values(entry.optionImages || {}).reduce((n, list) => n + list.length, 0);
+  if (!(await confirmRemoveListItem({ label: fieldDef.label, key, value, pictures }))) return;
   try {
     const res = await fetch(`${USER_BACKEND_URL}/api/marklists/${entry.id}${effectiveUserIdParam()}`, {
       method: "DELETE",
