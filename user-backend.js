@@ -3716,7 +3716,7 @@ const CTL_MAX_BATCH = 100;
 // events once it has used this many and answers the rest "deferred" — the app simply leaves those pending and sends them next time.
 const CTL_QUERY_BUDGET = 30;
 const CTL_MAX_TRACK_POINTS = 200; // per request; at 14 rows per INSERT statement (D1 allows 100 bound values) that is at most 15 statements
-const CTL_EVENT_TYPES = ["trip_start", "trip_end", "action_start", "action_end", "catch"];
+const CTL_EVENT_TYPES = ["trip_start", "trip_end", "action_start", "action_end", "catch", "action_update", "rodsetup_update"];
 // Defaults for the controller's number dials until they get a Settings page of their own.
 const CTL_DEPTH_VALUES = [0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20];
 const CTL_SIZE_DIAL = { min: 10, max: 120, step: 1, default: 30 };
@@ -3954,6 +3954,112 @@ async function ctlLoadTripData(env, uid) {
   return { trips: trips.results.map(rowToTripSetup), actions: actions.results.map(rowToTripAction), rodSetups: rods.results.map(rowToRodSetup) };
 }
 
+/** Every value of the pick-lists a controller edit may choose from (your own plus Public's): {field: Set of values}. */
+async function ctlListValues(env, uid) {
+  const { results } = await env.DB.prepare(
+    "SELECT field, value FROM user_mark_lists WHERE user_id IN (?, ?) AND field IN ('Species', 'Berley', 'Bait', 'Fishing Method', 'Rod', 'Rig')"
+  ).bind(uid, PUBLIC_USER_ID).all();
+  const out = {};
+  for (const r of results) (out[r.field] ||= new Set()).add(r.value);
+  return out;
+}
+
+/** A rig's options: its own Sub List, else your private one on a Public rig (nothing when it has none). */
+async function ctlRigOptions(env, uid, rigName) {
+  const rows = (await env.DB.prepare("SELECT id, user_id, has_sublist, sub_list FROM user_mark_lists WHERE field = 'Rig' AND value = ? AND user_id IN (?, ?)").bind(rigName, uid, PUBLIC_USER_ID).all()).results;
+  const row = rows.find((r) => r.user_id === uid) || rows[0]; // your own row wins over Public's
+  if (!row) return [];
+  if (row.has_sublist) return parseSubList(row.sub_list);
+  const o = await env.DB.prepare("SELECT sub_list FROM user_rig_sublist_overrides WHERE user_id = ? AND rig_id = ?").bind(uid, row.id).first();
+  return o ? parseSubList(o.sub_list) : [];
+}
+
+/** A list of non-empty names, trimmed and without repeats — or null when `v` isn't one. */
+function ctlNameList(v) {
+  return Array.isArray(v) && v.every((x) => typeof x === "string" && x.trim()) ? [...new Set(v.map((x) => x.trim()))] : null;
+}
+
+const ctlJsonOrNull = (list) => (list && list.length ? JSON.stringify(list) : null);
+
+/** The UPDATE for an `action_update` event: {actionId, fishingMethod?, berley?, bait?, targets?, rodSetupIds?}. Only existing values may be chosen. */
+async function ctlActionUpdateStatements(env, uid, ev) {
+  const row = typeof ev.actionId === "string" ? await env.DB.prepare("SELECT * FROM user_trip_actions WHERE id = ? AND user_id = ?").bind(ev.actionId, uid).first() : null;
+  if (!row) return { error: "action not found" };
+  const cur = rowToTripAction(row);
+  const next = { fishingMethod: cur.fishingMethod, berley: cur.berley || null, bait: cur.bait, species: cur.species, rodSetupIds: cur.rodSetupIds };
+  const lists = await ctlListValues(env, uid);
+  let changed = false;
+  const pick = (key, field, column, label) => {
+    if (ev[key] === undefined) return null;
+    const values = ctlNameList(ev[key]);
+    if (!values) return `${key} must be a list of names`;
+    const unknown = values.find((v) => !(lists[field] && lists[field].has(v)));
+    if (unknown) return `"${unknown}" is not one of your ${label} options`;
+    next[column] = values;
+    changed = true;
+    return null;
+  };
+  const problem = pick("fishingMethod", "Fishing Method", "fishingMethod", "fishing method") || pick("bait", "Bait", "bait", "bait") || pick("targets", "Species", "species", "species");
+  if (problem) return { error: problem };
+  if (ev.berley !== undefined) {
+    if (ev.berley !== null && typeof ev.berley !== "string") return { error: "berley must be text (empty to clear it)" };
+    const b = (ev.berley || "").trim();
+    if (b && !(lists.Berley && lists.Berley.has(b))) return { error: `"${b}" is not one of your berley options` };
+    next.berley = b || null;
+    changed = true;
+  }
+  if (ev.rodSetupIds !== undefined) {
+    const ids = ctlNameList(ev.rodSetupIds);
+    if (!ids) return { error: "rodSetupIds must be a list of rod setup ids" };
+    const known = new Set((await env.DB.prepare("SELECT id FROM user_rod_setups WHERE user_id = ?").bind(uid).all()).results.map((r) => r.id));
+    const stranger = ids.find((id) => !known.has(id));
+    if (stranger) return { error: "a rod setup in that list isn't yours" };
+    next.rodSetupIds = ids;
+    changed = true;
+  }
+  if (!changed) return { error: "nothing to change" };
+  return {
+    stmts: [
+      env.DB.prepare("UPDATE user_trip_actions SET fishing_method = ?, berley = ?, bait = ?, rod_setup_ids = ?, species = ? WHERE id = ? AND user_id = ?")
+        .bind(ctlJsonOrNull(next.fishingMethod), next.berley, ctlJsonOrNull(next.bait), ctlJsonOrNull(next.rodSetupIds), ctlJsonOrNull(next.species), cur.id, uid),
+    ],
+  };
+}
+
+/** The UPDATE for a `rodsetup_update` event: {rodSetupId, rod?, rig?, subListItems?}. Changing the rig clears its options unless new ones are given (as on the website). */
+async function ctlRodSetupUpdateStatements(env, uid, ev) {
+  const row = typeof ev.rodSetupId === "string" ? await env.DB.prepare("SELECT * FROM user_rod_setups WHERE id = ? AND user_id = ?").bind(ev.rodSetupId, uid).first() : null;
+  if (!row) return { error: "rod setup not found" };
+  const cur = rowToRodSetup(row);
+  const next = { rod: cur.rod || null, rig: cur.rig || null, subListItems: cur.subListItems };
+  const lists = await ctlListValues(env, uid);
+  let changed = false;
+  for (const [key, field] of [["rod", "Rod"], ["rig", "Rig"]]) {
+    if (ev[key] === undefined) continue;
+    if (ev[key] !== null && typeof ev[key] !== "string") return { error: `${key} must be text (empty to clear it)` };
+    const v = (ev[key] || "").trim();
+    if (v && !(lists[field] && lists[field].has(v))) return { error: `"${v}" is not one of your ${key} options` };
+    if (key === "rig" && (v || null) !== next.rig && ev.subListItems === undefined) next.subListItems = [];
+    next[key] = v || null;
+    changed = true;
+  }
+  if (ev.subListItems !== undefined) {
+    const items = ctlNameList(ev.subListItems);
+    if (!items) return { error: "subListItems must be a list of option names" };
+    if (items.length) {
+      const options = next.rig ? await ctlRigOptions(env, uid, next.rig) : [];
+      const bad = items.find((i) => !options.includes(i));
+      if (bad) return { error: `"${bad}" is not an option of ${next.rig || "a rig"}` };
+    }
+    next.subListItems = items;
+    changed = true;
+  }
+  if (!changed) return { error: "nothing to change" };
+  return {
+    stmts: [env.DB.prepare("UPDATE user_rod_setups SET rod = ?, rig = ?, sub_list_items = ? WHERE id = ? AND user_id = ?").bind(next.rod, next.rig, ctlJsonOrNull(next.subListItems), cur.id, uid)],
+  };
+}
+
 async function ctlLoadRodSetups(env, uid) {
   const { results } = await env.DB.prepare("SELECT * FROM user_rod_setups WHERE user_id = ? ORDER BY name ASC").bind(uid).all();
   return results.map(rowToRodSetup);
@@ -3963,9 +4069,11 @@ async function ctlLoadRodSetups(env, uid) {
 async function ctlBuildConfig(env, user) {
   const { trips, actions, rodSetups } = await ctlLoadTripData(env, user.id);
   const { results } = await env.DB.prepare(
-    `SELECT field, value, user_id, min_size, max_size, max_qty, big_max_qty, big_size, qty_group FROM user_mark_lists
+    `SELECT id, field, value, user_id, min_size, max_size, max_qty, big_max_qty, big_size, qty_group, has_sublist, sub_list FROM user_mark_lists
      WHERE user_id IN (?, ?) AND field IN (${CTL_LIST_FIELDS.map(() => "?").join(", ")}) ORDER BY field, value`
   ).bind(user.id, PUBLIC_USER_ID, ...CTL_LIST_FIELDS).all();
+  const overrides = await env.DB.prepare("SELECT rig_id, sub_list FROM user_rig_sublist_overrides WHERE user_id = ?").bind(user.id).all();
+  const overrideByRig = new Map(overrides.results.map((o) => [o.rig_id, parseSubList(o.sub_list)]));
   const byField = {};
   const seen = new Set();
   // Your own rows win over Public's on a clash, same as the site's merged lists.
@@ -3988,8 +4096,16 @@ async function ctlBuildConfig(env, user) {
       name: a.name,
       rodSetupIds: ctlLiveRodSetupIds(a.rodSetupIds, rodSetups),
       species: ctlSpeciesOrder(a, actions, allSpecies),
+      // what the controller's "Modify defaults" shows and edits (the website's Trip Defaults): this action's own choices
+      fishingMethod: a.fishingMethod,
+      berley: a.berley || "",
+      bait: a.bait,
+      targets: a.species,
     })),
-    rodSetups: rodSetups.map((r) => ({ id: r.id, name: r.name, rod: r.rod, rig: r.rig })),
+    rodSetups: rodSetups.map((r) => ({ id: r.id, name: r.name, rod: r.rod, rig: r.rig, subListItems: r.subListItems })),
+    rods: names("Rod"),
+    // A rig's options: its own Sub List, else your private one on a Public rig (same rule as the website's tdRigSublist).
+    rigs: (byField.Rig || []).map((r) => ({ name: r.value, options: r.has_sublist ? parseSubList(r.sub_list) : overrideByRig.get(r.id) || [] })).sort((a, b) => a.name.localeCompare(b.name)),
     species: allSpecies,
     limits,
     berley: names("Berley"),
@@ -4133,6 +4249,14 @@ async function ctlProcessEvent(env, user, ev) {
         rodSetups
       )
     );
+  }
+
+  // Edits made on the controller's "Modify defaults" screens: they change the website's Trip Defaults (an Action, a Rod Setup) and
+  // may only choose values that already exist.
+  if (ev.type === "action_update" || ev.type === "rodsetup_update") {
+    const edit = ev.type === "action_update" ? await ctlActionUpdateStatements(env, uid, ev) : await ctlRodSetupUpdateStatements(env, uid, ev);
+    if (edit.error) return bad(edit.error);
+    stmts.push(...edit.stmts);
   }
 
   if (nextState) stmts.push(ctlWriteStateStatement(env, uid, nextState));

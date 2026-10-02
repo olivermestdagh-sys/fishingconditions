@@ -27,7 +27,7 @@ function makeDb() {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("CREATE TABLE users (id TEXT PRIMARY KEY, role TEXT, email TEXT, name TEXT);");
   sqlite.exec("CREATE TABLE sessions (id TEXT PRIMARY KEY, user_id TEXT, expires_at INTEGER);");
-  for (const t of ["user_prefs", "user_mark_lists", "user_rod_setups", "user_trip_setups", "user_trip_actions", "marks", "controller_tokens", "controller_events", "controller_track"]) sqlite.exec(table(t));
+  for (const t of ["user_prefs", "user_mark_lists", "user_rod_setups", "user_trip_setups", "user_trip_actions", "marks", "controller_tokens", "controller_events", "controller_track", "user_rig_sublist_overrides"]) sqlite.exec(table(t));
   sqlite.prepare("INSERT INTO users VALUES ('u1', 'basic', 'a@x', 'A'), ('u2', 'basic', 'b@x', 'B'), ('public', 'public', 'p@x', 'Public')").run();
   sqlite.prepare("INSERT INTO sessions VALUES ('s-u1', 'u1', ?), ('s-u2', 'u2', ?)").run(NOW + 3600000, NOW + 3600000);
   const d1 = {
@@ -79,6 +79,15 @@ async function seeded() {
       "('ax', 'u2', 'tx', 'Not mine', '[]', NULL, '[]', '[]', '[]', 1)"
   );
   ins("INSERT INTO user_mark_lists (id, user_id, field, value, created_at, min_size) VALUES ('s1', 'u1', 'Species', 'Bream', 1, 25), ('s2', 'public', 'Species', 'Flathead', 1, NULL), ('s3', 'public', 'Species', 'Snapper', 1, NULL), ('b1', 'public', 'Berley', 'Pilchard Mix', 1, NULL), ('x1', 'u2', 'Species', 'Secret', 1, NULL)");
+  // pick-list values the defaults editor may choose from (Public's and your own), a rig with its own Sub List and a Public rig with your private one
+  ins(
+    "INSERT INTO user_mark_lists (id, user_id, field, value, created_at, has_sublist, sub_list) VALUES " +
+      "('f1', 'public', 'Fishing Method', 'Drifting', 1, NULL, NULL), ('f2', 'public', 'Fishing Method', 'Anchored', 1, NULL, NULL)," +
+      "('ba1', 'u1', 'Bait', 'Prawn', 1, NULL, NULL), ('ba2', 'u1', 'Bait', 'Squid', 1, NULL, NULL)," +
+      "('ro1', 'u1', 'Rod', 'L Wilson', 1, NULL, NULL), ('ro2', 'u1', 'Rod', 'L Raider', 1, NULL, NULL)," +
+      "('ri1', 'u1', 'Rig', 'Paternoster', 1, 0, NULL), ('ri2', 'u1', 'Rig', 'Jig Head', 1, 1, '[\"Vibe\",\"Paddle Tail\"]'), ('ri3', 'public', 'Rig', 'Lure', 1, 0, NULL)"
+  );
+  ins("INSERT INTO user_rig_sublist_overrides (id, user_id, rig_id, sub_list, created_at) VALUES ('ov1', 'u1', 'ri3', '[\"Cranka\"]', 1)");
   const created = await worker.fetch(
     new Request("https://worker.example/api/controller/tokens", { method: "POST", headers: { "Content-Type": "application/json", Origin: SITE, Cookie: "session=s-u1" }, body: JSON.stringify({ name: "Test controller" }) }),
     env
@@ -393,4 +402,121 @@ test("track: bad requests are refused and store nothing", async () => {
   assert.equal((await site(env, "GET", "/api/controller/track?from=5&to=1")).status, 400);
   assert.equal((await api(env, null, "GET", "/api/controller/track?from=1&to=2")).status, 401, "reading needs a signed-in visitor");
   assert.equal((await api(env, token, "GET", "/api/controller/track?from=1&to=2")).status, 401, "a device token can write a track but not read it back");
+});
+
+test("config: carries what the defaults editor needs — each action's own choices, rod setup options, rods and rigs with their options", async () => {
+  const { env, token } = await seeded();
+  const cfg = await (await api(env, token, "GET", "/api/controller/config")).json();
+  const drift = cfg.actions.find((a) => a.name === "Drift");
+  assert.deepEqual(drift.fishingMethod, ["Drifting"]);
+  assert.equal(drift.berley, "Pilchard Mix");
+  assert.deepEqual(drift.bait, ["Prawn"]);
+  assert.deepEqual(drift.targets, ["Bream"], "its own targets, apart from the catch-card order in 'species'");
+  assert.equal(cfg.actions.find((a) => a.name === "Anchor").berley, "");
+  assert.deepEqual(cfg.rodSetups.find((r) => r.id === "r2").subListItems, ["Vibe"]);
+  assert.deepEqual(cfg.rods, ["L Raider", "L Wilson"]);
+  assert.deepEqual(cfg.rigs, [
+    { name: "Jig Head", options: ["Vibe", "Paddle Tail"] },
+    { name: "Lure", options: ["Cranka"] }, // a Public rig: your private sub list
+    { name: "Paternoster", options: [] },
+  ]);
+  assert.deepEqual(cfg.fishingMethod, ["Anchored", "Drifting"]);
+});
+
+const update = (env, token, type, seq, extra) => send(env, token, [{ deviceId: "fishctl-01", seq, type, ts: T0 + seq, tzOffsetMin: 600, ...extra }]);
+const actionRow = (sqlite, id) => sqlite.prepare("SELECT * FROM user_trip_actions WHERE id = ?").get(id);
+const setupRow = (sqlite, id) => sqlite.prepare("SELECT * FROM user_rod_setups WHERE id = ?").get(id);
+
+test("action_update: changes an action's choices, from existing values only, idempotently", async () => {
+  const { sqlite, env, token } = await seeded();
+  const v1 = (await (await api(env, token, "GET", "/api/controller/config")).json()).configVersion;
+
+  let r = await update(env, token, "action_update", 1, { actionId: "a1", fishingMethod: ["Anchored", "Drifting"], bait: ["Squid"], targets: ["Flathead", "Bream"], berley: "" });
+  assert.equal(r[0].status, "created");
+  const row = actionRow(sqlite, "a1");
+  assert.deepEqual(JSON.parse(row.fishing_method), ["Anchored", "Drifting"]);
+  assert.deepEqual(JSON.parse(row.bait), ["Squid"]);
+  assert.deepEqual(JSON.parse(row.species), ["Flathead", "Bream"]);
+  assert.equal(row.berley, null, "an empty berley clears it");
+  assert.deepEqual(JSON.parse(row.rod_setup_ids), ["r1", "r2"], "fields not sent are untouched");
+
+  r = await update(env, token, "action_update", 1, { actionId: "a1", bait: ["Prawn"] });
+  assert.equal(r[0].status, "duplicate", "a replay changes nothing");
+  assert.deepEqual(JSON.parse(actionRow(sqlite, "a1").bait), ["Squid"]);
+
+  r = await update(env, token, "action_update", 2, { actionId: "a1", berley: "Pilchard Mix", rodSetupIds: ["r2"], bait: [] });
+  assert.equal(r[0].status, "created");
+  const after = actionRow(sqlite, "a1");
+  assert.equal(after.berley, "Pilchard Mix");
+  assert.deepEqual(JSON.parse(after.rod_setup_ids), ["r2"]);
+  assert.equal(after.bait, null, "an empty list clears it");
+  assert.notEqual((await (await api(env, token, "GET", "/api/controller/config")).json()).configVersion, v1, "the config the controller reads changed");
+});
+
+test("action_update: a value that doesn't exist, someone else's action or rod setup, or nothing at all is rejected and changes nothing", async () => {
+  const { sqlite, env, token } = await seeded();
+  const before = JSON.stringify(actionRow(sqlite, "a1"));
+  const bad = [
+    { actionId: "a1", fishingMethod: ["Trawling"] },
+    { actionId: "a1", bait: ["Pipi"] },
+    { actionId: "a1", targets: ["Secret"] }, // another user's species
+    { actionId: "a1", berley: "Nope" },
+    { actionId: "a1", rodSetupIds: ["r9"] },
+    { actionId: "a1", bait: "Prawn" },
+    { actionId: "a1" },
+    { actionId: "ax", bait: ["Prawn"] }, // another user's action
+    { bait: ["Prawn"] },
+  ];
+  const results = [];
+  for (const [i, extra] of bad.entries()) results.push((await update(env, token, "action_update", 10 + i, extra))[0]);
+  assert.deepEqual(results.map((x) => x.status), Array(bad.length).fill("rejected"));
+  assert.ok(results.every((x) => typeof x.error === "string" && x.error));
+  assert.match(results[0].error, /Trawling/);
+  assert.equal(JSON.stringify(actionRow(sqlite, "a1")), before);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM controller_events").get().n, 0, "rejected events leave no trace");
+});
+
+test("rodsetup_update: rod, rig and rig options — changing the rig clears its options, and options must belong to the rig", async () => {
+  const { sqlite, env, token } = await seeded();
+  let r = await update(env, token, "rodsetup_update", 1, { rodSetupId: "r1", rod: "L Raider" });
+  assert.equal(r[0].status, "created");
+  assert.equal(setupRow(sqlite, "r1").rod, "L Raider");
+  assert.equal(setupRow(sqlite, "r1").rig, "Paternoster");
+
+  // r2 is on Jig Head with option Vibe: another rig drops the options
+  r = await update(env, token, "rodsetup_update", 2, { rodSetupId: "r2", rig: "Paternoster" });
+  assert.equal(r[0].status, "created");
+  assert.equal(setupRow(sqlite, "r2").rig, "Paternoster");
+  assert.equal(setupRow(sqlite, "r2").sub_list_items, null);
+
+  // options of the (new) rig only
+  assert.equal((await update(env, token, "rodsetup_update", 3, { rodSetupId: "r2", subListItems: ["Vibe"] }))[0].status, "rejected", "Paternoster has no options");
+  r = await update(env, token, "rodsetup_update", 4, { rodSetupId: "r2", rig: "Jig Head", subListItems: ["Paddle Tail", "Vibe"] });
+  assert.equal(r[0].status, "created");
+  assert.deepEqual(JSON.parse(setupRow(sqlite, "r2").sub_list_items), ["Paddle Tail", "Vibe"]);
+  // your private options on a Public rig count
+  r = await update(env, token, "rodsetup_update", 5, { rodSetupId: "r1", rig: "Lure", subListItems: ["Cranka"] });
+  assert.equal(r[0].status, "created");
+  assert.deepEqual(JSON.parse(setupRow(sqlite, "r1").sub_list_items), ["Cranka"]);
+  // clearing
+  r = await update(env, token, "rodsetup_update", 6, { rodSetupId: "r1", rod: "", subListItems: [] });
+  assert.equal(setupRow(sqlite, "r1").rod, null);
+  assert.equal(setupRow(sqlite, "r1").sub_list_items, null);
+});
+
+test("rodsetup_update: unknown rods and rigs, someone else's setup and empty edits are rejected", async () => {
+  const { sqlite, env, token } = await seeded();
+  const before = JSON.stringify(setupRow(sqlite, "r1"));
+  const bad = [
+    { rodSetupId: "r1", rod: "Mystery" },
+    { rodSetupId: "r1", rig: "Mystery" },
+    { rodSetupId: "r1", subListItems: ["Vibe"] }, // r1 is on Paternoster
+    { rodSetupId: "r1", subListItems: "Vibe" },
+    { rodSetupId: "r1" },
+    { rodSetupId: "nope", rod: "L Wilson" },
+  ];
+  const results = [];
+  for (const [i, extra] of bad.entries()) results.push((await update(env, token, "rodsetup_update", 30 + i, extra))[0]);
+  assert.deepEqual(results.map((x) => x.status), Array(bad.length).fill("rejected"));
+  assert.equal(JSON.stringify(setupRow(sqlite, "r1")), before);
 });
