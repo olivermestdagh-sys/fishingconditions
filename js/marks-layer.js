@@ -373,6 +373,7 @@ async function loadAndRenderMarks(map, state) {
     const res = await fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store", credentials: "include" });
     if (!res.ok) return; // nothing to show yet, not an error
     marks = await res.json(); // bare array — see handlePublicMarks, user-backend.js
+    if (typeof enrichControllerMarks === "function") enrichControllerMarks(marks); // fills tide/weather on marks the Fishing Controller saved (js/mark-lookup.js); runs in the background
   } catch (err) {
     console.error("Could not load marks:", err);
     return;

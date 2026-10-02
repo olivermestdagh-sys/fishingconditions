@@ -554,6 +554,53 @@ async function fillBlankMarkConditions(mark) {
   return mark;
 }
 
+// --- Marks from the Fishing Controller ------------------------------------------------------------------------------
+// The Worker saves a controller catch/session without tide or weather (the lookups above only run in the browser). Whenever the
+// marks load, this page completes the ones that are still blank — own marks from the Controller, from the last 2 weeks — with the
+// same lookup a mark saved on this page gets, and saves just those fields. Each mark is tried once per device (a mark the lookup
+// can't fill would otherwise be retried on every load).
+const CONTROLLER_ENRICH_TRIED_KEY = "controllerEnrichTried";
+
+async function enrichControllerMarks(marks) {
+  try {
+    if (!cachedIsSignedIn || !Array.isArray(marks)) return;
+    let tried;
+    try {
+      tried = new Set(JSON.parse(localStorage.getItem(CONTROLLER_ENRICH_TRIED_KEY) || "[]"));
+    } catch {
+      tried = new Set();
+    }
+    const cutoff = nowInNaiveEncoding() - 14 * 86400000;
+    const todo = marks
+      .filter((m) => m && m.source === "Controller" && m.owner === "Mine" && !tried.has(m.id) && parseNaive(m.dateTime) >= cutoff && blankConditionKeys(m).length > 0)
+      .slice(0, 10);
+    for (const mark of todo) {
+      tried.add(mark.id);
+      const filled = { ...mark };
+      await fillBlankMarkConditions(filled);
+      const patch = {};
+      for (const key of MARK_LOOKUP_KEYS) {
+        if (filled[key] !== undefined && filled[key] !== null && filled[key] !== "" && (mark[key] === undefined || mark[key] === null || mark[key] === "")) patch[key] = filled[key];
+      }
+      if (Object.keys(patch).length === 0) continue;
+      const res = await fetch(`${USER_BACKEND_URL}/api/marks/${mark.id}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (res.ok) Object.assign(mark, patch);
+    }
+    try {
+      localStorage.setItem(CONTROLLER_ENRICH_TRIED_KEY, JSON.stringify([...tried].slice(-300)));
+    } catch {
+      /* storage blocked: they may be tried again next time */
+    }
+  } catch (err) {
+    console.error("Completing Fishing Controller marks failed:", err);
+  }
+}
+
 // --- Shore direction guess (OpenStreetMap coastline bearing) ---------------
 //
 // Ports validate_shore.py's algorithm (already run and confirmed against

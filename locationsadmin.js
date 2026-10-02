@@ -216,6 +216,7 @@ async function init() {
   document.getElementById("btnAddMarkShapeFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Shape Format", "newMarkShapeFormatInput"));
   document.getElementById("btnAddMarkColorFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Colour Format", "newMarkColorFormatInput"));
   document.getElementById("btnRestoreMissingValues").addEventListener("click", onOpenRestorePanel);
+  document.getElementById("btnAddController").addEventListener("click", onCreateControllerToken);
   document.getElementById("btnAddTier").addEventListener("click", onAddTier);
   document.getElementById("btnSendMessage").addEventListener("click", onSendMessage);
   document.getElementById("contactMessageInput").addEventListener("input", (e) => {
@@ -294,11 +295,120 @@ async function refreshPageForCurrentUser() {
   await Promise.all([
     loadLocationGroups(),
     loadMarkLists(),
+    loadControllerDevices(),
     loadUsers(),
     loadTiers(),
     loadMyMessages(),
     loadAdminMessages(),
   ]);
+}
+
+// --- Fishing Controller devices: the tokens each controller's phone app signs in with (Worker: /api/controller/tokens) ---
+
+let controllerTokens = [];
+
+function setControllerStatus(text, isError) {
+  const el = document.getElementById("controllerStatus");
+  el.textContent = text;
+  el.style.color = isError ? "#dc2626" : "#16a34a";
+}
+
+/** Shows the section to signed-in people and loads their tokens. These belong to the REAL account, so the admin's "view as Public" doesn't change them. */
+async function loadControllerDevices() {
+  const section = document.getElementById("controllerSection");
+  if (!currentUser) {
+    section.style.display = "none";
+    controllerTokens = [];
+    return;
+  }
+  section.style.display = "";
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/controller/tokens`, { credentials: "include" });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    controllerTokens = await res.json();
+  } catch (err) {
+    console.error("Failed to load controller devices:", err);
+    controllerTokens = [];
+    setControllerStatus("Couldn't load your controller tokens — try reloading the page.", true);
+  }
+  renderControllerDevices();
+}
+
+function renderControllerDevices() {
+  const list = document.getElementById("controllerDevicesList");
+  const when = (ms) => (ms ? new Date(ms).toLocaleString() : "never");
+  if (!controllerTokens.length) {
+    list.innerHTML = `<p class="footnote" style="margin:0;text-align:left;">No controllers yet — create a token below for the first one.</p>`;
+    return;
+  }
+  list.innerHTML = controllerTokens
+    .map(
+      (t) => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--grey-200);">
+        <span style="font-weight:600;${t.revokedAt ? "text-decoration:line-through;opacity:0.6;" : ""}">${escapeHtml(t.name)}</span>
+        <span class="footnote" style="margin:0;">created ${escapeHtml(when(t.createdAt))} · last used ${escapeHtml(when(t.lastUsedAt))}${t.revokedAt ? ` · revoked ${escapeHtml(when(t.revokedAt))}` : ""}</span>
+        ${t.revokedAt ? "" : `<button type="button" class="btn-secondary" data-revoke-controller="${escapeHtml(t.id)}" style="margin-left:auto;padding:4px 10px;font-size:0.8rem;">Revoke</button>`}
+      </div>`
+    )
+    .join("");
+  list.querySelectorAll("[data-revoke-controller]").forEach((btn) => btn.addEventListener("click", () => onRevokeControllerToken(btn.dataset.revokeController)));
+}
+
+async function onCreateControllerToken() {
+  const input = document.getElementById("newControllerName");
+  const name = input.value.trim();
+  if (!name) {
+    setControllerStatus("Give the controller a name first.", true);
+    return;
+  }
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/controller/tokens`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `status ${res.status}`);
+    }
+    const created = await res.json();
+    input.value = "";
+    const box = document.getElementById("controllerNewToken");
+    box.style.display = "block";
+    box.innerHTML = `<div style="font-weight:600;margin-bottom:4px;">Token for ${escapeHtml(created.name)}</div>
+      <p class="footnote" style="margin:0 0 8px;text-align:left;">Copy it now — it is never shown again.</p>
+      <input type="text" id="controllerTokenValue" readonly value="${escapeHtml(created.token)}" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:8px;border:1px solid var(--grey-200);font-family:monospace;" />
+      <button type="button" class="btn-secondary" id="btnCopyControllerToken" style="margin-top:8px;">Copy</button>`;
+    document.getElementById("btnCopyControllerToken").addEventListener("click", async () => {
+      const field = document.getElementById("controllerTokenValue");
+      field.select();
+      try {
+        await navigator.clipboard.writeText(field.value);
+        setControllerStatus("Copied.", false);
+      } catch {
+        setControllerStatus("Select the token and copy it by hand.", true);
+      }
+    });
+    setControllerStatus("", false);
+    await loadControllerDevices();
+  } catch (err) {
+    console.error("Failed to create controller token:", err);
+    setControllerStatus("Couldn't create the token: " + err.message, true);
+  }
+}
+
+async function onRevokeControllerToken(id) {
+  const token = controllerTokens.find((t) => t.id === id);
+  if (!token || !confirm(`Revoke the token for "${token.name}"?\n\nThat controller's phone app will stop being able to sync until you give it a new token.`)) return;
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/controller/tokens/${encodeURIComponent(id)}`, { method: "DELETE", credentials: "include" });
+    if (!res.ok && res.status !== 404) throw new Error(`status ${res.status}`);
+    setControllerStatus("", false);
+  } catch (err) {
+    console.error("Failed to revoke controller token:", err);
+    setControllerStatus("Couldn't revoke it: " + err.message, true);
+  }
+  await loadControllerDevices();
 }
 
 async function onSignOut() {

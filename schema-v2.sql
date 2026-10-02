@@ -359,6 +359,29 @@ CREATE TABLE IF NOT EXISTS user_marklist_format_overrides (
 );
 CREATE INDEX IF NOT EXISTS idx_umfo_user ON user_marklist_format_overrides(user_id);
 
+-- Fishing Controller (user-backend.js: /api/controller/*). A device token is shown once and kept only as a sha-256 hash; revoked tokens stay
+-- (revoked_at) so the list in Settings shows what was used. controller_events records every event the phone app has sent, so a replayed
+-- batch (retry after a lost response) is recognised and ignored. Needed a manual CREATE TABLE on D1 (done 2026-10-02).
+CREATE TABLE IF NOT EXISTS controller_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER,
+  revoked_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_ctok_user ON controller_tokens(user_id);
+
+CREATE TABLE IF NOT EXISTS controller_events (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  device_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  received_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, device_id, seq)
+);
+
 -- A user's own logged fishing marks (catches and points of interest).
 -- Columns mirror data/marks.json's own record shape field-for-field
 -- (confirmed against the live file, not guessed) rather than normalizing

@@ -741,20 +741,46 @@ const LIVE_TRIP_KEY = "liveActiveTrip";
 let liveTripData = null; // {trips, actions, rodSetups}, loaded lazily
 let liveTripBusy = false;
 
+// The running trip is an account setting (js/prefs.js), so the Fishing Controller and other devices share it. "No trip" is stored as
+// {"tripId":null}, a value rather than a removal, so a device that still holds the old trip can't re-upload it.
 function getLiveTripState() {
   try {
-    return JSON.parse(localStorage.getItem(LIVE_TRIP_KEY)) || null;
+    const state = JSON.parse(localStorage.getItem(LIVE_TRIP_KEY));
+    return state && state.tripId ? state : null;
   } catch {
     return null;
   }
 }
 function setLiveTripState(state) {
+  Prefs.set(LIVE_TRIP_KEY, JSON.stringify(state && state.tripId ? state : { tripId: null }));
+}
+
+// Picks up what changed elsewhere while this page was open (a trip or action started on the Fishing Controller, a catch logged
+// from another device): the account's settings again, then the marks created since the last look.
+let liveAccountSyncAt = 0;
+let liveMarksPulledMs = 0;
+async function liveSyncFromAccount() {
+  if (mapMode !== "live" || !liveMap || !liveMarkState || !liveMarkState.markerLayer || !cachedIsSignedIn || liveTripBusy || activeCardFlow) return;
+  if (Date.now() - liveAccountSyncAt < 15000) return;
+  liveAccountSyncAt = Date.now();
+  const state = liveMarkState;
+  await Prefs.refresh();
   try {
-    if (state) localStorage.setItem(LIVE_TRIP_KEY, JSON.stringify(state));
-    else localStorage.removeItem(LIVE_TRIP_KEY);
-  } catch {
-    // storage unavailable: the trip just won't survive a reload
+    const since = liveMarksPulledMs ? liveMarksPulledMs - 10 * 60 * 1000 : Date.now() - 12 * 60 * 60 * 1000; // a little overlap covers clock differences
+    const res = await fetch(`${MARKS_FILE_PATH}?since=${since}&_=${Date.now()}`, { cache: "no-store", credentials: "include" });
+    if (res.ok) {
+      const fresh = (await res.json()).filter((m) => m && m.id && !state.marksById.has(m.id));
+      if (state === liveMarkState && !state._discarded) {
+        for (const mark of fresh) addCatchToLiveMap(mark);
+        if (fresh.some((m) => isSessionType(m.type))) renderSessionLines(liveMap, state, Array.from(state.marksById.values()));
+      }
+      liveMarksPulledMs = Date.now();
+      if (fresh.length && typeof enrichControllerMarks === "function") enrichControllerMarks(fresh);
+    }
+  } catch (err) {
+    console.error("Could not look for new marks:", err);
   }
+  updateLiveSessionButtons(); // re-draws the trip's action buttons from the (possibly changed) trip state and the marks
 }
 
 async function loadLiveTripData() {
@@ -1283,8 +1309,15 @@ function liveInitOnce() {
   // The automatic trigger itself — see liveRefreshGpsPosition's own comment for why this is scoped here (not
   // folded into app.js's unrelated syncAppHeight visibilitychange listener) and why resume-only, not a timer.
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) liveRefreshGpsPosition();
+    if (!document.hidden) {
+      liveRefreshGpsPosition();
+      liveSyncFromAccount();
+    }
   });
+  // While Live mode is open and visible, look for changes made elsewhere (e.g. the Fishing Controller) once a minute.
+  setInterval(() => {
+    if (!document.hidden) liveSyncFromAccount();
+  }, 60000);
   // Wired once, not inside renderForLocation — that function reuses this
   // same persistent <canvas> across every re-render (destroying and
   // recreating the Chart.js instance each time, never the canvas element),

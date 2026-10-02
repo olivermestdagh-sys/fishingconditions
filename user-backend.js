@@ -170,6 +170,9 @@ export default {
       request.method !== "GET" &&
       request.method !== "HEAD" &&
       !url.pathname.startsWith("/api/pipeline/") &&
+      // Also exempt: the Fishing Controller app's calls — they carry a device token ("Bearer fc_…"), no cookie and no Origin,
+      // so there is nothing for a cross-site page to ride on (the token routes themselves still require the site's Origin).
+      !(url.pathname.startsWith("/api/controller/") && /^Bearer fc_/.test(request.headers.get("Authorization") || "")) &&
       request.headers.get("Origin") !== env.ALLOWED_ORIGIN
     ) {
       return new Response(JSON.stringify({ error: "Cross-origin request blocked." }), {
@@ -196,6 +199,9 @@ export default {
       }
       if (url.pathname === "/api/prefs") {
         return handlePrefs(request, env);
+      }
+      if (url.pathname.startsWith("/api/controller/")) {
+        return handleControllerApi(request, url, env);
       }
 
       // --- v2 endpoints below: the unified locations/types/groups/mark-lists/
@@ -2306,7 +2312,12 @@ async function handleMarkItem(request, url, env, id) {
 }
 
 async function insertOrUpdateMark(env, id, uid, body, now) {
-  await env.DB.prepare(
+  await markInsertStatement(env, id, uid, body, now).run();
+}
+
+/** The prepared INSERT for one mark (not run), so a caller can include it in a batch — see the Fishing Controller events. */
+function markInsertStatement(env, id, uid, body, now) {
+  return env.DB.prepare(
     `INSERT INTO marks (id, user_id, lat, lng, name, type, date_time, source, source_uuid, species, bait, rig, rod,
                          berley, notes, size, released, weather_condition, tide_condition, tide_extreme, water_condition, water_depth,
                          water_temperature, temperature, barometer, wind_direction, wind_speed,
@@ -2320,8 +2331,7 @@ async function insertOrUpdateMark(env, id, uid, body, now) {
       body.waterCondition ?? null, body.waterDepth ?? null, body.waterTemperature ?? null, body.temperature ?? null,
       body.barometer ?? null, body.windDirection ?? null, body.windSpeed ?? null,
       body.fishingMethod ?? null, body.rigOptions ?? null, body.sessionRole ?? null, body.sessionGroupId ?? null, now
-    )
-    .run();
+    );
 }
 
 function mergeMarkFields(existing, body) {
@@ -2598,6 +2608,7 @@ const SYNCED_PREF_KEYS = new Set([
   "markLastFieldValues",
   "liveSessionDefaults",
   "tripOrigin",
+  "liveActiveTrip",
 ]);
 const PREF_MAX_VALUE_LENGTH = 64 * 1024;
 
@@ -2959,15 +2970,19 @@ async function handlePublicMarks(request, env) {
   // Admin sees every real user's marks too, not just their own (owners is null — see markReadOwnerIds) — the Map
   // page's owner tooltip/reassignment feature needs something besides their own account to actually show.
   const owners = markReadOwnerIds(user);
+  // ?since=<UTC ms>: only marks this database row was created after (what a Live page that is already open pulls to pick up marks
+  // made elsewhere — the Fishing Controller, another device — without downloading every mark again).
+  const sinceParam = Number(new URL(request.url).searchParams.get("since"));
+  const since = Number.isFinite(sinceParam) && sinceParam > 0 ? sinceParam : null;
   const { results } = await (owners
     ? env.DB.prepare(
         `SELECT marks.*, users.name AS owner_name, users.email AS owner_email FROM marks JOIN users ON users.id = marks.user_id
-         WHERE marks.user_id IN (${owners.map(() => "?").join(", ")}) ORDER BY marks.date_time DESC`
-      ).bind(...owners)
+         WHERE marks.user_id IN (${owners.map(() => "?").join(", ")})${since ? " AND marks.created_at > ?" : ""} ORDER BY marks.date_time DESC`
+      ).bind(...owners, ...(since ? [since] : []))
     : env.DB.prepare(
         `SELECT marks.*, users.name AS owner_name, users.email AS owner_email FROM marks JOIN users ON users.id = marks.user_id
-         ORDER BY marks.date_time DESC`
-      )
+         ${since ? "WHERE marks.created_at > ?" : ""} ORDER BY marks.date_time DESC`
+      ).bind(...(since ? [since] : []))
   ).all();
   return new Response(JSON.stringify(results.map((row) => rowToOwnedMark(row, user))), {
     status: 200,
@@ -3675,4 +3690,480 @@ function jsonResponse(body, status, env) {
       ...corsHeaders(env),
     },
   });
+}
+
+// ---------------------------------------------------------------------
+// Fishing Controller API (/api/controller/*) — see docs/Fishing Controller Design Brief.md, adapted to this site.
+//
+// A handheld Bluetooth controller talks to an Android app, which talks to these routes. Nothing here is a new data model:
+// a controller trip/action/catch becomes the SAME marks and the SAME running-trip setting the website's own Live mode
+// makes (Session Start/End and Catch marks; the `liveActiveTrip` preference), so it shows on the map, in Settings and in
+// reports like everything else. The builders below are server copies of the browser ones (js/trip-defaults.js,
+// js/live-cards.js, js/catch-limits.js) — tests/controller-parity.test.mjs runs both on the same inputs, so they can't drift.
+//
+// Auth: a per-user device token ("Bearer fc_…", created in Settings, stored only as a sha-256 hash, revocable). It is accepted
+// ONLY here, never as a session, and — carrying no cookie and no Origin — is exempt from the CSRF guard in fetch().
+// Events are idempotent: each (device, sequence number) is recorded in controller_events in the same batch as the marks it
+// created, so replaying a batch never creates anything twice. The controller sends UTC epoch seconds plus its timezone offset;
+// they're converted to the site's naive local "YYYY-MM-DD HH:MM:SS" here.
+// ---------------------------------------------------------------------
+
+const CONTROLLER_TOKEN_PREFIX = "fc_";
+const LIVE_TRIP_PREF = "liveActiveTrip"; // same key as js/prefs.js / map-live.js
+const CTL_RUN_GAP_MS = 8 * 3600000; // js/catch-limits.js CATCH_RUN_GAP_MS
+const CTL_MAX_BATCH = 100;
+const CTL_EVENT_TYPES = ["trip_start", "trip_end", "action_start", "action_end", "catch"];
+// Defaults for the controller's number dials until they get a Settings page of their own.
+const CTL_DEPTH_VALUES = [0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20];
+const CTL_SIZE_DIAL = { min: 10, max: 120, step: 1, default: 30 };
+const CTL_LIST_FIELDS = ["Species", "Berley", "Bait", "Fishing Method", "Water Condition", "Rod", "Rig"];
+
+// --- pure helpers (copies of the browser's; see tests/controller-parity.test.mjs) ----------------------------------
+
+function ctlUniq(list) {
+  return [...new Set((list || []).filter((v) => v != null && String(v).trim() !== "").map((v) => String(v).trim()))];
+}
+
+/** The Rod Setups of an Action that still exist (a deleted one drops out) — tdLiveRodSetupIds. */
+function ctlLiveRodSetupIds(ids, rodSetups) {
+  const known = new Set((rodSetups || []).map((r) => r.id));
+  return (ids || []).filter((id) => known.has(id));
+}
+
+/** The Session Start mark for a trip Action — buildSessionStartFromAction (js/trip-defaults.js), minus tide. */
+function ctlBuildSessionStart(action, rodSetups, ctx) {
+  const setups = (action.rodSetupIds || []).map((rid) => (rodSetups || []).find((r) => r.id === rid)).filter(Boolean);
+  const mark = {
+    id: ctx.id, lat: ctx.lat, lng: ctx.lng, name: `Session ${ctx.sessionNumber} Start`, type: "Session Start",
+    dateTime: ctx.dateTime, createdAt: ctx.createdAt, source: ctx.source || "Manual", sessionRole: "start", sessionGroupId: ctx.sessionGroupId,
+  };
+  const set = (key, list) => {
+    if (list.length) mark[key] = list.join(", ");
+  };
+  set("species", ctlUniq(action.species));
+  set("fishingMethod", ctlUniq(action.fishingMethod));
+  if (action.berley) mark.berley = action.berley;
+  set("bait", ctlUniq(action.bait));
+  set("rod", ctlUniq(setups.map((s) => s.rod)));
+  set("rig", ctlUniq(setups.map((s) => s.rig)));
+  set("rigOptions", ctlUniq(setups.flatMap((s) => s.subListItems || [])));
+  if (ctx.water) mark.waterCondition = ctx.water;
+  if (ctx.waterDepth != null) mark.waterDepth = ctx.waterDepth;
+  return mark;
+}
+
+const CTL_SESSION_END_CARRIED_FIELDS = ["species", "waterCondition", "berley", "fishingMethod", "waterDepth", "rod", "rig", "bait", "rigOptions", "tideCondition", "tideExtreme"];
+
+/** The Session End that closes `startMark` — buildSessionEndFromStart (js/live-cards.js). */
+function ctlBuildSessionEnd(startMark, { id, lat, lng, dateTime, createdAt, source }, sessionNumber) {
+  const mark = {
+    id, lat, lng, name: `Session ${sessionNumber} End`, type: "Session End", dateTime, createdAt,
+    source: source || "Manual", sessionRole: "end", sessionGroupId: startMark.sessionGroupId,
+  };
+  for (const key of CTL_SESSION_END_CARRIED_FIELDS) {
+    if (startMark[key] != null && startMark[key] !== "") mark[key] = startMark[key];
+  }
+  return mark;
+}
+
+/** The gear a Catch takes from a trip Action — tdCatchFieldsFromAction (js/trip-defaults.js). */
+function ctlCatchFieldsFromAction(action, rodSetups, setupId) {
+  const ids = ctlLiveRodSetupIds(action.rodSetupIds, rodSetups);
+  const setup = (rodSetups || []).find((r) => r.id === (setupId || (ids.length === 1 ? ids[0] : null)));
+  const out = {};
+  if (action.berley) out.berley = action.berley;
+  if ((action.fishingMethod || []).length) out.fishingMethod = action.fishingMethod.join(", ");
+  if ((action.bait || []).length) out.bait = action.bait.join(", ");
+  if (setup) {
+    if (setup.rod) out.rod = setup.rod;
+    if (setup.rig) out.rig = setup.rig;
+    if ((setup.subListItems || []).length) out.rigOptions = setup.subListItems.join(", ");
+  }
+  return out;
+}
+
+/**
+ * A Catch mark — what the Live +Catch flow saves on a trip (buildCatchFromCards + tdCatchFieldsFromAction, js/live-cards.js /
+ * js/trip-defaults.js, as map-live.js's saveLiveCatch combines them), minus tide. `c`: {id, lat, lng, dateTime, species, size,
+ * released, tooSmall, water, waterDepth, setupId, source}; `action` may be null (a catch with no running action: no gear).
+ */
+function ctlBuildCatch(c, action, rodSetups) {
+  const mark = { id: c.id, lat: c.lat, lng: c.lng, name: c.species, type: "Catch", dateTime: c.dateTime, createdAt: c.dateTime, source: c.source || "Manual", species: c.species };
+  const cm = c.size === "" || c.size == null ? NaN : Number(c.size);
+  if (Number.isFinite(cm) && !c.tooSmall) mark.size = cm;
+  if (c.tooSmall) mark.notes = "Too small";
+  if (c.released || c.tooSmall) mark.released = true;
+  if (c.water) mark.waterCondition = c.water;
+  if (action) {
+    if (action.berley) mark.berley = action.berley;
+    if (action.fishingMethod && action.fishingMethod.length) mark.fishingMethod = action.fishingMethod.join(", ");
+  }
+  if (c.waterDepth != null) mark.waterDepth = c.waterDepth;
+  if (action) Object.assign(mark, ctlCatchFieldsFromAction(action, rodSetups, c.setupId));
+  return mark;
+}
+
+/** The number in "Session 3 Start"/"Session 3 End", or null — sessionNumberFromName (js/catch-limits.js). */
+function ctlSessionNumberFromName(name) {
+  const m = /^Session (\d+) (?:Start|End)$/i.exec(String(name || "").trim());
+  return m ? Number(m[1]) : null;
+}
+
+function ctlCatchChain(timesMs, anchorMs, gapMs = CTL_RUN_GAP_MS) {
+  const real = timesMs.filter(Number.isFinite).sort((a, b) => a - b);
+  const all = [...real, anchorMs].sort((a, b) => a - b);
+  const i = all.indexOf(anchorMs);
+  let a = i;
+  while (a > 0 && all[a] - all[a - 1] <= gapMs) a--;
+  let b = i;
+  while (b < all.length - 1 && all[b + 1] - all[b] <= gapMs) b++;
+  const chain = all.slice(a, b + 1);
+  if (!real.includes(anchorMs)) chain.splice(chain.indexOf(anchorMs), 1);
+  return chain.length ? { start: chain[0], end: chain[chain.length - 1] } : null;
+}
+
+/** The next "Session N" number — nextSessionNumber (js/catch-limits.js). `starts`: [{tMs, number}]. */
+function ctlNextSessionNumber(starts, anchorMs, gapMs = CTL_RUN_GAP_MS) {
+  const valid = (starts || []).filter((s) => s && Number.isFinite(s.tMs) && Number.isFinite(s.number));
+  const chain = ctlCatchChain(valid.map((s) => s.tMs), anchorMs, gapMs);
+  if (!chain) return 1;
+  const inChain = valid.filter((s) => s.tMs <= anchorMs && s.tMs >= chain.start && s.tMs <= chain.end);
+  return inChain.reduce((max, s) => Math.max(max, s.number), 0) + 1;
+}
+
+/** The site's naive local time string for UTC epoch seconds seen on a clock `tzOffsetMin` minutes east of UTC. */
+function ctlNaiveFromEpoch(epochSec, tzOffsetMin) {
+  const d = new Date((epochSec + (tzOffsetMin || 0) * 60) * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+}
+
+/** parseNaive (js/chart-base.js): a naive "YYYY-MM-DD HH:MM:SS" as ms, treating it as UTC purely for arithmetic. */
+function ctlParseNaive(text) {
+  const m = String(text).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+  if (!m) return null;
+  const [, y, mo, d, h, mi, s] = m.map(Number);
+  return Date.UTC(y, mo - 1, d, h, mi, s);
+}
+
+/** Every species for an Action's controller list: its own targets, then the trip's other targets, then the rest (the Catch cards' order). */
+function ctlSpeciesOrder(action, actions, allSpecies) {
+  const own = ctlUniq(action ? action.species : []);
+  const seen = new Set(own);
+  const others = [];
+  for (const a of actions || []) {
+    if (!action || a.tripId !== action.tripId || a.id === action.id) continue;
+    for (const s of a.species || []) if (!seen.has(s)) (seen.add(s), others.push(s));
+  }
+  return [...own, ...others, ...allSpecies.filter((s) => !seen.has(s))];
+}
+
+// --- tokens --------------------------------------------------------------------------------------------------------
+
+async function ctlSha256Hex(text) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function ctlNewToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return CONTROLLER_TOKEN_PREFIX + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** The user a "Bearer fc_…" device token belongs to, or null (unknown, malformed or revoked). Notes when it was last used. */
+async function requireControllerUser(request, env) {
+  const auth = request.headers.get("Authorization") || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!token.startsWith(CONTROLLER_TOKEN_PREFIX)) return null;
+  const hash = await ctlSha256Hex(token);
+  const row = await env.DB.prepare(
+    `SELECT users.*, controller_tokens.id AS token_id, controller_tokens.last_used_at AS token_last_used FROM controller_tokens
+     JOIN users ON users.id = controller_tokens.user_id
+     WHERE controller_tokens.token_hash = ? AND controller_tokens.revoked_at IS NULL`
+  ).bind(hash).first();
+  if (!row) return null;
+  const now = Date.now();
+  if (!row.token_last_used || now - row.token_last_used > 60000) {
+    await env.DB.prepare("UPDATE controller_tokens SET last_used_at = ? WHERE id = ?").bind(now, row.token_id).run();
+  }
+  return row;
+}
+
+async function handleControllerTokens(request, url, env, tokenId) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  if (request.method === "GET" && !tokenId) {
+    const { results } = await env.DB.prepare("SELECT id, name, created_at, last_used_at, revoked_at FROM controller_tokens WHERE user_id = ? ORDER BY created_at DESC").bind(user.id).all();
+    return jsonResponse(results.map((r) => ({ id: r.id, name: r.name, createdAt: r.created_at, lastUsedAt: r.last_used_at ?? null, revokedAt: r.revoked_at ?? null })), 200, env);
+  }
+  if (request.method === "POST" && !tokenId) {
+    const body = await readJsonBody(request);
+    const name = body && typeof body.name === "string" ? body.name.trim() : "";
+    if (!name || name.length > 60) return jsonResponse({ error: "name is required (up to 60 characters)." }, 400, env);
+    const token = ctlNewToken();
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO controller_tokens (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(id, user.id, name, await ctlSha256Hex(token), Date.now())
+      .run();
+    return jsonResponse({ id, name, token }, 201, env); // the only time the token itself is ever shown
+  }
+  if (request.method === "DELETE" && tokenId) {
+    await env.DB.prepare("UPDATE controller_tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL").bind(Date.now(), tokenId, user.id).run();
+    return new Response(null, { status: 204, headers: corsHeaders(env) });
+  }
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+// --- config and state ----------------------------------------------------------------------------------------------
+
+/** The running trip as stored in prefs: {tripId, actionId?, sessionGroupId?}, tripId null when there isn't one. */
+function ctlParseState(text) {
+  try {
+    const s = JSON.parse(text);
+    return s && typeof s === "object" && typeof s.tripId === "string" && s.tripId ? s : { tripId: null };
+  } catch {
+    return { tripId: null };
+  }
+}
+
+async function ctlReadState(env, uid) {
+  const row = await env.DB.prepare("SELECT value FROM user_prefs WHERE user_id = ? AND key = ?").bind(uid, LIVE_TRIP_PREF).first();
+  return ctlParseState(row ? row.value : null);
+}
+
+function ctlWriteStateStatement(env, uid, state) {
+  const value = JSON.stringify(state && state.tripId ? state : { tripId: null });
+  return env.DB.prepare(
+    `INSERT INTO user_prefs (user_id, key, value, updated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).bind(uid, LIVE_TRIP_PREF, value, Date.now());
+}
+
+async function ctlLoadTripData(env, uid) {
+  const [trips, actions, rods] = await Promise.all([
+    env.DB.prepare("SELECT * FROM user_trip_setups WHERE user_id = ? ORDER BY name ASC").bind(uid).all(),
+    env.DB.prepare("SELECT * FROM user_trip_actions WHERE user_id = ?").bind(uid).all(),
+    env.DB.prepare("SELECT * FROM user_rod_setups WHERE user_id = ? ORDER BY name ASC").bind(uid).all(),
+  ]);
+  return { trips: trips.results.map(rowToTripSetup), actions: actions.results.map(rowToTripAction), rodSetups: rods.results.map(rowToRodSetup) };
+}
+
+/** Everything the controller's phone app needs to offer choices: your trips, their actions, rod setups and the pick-lists, plus the running trip. */
+async function ctlBuildConfig(env, user) {
+  const { trips, actions, rodSetups } = await ctlLoadTripData(env, user.id);
+  const { results } = await env.DB.prepare(
+    `SELECT field, value, user_id, min_size, max_size, max_qty, big_max_qty, big_size, qty_group FROM user_mark_lists
+     WHERE user_id IN (?, ?) AND field IN (${CTL_LIST_FIELDS.map(() => "?").join(", ")}) ORDER BY field, value`
+  ).bind(user.id, PUBLIC_USER_ID, ...CTL_LIST_FIELDS).all();
+  const byField = {};
+  const seen = new Set();
+  // Your own rows win over Public's on a clash, same as the site's merged lists.
+  for (const row of [...results.filter((r) => r.user_id === user.id), ...results.filter((r) => r.user_id !== user.id)]) {
+    const key = `${row.field}|${row.value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    (byField[row.field] ||= []).push(row);
+  }
+  const names = (field) => (byField[field] || []).map((r) => r.value).sort((a, b) => a.localeCompare(b));
+  const allSpecies = (byField.Species || []).map((r) => r.value);
+  const limits = Object.fromEntries(
+    (byField.Species || []).map((r) => [r.value, { minSize: r.min_size ?? null, maxSize: r.max_size ?? null, maxQty: r.max_qty ?? null, bigSize: r.big_size ?? null, bigMaxQty: r.big_max_qty ?? null, qtyGroup: r.qty_group ?? null }])
+  );
+  const config = {
+    trips: trips.map((t) => ({ id: t.id, name: t.name })),
+    actions: actions.map((a) => ({
+      id: a.id,
+      tripId: a.tripId,
+      name: a.name,
+      rodSetupIds: ctlLiveRodSetupIds(a.rodSetupIds, rodSetups),
+      species: ctlSpeciesOrder(a, actions, allSpecies),
+    })),
+    rodSetups: rodSetups.map((r) => ({ id: r.id, name: r.name, rod: r.rod, rig: r.rig })),
+    species: allSpecies,
+    limits,
+    berley: names("Berley"),
+    bait: names("Bait"),
+    fishingMethod: names("Fishing Method"),
+    waterCondition: names("Water Condition"),
+    depthValues: CTL_DEPTH_VALUES,
+    sizeDial: CTL_SIZE_DIAL,
+  };
+  const configVersion = (await ctlSha256Hex(JSON.stringify(config))).slice(0, 16);
+  return { configVersion, ...config, state: await ctlReadState(env, user.id) };
+}
+
+// --- events --------------------------------------------------------------------------------------------------------
+
+function ctlNewId(prefix = "m") {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`; // same shape as makeMarkId (js/backend.js)
+}
+
+/** The running session: the user's latest Session Start with no Session End sharing its group id (liveActiveSession, map-live.js). */
+async function ctlActiveSession(env, uid) {
+  const row = await env.DB.prepare("SELECT * FROM marks WHERE user_id = ? AND type = 'Session Start' ORDER BY date_time DESC LIMIT 1").bind(uid).first();
+  if (!row || !row.session_group_id) return null;
+  const ended = await env.DB.prepare("SELECT 1 AS ok FROM marks WHERE user_id = ? AND type = 'Session End' AND session_group_id = ? LIMIT 1").bind(uid, row.session_group_id).first();
+  if (ended) return null;
+  const mark = rowToMark(row);
+  const number = ctlSessionNumberFromName(mark.name);
+  return number == null ? null : { mark, number };
+}
+
+/** The numbers of Session Starts in the last week, for naming the next one. */
+async function ctlRecentStarts(env, uid, anchorNaive) {
+  const { results } = await env.DB.prepare("SELECT name, date_time FROM marks WHERE user_id = ? AND type = 'Session Start' AND date_time >= ? ORDER BY date_time ASC")
+    .bind(uid, ctlNaiveFromEpoch(ctlParseNaive(anchorNaive) / 1000 - 7 * 86400, 0)).all();
+  const out = [];
+  for (const r of results) {
+    const number = ctlSessionNumberFromName(r.name);
+    const tMs = ctlParseNaive(r.date_time);
+    if (number != null && Number.isFinite(tMs)) out.push({ tMs, number });
+  }
+  return out;
+}
+
+/**
+ * Applies ONE event: returns {status, markIds, error?}. Everything it changes (marks, the running-trip setting and the
+ * "this event was processed" record) goes in one batch, so a retry after a failure can't half-apply it.
+ */
+async function ctlProcessEvent(env, user, ev) {
+  const bad = (error) => ({ seq: ev && ev.seq, status: "rejected", error });
+  if (!ev || typeof ev !== "object") return bad("not an event");
+  if (typeof ev.deviceId !== "string" || !ev.deviceId.trim() || ev.deviceId.length > 64) return bad("deviceId is required");
+  if (!Number.isInteger(ev.seq) || ev.seq < 0) return bad("seq must be a whole number");
+  if (!CTL_EVENT_TYPES.includes(ev.type)) return bad("unknown type");
+  if (typeof ev.ts !== "number" || !Number.isFinite(ev.ts) || ev.ts <= 0) return bad("ts must be UTC epoch seconds");
+  const tz = ev.tzOffsetMin == null ? 0 : ev.tzOffsetMin;
+  if (typeof tz !== "number" || !Number.isFinite(tz) || Math.abs(tz) > 840) return bad("tzOffsetMin is out of range");
+  const uid = user.id;
+  const deviceId = ev.deviceId.trim();
+
+  const done = await env.DB.prepare("SELECT 1 AS ok FROM controller_events WHERE user_id = ? AND device_id = ? AND seq = ?").bind(uid, deviceId, ev.seq).first();
+  if (done) return { seq: ev.seq, status: "duplicate", markIds: [] };
+
+  const dateTime = ctlNaiveFromEpoch(ev.ts, tz);
+  const havePosition = typeof ev.lat === "number" && typeof ev.lng === "number" && Math.abs(ev.lat) <= 90 && Math.abs(ev.lng) <= 180;
+  const source = "Controller";
+  const stmts = [];
+  const markIds = [];
+  const now = Date.now();
+  const addMark = (mark, suffix = "") => {
+    markIds.push(mark.id);
+    stmts.push(markInsertStatement(env, mark.id, uid, { ...mark, sourceUuid: `fc:${deviceId}:${ev.seq}${suffix}` }, now));
+  };
+  const state = await ctlReadState(env, uid);
+  const position = { lat: ev.lat, lng: ev.lng };
+
+  // Ends whatever session is running, at this event's time and place.
+  const closeRunning = async () => {
+    const active = await ctlActiveSession(env, uid);
+    if (!active) return null;
+    if (!havePosition) return { error: "a position is needed to end the running session" };
+    addMark(ctlBuildSessionEnd(active.mark, { id: ctlNewId(), ...position, dateTime, createdAt: dateTime, source }, active.number), ":end");
+    return { ended: true };
+  };
+
+  let nextState = null; // set when the running trip changes
+  if (ev.type === "trip_start") {
+    const trip = typeof ev.tripId === "string" ? await env.DB.prepare("SELECT id FROM user_trip_setups WHERE id = ? AND user_id = ?").bind(ev.tripId, uid).first() : null;
+    if (!trip) return bad("trip not found");
+    nextState = { tripId: trip.id };
+  } else if (ev.type === "trip_end") {
+    // Like the site's End Trip: closes the session this trip's action started (if still running), then clears the trip.
+    if (state.sessionGroupId) {
+      const active = await ctlActiveSession(env, uid);
+      if (active && active.mark.sessionGroupId === state.sessionGroupId) {
+        const closed = await closeRunning();
+        if (closed && closed.error) return bad(closed.error);
+      }
+    }
+    nextState = { tripId: null };
+  } else if (ev.type === "action_start") {
+    if (!havePosition) return bad("lat/lng are required");
+    const row = typeof ev.actionId === "string" ? await env.DB.prepare("SELECT * FROM user_trip_actions WHERE id = ? AND user_id = ?").bind(ev.actionId, uid).first() : null;
+    if (!row) return bad("action not found");
+    const action = rowToTripAction(row);
+    const { rodSetups } = await ctlLoadTripData(env, uid);
+    const closed = await closeRunning(); // starting an action ends the running one first, like tapping another action pill
+    if (closed && closed.error) return bad(closed.error);
+    const anchorMs = ctlParseNaive(dateTime);
+    const sessionNumber = ctlNextSessionNumber(await ctlRecentStarts(env, uid, dateTime), anchorMs);
+    const sessionGroupId = ctlNewId();
+    addMark(ctlBuildSessionStart(action, rodSetups, { id: ctlNewId(), ...position, dateTime, createdAt: dateTime, sessionGroupId, sessionNumber, source }), ":start");
+    nextState = { tripId: action.tripId, actionId: action.id, sessionGroupId };
+  } else if (ev.type === "action_end") {
+    const closed = await closeRunning();
+    if (closed && closed.error) return bad(closed.error);
+    nextState = { tripId: state.tripId };
+  } else if (ev.type === "catch") {
+    if (!havePosition) return bad("lat/lng are required");
+    if (typeof ev.species !== "string" || !ev.species.trim()) return bad("species is required");
+    if (ev.size != null && (typeof ev.size !== "number" || !Number.isFinite(ev.size) || ev.size < 0 || ev.size > 1000)) return bad("size must be a number of cm");
+    if (ev.depth != null && (typeof ev.depth !== "number" || !Number.isFinite(ev.depth) || ev.depth < 0 || ev.depth > 1000)) return bad("depth must be a number of metres");
+    let action = null;
+    let rodSetups = [];
+    if (typeof ev.actionId === "string") {
+      const row = await env.DB.prepare("SELECT * FROM user_trip_actions WHERE id = ? AND user_id = ?").bind(ev.actionId, uid).first();
+      if (row) {
+        action = rowToTripAction(row);
+        rodSetups = (await ctlLoadTripData(env, uid)).rodSetups;
+      }
+    }
+    addMark(
+      ctlBuildCatch(
+        {
+          id: ctlNewId(), ...position, dateTime, species: ev.species.trim(), size: ev.size ?? null, released: ev.fate === "release", tooSmall: !!ev.tooSmall,
+          water: typeof ev.water === "string" ? ev.water : "", waterDepth: ev.depth ?? null, setupId: typeof ev.rodSetupId === "string" ? ev.rodSetupId : null, source,
+        },
+        action,
+        rodSetups
+      )
+    );
+  }
+
+  if (nextState) stmts.push(ctlWriteStateStatement(env, uid, nextState));
+  stmts.push(env.DB.prepare("INSERT INTO controller_events (user_id, device_id, seq, type, received_at) VALUES (?, ?, ?, ?, ?)").bind(uid, deviceId, ev.seq, ev.type, now));
+  await env.DB.batch(stmts);
+  return { seq: ev.seq, status: "created", markIds };
+}
+
+async function handleControllerApi(request, url, env) {
+  const tokenMatch = url.pathname.match(/^\/api\/controller\/tokens(?:\/([^/]+))?$/);
+  if (tokenMatch) return handleControllerTokens(request, url, env, tokenMatch[1]);
+
+  const user = await requireControllerUser(request, env);
+  if (!user) return jsonResponse({ error: "Invalid or revoked controller token." }, 401, env);
+
+  if (url.pathname === "/api/controller/config" && request.method === "GET") {
+    return jsonResponse(await ctlBuildConfig(env, user), 200, env);
+  }
+  if (url.pathname === "/api/controller/state") {
+    if (request.method === "GET") return jsonResponse(await ctlReadState(env, user.id), 200, env);
+    if (request.method === "PUT") {
+      const body = await readJsonBody(request);
+      if (!body || typeof body !== "object") return jsonResponse({ error: "Request body must be a JSON object." }, 400, env);
+      if (body.tripId === null || body.tripId === undefined) {
+        await ctlWriteStateStatement(env, user.id, { tripId: null }).run();
+        return jsonResponse({ tripId: null }, 200, env);
+      }
+      const trip = typeof body.tripId === "string" ? await env.DB.prepare("SELECT id FROM user_trip_setups WHERE id = ? AND user_id = ?").bind(body.tripId, user.id).first() : null;
+      if (!trip) return jsonResponse({ error: "Trip not found." }, 404, env);
+      const next = { tripId: trip.id };
+      if (typeof body.actionId === "string" && typeof body.sessionGroupId === "string") Object.assign(next, { actionId: body.actionId, sessionGroupId: body.sessionGroupId });
+      await ctlWriteStateStatement(env, user.id, next).run();
+      return jsonResponse(next, 200, env);
+    }
+  }
+  if (url.pathname === "/api/controller/events" && request.method === "POST") {
+    const body = await readJsonBody(request);
+    const events = body && Array.isArray(body.events) ? body.events : null;
+    if (!events || events.length === 0 || events.length > CTL_MAX_BATCH) return jsonResponse({ error: `events must be a list of 1 to ${CTL_MAX_BATCH}.` }, 400, env);
+    // In order, one at a time: a later event reads the trip and running session the earlier ones just made.
+    const results = [];
+    for (const ev of events) results.push(await ctlProcessEvent(env, user, ev));
+    return jsonResponse({ results }, 200, env);
+  }
+  return jsonResponse({ error: "Not found." }, 404, env);
 }
