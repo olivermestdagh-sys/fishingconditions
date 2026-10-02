@@ -3712,6 +3712,10 @@ const CONTROLLER_TOKEN_PREFIX = "fc_";
 const LIVE_TRIP_PREF = "liveActiveTrip"; // same key as js/prefs.js / map-live.js
 const CTL_RUN_GAP_MS = 8 * 3600000; // js/catch-limits.js CATCH_RUN_GAP_MS
 const CTL_MAX_BATCH = 100;
+// The free Cloudflare plan allows only 50 D1 queries per request, and one event takes up to ~12. So an events request stops taking new
+// events once it has used this many and answers the rest "deferred" — the app simply leaves those pending and sends them next time.
+const CTL_QUERY_BUDGET = 30;
+const CTL_MAX_TRACK_POINTS = 200; // per request; at 14 rows per INSERT statement (D1 allows 100 bound values) that is at most 15 statements
 const CTL_EVENT_TYPES = ["trip_start", "trip_end", "action_start", "action_end", "catch"];
 // Defaults for the controller's number dials until they get a Settings page of their own.
 const CTL_DEPTH_VALUES = [0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20];
@@ -3950,6 +3954,11 @@ async function ctlLoadTripData(env, uid) {
   return { trips: trips.results.map(rowToTripSetup), actions: actions.results.map(rowToTripAction), rodSetups: rods.results.map(rowToRodSetup) };
 }
 
+async function ctlLoadRodSetups(env, uid) {
+  const { results } = await env.DB.prepare("SELECT * FROM user_rod_setups WHERE user_id = ? ORDER BY name ASC").bind(uid).all();
+  return results.map(rowToRodSetup);
+}
+
 /** Everything the controller's phone app needs to offer choices: your trips, their actions, rod setups and the pick-lists, plus the running trip. */
 async function ctlBuildConfig(env, user) {
   const { trips, actions, rodSetups } = await ctlLoadTripData(env, user.id);
@@ -4085,13 +4094,16 @@ async function ctlProcessEvent(env, user, ev) {
     const row = typeof ev.actionId === "string" ? await env.DB.prepare("SELECT * FROM user_trip_actions WHERE id = ? AND user_id = ?").bind(ev.actionId, uid).first() : null;
     if (!row) return bad("action not found");
     const action = rowToTripAction(row);
-    const { rodSetups } = await ctlLoadTripData(env, uid);
+    const rodSetups = await ctlLoadRodSetups(env, uid);
     const closed = await closeRunning(); // starting an action ends the running one first, like tapping another action pill
     if (closed && closed.error) return bad(closed.error);
     const anchorMs = ctlParseNaive(dateTime);
     const sessionNumber = ctlNextSessionNumber(await ctlRecentStarts(env, uid, dateTime), anchorMs);
     const sessionGroupId = ctlNewId();
-    addMark(ctlBuildSessionStart(action, rodSetups, { id: ctlNewId(), ...position, dateTime, createdAt: dateTime, sessionGroupId, sessionNumber, source }), ":start");
+    addMark(ctlBuildSessionStart(action, rodSetups, {
+      id: ctlNewId(), ...position, dateTime, createdAt: dateTime, sessionGroupId, sessionNumber, source,
+      water: typeof ev.water === "string" ? ev.water : "", waterDepth: typeof ev.depth === "number" && Number.isFinite(ev.depth) && ev.depth >= 0 && ev.depth <= 1000 ? ev.depth : null,
+    }), ":start");
     nextState = { tripId: action.tripId, actionId: action.id, sessionGroupId };
   } else if (ev.type === "action_end") {
     const closed = await closeRunning();
@@ -4108,7 +4120,7 @@ async function ctlProcessEvent(env, user, ev) {
       const row = await env.DB.prepare("SELECT * FROM user_trip_actions WHERE id = ? AND user_id = ?").bind(ev.actionId, uid).first();
       if (row) {
         action = rowToTripAction(row);
-        rodSetups = (await ctlLoadTripData(env, uid)).rodSetups;
+        rodSetups = await ctlLoadRodSetups(env, uid);
       }
     }
     addMark(
@@ -4129,12 +4141,64 @@ async function ctlProcessEvent(env, user, ev) {
   return { seq: ev.seq, status: "created", markIds };
 }
 
+// --- GPS track (controller_track): the phone's position every ~20 s while a trip runs -------------------------------------
+
+/**
+ * POST /api/controller/track (device token): {deviceId, tripId?, points: [{ts, lat, lng, acc?}]}. Idempotent on (user, device, ts), so
+ * a batch whose answer was lost can simply be sent again. Answers {saved, duplicates}.
+ */
+async function handleControllerTrackWrite(request, env, user) {
+  const body = await readJsonBody(request);
+  if (!body || typeof body !== "object") return jsonResponse({ error: "Request body must be a JSON object." }, 400, env);
+  const deviceId = typeof body.deviceId === "string" ? body.deviceId.trim() : "";
+  if (!deviceId || deviceId.length > 64) return jsonResponse({ error: "deviceId is required." }, 400, env);
+  const tripId = body.tripId == null ? null : typeof body.tripId === "string" && body.tripId.length <= 64 ? body.tripId : undefined;
+  if (tripId === undefined) return jsonResponse({ error: "tripId must be text up to 64 characters." }, 400, env);
+  const points = body.points;
+  if (!Array.isArray(points) || points.length === 0 || points.length > CTL_MAX_TRACK_POINTS) return jsonResponse({ error: `points must be a list of 1 to ${CTL_MAX_TRACK_POINTS}.` }, 400, env);
+  for (const p of points) {
+    const ok = p && Number.isInteger(p.ts) && p.ts > 0 && typeof p.lat === "number" && Math.abs(p.lat) <= 90 && typeof p.lng === "number" && Math.abs(p.lng) <= 180 &&
+      (p.acc == null || (typeof p.acc === "number" && Number.isFinite(p.acc) && p.acc >= 0 && p.acc <= 100000));
+    if (!ok) return jsonResponse({ error: "Each point needs ts (UTC epoch seconds), lat, lng and optionally acc." }, 400, env);
+  }
+  const stmts = [];
+  for (let i = 0; i < points.length; i += 14) {
+    const chunk = points.slice(i, i + 14);
+    stmts.push(
+      env.DB.prepare(`INSERT OR IGNORE INTO controller_track (user_id, device_id, ts, lat, lng, acc, trip_id) VALUES ${chunk.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(", ")}`).bind(
+        ...chunk.flatMap((p) => [user.id, deviceId, p.ts, p.lat, p.lng, p.acc ?? null, tripId])
+      )
+    );
+  }
+  const out = await env.DB.batch(stmts);
+  const saved = out.reduce((n, r) => n + ((r && r.meta && r.meta.changes) || 0), 0);
+  return jsonResponse({ saved, duplicates: points.length - saved }, 200, env);
+}
+
+/** GET /api/controller/track?from=<epoch s>&to=<epoch s>[&tripId=] (signed-in site visitor): your own track points in that window, oldest first. */
+async function handleControllerTrackRead(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const from = Number(url.searchParams.get("from"));
+  const to = Number(url.searchParams.get("to"));
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from || to - from > 31 * 86400) return jsonResponse({ error: "from and to (UTC epoch seconds, at most 31 days apart) are required." }, 400, env);
+  const tripId = url.searchParams.get("tripId");
+  const { results } = await env.DB.prepare(
+    `SELECT device_id, ts, lat, lng, acc, trip_id FROM controller_track WHERE user_id = ? AND ts BETWEEN ? AND ?${tripId ? " AND trip_id = ?" : ""} ORDER BY ts ASC LIMIT 20000`
+  ).bind(user.id, from, to, ...(tripId ? [tripId] : [])).all();
+  return jsonResponse(results.map((r) => ({ deviceId: r.device_id, ts: r.ts, lat: r.lat, lng: r.lng, acc: r.acc ?? null, tripId: r.trip_id ?? null })), 200, env);
+}
+
 async function handleControllerApi(request, url, env) {
   const tokenMatch = url.pathname.match(/^\/api\/controller\/tokens(?:\/([^/]+))?$/);
   if (tokenMatch) return handleControllerTokens(request, url, env, tokenMatch[1]);
 
+  if (url.pathname === "/api/controller/track" && request.method === "GET") return handleControllerTrackRead(request, url, env);
+
   const user = await requireControllerUser(request, env);
   if (!user) return jsonResponse({ error: "Invalid or revoked controller token." }, 401, env);
+
+  if (url.pathname === "/api/controller/track" && request.method === "POST") return handleControllerTrackWrite(request, env, user);
 
   if (url.pathname === "/api/controller/config" && request.method === "GET") {
     return jsonResponse(await ctlBuildConfig(env, user), 200, env);
@@ -4160,9 +4224,15 @@ async function handleControllerApi(request, url, env) {
     const body = await readJsonBody(request);
     const events = body && Array.isArray(body.events) ? body.events : null;
     if (!events || events.length === 0 || events.length > CTL_MAX_BATCH) return jsonResponse({ error: `events must be a list of 1 to ${CTL_MAX_BATCH}.` }, 400, env);
-    // In order, one at a time: a later event reads the trip and running session the earlier ones just made.
+    // In order, one at a time: a later event reads the trip and running session the earlier ones just made. Queries are counted so a
+    // long backlog can't run into the per-request limit half way through an event: past the budget, the rest are "deferred".
+    const budget = { used: 0 };
+    const counted = { ...env, DB: { prepare: (sql) => (budget.used++, env.DB.prepare(sql)), batch: (stmts) => env.DB.batch(stmts) } };
     const results = [];
-    for (const ev of events) results.push(await ctlProcessEvent(env, user, ev));
+    for (const ev of events) {
+      if (budget.used >= CTL_QUERY_BUDGET) results.push({ seq: ev && ev.seq, status: "deferred" });
+      else results.push(await ctlProcessEvent(counted, user, ev));
+    }
     return jsonResponse({ results }, 200, env);
   }
   return jsonResponse({ error: "Not found." }, 404, env);

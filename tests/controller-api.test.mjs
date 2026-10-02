@@ -27,7 +27,7 @@ function makeDb() {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("CREATE TABLE users (id TEXT PRIMARY KEY, role TEXT, email TEXT, name TEXT);");
   sqlite.exec("CREATE TABLE sessions (id TEXT PRIMARY KEY, user_id TEXT, expires_at INTEGER);");
-  for (const t of ["user_prefs", "user_mark_lists", "user_rod_setups", "user_trip_setups", "user_trip_actions", "marks", "controller_tokens", "controller_events"]) sqlite.exec(table(t));
+  for (const t of ["user_prefs", "user_mark_lists", "user_rod_setups", "user_trip_setups", "user_trip_actions", "marks", "controller_tokens", "controller_events", "controller_track"]) sqlite.exec(table(t));
   sqlite.prepare("INSERT INTO users VALUES ('u1', 'basic', 'a@x', 'A'), ('u2', 'basic', 'b@x', 'B'), ('public', 'public', 'p@x', 'Public')").run();
   sqlite.prepare("INSERT INTO sessions VALUES ('s-u1', 'u1', ?), ('s-u2', 'u2', ?)").run(NOW + 3600000, NOW + 3600000);
   const d1 = {
@@ -181,14 +181,16 @@ test("state: set the running trip, clear it, and refuse a trip that isn't yours"
 
 test("events: a whole trip — start, action, catch, another action, end — becomes the marks the Live page would make", async () => {
   const { sqlite, env, token } = await seeded();
-  const results = await send(env, token, [
-    ev(1, "trip_start", { tripId: "t1" }),
-    ev(2, "action_start", { actionId: "a1" }),
-    ev(3, "catch", { actionId: "a1", species: "Bream", size: 31, fate: "keep", depth: 4, rodSetupId: "r2" }),
-    ev(4, "catch", { actionId: "a1", species: "Flathead", size: 40, fate: "release", depth: 4.5 }),
-    ev(5, "action_start", { actionId: "a2", lat: -38.15, lng: 145.25 }),
-    ev(6, "trip_end", { lat: -38.2, lng: 145.3 }),
-  ]);
+  // Two requests: one request only takes a limited number of events (see the query budget test below).
+  const results = [
+    ...(await send(env, token, [
+      ev(1, "trip_start", { tripId: "t1" }),
+      ev(2, "action_start", { actionId: "a1" }),
+      ev(3, "catch", { actionId: "a1", species: "Bream", size: 31, fate: "keep", depth: 4, rodSetupId: "r2" }),
+      ev(4, "catch", { actionId: "a1", species: "Flathead", size: 40, fate: "release", depth: 4.5 }),
+    ])),
+    ...(await send(env, token, [ev(5, "action_start", { actionId: "a2", lat: -38.15, lng: 145.25 }), ev(6, "trip_end", { lat: -38.2, lng: 145.3 })])),
+  ];
   assert.deepEqual(results.map((r) => r.status), Array(6).fill("created"));
 
   const all = marks(sqlite);
@@ -316,4 +318,79 @@ test("marks since: only marks created after that moment are returned, so an open
   const recent = await (await site(env, "GET", `/api/public/marks?since=${NOW - 60000}`)).json();
   assert.deepEqual(recent.map((m) => m.name), ["Bream"]);
   assert.equal(recent[0].sourceUuid, "fc:fishctl-01:1");
+});
+
+test("events: a long backlog is taken in slices — the rest come back 'deferred' and are accepted on the next request", async () => {
+  const { sqlite, env, token } = await seeded();
+  const backlog = Array.from({ length: 14 }, (_, i) => ev(i + 1, "catch", { species: "Bream", size: 20 + i, fate: "keep" }));
+  const first = await send(env, token, backlog);
+  const created = first.filter((r) => r.status === "created").length;
+  const deferred = first.filter((r) => r.status === "deferred");
+  assert.ok(created >= 1 && created < 14, "some are taken");
+  assert.equal(created + deferred.length, 14);
+  assert.deepEqual(first.slice(0, created).map((r) => r.status), Array(created).fill("created"), "taken in order, deferred ones are the tail");
+  assert.deepEqual(deferred.map((r) => r.seq), backlog.slice(created).map((e) => e.seq));
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM marks").get().n, created, "a deferred event leaves no trace");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM controller_events").get().n, created);
+  // The app sends what is still pending until nothing is.
+  let left = backlog.slice(created);
+  for (let round = 0; left.length && round < 10; round++) {
+    const answers = await send(env, token, left);
+    left = left.filter((_, i) => answers[i].status === "deferred");
+  }
+  assert.equal(left.length, 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM marks").get().n, 14);
+});
+
+test("events: an action started with a water condition and depth carries them on its Session Start", async () => {
+  const { sqlite, env, token } = await seeded();
+  await send(env, token, [ev(1, "action_start", { actionId: "a1", water: "Murky", depth: 3.5 })]);
+  const start = marks(sqlite, "type = 'Session Start'")[0];
+  assert.equal(start.water_condition, "Murky");
+  assert.equal(start.water_depth, 3.5);
+});
+
+const trackPoint = (n, extra = {}) => ({ ts: T0 + n * 20, lat: -38.1 + n * 0.0001, lng: 145.2, acc: 8, ...extra });
+const trackCall = (env, token, body) => api(env, token, "POST", "/api/controller/track", body);
+
+test("track: points are stored, idempotent on (device, time), and readable by the signed-in owner", async () => {
+  const { sqlite, env, token } = await seeded();
+  const points = Array.from({ length: 30 }, (_, i) => trackPoint(i));
+  const res = await trackCall(env, token, { deviceId: "phone-1", tripId: "t1", points });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { saved: 30, duplicates: 0 });
+    // 20 points seen before (10..29) plus 2 new ones
+  assert.deepEqual(await (await trackCall(env, token, { deviceId: "phone-1", tripId: "t1", points: points.slice(10).concat([trackPoint(30), trackPoint(31)]) })).json(), { saved: 2, duplicates: 20 });
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM controller_track").get().n, 32);
+  assert.equal((await (await trackCall(env, token, { deviceId: "phone-2", points: [trackPoint(0)] })).json()).saved, 1, "another device is its own stream");
+
+  const read = await site(env, "GET", `/api/controller/track?from=${T0}&to=${T0 + 100}`);
+  assert.equal(read.status, 200);
+  const rows = await read.json();
+  assert.ok(rows.length >= 6 && rows[0].ts <= rows[1].ts, "oldest first");
+  assert.equal(rows[0].tripId, "t1");
+  assert.equal((await site(env, "GET", `/api/controller/track?from=${T0}&to=${T0 + 100}&tripId=nope`).then((r) => r.json())).length, 0);
+  assert.equal((await site(env, "GET", `/api/controller/track?from=${T0}&to=${T0 + 100}`, undefined, "s-u2").then((r) => r.json())).length, 0, "someone else's track is not yours");
+});
+
+test("track: bad requests are refused and store nothing", async () => {
+  const { sqlite, env, token } = await seeded();
+  const cases = [
+    { points: [trackPoint(1)] },
+    { deviceId: "d", points: [] },
+    { deviceId: "d", points: Array.from({ length: 201 }, (_, i) => trackPoint(i)) },
+    { deviceId: "d", points: [trackPoint(1, { lat: 91 })] },
+    { deviceId: "d", points: [trackPoint(1, { lng: -181 })] },
+    { deviceId: "d", points: [trackPoint(1, { ts: 0 })] },
+    { deviceId: "d", points: [trackPoint(1, { ts: 1.5 })] },
+    { deviceId: "d", points: [trackPoint(1, { acc: -1 })] },
+    { deviceId: "d", tripId: 5, points: [trackPoint(1)] },
+    { deviceId: "d", points: [trackPoint(1), { ts: T0 }] },
+  ];
+  for (const body of cases) assert.equal((await trackCall(env, token, body)).status, 400, JSON.stringify(body).slice(0, 80));
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM controller_track").get().n, 0);
+  assert.equal((await trackCall(env, "fc_nonsense", { deviceId: "d", points: [trackPoint(1)] })).status, 401);
+  assert.equal((await site(env, "GET", "/api/controller/track?from=5&to=1")).status, 400);
+  assert.equal((await api(env, null, "GET", "/api/controller/track?from=1&to=2")).status, 401, "reading needs a signed-in visitor");
+  assert.equal((await api(env, token, "GET", "/api/controller/track?from=1&to=2")).status, 401, "a device token can write a track but not read it back");
 });

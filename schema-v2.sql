@@ -382,6 +382,18 @@ CREATE TABLE IF NOT EXISTS controller_events (
   PRIMARY KEY (user_id, device_id, seq)
 );
 
+-- The phone app's GPS track while a trip runs (about every 20 s). Idempotent on (user, device, ts). Needed a manual CREATE TABLE on D1.
+CREATE TABLE IF NOT EXISTS controller_track (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  device_id TEXT NOT NULL,
+  ts INTEGER NOT NULL,          -- UTC epoch seconds
+  lat REAL NOT NULL,
+  lng REAL NOT NULL,
+  acc REAL,                     -- metres
+  trip_id TEXT,                 -- the trip running at the time, when the phone knew it
+  PRIMARY KEY (user_id, device_id, ts)
+) WITHOUT ROWID;
+
 -- A user's own logged fishing marks (catches and points of interest).
 -- Columns mirror data/marks.json's own record shape field-for-field
 -- (confirmed against the live file, not guessed) rather than normalizing
