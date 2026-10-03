@@ -17,6 +17,7 @@ Environment variables:
     FORECAST_DAYS         (optional) - how many days ahead to pull, default 6
 """
 
+import hashlib
 import json
 import math
 import os
@@ -1550,6 +1551,44 @@ def keep_recent_history(old_rows, hours_to_keep=30):
     return kept
 
 
+# The fields of a row the controller's graph draws (the handheld fetches ONE location's file, not the whole 5 MB conditions.json).
+GRAPH_ROW_FIELDS = (
+    "dateTime", "Tide Height (m)", "Wind Forecast (km/h)", "Wind Realtime (km/h)", "Temp Forecast (C)", "Temp Realtime (C)",
+    "Rainfall Probability (%)", "Condition", "Fishing Condition",
+)
+
+
+def write_graph_files(output_locations, all_rows, sun_times_by_location, generated_at):
+    """Writes data/graph/index.json (one small entry per location+type) and data/graph/<id>.json (that location's rows and sun times).
+
+    Same numbers as conditions.json, split so the Fishing Controller's phone app downloads about 100 KB instead of the whole file.
+    Never allowed to break the run: the caller catches everything. Files of locations that no longer exist are removed.
+    """
+    out_dir = os.path.join(os.path.dirname(OUTPUT_PATH), "graph")
+    os.makedirs(out_dir, exist_ok=True)
+    rows_by_key = {}
+    for r in all_rows:
+        rows_by_key.setdefault((r.get("Location Name"), r.get("Type")), []).append({k: r[k] for k in GRAPH_ROW_FIELDS if k in r})
+    index = []
+    wanted = {"index.json"}
+    for loc in output_locations:
+        key = (loc.get("name"), loc.get("type"))
+        file_name = hashlib.sha1(f'{loc.get("ownerId")}|{key[0]}|{key[1]}'.encode("utf-8")).hexdigest()[:12] + ".json"
+        wanted.add(file_name)
+        index.append({
+            "ownerId": loc.get("ownerId"), "name": key[0], "displayName": loc.get("displayName"), "type": key[1],
+            "lat": loc.get("lat"), "lng": loc.get("lng"), "tideMaxObserved": loc.get("tideMaxObserved"), "file": file_name,
+        })
+        body = {"generatedAt": generated_at, "name": key[0], "type": key[1], "rows": rows_by_key.get(key, []), "sunTimes": sun_times_by_location.get(key[0], [])}
+        with open(os.path.join(out_dir, file_name), "w", encoding="utf-8") as f:
+            json.dump(body, f, separators=(",", ":"), ensure_ascii=False, default=str)
+    with open(os.path.join(out_dir, "index.json"), "w", encoding="utf-8") as f:
+        json.dump({"generatedAt": generated_at, "locations": index}, f, separators=(",", ":"), ensure_ascii=False, default=str)
+    for name in os.listdir(out_dir):
+        if name.endswith(".json") and name not in wanted:
+            os.remove(os.path.join(out_dir, name))
+
+
 def main():
     if not API_KEY:
         print("ERROR: WILLYWEATHER_API_KEY environment variable is not set.", file=sys.stderr)
@@ -1705,6 +1744,11 @@ def main():
         json.dump(output, f, separators=(",", ":"), ensure_ascii=False, default=str)
 
     print(f"Wrote {len(all_rows)} rows to {OUTPUT_PATH}")
+
+    try:
+        write_graph_files(output_locations, all_rows, sun_times_by_location, output["generatedAt"])
+    except Exception as e:  # noqa: BLE001 - the controller's graph files are extra; never fail the run over them
+        print(f"WARNING: could not write data/graph files: {e}", file=sys.stderr)
 
     # Write the WillyWeather id/name/region/state/lat/lng/tideMaxObserved
     # cache (see the resolution tiers at the top of process_location())

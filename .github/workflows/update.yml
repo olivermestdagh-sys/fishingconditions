@@ -52,4 +52,4 @@ jobs:
           # charts.js's own direct client-side reads of this file (Live
           # page GPS-matching, tide-offset lookups, boat-ramp-access chart
           # threshold) keep working without needing any changes there.
-          file_pattern: "data/conditions.json config/locations.json"
+          file_pattern: "data/conditions.json data/graph config/locations.json"
