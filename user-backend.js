@@ -4233,7 +4233,7 @@ async function ctlBuildConfig(env, user) {
     sizeDial: CTL_SIZE_DIAL,
   };
   const configVersion = (await ctlSha256Hex(JSON.stringify(config))).slice(0, 16);
-  return { configVersion, ...config, state: await ctlReadState(env, user.id) };
+  return { configVersion, ...config, state: await ctlReadState(env, user.id), userId: user.id }; // userId: the controller graph shows Public locations plus yours
 }
 
 // --- events --------------------------------------------------------------------------------------------------------
