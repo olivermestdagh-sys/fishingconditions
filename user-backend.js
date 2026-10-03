@@ -3792,7 +3792,8 @@ function ctlCatchFieldsFromAction(action, rodSetups, setupId) {
 /**
  * A Catch mark — what the Live +Catch flow saves on a trip (buildCatchFromCards + tdCatchFieldsFromAction, js/live-cards.js /
  * js/trip-defaults.js, as map-live.js's saveLiveCatch combines them), minus tide. `c`: {id, lat, lng, dateTime, species, size,
- * released, tooSmall, water, waterDepth, setupId, source}; `action` may be null (a catch with no running action: no gear).
+ * released, tooSmall, water, waterDepth, setupId, bait, source}; `bait` (the Bait question's answer; "" = none) replaces the
+ * action's bait list, undefined keeps it; `action` may be null (a catch with no running action: no gear).
  */
 function ctlBuildCatch(c, action, rodSetups) {
   const mark = { id: c.id, lat: c.lat, lng: c.lng, name: c.species, type: "Catch", dateTime: c.dateTime, createdAt: c.dateTime, source: c.source || "Manual", species: c.species };
@@ -3807,6 +3808,10 @@ function ctlBuildCatch(c, action, rodSetups) {
   }
   if (c.waterDepth != null) mark.waterDepth = c.waterDepth;
   if (action) Object.assign(mark, ctlCatchFieldsFromAction(action, rodSetups, c.setupId));
+  if (typeof c.bait === "string") {
+    if (c.bait) mark.bait = c.bait;
+    else delete mark.bait; // the Bait question was answered "none"
+  }
   return mark;
 }
 
@@ -4236,6 +4241,9 @@ async function ctlProcessEvent(env, user, ev) {
     if (typeof ev.species !== "string" || !ev.species.trim()) return bad("species is required");
     if (ev.size != null && (typeof ev.size !== "number" || !Number.isFinite(ev.size) || ev.size < 0 || ev.size > 1000)) return bad("size must be a number of cm");
     if (ev.depth != null && (typeof ev.depth !== "number" || !Number.isFinite(ev.depth) || ev.depth < 0 || ev.depth > 1000)) return bad("depth must be a number of metres");
+    // the bait used (the controller's last catch question): a list of names; [] = none; absent = keep the action's bait
+    const catchBait = ev.bait == null ? null : ctlNameList(ev.bait);
+    if (ev.bait != null && (!catchBait || catchBait.length > 10)) return bad("bait must be a list of names");
     let action = null;
     let rodSetups = [];
     if (typeof ev.actionId === "string") {
@@ -4250,6 +4258,7 @@ async function ctlProcessEvent(env, user, ev) {
         {
           id: ctlNewId(), ...position, dateTime, species: ev.species.trim(), size: ev.size ?? null, released: ev.fate === "release", tooSmall: !!ev.tooSmall,
           water: typeof ev.water === "string" ? ev.water : "", waterDepth: ev.depth ?? null, setupId: typeof ev.rodSetupId === "string" ? ev.rodSetupId : null, source,
+          bait: catchBait ? catchBait.join(", ") : undefined,
         },
         action,
         rodSetups

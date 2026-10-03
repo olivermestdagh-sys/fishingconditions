@@ -90,6 +90,25 @@ test("Catch on a running action: same mark as the Live +Catch flow saves", () =>
   }
 });
 
+test("Catch with a Bait answer: the answer is the mark's bait, as the Live +Catch flow saves it", () => {
+  for (const action of Object.values(actions)) {
+    const base = { id: "m9", lat: at.lat, lng: at.lng, dateTime: at.dateTime, species: "Bream" };
+    const defaults = { water: "", berley: action.berley || "", fishingMethod: action.fishingMethod || [], rodSetups: {} };
+    const viaBrowser = browser.buildCatchFromCards({ ...base, size: 30, rod: "", bait: "Squid", released: false }, defaults, undefined, null);
+    Object.assign(viaBrowser, browser.tdCatchFieldsFromAction(action, rodSetups, null));
+    viaBrowser.bait = "Squid"; // map-live.js puts the answer on after the action's gear
+    const viaWorker = worker.ctlBuildCatch({ ...base, size: 30, released: false, bait: "Squid", setupId: null }, action, rodSetups);
+    assert.deepEqual(viaWorker, viaBrowser, action.name);
+  }
+  // "none" (an empty answer from the controller) clears the action's bait; no answer keeps it
+  const withBait = Object.values(actions).find((a) => (a.bait || []).length);
+  if (withBait) {
+    const base = { id: "m9", lat: at.lat, lng: at.lng, dateTime: at.dateTime, species: "Bream", size: 30, released: false, setupId: null };
+    assert.equal(worker.ctlBuildCatch({ ...base, bait: "" }, withBait, rodSetups).bait, undefined);
+    assert.equal(worker.ctlBuildCatch({ ...base }, withBait, rodSetups).bait, withBait.bait.join(", "));
+  }
+});
+
 test("a catch with no running action has only what the controller sent", () => {
   const m = worker.ctlBuildCatch({ id: "m1", ...at, species: "Squid", size: 18, released: false, waterDepth: 6, source: "Controller" }, null, rodSetups);
   assert.deepEqual(m, { id: "m1", lat: at.lat, lng: at.lng, name: "Squid", type: "Catch", dateTime: at.dateTime, createdAt: at.dateTime, source: "Controller", species: "Squid", size: 18, waterDepth: 6 });

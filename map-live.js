@@ -448,6 +448,7 @@ function liveCatchDefaultsForAction(options, action) {
   const setups = tdLiveRodSetupIds(action.rodSetupIds, liveTripData.rodSetups).map((id) => liveTripData.rodSetups.find((r) => r.id === id));
   return {
     species: action.species || [],
+    bait: action.bait || [], // the Bait card lists these first
     otherTargets: tdOtherTargets(liveTripData.actions, action),
     water: getLiveMarkDefaults().water || "",
     berley: action.berley || "",
@@ -483,12 +484,14 @@ async function saveLiveCatch(options, answers, defaults, gpsPromise, ctx) {
     species: st.species,
     size: st.tooSmall ? null : st.size,
     rod: defaults.tripAction ? "" : st.rod, // on a trip the rod/rig come from the chosen Rod Setup, below
+    bait: st.bait,
     tooSmall: st.tooSmall,
     released: st.released,
   }, { ...defaults, water: getLiveMarkDefaults().water || defaults.water }, tide, st.depth);
   if (defaults.tripAction) {
     const chosen = defaults.tripRodSetups.find((s) => s.name === st.rod);
     Object.assign(mark, tdCatchFieldsFromAction(defaults.tripAction, liveTripData.rodSetups, chosen ? chosen.id : null));
+    if (st.bait) mark.bait = st.bait; // the Bait card's answer, not all of the action's baits
   }
   const result = await saveMarkToD1(mark, true);
   if (!result.success) {

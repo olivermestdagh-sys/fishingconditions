@@ -240,7 +240,7 @@ function catchCardState(options, ctx) {
   const fate = tooSmall ? "Release" : answers.fate || rec.fate;
   // Water depth: what was set on its card, else the default for new marks (ctx.depthDefault), else unknown.
   const depth = typeof answers.depth === "number" ? answers.depth : Number.isFinite(ctx.depthDefault) ? ctx.depthDefault : null;
-  return { species, lim, start, size, tooSmall, counts, rec, fate, released: fate === "Release", rod: answers.rod || "", depth };
+  return { species, lim, start, size, tooSmall, counts, rec, fate, released: fate === "Release", rod: answers.rod || "", bait: answers.bait || "", depth };
 }
 
 /** A press on the water depth card ("depth:-1", "depth:0.1", ...). `current` is the depth so far (metres) or null; a press
@@ -266,7 +266,8 @@ function sizeVerdictText(lim, size) {
 /**
  * The cards of the Catch flow: Species (the session's targets first, then a divider and every other species, each with its
  * limits and kept count), Size (a +/- stepper with Too small), Keep or Release (skipped for Too small; the recommendation is
- * pre-selected) and Rod (the session's rods). With no targets or rods saved they fall back to the full lists.
+ * pre-selected), Water depth, Rod (the session's rods) and last Bait (the action's/rod's bait first, then every other bait). With no
+ * targets or rods saved they fall back to the full lists.
  * `ctx` = {answers, run, catches} (see catchCardState); all optional.
  */
 function buildCatchCardSteps(options, defaults, ctx = {}) {
@@ -315,6 +316,21 @@ function buildCatchCardSteps(options, defaults, ctx = {}) {
       hint: defaults.rods.length ? "" : "No rods set — showing every rod.",
     });
   }
+  // Bait used: the last question. The action's bait (or the chosen rod's saved bait) first, then every other bait. Optional: leaving it
+  // unanswered keeps what the action/rod already carries.
+  const rodBait = answers.rod && defaults.rodSetups && defaults.rodSetups[answers.rod] ? defaults.rodSetups[answers.rod].bait : "";
+  const preferredBaits = [...new Set([...(defaults.bait || []), ...(rodBait ? [rodBait] : [])])];
+  const otherBaits = (options.baits || []).filter((b) => !preferredBaits.includes(b));
+  const baitList = [...preferredBaits, ...otherBaits];
+  if (baitList.length) {
+    steps.push({
+      id: "bait", title: "Bait", prompt: "What bait did you use?", multi: false, required: false, options: baitList,
+      selected: answers.bait ? [answers.bait] : preferredBaits.length === 1 ? [preferredBaits[0]] : [],
+      dividers: preferredBaits.length && otherBaits.length ? [{ index: preferredBaits.length, label: "Other baits" }] : [],
+      ...stepThumbs(options, "baits"),
+      hint: preferredBaits.length ? "" : "No bait set — showing every bait.",
+    });
+  }
   return steps;
 }
 
@@ -326,7 +342,7 @@ function buildCatchCardSteps(options, defaults, ctx = {}) {
  * than asked about. Weather, barometer, temperature and wind are left blank here; saving a new mark fills them (see
  * saveMarkToD1).
  */
-function buildCatchFromCards({ id, lat, lng, dateTime, species, size, rod, tooSmall, released }, defaults, tide, lastWaterDepth) {
+function buildCatchFromCards({ id, lat, lng, dateTime, species, size, rod, bait, tooSmall, released }, defaults, tide, lastWaterDepth) {
   const mark = { id, lat, lng, name: species, type: "Catch", dateTime, createdAt: dateTime, source: "Manual", species };
   const cm = size === "" || size == null ? NaN : Number(size);
   if (Number.isFinite(cm) && !tooSmall) mark.size = cm;
@@ -338,6 +354,7 @@ function buildCatchFromCards({ id, lat, lng, dateTime, species, size, rod, tooSm
     if (setup.rig) mark.rig = setup.rig;
     if (setup.bait) mark.bait = setup.bait;
   }
+  if (bait) mark.bait = bait; // the Bait question's answer wins over the rod's saved bait
   if (defaults.water) mark.waterCondition = defaults.water;
   if (defaults.berley) mark.berley = defaults.berley;
   if (defaults.fishingMethod && defaults.fishingMethod.length) mark.fishingMethod = defaults.fishingMethod.join(", ");

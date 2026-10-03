@@ -296,6 +296,22 @@ test("events: a Too small catch has no size, is released and carries the Too sma
   assert.equal(m.notes, "Too small");
 });
 
+test("events: the Bait answer on a catch replaces the action's bait; [] means none; leaving it out keeps the action's", async () => {
+  const { sqlite, env, token } = await seeded();
+  await send(env, token, [ev(1, "trip_start", { tripId: "t1" }), ev(2, "action_start", { actionId: "a1" })]);
+  await send(env, token, [
+    ev(3, "catch", { actionId: "a1", species: "Bream", size: 30, fate: "keep" }),
+    ev(4, "catch", { actionId: "a1", species: "Bream", size: 31, fate: "keep", bait: ["Pipi"] }),
+    ev(5, "catch", { actionId: "a1", species: "Bream", size: 32, fate: "keep", bait: [] }),
+  ]);
+  const by = Object.fromEntries(marks(sqlite, "type = 'Catch'").map((m) => [m.size, m]));
+  assert.ok(by[30].bait, "no answer: the action's own bait is kept");
+  assert.equal(by[31].bait, "Pipi");
+  assert.equal(by[32].bait, null, "answered none");
+  const bad = await send(env, token, [ev(6, "catch", { actionId: "a1", species: "Bream", size: 33, bait: "Pipi" })]);
+  assert.equal(bad[0].status, "rejected");
+});
+
 test("events: starting an action with no trip running adopts that action's trip", async () => {
   const { sqlite, env, token } = await seeded();
   await send(env, token, [ev(1, "action_start", { actionId: "a2" })]);

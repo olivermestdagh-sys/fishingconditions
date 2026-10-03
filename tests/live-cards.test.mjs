@@ -90,7 +90,7 @@ test("deselecting a rod discards its rig and bait; the input draft is never muta
 test("catch cards: only target species and session rods; fall back to the full lists with a hint", () => {
   const defaults = { ...fns.emptySessionDefaults(), species: ["Whiting"], rods: ["Heavy"], rodSetups: { Heavy: { rig: "", bait: "" } } };
   const steps = fns.buildCatchCardSteps(options, defaults);
-  assert.deepEqual(steps.map((s) => s.id), ["species", "size", "fate", "depth", "rod"]);
+  assert.deepEqual(steps.map((s) => s.id), ["species", "size", "fate", "depth", "rod", "bait"], "Bait is the last question");
   // targets first, then a divider position, then every other species
   assert.deepEqual(steps[0].options, ["Whiting", "Bream"]);
   assert.deepEqual(steps[0].dividers, [{ index: 1, label: "Other species" }]);
@@ -103,6 +103,38 @@ test("catch cards: only target species and session rods; fall back to the full l
   assert.ok(fallback[0].hint);
   const allTargets = fns.buildCatchCardSteps(options, { ...fns.emptySessionDefaults(), species: ["Bream", "Whiting"] });
   assert.deepEqual(allTargets[0].dividers, [], "no divider when every species is a target");
+});
+
+test("catch cards: Bait is the last card — the action's bait first, then every other bait, optional, with a single bait preselected", () => {
+  const defaults = { ...fns.emptySessionDefaults(), species: ["Bream"], bait: ["Squid"], rods: [], rodSetups: {} };
+  const steps = fns.buildCatchCardSteps(options, defaults);
+  const bait = steps[steps.length - 1];
+  assert.equal(bait.id, "bait");
+  assert.deepEqual(bait.options, ["Squid", "Prawn"], "Squid is the action's; the other baits follow");
+  assert.deepEqual(bait.dividers, [{ index: 1, label: "Other baits" }]);
+  assert.deepEqual(bait.selected, ["Squid"], "a single bait is preselected");
+  assert.equal(bait.required, false);
+  // two baits on the action: nothing preselected; an answer is shown selected
+  const two = fns.buildCatchCardSteps(options, { ...defaults, bait: ["Squid", "Prawn"] });
+  const twoBait = two[two.length - 1];
+  assert.deepEqual(twoBait.selected, []);
+  assert.deepEqual(twoBait.dividers, []);
+  const chosen = fns.buildCatchCardSteps(options, { ...defaults, bait: ["Squid", "Prawn"] }, { answers: { bait: "Prawn" } });
+  assert.deepEqual(chosen[chosen.length - 1].selected, ["Prawn"]);
+  // no baits anywhere: no card
+  assert.ok(!fns.buildCatchCardSteps({ ...options, baits: [] }, { ...defaults, bait: [] }).some((s) => s.id === "bait"));
+  // off a trip the chosen rod's saved bait leads
+  const rodBait = fns.buildCatchCardSteps(options, { ...fns.emptySessionDefaults(), species: ["Bream"], rods: ["Light"], rodSetups: { Light: { rig: "", bait: "Prawn" } } }, { answers: { rod: "Light" } });
+  assert.deepEqual(rodBait[rodBait.length - 1].options[0], "Prawn");
+});
+
+test("catch mark: the Bait answer is the mark's bait, over the rod's saved one", () => {
+  const defaults = { species: ["Bream"], rods: ["Light"], rodSetups: { Light: { rig: "Paternoster", bait: "Prawn" } } };
+  const m = fns.buildCatchFromCards({ id: "b1", lat: 1, lng: 2, dateTime: "d", species: "Bream", size: 30, rod: "Light", bait: "Squid" }, defaults, {});
+  assert.equal(m.bait, "Squid");
+  assert.equal(m.rig, "Paternoster");
+  const none = fns.buildCatchFromCards({ id: "b2", lat: 1, lng: 2, dateTime: "d", species: "Bream", size: 30, rod: "Light", bait: "" }, defaults, {});
+  assert.equal(none.bait, "Prawn", "no answer keeps the rod's saved bait");
 });
 
 test("catch mark: type Catch, rig/bait from the rod, water/berley/fishing method from the session, size a number", () => {
