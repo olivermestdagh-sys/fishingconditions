@@ -540,8 +540,26 @@ function nearestRowWithField(rows, field, now) {
 // current time, re-interpreted as if those wall-clock digits were UTC, to
 // match how the data's own timestamps are encoded.
 function nowInNaiveEncoding() {
-  const d = new Date();
-  return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds());
+  const p = siteWallClockNow();
+  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+}
+
+// The current Melbourne wall-clock time (the site's one time zone), independent of the
+// viewer's browser zone — so a visitor outside Melbourne (e.g. Queensland, which has no
+// daylight saving) still gets the same "now" as the data. Falls back to the browser's
+// own clock if Intl can't do the zone.
+function siteWallClockNow() {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Australia/Melbourne", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    }).formatToParts(new Date());
+    const g = (type) => Number(parts.find((x) => x.type === type).value);
+    return { year: g("year"), month: g("month"), day: g("day"), hour: g("hour"), minute: g("minute"), second: g("second") };
+  } catch {
+    const d = new Date();
+    return { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate(), hour: d.getHours(), minute: d.getMinutes(), second: d.getSeconds() };
+  }
 }
 
 // String-formatted counterpart of nowInNaiveEncoding above, for anywhere a
@@ -549,9 +567,9 @@ function nowInNaiveEncoding() {
 // currently just defaulting a brand-new mark's Date/Time and createdAt to
 // "right now" (see startNewMarkEntry below).
 function nowAsNaiveString() {
-  const d = new Date();
+  const d = siteWallClockNow();
   const p = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  return `${d.year}-${p(d.month)}-${p(d.day)} ${p(d.hour)}:${p(d.minute)}:${p(d.second)}`;
 }
 
 const KAYAK_WIND_THRESHOLD_KMH = 15;

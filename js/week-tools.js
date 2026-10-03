@@ -154,16 +154,12 @@ function dateOnly(ms) {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
-// Session timestamps (w.from/w.to) use the same "naive local time treated as
-// UTC" convention as everything else in this app (see parseNaive above) —
-// they're NOT real UTC instants. To compare one against the browser's
-// actual current time, re-interpret those same wall-clock digits as the
-// browser's own local time instead (matching the same assumption app.js
-// already relies on: the viewer's browser is in the same timezone the data
-// represents, i.e. Melbourne).
-function naiveMsToLocalDate(ms) {
-  const d = new Date(ms);
-  return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds());
+// Melbourne's daylight-saving start: on the first Sunday of October the wall clock jumps
+// 02:00 -> 03:00, so hourly rows go 01:00, 03:00 with no 02:00 between them.
+function isDstSkippedGap(prevMs, curMs) {
+  if (curMs - prevMs !== 2 * 3600 * 1000) return false;
+  const d = new Date(prevMs);
+  return d.getUTCMonth() === 9 && d.getUTCDay() === 0 && d.getUTCDate() <= 7 && d.getUTCHours() === 1;
 }
 
 function computeWindowsForLocation(locRows, minCondition, minHours) {
@@ -194,7 +190,7 @@ function computeWindowsForLocation(locRows, minCondition, minHours) {
       continue;
     }
     const prev = i > 0 ? filtered[i - 1] : null;
-    const isConsecutiveHour = prev && filtered[i]._t - prev._t === 3600 * 1000;
+    const isConsecutiveHour = prev && (filtered[i]._t - prev._t === 3600 * 1000 || isDstSkippedGap(prev._t, filtered[i]._t));
     AD[i] = isConsecutiveHour && AD[i - 1] > 0 ? AD[i - 1] + 1 : 1;
   }
 
@@ -234,8 +230,9 @@ function computeWindowsForLocation(locRows, minCondition, minHours) {
     // card, so a session spanning midnight shows the SAME full span and
     // matching figures on every day-card it appears on, rather than a
     // different partial range (and partial averages) per day.
-    const trueFrom = filtered[i]._t - (AD[i] - 1) * 3600 * 1000;
-    const naturalEnd = filtered[i]._t + (AE[i] - AD[i]) * 3600 * 1000;
+    // Walk by row index, not by N x 1h, so a run across the DST-skipped hour still spans its real rows.
+    const trueFrom = filtered[i - (AD[i] - 1)]._t;
+    const naturalEnd = filtered[i + (AE[i] - AD[i])]._t;
 
     const hoursLabel = AE[i] - 1;
 
@@ -293,11 +290,11 @@ function computeQualifyingSessions(locRows, minCondition, minHours) {
     if (minCondition == null) minCondition = Number(saved && saved.minCondition) || 3;
     if (minHours == null) minHours = Number(saved && saved.minHours) || 3;
   }
-  const nowLocal = new Date();
+  const nowMs = nowInNaiveEncoding(); // same naive Melbourne wall-clock encoding as w.to
   const seenSpans = new Set();
   const sessions = [];
   for (const w of computeWindowsForLocation(locRows, minCondition, minHours)) {
-    if (naiveMsToLocalDate(w.to) < nowLocal) continue; // already finished
+    if (w.to < nowMs) continue; // already finished
     const spanKey = `${w.from}::${w.to}`;
     if (seenSpans.has(spanKey)) continue; // same session, different day-anchor duplicate
     seenSpans.add(spanKey);
