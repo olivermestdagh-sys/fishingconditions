@@ -312,6 +312,22 @@ test("events: the Bait answer on a catch replaces the action's bait; [] means no
   assert.equal(bad[0].status, "rejected");
 });
 
+test("config: carries the first picture of each value that has one, and of a rig's options (your private override wins)", async () => {
+  const { sqlite, env, token } = await seeded();
+  sqlite.prepare("UPDATE user_mark_lists SET image_index = ? WHERE id = 's1'").run(JSON.stringify([{ id: "img-bream-1", v: 11 }, { id: "img-bream-2", v: 12 }]));
+  sqlite.prepare("UPDATE user_mark_lists SET image_index = ? WHERE id = 'ba1'").run(JSON.stringify([{ id: "img-prawn", v: 5 }]));
+  sqlite.prepare("UPDATE user_mark_lists SET option_images = ? WHERE id = 'ri2'").run(JSON.stringify({ Vibe: [{ id: "img-vibe", v: 7 }], "Paddle Tail": [{ id: "img-paddle", v: 8 }] }));
+  sqlite.prepare("UPDATE user_rig_sublist_overrides SET option_images = ? WHERE id = 'ov1'").run(JSON.stringify({ Cranka: [{ id: "img-cranka", v: 9 }] }));
+  const config = await (await api(env, token, "GET", "/api/controller/config")).json();
+  assert.deepEqual(config.images.Species, { Bream: { id: "img-bream-1", v: 11 } }, "only the first picture, and only values that have one");
+  assert.deepEqual(config.images.Bait, { Prawn: { id: "img-prawn", v: 5 } });
+  assert.equal(config.images.Rod, undefined);
+  const rig = (name) => config.rigs.find((r) => r.name === name);
+  assert.deepEqual(rig("Jig Head").optionImages, { Vibe: { id: "img-vibe", v: 7 }, "Paddle Tail": { id: "img-paddle", v: 8 } });
+  assert.deepEqual(rig("Lure").optionImages, { Cranka: { id: "img-cranka", v: 9 } }, "a Public rig takes your private override's pictures");
+  assert.deepEqual(rig("Paternoster").optionImages, {});
+});
+
 test("events: starting an action with no trip running adopts that action's trip", async () => {
   const { sqlite, env, token } = await seeded();
   await send(env, token, [ev(1, "action_start", { actionId: "a2" })]);
@@ -472,9 +488,9 @@ test("config: carries what the defaults editor needs — each action's own choic
   assert.deepEqual(cfg.rodSetups.find((r) => r.id === "r2").subListItems, ["Vibe"]);
   assert.deepEqual(cfg.rods, ["L Raider", "L Wilson"]);
   assert.deepEqual(cfg.rigs, [
-    { name: "Jig Head", options: ["Vibe", "Paddle Tail"] },
-    { name: "Lure", options: ["Cranka"] }, // a Public rig: your private sub list
-    { name: "Paternoster", options: [] },
+    { name: "Jig Head", options: ["Vibe", "Paddle Tail"], optionImages: {} },
+    { name: "Lure", options: ["Cranka"], optionImages: {} }, // a Public rig: your private sub list
+    { name: "Paternoster", options: [], optionImages: {} },
   ]);
   assert.deepEqual(cfg.fishingMethod, ["Anchored", "Drifting"]);
 });

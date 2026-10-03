@@ -4077,11 +4077,12 @@ async function ctlLoadRodSetups(env, uid) {
 async function ctlBuildConfig(env, user) {
   const { trips, actions, rodSetups } = await ctlLoadTripData(env, user.id);
   const { results } = await env.DB.prepare(
-    `SELECT id, field, value, user_id, min_size, max_size, max_qty, big_max_qty, big_size, qty_group, has_sublist, sub_list FROM user_mark_lists
+    `SELECT id, field, value, user_id, min_size, max_size, max_qty, big_max_qty, big_size, qty_group, has_sublist, sub_list, image_index, option_images FROM user_mark_lists
      WHERE user_id IN (?, ?) AND field IN (${CTL_LIST_FIELDS.map(() => "?").join(", ")}) ORDER BY field, value`
   ).bind(user.id, PUBLIC_USER_ID, ...CTL_LIST_FIELDS).all();
-  const overrides = await env.DB.prepare("SELECT rig_id, sub_list FROM user_rig_sublist_overrides WHERE user_id = ?").bind(user.id).all();
+  const overrides = await env.DB.prepare("SELECT rig_id, sub_list, option_images FROM user_rig_sublist_overrides WHERE user_id = ?").bind(user.id).all();
   const overrideByRig = new Map(overrides.results.map((o) => [o.rig_id, parseSubList(o.sub_list)]));
+  const overrideImagesByRig = new Map(overrides.results.map((o) => [o.rig_id, parseOptionImages(o.option_images)]));
   const byField = {};
   const seen = new Set();
   // Your own rows win over Public's on a clash, same as the site's merged lists.
@@ -4096,6 +4097,22 @@ async function ctlBuildConfig(env, user) {
   const limits = Object.fromEntries(
     (byField.Species || []).map((r) => [r.value, { minSize: r.min_size ?? null, maxSize: r.max_size ?? null, maxQty: r.max_qty ?? null, bigSize: r.big_size ?? null, bigMaxQty: r.big_max_qty ?? null, qtyGroup: r.qty_group ?? null }])
   );
+  // The first picture of each value that has one (the controller shows it full screen as you scroll the options): {field: {value: {id, v}}}.
+  // The bytes are the site's public picture route (/api/public/species-image/<id>?v=<v>).
+  const firstImage = (list) => (list && list.length ? { id: list[0].id, v: list[0].v ?? null } : null);
+  const images = {};
+  for (const field of ["Species", "Bait", "Rig", "Rod", "Berley", "Fishing Method"]) {
+    for (const row of byField[field] || []) {
+      const img = firstImage(parseImageIndex(row.image_index));
+      if (img) (images[field] ||= {})[row.value] = img;
+    }
+  }
+  // A rig's sub-list options have pictures of their own (your private override of a Public rig wins for an option it has pictures for).
+  const rigOptionImages = (row) => {
+    const own = parseOptionImages(row.option_images);
+    const priv = overrideImagesByRig.get(row.id) || {};
+    return Object.fromEntries([...new Set([...Object.keys(own), ...Object.keys(priv)])].map((o) => [o, firstImage(priv[o] || own[o])]).filter(([, img]) => img));
+  };
   const config = {
     trips: trips.map((t) => ({ id: t.id, name: t.name })),
     actions: actions.map((a) => ({
@@ -4113,7 +4130,8 @@ async function ctlBuildConfig(env, user) {
     rodSetups: rodSetups.map((r) => ({ id: r.id, name: r.name, rod: r.rod, rig: r.rig, subListItems: r.subListItems })),
     rods: names("Rod"),
     // A rig's options: its own Sub List, else your private one on a Public rig (same rule as the website's tdRigSublist).
-    rigs: (byField.Rig || []).map((r) => ({ name: r.value, options: r.has_sublist ? parseSubList(r.sub_list) : overrideByRig.get(r.id) || [] })).sort((a, b) => a.name.localeCompare(b.name)),
+    rigs: (byField.Rig || []).map((r) => ({ name: r.value, options: r.has_sublist ? parseSubList(r.sub_list) : overrideByRig.get(r.id) || [], optionImages: rigOptionImages(r) })).sort((a, b) => a.name.localeCompare(b.name)),
+    images,
     species: allSpecies,
     limits,
     berley: names("Berley"),
