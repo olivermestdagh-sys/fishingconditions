@@ -256,6 +256,35 @@ test("events: the running trip/action is what the Live page reads — action_sta
   assert.equal(marks(sqlite, "type = 'Session End'").length, 1);
 });
 
+test("events: Session Start, Session End and Catch all take the water condition and depth the controller has set", async () => {
+  const { sqlite, env, token } = await seeded();
+  await send(env, token, [ev(1, "trip_start", { tripId: "t1" })]);
+  await send(env, token, [ev(2, "action_start", { actionId: "a1", water: "Clear", depth: 2 })]);
+  await send(env, token, [ev(3, "catch", { actionId: "a1", species: "Bream", size: 30, fate: "keep", water: "Dirty", depth: 3 })]);
+  // switching action: both the End of the first and the Start of the second get the values in force at that moment
+  await send(env, token, [ev(4, "action_start", { actionId: "a2", water: "Dirty", depth: 3 })]);
+  await send(env, token, [ev(5, "trip_end", { water: "Muddy", depth: 5 })]);
+  const by = Object.fromEntries(marks(sqlite).map((m) => [m.name, m]));
+  assert.equal(by["Session 1 Start"].water_condition, "Clear");
+  assert.equal(by["Session 1 Start"].water_depth, 2);
+  assert.equal(by.Bream.water_condition, "Dirty");
+  assert.equal(by.Bream.water_depth, 3);
+  assert.equal(by["Session 1 End"].water_condition, "Dirty", "the End records the conditions when it ended, not the Start's");
+  assert.equal(by["Session 1 End"].water_depth, 3);
+  assert.equal(by["Session 2 Start"].water_depth, 3);
+  assert.equal(by["Session 2 End"].water_condition, "Muddy");
+  assert.equal(by["Session 2 End"].water_depth, 5);
+});
+
+test("events: a Session End with no water/depth in the event keeps the Start's values", async () => {
+  const { sqlite, env, token } = await seeded();
+  await send(env, token, [ev(1, "action_start", { actionId: "a1", water: "Clear", depth: 2 })]);
+  await send(env, token, [ev(2, "action_end")]);
+  const end = marks(sqlite, "type = 'Session End'")[0];
+  assert.equal(end.water_condition, "Clear");
+  assert.equal(end.water_depth, 2);
+});
+
 test("events: starting an action with no trip running adopts that action's trip", async () => {
   const { sqlite, env, token } = await seeded();
   await send(env, token, [ev(1, "action_start", { actionId: "a2" })]);

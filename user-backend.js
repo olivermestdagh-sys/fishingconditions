@@ -3759,7 +3759,7 @@ function ctlBuildSessionStart(action, rodSetups, ctx) {
 const CTL_SESSION_END_CARRIED_FIELDS = ["species", "waterCondition", "berley", "fishingMethod", "waterDepth", "rod", "rig", "bait", "rigOptions", "tideCondition", "tideExtreme"];
 
 /** The Session End that closes `startMark` — buildSessionEndFromStart (js/live-cards.js). */
-function ctlBuildSessionEnd(startMark, { id, lat, lng, dateTime, createdAt, source }, sessionNumber) {
+function ctlBuildSessionEnd(startMark, { id, lat, lng, dateTime, createdAt, source, water, waterDepth }, sessionNumber) {
   const mark = {
     id, lat, lng, name: `Session ${sessionNumber} End`, type: "Session End", dateTime, createdAt,
     source: source || "Manual", sessionRole: "end", sessionGroupId: startMark.sessionGroupId,
@@ -3767,6 +3767,9 @@ function ctlBuildSessionEnd(startMark, { id, lat, lng, dateTime, createdAt, sour
   for (const key of CTL_SESSION_END_CARRIED_FIELDS) {
     if (startMark[key] != null && startMark[key] !== "") mark[key] = startMark[key];
   }
+  // the conditions when it ended (the controller's current Water / Depth) win over the ones the session started with
+  if (water) mark.waterCondition = water;
+  if (waterDepth != null) mark.waterDepth = waterDepth;
   return mark;
 }
 
@@ -4182,11 +4185,14 @@ async function ctlProcessEvent(env, user, ev) {
   const position = { lat: ev.lat, lng: ev.lng };
 
   // Ends whatever session is running, at this event's time and place.
+  // the water condition / depth the controller currently has set: on Session Start, Session End and Catch marks
+  const evWater = typeof ev.water === "string" ? ev.water : "";
+  const evDepth = typeof ev.depth === "number" && Number.isFinite(ev.depth) && ev.depth >= 0 && ev.depth <= 1000 ? ev.depth : null;
   const closeRunning = async () => {
     const active = await ctlActiveSession(env, uid);
     if (!active) return null;
     if (!havePosition) return { error: "a position is needed to end the running session" };
-    addMark(ctlBuildSessionEnd(active.mark, { id: ctlNewId(), ...position, dateTime, createdAt: dateTime, source }, active.number), ":end");
+    addMark(ctlBuildSessionEnd(active.mark, { id: ctlNewId(), ...position, dateTime, createdAt: dateTime, source, water: evWater, waterDepth: evDepth }, active.number), ":end");
     return { ended: true };
   };
 
@@ -4218,7 +4224,7 @@ async function ctlProcessEvent(env, user, ev) {
     const sessionGroupId = ctlNewId();
     addMark(ctlBuildSessionStart(action, rodSetups, {
       id: ctlNewId(), ...position, dateTime, createdAt: dateTime, sessionGroupId, sessionNumber, source,
-      water: typeof ev.water === "string" ? ev.water : "", waterDepth: typeof ev.depth === "number" && Number.isFinite(ev.depth) && ev.depth >= 0 && ev.depth <= 1000 ? ev.depth : null,
+      water: evWater, waterDepth: evDepth,
     }), ":start");
     nextState = { tripId: action.tripId, actionId: action.id, sessionGroupId };
   } else if (ev.type === "action_end") {
