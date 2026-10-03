@@ -2321,8 +2321,8 @@ function markInsertStatement(env, id, uid, body, now) {
     `INSERT INTO marks (id, user_id, lat, lng, name, type, date_time, source, source_uuid, species, bait, rig, rod,
                          berley, notes, size, released, weather_condition, tide_condition, tide_extreme, water_condition, water_depth,
                          water_temperature, temperature, barometer, wind_direction, wind_speed,
-                         fishing_method, rig_options, session_role, session_group_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                         fishing_method, rig_options, session_role, session_group_id, created_at, trip_run_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       id, uid, body.lat, body.lng, body.name ?? null, body.type, body.dateTime, body.source ?? "manual",
@@ -2330,7 +2330,7 @@ function markInsertStatement(env, id, uid, body, now) {
       body.berley ?? null, body.notes ?? null, body.size ?? null, body.released ? 1 : 0, body.weatherCondition ?? null, body.tideCondition ?? null, body.tideExtreme ?? null,
       body.waterCondition ?? null, body.waterDepth ?? null, body.waterTemperature ?? null, body.temperature ?? null,
       body.barometer ?? null, body.windDirection ?? null, body.windSpeed ?? null,
-      body.fishingMethod ?? null, body.rigOptions ?? null, body.sessionRole ?? null, body.sessionGroupId ?? null, now
+      body.fishingMethod ?? null, body.rigOptions ?? null, body.sessionRole ?? null, body.sessionGroupId ?? null, now, body.tripRunId ?? null
     );
 }
 
@@ -3716,11 +3716,12 @@ const CTL_MAX_BATCH = 100;
 // events once it has used this many and answers the rest "deferred" — the app simply leaves those pending and sends them next time.
 const CTL_QUERY_BUDGET = 30;
 const CTL_MAX_TRACK_POINTS = 200; // per request; at 14 rows per INSERT statement (D1 allows 100 bound values) that is at most 15 statements
-const CTL_EVENT_TYPES = ["trip_start", "trip_end", "action_start", "action_end", "catch", "action_update", "rodsetup_update"];
+const CTL_EVENT_TYPES = ["trip_start", "trip_end", "action_start", "action_end", "catch", "action_update", "rodsetup_update", "mark_update"];
 // Defaults for the controller's number dials until they get a Settings page of their own.
 const CTL_DEPTH_VALUES = [0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20];
 const CTL_SIZE_DIAL = { min: 10, max: 120, step: 1, default: 30 };
-const CTL_LIST_FIELDS = ["Species", "Berley", "Bait", "Fishing Method", "Water Condition", "Rod", "Rig"];
+const CTL_LIST_FIELDS = ["Species", "Berley", "Bait", "Fishing Method", "Water Condition", "Rod", "Rig", "Weather Condition", "Tide Condition", "Tide Extreme"];
+const CTL_WIND_DIRECTIONS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]; // SHORE_OPTIONS (js/chart-base.js)
 
 // --- pure helpers (copies of the browser's; see tests/controller-parity.test.mjs) ----------------------------------
 
@@ -3965,7 +3966,7 @@ async function ctlLoadTripData(env, uid) {
 /** Every value of the pick-lists a controller edit may choose from (your own plus Public's): {field: Set of values}. */
 async function ctlListValues(env, uid) {
   const { results } = await env.DB.prepare(
-    "SELECT field, value FROM user_mark_lists WHERE user_id IN (?, ?) AND field IN ('Species', 'Berley', 'Bait', 'Fishing Method', 'Rod', 'Rig')"
+    "SELECT field, value FROM user_mark_lists WHERE user_id IN (?, ?) AND field IN ('Species', 'Berley', 'Bait', 'Fishing Method', 'Water Condition', 'Rod', 'Rig', 'Weather Condition', 'Tide Condition', 'Tide Extreme')"
   ).bind(uid, PUBLIC_USER_ID).all();
   const out = {};
   for (const r of results) (out[r.field] ||= new Set()).add(r.value);
@@ -4073,6 +4074,92 @@ async function ctlLoadRodSetups(env, uid) {
   return results.map(rowToRodSetup);
 }
 
+// Fields a `mark_update` may change: key -> [column, kind, list or limits]. Type, GPS and Source are deliberately not editable from the controller.
+const CTL_MARK_LIST_FIELDS = {
+  species: ["species", "Species"], bait: ["bait", "Bait"], rig: ["rig", "Rig"], rod: ["rod", "Rod"], berley: ["berley", "Berley"],
+  fishingMethod: ["fishing_method", "Fishing Method"], weatherCondition: ["weather_condition", "Weather Condition"],
+  tideCondition: ["tide_condition", "Tide Condition"], tideExtreme: ["tide_extreme", "Tide Extreme"], waterCondition: ["water_condition", "Water Condition"],
+};
+const CTL_MARK_SINGLE_FIELDS = new Set(["species", "weatherCondition", "tideCondition", "tideExtreme", "waterCondition"]); // one value even on a Session
+const CTL_MARK_NUMBER_FIELDS = {
+  size: ["size", 0, 1000], waterDepth: ["water_depth", 0, 1000], barometer: ["barometer", 800, 1200], temperature: ["temperature", -50, 60],
+  waterTemperature: ["water_temperature", -5, 50], windSpeed: ["wind_speed", 0, 400],
+};
+
+/**
+ * The UPDATE for a `mark_update` event: {markId, changes: {name?, dateTime?, species?, size?, released?, notes?, <pick-lists>, rigOptions?, ...}}.
+ * Only marks the controller made, and only values that already exist in your lists (no creating), as with action_update.
+ */
+async function ctlMarkUpdateStatements(env, uid, ev) {
+  const row = typeof ev.markId === "string" ? await env.DB.prepare("SELECT * FROM marks WHERE id = ? AND user_id = ? AND source = 'Controller'").bind(ev.markId, uid).first() : null;
+  if (!row) return { error: "mark not found" };
+  const ch = ev.changes;
+  if (!ch || typeof ch !== "object" || Array.isArray(ch)) return { error: "changes must be an object" };
+  const isSession = row.type === "Session Start" || row.type === "Session End";
+  if (!isSession && row.type !== "Catch") return { error: "only Catch and Session marks can be edited here" };
+  const sets = {}; // column -> value
+  const lists = await ctlListValues(env, uid);
+  const keys = Object.keys(ch);
+  if (!keys.length) return { error: "nothing to change" };
+  let rigsNow = ctlUniq((row.rig || "").split(","));
+  for (const key of keys) {
+    const v = ch[key];
+    if (CTL_MARK_LIST_FIELDS[key]) {
+      const [column, field] = CTL_MARK_LIST_FIELDS[key];
+      const values = v === null ? [] : ctlNameList(Array.isArray(v) ? v : typeof v === "string" ? (v.trim() ? [v] : []) : null);
+      if (!values) return { error: `${key} must be a name or a list of names` };
+      if (values.length > 1 && (CTL_MARK_SINGLE_FIELDS.has(key) || (!isSession && key === "rig"))) return { error: `${key} takes one value` };
+      const unknown = values.find((x) => !(lists[field] && lists[field].has(x)));
+      if (unknown) return { error: `"${unknown}" is not one of your ${field} options` };
+      sets[column] = values.length ? values.join(", ") : null;
+      if (key === "rig") {
+        rigsNow = values;
+        if (ch.rigOptions === undefined) sets.rig_options = null; // changing the rig clears its options, like the site
+      }
+      if (key === "species" && !isSession) sets.name = values[0] || row.name; // a Catch is named after its species
+    } else if (CTL_MARK_NUMBER_FIELDS[key]) {
+      if (isSession && (key === "size")) return { error: "a Session has no size" };
+      const [column, min, max] = CTL_MARK_NUMBER_FIELDS[key];
+      if (v !== null && (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max)) return { error: `${key} must be a number from ${min} to ${max}` };
+      sets[column] = v === null ? null : key === "size" ? Math.round(v) : v;
+    } else if (key === "windDirection") {
+      if (v !== null && !CTL_WIND_DIRECTIONS.includes(v)) return { error: "windDirection must be a compass point" };
+      sets.wind_direction = v;
+    } else if (key === "released") {
+      if (isSession) return { error: "a Session has no released flag" };
+      if (typeof v !== "boolean") return { error: "released must be true or false" };
+      sets.released = v ? 1 : 0;
+    } else if (key === "notes" || key === "name") {
+      if (v !== null && typeof v !== "string") return { error: `${key} must be text` };
+      const t = (v || "").trim();
+      if (t.length > (key === "name" ? 100 : 2000)) return { error: `${key} is too long` };
+      if (key === "name" && !t) return { error: "name can't be empty" };
+      sets[key] = t || null;
+    } else if (key === "dateTime") {
+      if (typeof v !== "string" || !/^d{4}-d{2}-d{2} d{2}:d{2}:d{2}$/.test(v) || ctlParseNaive(v) == null) return { error: "dateTime must be YYYY-MM-DD HH:MM:SS" };
+      sets.date_time = v;
+    } else if (key !== "rigOptions") {
+      return { error: `${key} can't be edited` };
+    }
+  }
+  if (ch.rigOptions !== undefined) {
+    const items = ch.rigOptions === null ? [] : ctlNameList(ch.rigOptions);
+    if (!items) return { error: "rigOptions must be a list of option names" };
+    if (items.length) {
+      const options = new Set();
+      for (const rig of rigsNow) for (const o of await ctlRigOptions(env, uid, rig)) options.add(o);
+      const stranger = items.find((i) => !options.has(i));
+      if (stranger) return { error: `"${stranger}" is not an option of the chosen rig` };
+    }
+    sets.rig_options = items.length ? items.join(", ") : null;
+  }
+  const cols = Object.keys(sets);
+  if (!cols.length) return { error: "nothing to change" };
+  return {
+    stmts: [env.DB.prepare(`UPDATE marks SET ${cols.map((c) => `${c} = ?`).join(", ")} WHERE id = ? AND user_id = ?`).bind(...cols.map((c) => sets[c]), row.id, uid)],
+  };
+}
+
 /** Everything the controller's phone app needs to offer choices: your trips, their actions, rod setups and the pick-lists, plus the running trip. */
 async function ctlBuildConfig(env, user) {
   const { trips, actions, rodSetups } = await ctlLoadTripData(env, user.id);
@@ -4138,6 +4225,10 @@ async function ctlBuildConfig(env, user) {
     bait: names("Bait"),
     fishingMethod: names("Fishing Method"),
     waterCondition: names("Water Condition"),
+    weatherCondition: names("Weather Condition"),
+    tideCondition: names("Tide Condition"),
+    tideExtreme: names("Tide Extreme"),
+    windDirections: CTL_WIND_DIRECTIONS,
     depthValues: CTL_DEPTH_VALUES,
     sizeDial: CTL_SIZE_DIAL,
   };
@@ -4202,9 +4293,11 @@ async function ctlProcessEvent(env, user, ev) {
   const now = Date.now();
   const addMark = (mark, suffix = "") => {
     markIds.push(mark.id);
-    stmts.push(markInsertStatement(env, mark.id, uid, { ...mark, sourceUuid: `fc:${deviceId}:${ev.seq}${suffix}` }, now));
+    stmts.push(markInsertStatement(env, mark.id, uid, { ...mark, sourceUuid: `fc:${deviceId}:${ev.seq}${suffix}`, tripRunId }, now));
   };
   const state = await ctlReadState(env, uid);
+  // a trip started on the site has no run id: its first action gets one, so its marks still list on the log
+  const tripRunId = state.runId || (state.tripId ? ctlNewId("run") : null);
   const position = { lat: ev.lat, lng: ev.lng };
 
   // Ends whatever session is running, at this event's time and place.
@@ -4223,7 +4316,7 @@ async function ctlProcessEvent(env, user, ev) {
   if (ev.type === "trip_start") {
     const trip = typeof ev.tripId === "string" ? await env.DB.prepare("SELECT id FROM user_trip_setups WHERE id = ? AND user_id = ?").bind(ev.tripId, uid).first() : null;
     if (!trip) return bad("trip not found");
-    nextState = { tripId: trip.id };
+    nextState = { tripId: trip.id, runId: ctlNewId("run") }; // the run id stamps every mark this trip makes (the controller's log lists them)
   } else if (ev.type === "trip_end") {
     // Like the site's End Trip: closes the session this trip's action started (if still running), then clears the trip.
     if (state.sessionGroupId) {
@@ -4249,11 +4342,11 @@ async function ctlProcessEvent(env, user, ev) {
       id: ctlNewId(), ...position, dateTime, createdAt: dateTime, sessionGroupId, sessionNumber, source,
       water: evWater, waterDepth: evDepth,
     }), ":start");
-    nextState = { tripId: action.tripId, actionId: action.id, sessionGroupId };
+    nextState = { tripId: action.tripId, actionId: action.id, sessionGroupId, runId: tripRunId };
   } else if (ev.type === "action_end") {
     const closed = await closeRunning();
     if (closed && closed.error) return bad(closed.error);
-    nextState = { tripId: state.tripId };
+    nextState = { tripId: state.tripId, ...(state.runId ? { runId: state.runId } : {}) };
   } else if (ev.type === "catch") {
     if (!havePosition) return bad("lat/lng are required");
     if (typeof ev.species !== "string" || !ev.species.trim()) return bad("species is required");
@@ -4288,6 +4381,12 @@ async function ctlProcessEvent(env, user, ev) {
   // may only choose values that already exist.
   if (ev.type === "action_update" || ev.type === "rodsetup_update") {
     const edit = ev.type === "action_update" ? await ctlActionUpdateStatements(env, uid, ev) : await ctlRodSetupUpdateStatements(env, uid, ev);
+    if (edit.error) return bad(edit.error);
+    stmts.push(...edit.stmts);
+  }
+
+  if (ev.type === "mark_update") {
+    const edit = await ctlMarkUpdateStatements(env, uid, ev);
     if (edit.error) return bad(edit.error);
     stmts.push(...edit.stmts);
   }
@@ -4373,9 +4472,17 @@ async function handleControllerApi(request, url, env) {
       if (!trip) return jsonResponse({ error: "Trip not found." }, 404, env);
       const next = { tripId: trip.id };
       if (typeof body.actionId === "string" && typeof body.sessionGroupId === "string") Object.assign(next, { actionId: body.actionId, sessionGroupId: body.sessionGroupId });
+      if (typeof body.runId === "string" && body.runId) next.runId = body.runId;
       await ctlWriteStateStatement(env, user.id, next).run();
       return jsonResponse(next, 200, env);
     }
+  }
+  if (url.pathname === "/api/controller/marks" && request.method === "GET") {
+    // the marks the running trip has made (Session Start/End and Catches), oldest first, for the controller's log
+    const runId = url.searchParams.get("runId") || (await ctlReadState(env, user.id)).runId || null;
+    if (!runId) return jsonResponse({ runId: null, marks: [] }, 200, env);
+    const { results } = await env.DB.prepare("SELECT * FROM marks WHERE user_id = ? AND trip_run_id = ? ORDER BY date_time ASC, created_at ASC LIMIT 500").bind(user.id, runId).all();
+    return jsonResponse({ runId, marks: results.map(rowToMark) }, 200, env);
   }
   if (url.pathname === "/api/controller/events" && request.method === "POST") {
     const body = await readJsonBody(request);

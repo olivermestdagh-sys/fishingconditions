@@ -245,12 +245,14 @@ test("events: a whole trip — start, action, catch, another action, end — bec
 test("events: the running trip/action is what the Live page reads — action_start sets it, action_end keeps just the trip", async () => {
   const { sqlite, env, token } = await seeded();
   await send(env, token, [ev(1, "trip_start", { tripId: "t1" })]);
-  assert.deepEqual(stateOf(sqlite), { tripId: "t1" });
+  const runId = stateOf(sqlite).runId;
+  assert.match(runId, /^run_/);
+  assert.deepEqual(stateOf(sqlite), { tripId: "t1", runId });
   await send(env, token, [ev(2, "action_start", { actionId: "a1" })]);
   const group = marks(sqlite, "type = 'Session Start'")[0].session_group_id;
-  assert.deepEqual(stateOf(sqlite), { tripId: "t1", actionId: "a1", sessionGroupId: group });
+  assert.deepEqual(stateOf(sqlite), { tripId: "t1", actionId: "a1", sessionGroupId: group, runId });
   await send(env, token, [ev(3, "action_end")]);
-  assert.deepEqual(stateOf(sqlite), { tripId: "t1" });
+  assert.deepEqual(stateOf(sqlite), { tripId: "t1", runId });
   assert.equal(marks(sqlite, "type = 'Session End'").length, 1);
   assert.equal((await send(env, token, [ev(4, "action_end")]))[0].status, "created", "ending with nothing running is harmless");
   assert.equal(marks(sqlite, "type = 'Session End'").length, 1);
@@ -591,4 +593,74 @@ test("rodsetup_update: unknown rods and rigs, someone else's setup and empty edi
   for (const [i, extra] of bad.entries()) results.push((await update(env, token, "rodsetup_update", 30 + i, extra))[0]);
   assert.deepEqual(results.map((x) => x.status), Array(bad.length).fill("rejected"));
   assert.equal(JSON.stringify(setupRow(sqlite, "r1")), before);
+});
+
+test("trip log: marks of a trip run are listed for the controller, and mark_update edits them from existing values only", async () => {
+  const { sqlite, env, token } = await seeded();
+  sqlite.prepare("INSERT INTO user_mark_lists (id, user_id, field, value, created_at) VALUES ('w1', 'u1', 'Weather Condition', 'Overcast', 1), ('wa1', 'u1', 'Water Condition', 'Clear', 1)").run();
+  await send(env, token, [ev(1, "trip_start", { tripId: "t1" }), ev(2, "action_start", { actionId: "a1" }), ev(3, "catch", { actionId: "a1", species: "Bream", size: 31, fate: "keep" })]);
+  const runId = stateOf(sqlite).runId;
+  assert.ok(runId, "the trip has a run id");
+  assert.equal(marks(sqlite, `trip_run_id = '${runId}'`).length, 2, "Session Start and the Catch carry it");
+
+  // other trips' marks and other users' don't list
+  sqlite.prepare("INSERT INTO marks (id, user_id, lat, lng, type, date_time, source, created_at, trip_run_id) VALUES ('old', 'u1', 0, 0, 'Catch', '2026-01-01 10:00:00', 'Controller', 1, 'run_other')").run();
+  const listed = await (await api(env, token, "GET", "/api/controller/marks")).json();
+  assert.equal(listed.runId, runId);
+  assert.deepEqual(listed.marks.map((m) => m.type), ["Session Start", "Catch"]);
+  assert.equal((await api(env, null, "GET", "/api/controller/marks")).status, 401);
+
+  const catchId = listed.marks[1].id;
+  let r = await update(env, token, "mark_update", 10, { markId: catchId, changes: { species: "Flathead", size: 42, released: true, weatherCondition: "Overcast", windDirection: "NE", notes: "  nice  " } });
+  assert.equal(r[0].status, "created");
+  const row = sqlite.prepare("SELECT * FROM marks WHERE id = ?").get(catchId);
+  assert.equal(row.species, "Flathead");
+  assert.equal(row.name, "Flathead", "a Catch is named after its species");
+  assert.equal(row.size, 42);
+  assert.equal(row.released, 1);
+  assert.equal(row.weather_condition, "Overcast");
+  assert.equal(row.wind_direction, "NE");
+  assert.equal(row.notes, "nice");
+
+  r = await update(env, token, "mark_update", 10, { markId: catchId, changes: { size: 1 } });
+  assert.equal(r[0].status, "duplicate");
+
+  // a rig change clears rig options; options must belong to the rig
+  r = await update(env, token, "mark_update", 11, { markId: catchId, changes: { rig: "Jig Head", rigOptions: ["Vibe"] } });
+  assert.equal(r[0].status, "created");
+  assert.equal(sqlite.prepare("SELECT rig_options FROM marks WHERE id = ?").get(catchId).rig_options, "Vibe");
+  r = await update(env, token, "mark_update", 12, { markId: catchId, changes: { rig: "Paternoster" } });
+  assert.equal(sqlite.prepare("SELECT rig_options FROM marks WHERE id = ?").get(catchId).rig_options, null);
+
+  const bad = [
+    { markId: catchId, changes: { species: "Secret" } },
+    { markId: catchId, changes: { size: -1 } },
+    { markId: catchId, changes: { lat: 1 } },
+    { markId: catchId, changes: { type: "POI" } },
+    { markId: catchId, changes: { windDirection: "Up" } },
+    { markId: catchId, changes: { rigOptions: ["Vibe"] } }, // not Paternoster's
+    { markId: catchId, changes: {} },
+    { markId: "old2", changes: { size: 3 } },
+    { markId: listed.marks[0].id, changes: { size: 3 } }, // a Session has no size
+  ];
+  const out = [];
+  for (const [i, extra] of bad.entries()) out.push((await update(env, token, "mark_update", 20 + i, extra))[0]);
+  assert.deepEqual(out.map((x) => x.status), Array(bad.length).fill("rejected"));
+
+  // someone else's (or a hand-made) mark can't be edited
+  sqlite.prepare("INSERT INTO marks (id, user_id, lat, lng, type, date_time, source, created_at) VALUES ('hand', 'u1', 0, 0, 'Catch', '2026-01-01 10:00:00', 'Manual', 1)").run();
+  assert.equal((await update(env, token, "mark_update", 40, { markId: "hand", changes: { size: 3 } }))[0].status, "rejected");
+});
+
+test("trip log: the run id survives actions starting and ending, and a trip started elsewhere gets one at its first action", async () => {
+  const { sqlite, env, token } = await seeded();
+  await send(env, token, [ev(1, "trip_start", { tripId: "t1" })]);
+  const runId = stateOf(sqlite).runId;
+  await send(env, token, [ev(2, "action_start", { actionId: "a1" }), ev(3, "action_end"), ev(4, "action_start", { actionId: "a2" })]);
+  assert.equal(stateOf(sqlite).runId, runId);
+  assert.equal(marks(sqlite, `trip_run_id = '${runId}'`).length, 3, "Start, End, Start");
+
+  sqlite.prepare("UPDATE user_prefs SET value = '{\"tripId\":\"t1\"}' WHERE user_id = 'u1' AND key = 'liveActiveTrip'").run();
+  await send(env, token, [ev(5, "action_start", { actionId: "a1" })]);
+  assert.ok(stateOf(sqlite).runId && stateOf(sqlite).runId !== runId);
 });

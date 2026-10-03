@@ -439,6 +439,7 @@ CREATE TABLE IF NOT EXISTS marks (
                                       -- type = 'Session Start' / 'Session End' (Fishing Sessions
                                       -- trail-import feature); NULL for every
                                       -- other mark type
+  trip_run_id TEXT,                  -- the controller trip run a Controller-made mark belongs to (added later via ALTER TABLE); lists a trip's marks on the controller's log. Not part of the site's mark shape.
   session_group_id TEXT,             -- links a Session's Start row to its own
                                       -- End row (both share the same value) —
                                       -- what the Location/Live maps use to draw
