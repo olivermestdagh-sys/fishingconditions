@@ -285,6 +285,17 @@ test("events: a Session End with no water/depth in the event keeps the Start's v
   assert.equal(end.water_depth, 2);
 });
 
+test("events: a Too small catch has no size, is released and carries the Too small note — like the Live +Catch", async () => {
+  const { sqlite, env, token } = await seeded();
+  await send(env, token, [ev(1, "trip_start", { tripId: "t1" }), ev(2, "action_start", { actionId: "a1" })]);
+  const out = await send(env, token, [ev(3, "catch", { actionId: "a1", species: "Bream", tooSmall: true, fate: "release" })]);
+  assert.equal(out[0].status, "created");
+  const m = marks(sqlite, "type = 'Catch'")[0];
+  assert.equal(m.size, null);
+  assert.equal(m.released, 1);
+  assert.equal(m.notes, "Too small");
+});
+
 test("events: starting an action with no trip running adopts that action's trip", async () => {
   const { sqlite, env, token } = await seeded();
   await send(env, token, [ev(1, "action_start", { actionId: "a2" })]);
