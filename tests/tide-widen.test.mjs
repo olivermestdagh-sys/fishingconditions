@@ -88,3 +88,20 @@ test("the input rows are never mutated", () => {
   fns.applyTroughWideningToRows(rows, { hlw: 40, llw: 40 }, THRESH);
   assert.equal(JSON.stringify(rows), snap);
 });
+
+test("HHW offset widens the high-water plateau (high-owned crossings) without moving the high", () => {
+  const HI = 1.7; // above the 2.0 -> 0.5 leg midpoint (1.25), so the higher high owns that crossing
+  const hiBefore = fns.findTideExtrema(rows).filter((e) => e.type === "high")[0];
+  const cBefore = fns.findTideThresholdCrossings(rows, HI).filter((c) => c.t > hiBefore.t && c.t < T0 + 6 * H && !c.becomingAccessible)[0];
+  const out = fns.applyTroughWideningToRows(rows, { hhw: 40 }, HI);
+  const hiAfter = fns.findTideExtrema(out).filter((e) => e.type === "high")[0];
+  const cAfter = fns.findTideThresholdCrossings(out, HI).filter((c) => c.t > hiAfter.t && c.t < T0 + 6 * H && !c.becomingAccessible)[0];
+  assert.ok(Math.abs(hiAfter.t - hiBefore.t) < 5 * 60000, "the displayed high does not move");
+  assert.ok(Math.abs(cAfter.t - cBefore.t - 40 * 60000) < 15 * 60000, "falling crossing ~40 min later");
+});
+
+test("a low-owned crossing is not touched by the high offsets", () => {
+  // threshold 1.0 is below both the 2.0->0.5 and 0.5->1.8 midpoints, so the lows own it
+  const out = fns.applyTroughWideningToRows(rows, { hhw: 40, lhw: 40 }, THRESH);
+  assert.equal(out, rows);
+});

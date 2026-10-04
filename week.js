@@ -1240,7 +1240,7 @@ function buildLocationRowElement({ loc, locRows, sessions }, timelineStart, time
       disableBuiltinEvents: true, // this page drives the tooltip itself — see wireSyncedTooltip below
       showFirstBoxIcons: true, // windvane/fish legend on each row's own first condition-strip box
       tideOffsetMinutes: loc.tideOffset,
-      troughOffsets: { hlw: loc.hlwOffset, llw: loc.llwOffset },
+      troughOffsets: { hhw: loc.hhwOffset, lhw: loc.lhwOffset, hlw: loc.hlwOffset, llw: loc.llwOffset },
     });
     rowChartRef = rowChart;
     if (rowChart) {

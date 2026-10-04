@@ -192,57 +192,73 @@ function applyTideOffsetToRows(rows, offsetMinutes) {
 }
 
 /**
- * Trough widening (docs/lang-lang-trough-widening-spec.md): the synthetic tide curve rushes through a shallow low
- * faster than the real tide, so the "too low" / "high enough" crossings of minTideHeight come out too narrow. For each
- * LOW whose class (HLW/LLW, via rankExtremum) has a non-zero offset O in `offsets` ({hlw, llw} minutes), re-times the
- * curve between the high before it and the high after it so that the falling crossing moves O minutes earlier, the low
- * itself O later and the rising crossing O later (piecewise-linear time warp; the two highs and everything outside
- * that bracket stay put). The warp is applied to the rows, so the drawn curve, the extrema labels and the crossing
- * dots all agree. Needs minTideHeight (the crossings are what it anchors on); a low that never dips below it, or one
- * without a high on both sides in `rows`, is left alone. hhw/lhw offsets are stored but inert (no evidence yet).
- * Returns a new array; `rows` is never mutated. Run it AFTER applyTideOffsetToRows.
+ * Tide-extremum widening (docs/lang-lang-trough-widening-spec V2.md): the synthetic tide curve rushes through a shallow
+ * low faster than the real tide, so the "too low" / "high enough" crossings of minTideHeight come out too narrow.
+ * `offsets` ({hhw, lhw, hlw, llw} minutes, by rankExtremum class) widen the feature around each extremum:
+ *  - LOW with offset O: the falling crossing on the leg into it moves O earlier, the rising crossing out of it O later,
+ *    and the low itself O later (the displayed low was measured ~29 min early). Needs a crossing on both legs.
+ *  - HIGH with offset O: the crossing on the leg into it moves O earlier and the one out of it O later (a wider
+ *    high-water plateau); the displayed high time is deliberately NOT moved (logged highs are accurate).
+ * Each leg's crossing is owned by the low if the threshold is at or below the leg's height-midpoint, else by the high
+ * (no double-application). Shifts are capped at 50% of the leg's duration and kept inside the leg. Implemented as a
+ * piecewise-linear time warp on the rows, so the drawn curve, the extrema labels and the crossing dots all agree.
+ * Only moves crossings that already exist. Needs minTideHeight. Returns a new array (`rows` is never mutated); run it
+ * AFTER applyTideOffsetToRows.
  */
 function applyTroughWideningToRows(rows, offsets, minTideHeight) {
   if (!offsets || minTideHeight == null || minTideHeight === "") return rows;
-  const byClass = { HLW: Number(offsets.hlw) || 0, LLW: Number(offsets.llw) || 0 };
-  if (!byClass.HLW && !byClass.LLW) return rows;
+  const byClass = { HHW: Number(offsets.hhw) || 0, LHW: Number(offsets.lhw) || 0, HLW: Number(offsets.hlw) || 0, LLW: Number(offsets.llw) || 0 };
+  if (!byClass.HHW && !byClass.LHW && !byClass.HLW && !byClass.LLW) return rows;
   const tideRows = rows
     .filter((r) => r["Tide Height (m)"] != null)
     .slice()
     .sort((a, b) => a._t - b._t);
   if (tideRows.length < 3) return rows;
+  const threshold = Number(minTideHeight);
   const extrema = findTideExtrema(tideRows);
-  const crossings = findTideThresholdCrossings(tideRows, Number(minTideHeight));
+  if (extrema.length < 2) return rows;
+  const crossings = findTideThresholdCrossings(tideRows, threshold);
   const MIN_GAP = 60000;
-  const warps = []; // { a, b, knots: [[newT, oldT], ...] }
-  extrema.forEach((ex, i) => {
-    if (ex.type !== "low") return;
-    const O = byClass[rankExtremum(extrema, ex)] || 0;
-    if (O <= 0) return;
-    const hi0 = extrema[i - 1];
-    const hi1 = extrema[i + 1];
-    if (!hi0 || !hi1 || hi0.type !== "high" || hi1.type !== "high") return;
-    const down = crossings.filter((c) => !c.becomingAccessible && c.t > hi0.t && c.t < ex.t).pop();
-    const up = crossings.find((c) => c.becomingAccessible && c.t > ex.t && c.t < hi1.t);
-    if (!down || !up) return;
-    // Never let the shifted crossings run into the highs (the warp has to stay increasing).
-    const shift = Math.min(O * 60000, down.t - hi0.t - MIN_GAP, hi1.t - up.t - MIN_GAP);
-    if (shift <= 0) return;
-    warps.push({
-      a: hi0.t,
-      b: hi1.t,
-      knots: [[hi0.t, hi0.t], [down.t - shift, down.t], [ex.t + shift, ex.t], [up.t + shift, up.t], [hi1.t, hi1.t]],
-    });
+  const offMs = extrema.map((ex) => (byClass[rankExtremum(extrema, ex)] || 0) * 60000);
+  const legCrossing = (i) => crossings.find((c) => c.t > extrema[i].t && c.t < extrema[i + 1].t);
+  // New time of each extremum: only lows move (and only if both neighbouring legs have a crossing to widen).
+  const newT = extrema.map((ex, i) => {
+    if (ex.type !== "low" || offMs[i] <= 0 || i === 0 || i === extrema.length - 1) return ex.t;
+    if (!legCrossing(i - 1) || !legCrossing(i)) return ex.t;
+    const room = Math.min(ex.t - extrema[i - 1].t, extrema[i + 1].t - ex.t) / 2;
+    return ex.t + Math.min(offMs[i], room);
   });
-  if (warps.length === 0) return rows;
+  const knots = [];
+  let changed = false;
+  for (let i = 0; i < extrema.length; i++) {
+    knots.push([newT[i], extrema[i].t]);
+    if (newT[i] !== extrema[i].t) changed = true;
+    if (i === extrema.length - 1) break;
+    const a = extrema[i];
+    const b = extrema[i + 1];
+    const c = legCrossing(i);
+    if (!c || a.type === b.type) continue;
+    const low = a.type === "low" ? i : i + 1;
+    const high = a.type === "low" ? i + 1 : i;
+    const lowOwned = threshold <= (extrema[low].height + extrema[high].height) / 2;
+    const owner = lowOwned ? low : high;
+    const O = Math.min(offMs[owner], (b.t - a.t) / 2);
+    if (O <= 0) continue;
+    // the leg into an extremum moves its crossing earlier, the leg out of it later
+    const delta = owner === i + 1 ? -O : O;
+    const pos = Math.min(Math.max(c.t + delta, newT[i] + MIN_GAP), newT[i + 1] - MIN_GAP);
+    if (pos !== c.t) changed = true;
+    knots.push([pos, c.t]);
+  }
+  if (!changed) return rows;
+  const first = knots[0][0];
+  const last = knots[knots.length - 1][0];
   return rows.map((r) => {
-    if (r["Tide Height (m)"] == null) return r;
-    const w = warps.find((x) => r._t > x.a && r._t < x.b);
-    if (!w) return r;
+    if (r["Tide Height (m)"] == null || r._t <= first || r._t >= last) return r;
     let oldT = r._t;
-    for (let k = 0; k < w.knots.length - 1; k++) {
-      const [n0, o0] = w.knots[k];
-      const [n1, o1] = w.knots[k + 1];
+    for (let k = 0; k < knots.length - 1; k++) {
+      const [n0, o0] = knots[k];
+      const [n1, o1] = knots[k + 1];
       if (r._t >= n0 && r._t <= n1) {
         oldT = n1 === n0 ? o0 : o0 + ((r._t - n0) / (n1 - n0)) * (o1 - o0);
         break;

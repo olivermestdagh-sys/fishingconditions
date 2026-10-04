@@ -366,10 +366,10 @@ async function openLocationEditor(name, { onChanged, onRemoved } = {}) {
                title="Same as the higher-low setting, for the lower low (LLW) of the day." style="${MARK_POPUP_INPUT_STYLE}" /></label>
            <label class="mark-edit-field">High-tide widening, higher high (min)
              <input type="number" step="1" min="0" inputmode="numeric" data-loced-trough="hhwOffset" value="${loc.hhwOffset != null ? loc.hhwOffset : ""}" placeholder="0"
-               title="Saved for the higher high (HHW) of the day. Not applied to the charts yet: there is no logged evidence that highs need a correction." style="${MARK_POPUP_INPUT_STYLE}" /></label>
+               title="Widens the high-water plateau around the higher high (HHW) of the day: crossings of the minimum tide height just before it move this many minutes earlier and just after it later. The high's own time does not move. Only matters where the minimum tide height is above the middle of the tide leg (a high-water-only launch)." style="${MARK_POPUP_INPUT_STYLE}" /></label>
            <label class="mark-edit-field">High-tide widening, lower high (min)
              <input type="number" step="1" min="0" inputmode="numeric" data-loced-trough="lhwOffset" value="${loc.lhwOffset != null ? loc.lhwOffset : ""}" placeholder="0"
-               title="Saved for the lower high (LHW) of the day. Not applied to the charts yet: there is no logged evidence that highs need a correction." style="${MARK_POPUP_INPUT_STYLE}" /></label>`
+               title="Same as the higher-high setting, for the lower high (LHW) of the day." style="${MARK_POPUP_INPUT_STYLE}" /></label>`
         )}
         ${group(
           "types",
