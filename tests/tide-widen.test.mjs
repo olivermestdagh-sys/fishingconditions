@@ -17,7 +17,6 @@ const fns = new Function(
     grab(/function findTideThresholdCrossings[\s\S]*?\r?\n}\r?\n/),
     grab(/function interpolatedTideHeightAt[\s\S]*?\r?\n}\r?\n/),
     grab(/function findTideExtrema[\s\S]*?\r?\n}\r?\n/),
-    grab(/function monotoneWarp[\s\S]*?\r?\n}\r?\n/),
     grab(/function applyTroughWideningToRows[\s\S]*?\r?\n}\r?\n/),
     "return { applyTroughWideningToRows, findTideExtrema, findTideThresholdCrossings };",
   ].join("\n")
@@ -114,4 +113,36 @@ test("widening keeps the curve smooth: same number of highs and lows, heights st
   const lo = Math.min(...rows.map((r) => r["Tide Height (m)"]));
   const hi = Math.max(...rows.map((r) => r["Tide Height (m)"]));
   for (const r of out) assert.ok(r["Tide Height (m)"] >= lo - 1e-9 && r["Tide Height (m)"] <= hi + 1e-9);
+});
+
+test("each widened leg is monotone (no corner overshoot or bump) and stays inside its extremum heights", () => {
+  const out = fns.applyTroughWideningToRows(rows, { hlw: 40 }, THRESH);
+  const low = fns.findTideExtrema(out).filter((e) => e.type === "low")[0];
+  const lowH = low.height;
+  let prev = null;
+  for (const r of out) {
+    const h = r["Tide Height (m)"];
+    assert.ok(h >= lowH - 0.02 || r._t > T0 + 12 * H || r._t < T0, "never dips below the low on this leg pair");
+    if (r._t >= T0 && r._t <= low.t) {
+      if (prev !== null) assert.ok(h <= prev + 1e-9, "falling leg never rises");
+      prev = h;
+    }
+  }
+  prev = null;
+  for (const r of out) {
+    if (r._t >= low.t && r._t <= T0 + 11 * H) {
+      const h = r["Tide Height (m)"];
+      if (prev !== null) assert.ok(h >= prev - 1e-9, "rising leg never dips");
+      prev = h;
+    }
+  }
+});
+
+test("the widened crossings are exactly on the threshold at the spec times", () => {
+  const before = crossings(rows).filter((c) => c.t > T0 && c.t < T0 + 12 * H);
+  const out = fns.applyTroughWideningToRows(rows, { hlw: 40 }, THRESH);
+  const after = crossings(out).filter((c) => c.t > T0 && c.t < T0 + 12 * H);
+  assert.equal(after.length, 2);
+  assert.equal(after[0].t, before[0].t - 40 * 60000);
+  assert.equal(after[1].t, before[1].t + 40 * 60000);
 });
