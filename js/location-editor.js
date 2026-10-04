@@ -363,7 +363,13 @@ async function openLocationEditor(name, { onChanged, onRemoved } = {}) {
                title="Widens the too-low / launchable window around a higher-low (HLW) tide: the 'too low' time moves this many minutes earlier, the low and the 'high enough' time this many later. Needs a minimum tide height." style="${MARK_POPUP_INPUT_STYLE}" /></label>
            <label class="mark-edit-field">Low-tide window widening, lower low (min)
              <input type="number" step="1" min="0" inputmode="numeric" data-loced-trough="llwOffset" value="${loc.llwOffset != null ? loc.llwOffset : ""}" placeholder="0"
-               title="Same as the higher-low setting, for the lower low (LLW) of the day." style="${MARK_POPUP_INPUT_STYLE}" /></label>`
+               title="Same as the higher-low setting, for the lower low (LLW) of the day." style="${MARK_POPUP_INPUT_STYLE}" /></label>
+           <label class="mark-edit-field">High-tide widening, higher high (min)
+             <input type="number" step="1" min="0" inputmode="numeric" data-loced-trough="hhwOffset" value="${loc.hhwOffset != null ? loc.hhwOffset : ""}" placeholder="0"
+               title="Saved for the higher high (HHW) of the day. Not applied to the charts yet: there is no logged evidence that highs need a correction." style="${MARK_POPUP_INPUT_STYLE}" /></label>
+           <label class="mark-edit-field">High-tide widening, lower high (min)
+             <input type="number" step="1" min="0" inputmode="numeric" data-loced-trough="lhwOffset" value="${loc.lhwOffset != null ? loc.lhwOffset : ""}" placeholder="0"
+               title="Saved for the lower high (LHW) of the day. Not applied to the charts yet: there is no logged evidence that highs need a correction." style="${MARK_POPUP_INPUT_STYLE}" /></label>`
         )}
         ${group(
           "types",
