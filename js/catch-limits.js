@@ -63,12 +63,27 @@ function runCatches(catches, anchorMs, gapMs = CATCH_RUN_GAP_MS) {
   return chain ? catches.filter((c) => c.tMs >= chain.start && c.tMs <= chain.end) : [];
 }
 
-/** The number in a Session Start/End mark's own name ("Session 3 Start"/"Session 3 End" -> 3), or null when the
- * name doesn't match that shape (e.g. hand-renamed) — nextSessionNumber (below) needs each session's own already-
- * assigned number, not just a count of how many currently exist. */
+/** The number in a Session Start/End mark's own name ("Session 3 Start", or on a trip "Weekend Drift 3 End" -> 3), or
+ * null when the name doesn't match that shape (e.g. hand-renamed) — nextSessionNumber (below) needs each session's own
+ * already-assigned number, not just a count of how many currently exist. */
 function sessionNumberFromName(name) {
-  const m = /^Session (\d+) (?:Start|End)$/i.exec(String(name || "").trim());
+  const m = /(?:^|\s)(\d+) (?:Start|End)$/i.exec(String(name || "").trim());
   return m ? Number(m[1]) : null;
+}
+
+/** The default name of a Session Start/End mark made on a trip: "[Trip] [Action] [Number] [Start/End]" (just "Session N Start"
+ * when there is no trip or action name). role is "Start" or "End". Keep in step with ctlTripMarkName (user-backend.js). */
+function tripMarkName(tripName, actionName, number, role) {
+  const parts = [tripName, actionName].map((s) => String(s == null ? "" : s).trim()).filter(Boolean);
+  return `${parts.length ? parts.join(" ") : "Session"} ${number} ${role}`;
+}
+
+/** The default name of a Catch made on a trip: "[Species] [Trip] [Action] [Number]" (just the species with no trip/action name).
+ * Keep in step with ctlTripCatchName (user-backend.js). */
+function tripCatchName(species, tripName, actionName, number) {
+  const parts = [tripName, actionName].map((s) => String(s == null ? "" : s).trim()).filter(Boolean);
+  if (!parts.length) return species;
+  return [species, ...parts, ...(Number.isFinite(number) ? [number] : [])].join(" ");
 }
 
 /**

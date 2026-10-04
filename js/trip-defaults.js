@@ -37,7 +37,7 @@ function buildSessionStartFromAction(action, rodSetups, ctx, tide) {
   const uniq = (list) => [...new Set((list || []).filter((v) => v != null && String(v).trim() !== "").map((v) => String(v).trim()))];
   const setups = (action.rodSetupIds || []).map((rid) => (rodSetups || []).find((r) => r.id === rid)).filter(Boolean);
   const mark = {
-    id: ctx.id, lat: ctx.lat, lng: ctx.lng, name: `Session ${ctx.sessionNumber} Start`, type: "Session Start",
+    id: ctx.id, lat: ctx.lat, lng: ctx.lng, name: tripMarkName(ctx.tripName, action.name, ctx.sessionNumber, "Start"), type: "Session Start",
     dateTime: ctx.dateTime, createdAt: ctx.createdAt, source: "Manual", sessionRole: "start", sessionGroupId: ctx.sessionGroupId,
   };
   const set = (key, list) => {

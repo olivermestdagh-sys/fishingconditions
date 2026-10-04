@@ -492,6 +492,8 @@ async function saveLiveCatch(options, answers, defaults, gpsPromise, ctx) {
     const chosen = defaults.tripRodSetups.find((s) => s.name === st.rod);
     const trip = liveTripData.trips.find((t) => t.id === defaults.tripAction.tripId);
     Object.assign(mark, tdCatchFieldsFromAction(defaults.tripAction, liveTripData.rodSetups, chosen ? chosen.id : null, trip ? trip.name : ""));
+    const running = liveActiveSession();
+    mark.name = tripCatchName(st.species, mark.tripName, mark.actionName, running ? running.number : null); // "[Species] [Trip] [Action] [Number]"
     if (st.bait) mark.bait = st.bait; // the Bait card's answer, not all of the action's baits
   }
   const result = await saveMarkToD1(mark, true);

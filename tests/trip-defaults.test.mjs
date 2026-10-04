@@ -4,8 +4,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const src = fs.readFileSync(new URL("../js/trip-defaults.js", import.meta.url), "utf8");
+const limitsSrc = fs.readFileSync(new URL("../js/catch-limits.js", import.meta.url), "utf8"); // tripMarkName
 const pure = src.slice(0, src.indexOf("// --- Backend"));
-const fns = new Function(pure + "\nreturn { tdToggle, tdToggleSingle, tdRigSublist, tdActionsForTrip, tdLiveRodSetupIds, tdHasValue, buildSessionStartFromAction, tdOtherTargets, tdCatchFieldsFromAction };")();
+const fns = new Function(limitsSrc + "\n" + pure + "\nreturn { tdToggle, tdToggleSingle, tdRigSublist, tdActionsForTrip, tdLiveRodSetupIds, tdHasValue, buildSessionStartFromAction, tdOtherTargets, tdCatchFieldsFromAction };")();
 
 test("tdToggle adds a missing value and removes a present one, without mutating", () => {
   const list = ["a"];
@@ -52,7 +53,9 @@ test("buildSessionStartFromAction maps an Action and its rod setups onto a Sessi
   const action = { species: ["Bream", "Whiting"], fishingMethod: ["Lure"], berley: "Pilchard", bait: ["Prawn"], rodSetupIds: ["a", "b", "gone"] };
   const ctx = { id: "m1", lat: -38, lng: 145, dateTime: "2026-09-29 06:00:00", createdAt: "2026-09-29 06:00:00", sessionGroupId: "g1", sessionNumber: 3, water: "Clear", waterDepth: 2.5 };
   const mark = fns.buildSessionStartFromAction(action, rodSetups, ctx, { tideCondition: "Rising", tideExtreme: "HHW" });
-  assert.equal(mark.name, "Session 3 Start");
+  assert.equal(mark.name, "Session 3 Start", "no trip/action name: the plain session name");
+  const named = fns.buildSessionStartFromAction({ ...action, name: "Drift" }, rodSetups, { ...ctx, tripName: "Weekend" }, null);
+  assert.equal(named.name, "Weekend Drift 3 Start");
   assert.equal(mark.type, "Session Start");
   assert.equal(mark.sessionRole, "start");
   assert.equal(mark.sessionGroupId, "g1");

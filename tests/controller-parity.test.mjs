@@ -15,7 +15,7 @@ const workerSrc = read("../user-backend.js");
 const tripPure = tripSrc.slice(0, tripSrc.indexOf("// --- Backend"));
 const livePure = liveSrc.slice(0, liveSrc.indexOf("// --- DOM:"));
 const browser = new Function(
-  `${limitsSrc}\n${tripPure}\n${livePure}\nreturn { buildSessionStartFromAction, buildSessionEndFromStart, buildCatchFromCards, tdCatchFieldsFromAction, nextSessionNumber, sessionNumberFromName };`
+  `${limitsSrc}\n${tripPure}\n${livePure}\nreturn { buildSessionStartFromAction, buildSessionEndFromStart, buildCatchFromCards, tdCatchFieldsFromAction, nextSessionNumber, sessionNumberFromName, tripCatchName };`
 )();
 
 // Worker side: the ctl* helpers and constants, pulled out of the Worker file.
@@ -27,6 +27,8 @@ const grab = (re) => {
 const worker = new Function(
   [
     grab(/const CTL_RUN_GAP_MS[^\n]*\n/),
+    grab(/function ctlTripMarkName[\s\S]*?\n}\n/),
+    grab(/function ctlTripCatchName[\s\S]*?\n}\n/),
     grab(/function ctlUniq[\s\S]*?\n}\n/),
     grab(/function ctlLiveRodSetupIds[\s\S]*?\n}\n/),
     grab(/function ctlBuildSessionStart[\s\S]*?\n}\n/),
@@ -84,7 +86,8 @@ test("Catch on a running action: same mark as the Live +Catch flow saves", () =>
       const defaults = { water: c.water, berley: action.berley || "", fishingMethod: action.fishingMethod || [], rodSetups: {} };
       const viaBrowser = browser.buildCatchFromCards({ ...base, size: c.tooSmall ? null : c.size, rod: "", tooSmall: c.tooSmall, released: c.released }, defaults, undefined, c.depth);
       Object.assign(viaBrowser, browser.tdCatchFieldsFromAction(action, rodSetups, c.setupId, "Weekend"));
-      const viaWorker = worker.ctlBuildCatch({ ...base, size: c.size, released: c.released, tooSmall: c.tooSmall, water: c.water, waterDepth: c.depth, setupId: c.setupId, tripName: "Weekend" }, action, rodSetups);
+      viaBrowser.name = browser.tripCatchName(c.species, "Weekend", action.name, 2); // map-live.js names it after the species, trip, action and session number
+      const viaWorker = worker.ctlBuildCatch({ ...base, size: c.size, released: c.released, tooSmall: c.tooSmall, water: c.water, waterDepth: c.depth, setupId: c.setupId, tripName: "Weekend", sessionNumber: 2 }, action, rodSetups);
       assert.deepEqual(viaWorker, viaBrowser, `${action.name} ${JSON.stringify(c)}`);
     }
   }
@@ -97,6 +100,7 @@ test("Catch with a Bait answer: the answer is the mark's bait, as the Live +Catc
     const viaBrowser = browser.buildCatchFromCards({ ...base, size: 30, rod: "", bait: "Squid", released: false }, defaults, undefined, null);
     Object.assign(viaBrowser, browser.tdCatchFieldsFromAction(action, rodSetups, null, "Weekend"));
     viaBrowser.bait = "Squid"; // map-live.js puts the answer on after the action's gear
+    viaBrowser.name = browser.tripCatchName("Bream", "Weekend", action.name, null);
     const viaWorker = worker.ctlBuildCatch({ ...base, size: 30, released: false, bait: "Squid", setupId: null, tripName: "Weekend" }, action, rodSetups);
     assert.deepEqual(viaWorker, viaBrowser, action.name);
   }
@@ -128,7 +132,7 @@ test("the next session number follows the browser's rule", () => {
     assert.equal(worker.ctlNextSessionNumber(s.starts, s.anchor), browser.nextSessionNumber(s.starts, s.anchor), JSON.stringify(s));
   }
   assert.equal(worker.ctlNextSessionNumber(scenarios[2].starts, base), 5, "highest number in the run plus one");
-  for (const n of ["Session 3 Start", "Session 12 End", "session 7 start", "Session x Start", "", null]) {
+  for (const n of ["Session 3 Start", "Session 12 End", "session 7 start", "Session x Start", "Weekend Drift 4 Start", "Weekend Drift 11 End", "Bream", "", null]) {
     assert.equal(worker.ctlSessionNumberFromName(n), browser.sessionNumberFromName(n), String(n));
   }
 });

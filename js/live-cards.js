@@ -490,7 +490,7 @@ const SESSION_END_CARRIED_FIELDS = ["species", "waterCondition", "berley", "fish
  */
 function buildSessionEndFromStart(startMark, { id, lat, lng, dateTime, createdAt }, sessionNumber) {
   const mark = {
-    id, lat, lng, name: `Session ${sessionNumber} End`, type: "Session End", dateTime, createdAt,
+    id, lat, lng, name: tripMarkName(startMark.tripName, startMark.actionName, sessionNumber, "End"), type: "Session End", dateTime, createdAt,
     source: "Manual", sessionRole: "end", sessionGroupId: startMark.sessionGroupId,
   };
   for (const key of SESSION_END_CARRIED_FIELDS) {

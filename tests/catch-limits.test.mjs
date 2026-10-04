@@ -195,3 +195,14 @@ test("editing an existing catch doesn't count it twice", () => {
   const atLimit = f.catchLimitWarnings({ ...many[0] }, limits, many);
   assert.deepEqual(atLimit, [], "20 kept of 20 is at the limit, not over");
 });
+
+test("trip mark names: '[Trip] [Action] [Number] Start/End' and '[Species] [Trip] [Action] [Number]'; the number still parses back", () => {
+  const g = new Function(src + "\nreturn { tripMarkName, tripCatchName, sessionNumberFromName };")();
+  assert.equal(g.tripMarkName("Weekend", "Drift", 3, "Start"), "Weekend Drift 3 Start");
+  assert.equal(g.tripMarkName("", "", 2, "End"), "Session 2 End", "no trip/action name: the plain session name");
+  assert.equal(g.tripMarkName("Weekend", "", 1, "End"), "Weekend 1 End");
+  assert.equal(g.tripCatchName("Bream", "Weekend", "Drift", 3), "Bream Weekend Drift 3");
+  assert.equal(g.tripCatchName("Bream", "Weekend", "Drift", null), "Bream Weekend Drift");
+  assert.equal(g.tripCatchName("Bream", "", "", 3), "Bream");
+  assert.equal(g.sessionNumberFromName(g.tripMarkName("Weekend 2", "Drift", 12, "End")), 12);
+});

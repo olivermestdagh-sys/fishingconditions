@@ -204,9 +204,9 @@ test("events: a whole trip — start, action, catch, another action, end — bec
 
   const all = marks(sqlite);
   const byName = Object.fromEntries(all.map((m) => [m.name, m]));
-  assert.deepEqual(Object.keys(byName).sort(), ["Bream", "Flathead", "Session 1 End", "Session 1 Start", "Session 2 End", "Session 2 Start"]);
+  assert.deepEqual(Object.keys(byName).sort(), ["Bream Estuary Drift 1", "Estuary Anchor 2 End", "Estuary Anchor 2 Start", "Estuary Drift 1 End", "Estuary Drift 1 Start", "Flathead Estuary Drift 1"]);
 
-  const start1 = byName["Session 1 Start"];
+  const start1 = byName["Estuary Drift 1 Start"];
   assert.equal(start1.type, "Session Start");
   assert.equal(start1.date_time, "2026-10-02 10:02:00", "UTC+10 clock, converted to the site's local time");
   assert.equal(start1.source, "Controller");
@@ -219,7 +219,7 @@ test("events: a whole trip — start, action, catch, another action, end — bec
   assert.equal(start1.rod, "L Wilson, L Raider");
   assert.equal(start1.rig_options, "Vibe");
 
-  const bream = byName.Bream;
+  const bream = byName["Bream Estuary Drift 1"];
   assert.equal(bream.type, "Catch");
   assert.equal(bream.size, 31);
   assert.equal(bream.released, 0);
@@ -228,17 +228,17 @@ test("events: a whole trip — start, action, catch, another action, end — bec
   assert.equal(bream.rig, "Jig Head");
   assert.equal(bream.berley, "Pilchard Mix");
   assert.equal(bream.source_uuid, "fc:fishctl-01:3");
-  assert.equal(byName.Flathead.released, 1);
-  assert.equal(byName.Flathead.rod, null, "two rod setups and none chosen: no rod guessed");
+  assert.equal(byName["Flathead Estuary Drift 1"].released, 1);
+  assert.equal(byName["Flathead Estuary Drift 1"].rod, null, "two rod setups and none chosen: no rod guessed");
 
   // Starting the second action closed the first session at that moment and place; ending the trip closed the second.
-  const end1 = byName["Session 1 End"];
+  const end1 = byName["Estuary Drift 1 End"];
   assert.equal(end1.session_group_id, start1.session_group_id);
   assert.equal(end1.date_time, "2026-10-02 10:05:00");
   assert.equal(end1.lat, -38.15);
   assert.equal(end1.source_uuid, "fc:fishctl-01:5:end");
-  assert.equal(byName["Session 2 Start"].session_group_id, byName["Session 2 End"].session_group_id);
-  assert.notEqual(byName["Session 2 Start"].session_group_id, start1.session_group_id);
+  assert.equal(byName["Estuary Anchor 2 Start"].session_group_id, byName["Estuary Anchor 2 End"].session_group_id);
+  assert.notEqual(byName["Estuary Anchor 2 Start"].session_group_id, start1.session_group_id);
   assert.deepEqual(stateOf(sqlite), { tripId: null });
 });
 
@@ -267,15 +267,15 @@ test("events: Session Start, Session End and Catch all take the water condition 
   await send(env, token, [ev(4, "action_start", { actionId: "a2", water: "Dirty", depth: 3 })]);
   await send(env, token, [ev(5, "trip_end", { water: "Muddy", depth: 5 })]);
   const by = Object.fromEntries(marks(sqlite).map((m) => [m.name, m]));
-  assert.equal(by["Session 1 Start"].water_condition, "Clear");
-  assert.equal(by["Session 1 Start"].water_depth, 2);
-  assert.equal(by.Bream.water_condition, "Dirty");
-  assert.equal(by.Bream.water_depth, 3);
-  assert.equal(by["Session 1 End"].water_condition, "Dirty", "the End records the conditions when it ended, not the Start's");
-  assert.equal(by["Session 1 End"].water_depth, 3);
-  assert.equal(by["Session 2 Start"].water_depth, 3);
-  assert.equal(by["Session 2 End"].water_condition, "Muddy");
-  assert.equal(by["Session 2 End"].water_depth, 5);
+  assert.equal(by["Estuary Drift 1 Start"].water_condition, "Clear");
+  assert.equal(by["Estuary Drift 1 Start"].water_depth, 2);
+  assert.equal(by["Bream Estuary Drift 1"].water_condition, "Dirty");
+  assert.equal(by["Bream Estuary Drift 1"].water_depth, 3);
+  assert.equal(by["Estuary Drift 1 End"].water_condition, "Dirty", "the End records the conditions when it ended, not the Start's");
+  assert.equal(by["Estuary Drift 1 End"].water_depth, 3);
+  assert.equal(by["Estuary Anchor 2 Start"].water_depth, 3);
+  assert.equal(by["Estuary Anchor 2 End"].water_condition, "Muddy");
+  assert.equal(by["Estuary Anchor 2 End"].water_depth, 5);
 });
 
 test("events: a Session End with no water/depth in the event keeps the Start's values", async () => {
@@ -383,7 +383,7 @@ test("events: a catch with no running action is just what the controller sent; s
   assert.equal(squid.berley, null);
   assert.equal(squid.water_depth, 6);
   await send(env, token, [ev(2, "action_start", { actionId: "a1" }), ev(3, "action_start", { actionId: "a2" }), ev(4, "action_start", { actionId: "a1" })]);
-  assert.deepEqual(marks(sqlite, "type = 'Session Start'").map((m) => m.name), ["Session 1 Start", "Session 2 Start", "Session 3 Start"]);
+  assert.deepEqual(marks(sqlite, "type = 'Session Start'").map((m) => m.name), ["Estuary Drift 1 Start", "Estuary Anchor 2 Start", "Estuary Drift 3 Start"]);
 });
 
 test("events: one user's token can't touch another user's trips or actions", async () => {

@@ -3768,11 +3768,24 @@ function ctlLiveRodSetupIds(ids, rodSetups) {
   return (ids || []).filter((id) => known.has(id));
 }
 
+/** Default Session Start/End name on a trip — tripMarkName (js/catch-limits.js). */
+function ctlTripMarkName(tripName, actionName, number, role) {
+  const parts = [tripName, actionName].map((s) => String(s == null ? "" : s).trim()).filter(Boolean);
+  return `${parts.length ? parts.join(" ") : "Session"} ${number} ${role}`;
+}
+
+/** Default Catch name on a trip — tripCatchName (js/catch-limits.js). */
+function ctlTripCatchName(species, tripName, actionName, number) {
+  const parts = [tripName, actionName].map((s) => String(s == null ? "" : s).trim()).filter(Boolean);
+  if (!parts.length) return species;
+  return [species, ...parts, ...(Number.isFinite(number) ? [number] : [])].join(" ");
+}
+
 /** The Session Start mark for a trip Action — buildSessionStartFromAction (js/trip-defaults.js), minus tide. */
 function ctlBuildSessionStart(action, rodSetups, ctx) {
   const setups = (action.rodSetupIds || []).map((rid) => (rodSetups || []).find((r) => r.id === rid)).filter(Boolean);
   const mark = {
-    id: ctx.id, lat: ctx.lat, lng: ctx.lng, name: `Session ${ctx.sessionNumber} Start`, type: "Session Start",
+    id: ctx.id, lat: ctx.lat, lng: ctx.lng, name: ctlTripMarkName(ctx.tripName, action.name, ctx.sessionNumber, "Start"), type: "Session Start",
     dateTime: ctx.dateTime, createdAt: ctx.createdAt, source: ctx.source || "Manual", sessionRole: "start", sessionGroupId: ctx.sessionGroupId,
   };
   const set = (key, list) => {
@@ -3797,7 +3810,7 @@ const CTL_SESSION_END_CARRIED_FIELDS = ["species", "waterCondition", "berley", "
 /** The Session End that closes `startMark` — buildSessionEndFromStart (js/live-cards.js). */
 function ctlBuildSessionEnd(startMark, { id, lat, lng, dateTime, createdAt, source, water, waterDepth }, sessionNumber) {
   const mark = {
-    id, lat, lng, name: `Session ${sessionNumber} End`, type: "Session End", dateTime, createdAt,
+    id, lat, lng, name: ctlTripMarkName(startMark.tripName, startMark.actionName, sessionNumber, "End"), type: "Session End", dateTime, createdAt,
     source: source || "Manual", sessionRole: "end", sessionGroupId: startMark.sessionGroupId,
   };
   for (const key of CTL_SESSION_END_CARRIED_FIELDS) {
@@ -3846,6 +3859,7 @@ function ctlBuildCatch(c, action, rodSetups) {
   }
   if (c.waterDepth != null) mark.waterDepth = c.waterDepth;
   if (action) Object.assign(mark, ctlCatchFieldsFromAction(action, rodSetups, c.setupId, c.tripName));
+  if (action) mark.name = ctlTripCatchName(c.species, c.tripName, action.name, c.sessionNumber);
   if (typeof c.bait === "string") {
     if (c.bait) mark.bait = c.bait;
     else delete mark.bait; // the Bait question was answered "none"
@@ -3855,7 +3869,7 @@ function ctlBuildCatch(c, action, rodSetups) {
 
 /** The number in "Session 3 Start"/"Session 3 End", or null — sessionNumberFromName (js/catch-limits.js). */
 function ctlSessionNumberFromName(name) {
-  const m = /^Session (\d+) (?:Start|End)$/i.exec(String(name || "").trim());
+  const m = /(?:^|\s)(\d+) (?:Start|End)$/i.exec(String(name || "").trim());
   return m ? Number(m[1]) : null;
 }
 
@@ -4413,11 +4427,13 @@ async function ctlProcessEvent(env, user, ev) {
         rodSetups = await ctlLoadRodSetups(env, uid);
       }
     }
+    // the running session's number goes into the catch's default name ("[Species] [Trip] [Action] [Number]")
+    const runningSession = action ? await ctlActiveSession(env, uid) : null;
     addMark(
       ctlBuildCatch(
         {
           id: ctlNewId(), ...position, dateTime, species: ev.species.trim(), size: ev.size ?? null, released: ev.fate === "release", tooSmall: !!ev.tooSmall,
-          water: typeof ev.water === "string" ? ev.water : "", waterDepth: ev.depth ?? null, setupId: typeof ev.rodSetupId === "string" ? ev.rodSetupId : null, source, tripName,
+          water: typeof ev.water === "string" ? ev.water : "", waterDepth: ev.depth ?? null, setupId: typeof ev.rodSetupId === "string" ? ev.rodSetupId : null, source, tripName, sessionNumber: runningSession ? runningSession.number : null,
           bait: catchBait ? catchBait.join(", ") : undefined,
         },
         action,
