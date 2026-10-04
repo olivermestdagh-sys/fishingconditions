@@ -360,7 +360,7 @@ async function openLocationEditor(name, { onChanged, onRemoved } = {}) {
                title="Positive: this location's tide runs later than the matched station. Negative: earlier." style="${MARK_POPUP_INPUT_STYLE}" /></label>
            <label class="mark-edit-field">Low-tide window widening, higher low (min)
              <input type="number" step="1" min="0" inputmode="numeric" data-loced-trough="hlwOffset" value="${loc.hlwOffset != null ? loc.hlwOffset : ""}" placeholder="0"
-               title="Widens the too-low / launchable window around a higher-low (HLW) tide: the 'too low' time moves this many minutes earlier and the 'high enough' time this many later (the low itself is not moved, so the curve stays smooth). Needs a minimum tide height." style="${MARK_POPUP_INPUT_STYLE}" /></label>
+               title="Widens the too-low / launchable window around a higher-low (HLW) tide: the 'too low' time moves this many minutes earlier and the 'high enough' time this many later and the low itself that many minutes later. Needs a minimum tide height." style="${MARK_POPUP_INPUT_STYLE}" /></label>
            <label class="mark-edit-field">Low-tide window widening, lower low (min)
              <input type="number" step="1" min="0" inputmode="numeric" data-loced-trough="llwOffset" value="${loc.llwOffset != null ? loc.llwOffset : ""}" placeholder="0"
                title="Same as the higher-low setting, for the lower low (LLW) of the day." style="${MARK_POPUP_INPUT_STYLE}" /></label>

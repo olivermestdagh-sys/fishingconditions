@@ -660,6 +660,15 @@ function findTideThresholdCrossings(rows, threshold) {
       crossings.push({ t: t1 + frac * (t2 - t1), becomingAccessible: above2 });
     }
   }
+  // Rows run through applyTroughWideningToRows carry the exact (widened) crossing times; the hourly sampling above can
+  // be a few minutes off them, so swap in the exact one for the same crossing (same direction, within 90 min).
+  const w = rows.widened;
+  if (w && w.threshold === threshold) {
+    for (const c of crossings) {
+      const exact = w.crossings.find((f) => f.becomingAccessible === c.becomingAccessible && Math.abs(f.t - c.t) < 90 * 60000);
+      if (exact) c.t = exact.t;
+    }
+  }
   return crossings;
 }
 

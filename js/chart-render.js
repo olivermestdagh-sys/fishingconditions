@@ -235,7 +235,7 @@ function monotoneWarp(knots) {
  * low faster than the real tide, so the "too low" / "high enough" crossings of minTideHeight come out too narrow.
  * `offsets` ({hhw, lhw, hlw, llw} minutes, by rankExtremum class) widen the feature around each extremum:
  *  - LOW with offset O: the falling crossing on the leg into it moves O earlier, the rising crossing out of it O later,
- *    (the low gets no knot of its own, so the basin stays smooth; the spec's "low moves O later" was dropped: it gave a flat floor with steep walls). Needs a crossing on both legs.
+ *    and the low itself O later (the displayed low was measured ~29 min early). Needs a crossing on both legs.
  *  - HIGH with offset O: the crossing on the leg into it moves O earlier and the one out of it O later (a wider
  *    high-water plateau); the displayed high time is deliberately NOT moved (logged highs are accurate).
  * Each leg's crossing is owned by the low if the threshold is at or below the leg's height-midpoint, else by the high
@@ -260,14 +260,20 @@ function applyTroughWideningToRows(rows, offsets, minTideHeight) {
   const MIN_GAP = 60000;
   const offMs = extrema.map((ex) => (byClass[rankExtremum(extrema, ex)] || 0) * 60000);
   const legCrossing = (i) => crossings.find((c) => c.t > extrema[i].t && c.t < extrema[i + 1].t);
-  // A widened low gets no knot of its own (the curve decides where its minimum ends up): pinning it later by O as
-  // well squeezed the extra time into the short stretch between "too low" and the low and gave a flat floor with
-  // steep walls. Stretching [down crossing, up crossing] outward by O each side keeps a smooth, rounded basin.
-  const free = extrema.map((ex, i) => ex.type === "low" && offMs[i] > 0 && i > 0 && i < extrema.length - 1 && !!legCrossing(i - 1) && !!legCrossing(i));
-  const knots = [];
+  // New time of each extremum: only lows move (and only if both neighbouring legs have a crossing to widen).
+  const newT = extrema.map((ex, i) => {
+    if (ex.type !== "low" || offMs[i] <= 0 || i === 0 || i === extrema.length - 1) return ex.t;
+    if (!legCrossing(i - 1) || !legCrossing(i)) return ex.t;
+    const room = Math.min(ex.t - extrema[i - 1].t, extrema[i + 1].t - ex.t) / 2;
+    return ex.t + Math.min(offMs[i], room);
+  });
+  // Key points of the re-timed curve: [newTime, oldTime, height, isExtremum]. The times are exactly the spec's numbers
+  // (crossings at +/-O, the low O later); only the line drawn BETWEEN them is smoothed (see below).
+  const pts = [];
   let changed = false;
   for (let i = 0; i < extrema.length; i++) {
-    if (!free[i]) knots.push([extrema[i].t, extrema[i].t]);
+    pts.push([newT[i], extrema[i].t, interpolatedTideHeightAt(tideRows, extrema[i].t), true]);
+    if (newT[i] !== extrema[i].t) changed = true;
     if (i === extrema.length - 1) break;
     const a = extrema[i];
     const b = extrema[i + 1];
@@ -281,19 +287,58 @@ function applyTroughWideningToRows(rows, offsets, minTideHeight) {
     if (O <= 0) continue;
     // the leg into an extremum moves its crossing earlier, the leg out of it later
     const delta = owner === i + 1 ? -O : O;
-    const pos = Math.min(Math.max(c.t + delta, a.t + MIN_GAP), b.t - MIN_GAP);
+    const pos = Math.min(Math.max(c.t + delta, newT[i] + MIN_GAP), newT[i + 1] - MIN_GAP);
     if (pos !== c.t) changed = true;
-    knots.push([pos, c.t]);
+    pts.push([pos, c.t, threshold, false, a.type === "low"]); // last: true = rising leg = "high enough"
   }
   if (!changed) return rows;
-  const warp = monotoneWarp(knots);
-  const first = knots[0][0];
-  const last = knots[knots.length - 1][0];
-  return rows.map((r) => {
+  const warp = monotoneWarp(pts.map((p) => [p[0], p[1]]));
+  const warpedH = (t) => interpolatedTideHeightAt(tideRows, warp(t));
+  // The time warp hits the spec's numbers exactly (crossings at +/-O, the low O later), but between the two crossings
+  // it stretches the short stretch to the low so much that the trough comes out flat-floored with steep walls. So,
+  // for each widened low, redraw just that bowl (crossing -> low -> crossing) as a smooth monotone cubic Hermite
+  // through the SAME three points: slope 0 at the low (a true minimum) and, at the crossings, the warped curve's own
+  // slope there (capped to stay monotone), so the bowl joins the rest of the curve without a kink.
+  const bowls = [];
+  for (let k = 1; k < pts.length - 1; k++) {
+    if (!pts[k][3] || pts[k][0] === pts[k][1] || pts[k - 1][3] || pts[k + 1][3]) continue;
+    const [x0, , y0] = pts[k - 1];
+    const [x1, , y1] = pts[k];
+    const [x2, , y2] = pts[k + 1];
+    const eps = 60000;
+    const cap = (m, secant) => (m * secant <= 0 ? 0 : Math.sign(m) * Math.min(Math.abs(m), 3 * Math.abs(secant)));
+    const m0 = cap((warpedH(x0 + eps) - warpedH(x0 - eps)) / (2 * eps), (y1 - y0) / (x1 - x0));
+    const m2 = cap((warpedH(x2 + eps) - warpedH(x2 - eps)) / (2 * eps), (y2 - y1) / (x2 - x1));
+    bowls.push({ x: [x0, x1, x2], y: [y0, y1, y2], m: [m0, 0, m2] });
+  }
+  const hermite = (x0, x1, y0, y1, m0, m1, t) => {
+    const dx = x1 - x0;
+    const u = (t - x0) / dx;
+    const u2 = u * u;
+    const u3 = u2 * u;
+    return (2 * u3 - 3 * u2 + 1) * y0 + (u3 - 2 * u2 + u) * dx * m0 + (-2 * u3 + 3 * u2) * y1 + (u3 - u2) * dx * m1;
+  };
+  const first = pts[0][0];
+  const last = pts[pts.length - 1][0];
+  const out = rows.map((r) => {
     if (r["Tide Height (m)"] == null || r._t <= first || r._t >= last) return r;
-    const h = interpolatedTideHeightAt(tideRows, warp(r._t));
+    const b = bowls.find((x) => r._t >= x.x[0] && r._t <= x.x[2]);
+    let h;
+    if (b) {
+      const side = r._t <= b.x[1] ? 0 : 1;
+      h = hermite(b.x[side], b.x[side + 1], b.y[side], b.y[side + 1], b.m[side], b.m[side + 1], r._t);
+    } else {
+      h = warpedH(r._t);
+    }
     return h == null ? r : { ...r, "Tide Height (m)": h };
   });
+  // The exact widened times, for the label/dot code to use instead of re-deriving them from hourly samples.
+  out.widened = {
+    threshold,
+    lows: pts.filter((p) => p[3] && p[0] !== p[1]).map((p) => ({ t: p[0], height: p[2] })),
+    crossings: pts.filter((p) => !p[3]).map((p) => ({ t: p[0], becomingAccessible: p[4] })),
+  };
+  return out;
 }
 
 function findTideExtrema(rows) {
@@ -325,6 +370,18 @@ function findTideExtrema(rows) {
     const interpolatedT = tideRows[i]._t + offsetFraction * spacingMs;
 
     extrema.push({ t: interpolatedT, height: curr, type: isHigh ? "high" : "low" });
+  }
+  // Same idea as in findTideThresholdCrossings: a widened low's exact time/height replaces the hourly-sampled estimate.
+  const w = rows.widened;
+  if (w) {
+    for (const f of w.lows) {
+      let best = null;
+      for (const e of extrema) if (e.type === "low" && Math.abs(e.t - f.t) < 2 * 3600000 && (!best || Math.abs(e.t - f.t) < Math.abs(best.t - f.t))) best = e;
+      if (best) {
+        best.t = f.t;
+        best.height = f.height;
+      }
+    }
   }
   return extrema;
 }

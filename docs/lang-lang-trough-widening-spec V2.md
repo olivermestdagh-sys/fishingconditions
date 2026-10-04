@@ -1,6 +1,6 @@
 # Lang Lang tide-trough correction — field spec (draft)
 
-**Status:** implemented (2026-10-05) with one deliberate deviation: the low's own displayed time is NOT moved later by `hlwOffset` (pinning it produced a flat-floored, steep-walled trough on the graph). Only the two crossings move, +/- `hlwOffset`, via a smooth time warp; the low follows the curve. Original status: Based on 9 days of logged observed-vs-predicted data (26 Sep – 4 Oct 2026) for Lang Lang Boat Ramp, Kayak type.
+**Status:** implemented (2026-10-05) exactly as specified (low O later, "too low" O earlier, "high enough" O later); only the drawn curve between those points is smoothed. Original status: Based on 9 days of logged observed-vs-predicted data (26 Sep – 4 Oct 2026) for Lang Lang Boat Ramp, Kayak type.
 
 ## The finding
 
