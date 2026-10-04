@@ -897,6 +897,16 @@ function renderBulkEditForm(map, state) {
           </label>
         </div>
         <div style="margin-bottom:8px;">
+          <label style="display:block;font-size:0.8rem;font-weight:600;margin-bottom:2px;">Trip
+            <input type="text" name="tripName" maxlength="100" placeholder="No change" style="${MARK_POPUP_INPUT_STYLE}" />
+          </label>
+        </div>
+        <div style="margin-bottom:8px;">
+          <label style="display:block;font-size:0.8rem;font-weight:600;margin-bottom:2px;">Action
+            <input type="text" name="actionName" maxlength="100" placeholder="No change" style="${MARK_POPUP_INPUT_STYLE}" />
+          </label>
+        </div>
+        <div style="margin-bottom:8px;">
           <label style="display:block;font-size:0.8rem;font-weight:600;margin-bottom:2px;">Notes
             <textarea name="notes" placeholder="No change" rows="2" style="${MARK_POPUP_INPUT_STYLE}"></textarea>
           </label>
@@ -941,6 +951,10 @@ function collectBulkEditFormValues(form) {
   if (windDirection !== "__nochange__") updates.windDirection = windDirection;
   const released = form.querySelector('[name="released"]').value;
   if (released !== "__nochange__") updates.released = released === "1";
+  for (const key of ["tripName", "actionName"]) {
+    const text = form.querySelector(`[name="${key}"]`).value.trim();
+    if (text !== "") updates[key] = text;
+  }
   const notes = form.querySelector('[name="notes"]').value;
   if (notes !== "") updates.notes = notes;
   const ownerSelect = form.querySelector('[name="ownerUserId"]'); // Admin only — see bulkEditOwnerFieldHtml
@@ -1199,7 +1213,7 @@ function startCopiedMarkEntry(map, sourceMark, state) {
   const COPYABLE_KEYS = [
     "species", "weatherCondition", "tideCondition", "tideExtreme", "waterCondition", "bait", "rig", "rod", "berley", "fishingMethod",
     "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed",
-    "notes", "released",
+    "notes", "released", "tripName", "actionName",
   ];
   for (const key of COPYABLE_KEYS) {
     if (applicable.includes(key) && sourceMark[key] != null) draft[key] = sourceMark[key];

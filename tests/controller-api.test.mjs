@@ -664,3 +664,44 @@ test("trip log: the run id survives actions starting and ending, and a trip star
   await send(env, token, [ev(5, "action_start", { actionId: "a1" })]);
   assert.ok(stateOf(sqlite).runId && stateOf(sqlite).runId !== runId);
 });
+
+test("trip and action names: stamped on Session Start / End and Catch, editable from the controller from existing names only", async () => {
+  const { sqlite, env, token } = await seeded();
+  await send(env, token, [ev(1, "trip_start", { tripId: "t1" }), ev(2, "action_start", { actionId: "a1" }), ev(3, "catch", { actionId: "a1", species: "Bream", size: 31, fate: "keep" }), ev(4, "action_end")]);
+  for (const m of marks(sqlite)) {
+    assert.equal(m.trip_name, "Estuary", m.type);
+    assert.equal(m.action_name, "Drift", m.type);
+  }
+  assert.equal(marks(sqlite).length, 3);
+  // the catch with no running action carries neither
+  await send(env, token, [ev(5, "catch", { species: "Bream", size: 30, fate: "keep" })]);
+  const loose = sqlite.prepare("SELECT * FROM marks ORDER BY created_at DESC, rowid DESC LIMIT 1").get();
+  assert.equal(loose.trip_name, null);
+
+  const catchId = sqlite.prepare("SELECT id FROM marks WHERE type = 'Catch' AND action_name = 'Drift'").get().id;
+  assert.equal((await update(env, token, "mark_update", 10, { markId: catchId, changes: { actionName: "Anchor", tripName: "Estuary" } }))[0].status, "created");
+  const row = sqlite.prepare("SELECT * FROM marks WHERE id = ?").get(catchId);
+  assert.equal(row.action_name, "Anchor");
+  assert.equal((await update(env, token, "mark_update", 11, { markId: catchId, changes: { actionName: null } }))[0].status, "created");
+  assert.equal(sqlite.prepare("SELECT action_name FROM marks WHERE id = ?").get(catchId).action_name, null);
+  for (const [i, changes] of [{ tripName: "Nope" }, { actionName: "Not mine" }, { tripName: 5 }].entries()) {
+    assert.equal((await update(env, token, "mark_update", 20 + i, { markId: catchId, changes }))[0].status, "rejected", JSON.stringify(changes));
+  }
+
+  // the site's own edit (PUT /api/marks) carries them too, as free text
+  const put = await site(env, "PUT", `/api/marks/${catchId}`, { tripName: "Weekend away", actionName: "Anchor" });
+  assert.equal(put.status, 200);
+  const body = await put.json();
+  assert.equal(body.tripName, "Weekend away");
+  assert.equal(sqlite.prepare("SELECT trip_name FROM marks WHERE id = ?").get(catchId).trip_name, "Weekend away");
+  assert.equal((await site(env, "PUT", `/api/marks/${catchId}`, { tripName: 7 })).status, 400);
+});
+
+test("mark_update: the date and time can be edited (and a bad one is refused)", async () => {
+  const { sqlite, env, token } = await seeded();
+  await send(env, token, [ev(1, "trip_start", { tripId: "t1" }), ev(2, "action_start", { actionId: "a1" })]);
+  const id = sqlite.prepare("SELECT id FROM marks WHERE type = 'Session Start'").get().id;
+  assert.equal((await update(env, token, "mark_update", 10, { markId: id, changes: { dateTime: "2026-10-02 10:25:00" } }))[0].status, "created");
+  assert.equal(sqlite.prepare("SELECT date_time FROM marks WHERE id = ?").get(id).date_time, "2026-10-02 10:25:00");
+  assert.equal((await update(env, token, "mark_update", 11, { markId: id, changes: { dateTime: "yesterday" } }))[0].status, "rejected");
+});

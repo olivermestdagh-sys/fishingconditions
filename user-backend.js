@@ -1493,7 +1493,7 @@ async function handleTripActionItem(request, url, env, id) {
   if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
   const uid = resolved.id;
 
-  const existing = await env.DB.prepare("SELECT * FROM user_trip_actions WHERE id = ? AND user_id = ?").bind(id, uid).first();
+  const existing = await env.DB.prepare("SELECT a.*, t.name AS trip_name FROM user_trip_actions a LEFT JOIN user_trip_setups t ON t.id = a.trip_id WHERE a.id = ? AND a.user_id = ?").bind(id, uid).first();
   if (!existing) return jsonResponse({ error: "Action not found." }, 404, env);
 
   if (request.method === "PUT") {
@@ -2287,7 +2287,7 @@ async function handleMarkItem(request, url, env, id) {
       `UPDATE marks SET lat=?, lng=?, name=?, type=?, date_time=?, source=?, source_uuid=?, species=?, bait=?, rig=?,
                         rod=?, berley=?, notes=?, size=?, released=?, weather_condition=?, tide_condition=?, tide_extreme=?, water_condition=?,
                         water_depth=?, water_temperature=?, temperature=?, barometer=?, wind_direction=?, wind_speed=?,
-                        fishing_method=?, rig_options=?, session_role=?, session_group_id=?, user_id=?
+                        fishing_method=?, rig_options=?, session_role=?, session_group_id=?, trip_name=?, action_name=?, user_id=?
        WHERE id = ? AND user_id = ?`
     )
       .bind(
@@ -2295,7 +2295,7 @@ async function handleMarkItem(request, url, env, id) {
         merged.species, merged.bait, merged.rig, merged.rod, merged.berley, merged.notes, merged.size, merged.released,
         merged.weatherCondition, merged.tideCondition, merged.tideExtreme, merged.waterCondition, merged.waterDepth,
         merged.waterTemperature, merged.temperature, merged.barometer, merged.windDirection, merged.windSpeed,
-        merged.fishingMethod, merged.rigOptions, merged.sessionRole, merged.sessionGroupId, newOwner,
+        merged.fishingMethod, merged.rigOptions, merged.sessionRole, merged.sessionGroupId, merged.tripName, merged.actionName, newOwner,
         id, uid
       )
       .run();
@@ -2321,8 +2321,8 @@ function markInsertStatement(env, id, uid, body, now) {
     `INSERT INTO marks (id, user_id, lat, lng, name, type, date_time, source, source_uuid, species, bait, rig, rod,
                          berley, notes, size, released, weather_condition, tide_condition, tide_extreme, water_condition, water_depth,
                          water_temperature, temperature, barometer, wind_direction, wind_speed,
-                         fishing_method, rig_options, session_role, session_group_id, created_at, trip_run_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                         fishing_method, rig_options, session_role, session_group_id, created_at, trip_run_id, trip_name, action_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       id, uid, body.lat, body.lng, body.name ?? null, body.type, body.dateTime, body.source ?? "manual",
@@ -2330,7 +2330,7 @@ function markInsertStatement(env, id, uid, body, now) {
       body.berley ?? null, body.notes ?? null, body.size ?? null, body.released ? 1 : 0, body.weatherCondition ?? null, body.tideCondition ?? null, body.tideExtreme ?? null,
       body.waterCondition ?? null, body.waterDepth ?? null, body.waterTemperature ?? null, body.temperature ?? null,
       body.barometer ?? null, body.windDirection ?? null, body.windSpeed ?? null,
-      body.fishingMethod ?? null, body.rigOptions ?? null, body.sessionRole ?? null, body.sessionGroupId ?? null, now, body.tripRunId ?? null
+      body.fishingMethod ?? null, body.rigOptions ?? null, body.sessionRole ?? null, body.sessionGroupId ?? null, now, body.tripRunId ?? null, body.tripName ?? null, body.actionName ?? null
     );
 }
 
@@ -2365,6 +2365,8 @@ function mergeMarkFields(existing, body) {
     windSpeed: body.windSpeed !== undefined ? body.windSpeed : existing.wind_speed,
     sessionRole: body.sessionRole !== undefined ? body.sessionRole : existing.session_role,
     sessionGroupId: body.sessionGroupId !== undefined ? body.sessionGroupId : existing.session_group_id,
+    tripName: body.tripName !== undefined ? body.tripName : existing.trip_name,
+    actionName: body.actionName !== undefined ? body.actionName : existing.action_name,
   };
 }
 
@@ -2400,6 +2402,8 @@ function rowToMark(row) {
     windSpeed: row.wind_speed,
     sessionRole: row.session_role,
     sessionGroupId: row.session_group_id,
+    tripName: row.trip_name,
+    actionName: row.action_name,
   };
 }
 
@@ -2418,6 +2422,10 @@ function validateMarkInput(body, { partial }) {
     if (typeof body.dateTime !== "string" || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(body.dateTime)) {
       return 'dateTime must be "YYYY-MM-DD HH:MM:SS" (naive, matching the rest of this site).';
     }
+  }
+  for (const key of ["tripName", "actionName"]) {
+    const v = body[key];
+    if (v !== undefined && v !== null && (typeof v !== "string" || v.trim().length > 100)) return `${key} must be text of up to 100 characters.`;
   }
   return null;
 }
@@ -3745,6 +3753,8 @@ function ctlBuildSessionStart(action, rodSetups, ctx) {
   const set = (key, list) => {
     if (list.length) mark[key] = list.join(", ");
   };
+  if (ctx.tripName) mark.tripName = ctx.tripName;
+  if (action.name) mark.actionName = action.name;
   set("species", ctlUniq(action.species));
   set("fishingMethod", ctlUniq(action.fishingMethod));
   if (action.berley) mark.berley = action.berley;
@@ -3757,7 +3767,7 @@ function ctlBuildSessionStart(action, rodSetups, ctx) {
   return mark;
 }
 
-const CTL_SESSION_END_CARRIED_FIELDS = ["species", "waterCondition", "berley", "fishingMethod", "waterDepth", "rod", "rig", "bait", "rigOptions", "tideCondition", "tideExtreme"];
+const CTL_SESSION_END_CARRIED_FIELDS = ["species", "waterCondition", "berley", "fishingMethod", "waterDepth", "rod", "rig", "bait", "rigOptions", "tideCondition", "tideExtreme", "tripName", "actionName"];
 
 /** The Session End that closes `startMark` — buildSessionEndFromStart (js/live-cards.js). */
 function ctlBuildSessionEnd(startMark, { id, lat, lng, dateTime, createdAt, source, water, waterDepth }, sessionNumber) {
@@ -3775,10 +3785,12 @@ function ctlBuildSessionEnd(startMark, { id, lat, lng, dateTime, createdAt, sour
 }
 
 /** The gear a Catch takes from a trip Action — tdCatchFieldsFromAction (js/trip-defaults.js). */
-function ctlCatchFieldsFromAction(action, rodSetups, setupId) {
+function ctlCatchFieldsFromAction(action, rodSetups, setupId, tripName) {
   const ids = ctlLiveRodSetupIds(action.rodSetupIds, rodSetups);
   const setup = (rodSetups || []).find((r) => r.id === (setupId || (ids.length === 1 ? ids[0] : null)));
   const out = {};
+  if (tripName) out.tripName = tripName;
+  if (action.name) out.actionName = action.name;
   if (action.berley) out.berley = action.berley;
   if ((action.fishingMethod || []).length) out.fishingMethod = action.fishingMethod.join(", ");
   if ((action.bait || []).length) out.bait = action.bait.join(", ");
@@ -3808,7 +3820,7 @@ function ctlBuildCatch(c, action, rodSetups) {
     if (action.fishingMethod && action.fishingMethod.length) mark.fishingMethod = action.fishingMethod.join(", ");
   }
   if (c.waterDepth != null) mark.waterDepth = c.waterDepth;
-  if (action) Object.assign(mark, ctlCatchFieldsFromAction(action, rodSetups, c.setupId));
+  if (action) Object.assign(mark, ctlCatchFieldsFromAction(action, rodSetups, c.setupId, c.tripName));
   if (typeof c.bait === "string") {
     if (c.bait) mark.bait = c.bait;
     else delete mark.bait; // the Bait question was answered "none"
@@ -3992,7 +4004,7 @@ const ctlJsonOrNull = (list) => (list && list.length ? JSON.stringify(list) : nu
 
 /** The UPDATE for an `action_update` event: {actionId, fishingMethod?, berley?, bait?, targets?, rodSetupIds?}. Only existing values may be chosen. */
 async function ctlActionUpdateStatements(env, uid, ev) {
-  const row = typeof ev.actionId === "string" ? await env.DB.prepare("SELECT * FROM user_trip_actions WHERE id = ? AND user_id = ?").bind(ev.actionId, uid).first() : null;
+  const row = typeof ev.actionId === "string" ? await env.DB.prepare("SELECT a.*, t.name AS trip_name FROM user_trip_actions a LEFT JOIN user_trip_setups t ON t.id = a.trip_id WHERE a.id = ? AND a.user_id = ?").bind(ev.actionId, uid).first() : null;
   if (!row) return { error: "action not found" };
   const cur = rowToTripAction(row);
   const next = { fishingMethod: cur.fishingMethod, berley: cur.berley || null, bait: cur.bait, species: cur.species, rodSetupIds: cur.rodSetupIds };
@@ -4129,6 +4141,16 @@ async function ctlMarkUpdateStatements(env, uid, ev) {
       if (isSession) return { error: "a Session has no released flag" };
       if (typeof v !== "boolean") return { error: "released must be true or false" };
       sets.released = v ? 1 : 0;
+    } else if (key === "tripName" || key === "actionName") {
+      // the controller picks from the trips / actions you already have (a dial has no text entry); null clears it
+      if (v !== null && typeof v !== "string") return { error: `${key} must be text (null to clear it)` };
+      const t = (v || "").trim();
+      if (t) {
+        const table = key === "tripName" ? "user_trip_setups" : "user_trip_actions";
+        const known = await env.DB.prepare(`SELECT 1 AS ok FROM ${table} WHERE user_id = ? AND name = ? LIMIT 1`).bind(uid, t).first();
+        if (!known) return { error: `"${t}" is not one of your ${key === "tripName" ? "trips" : "actions"}` };
+      }
+      sets[key === "tripName" ? "trip_name" : "action_name"] = t || null;
     } else if (key === "notes" || key === "name") {
       if (v !== null && typeof v !== "string") return { error: `${key} must be text` };
       const t = (v || "").trim();
@@ -4136,7 +4158,7 @@ async function ctlMarkUpdateStatements(env, uid, ev) {
       if (key === "name" && !t) return { error: "name can't be empty" };
       sets[key] = t || null;
     } else if (key === "dateTime") {
-      if (typeof v !== "string" || !/^d{4}-d{2}-d{2} d{2}:d{2}:d{2}$/.test(v) || ctlParseNaive(v) == null) return { error: "dateTime must be YYYY-MM-DD HH:MM:SS" };
+      if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(v) || ctlParseNaive(v) == null) return { error: "dateTime must be YYYY-MM-DD HH:MM:SS" };
       sets.date_time = v;
     } else if (key !== "rigOptions") {
       return { error: `${key} can't be edited` };
@@ -4329,7 +4351,7 @@ async function ctlProcessEvent(env, user, ev) {
     nextState = { tripId: null };
   } else if (ev.type === "action_start") {
     if (!havePosition) return bad("lat/lng are required");
-    const row = typeof ev.actionId === "string" ? await env.DB.prepare("SELECT * FROM user_trip_actions WHERE id = ? AND user_id = ?").bind(ev.actionId, uid).first() : null;
+    const row = typeof ev.actionId === "string" ? await env.DB.prepare("SELECT a.*, t.name AS trip_name FROM user_trip_actions a LEFT JOIN user_trip_setups t ON t.id = a.trip_id WHERE a.id = ? AND a.user_id = ?").bind(ev.actionId, uid).first() : null;
     if (!row) return bad("action not found");
     const action = rowToTripAction(row);
     const rodSetups = await ctlLoadRodSetups(env, uid);
@@ -4340,7 +4362,7 @@ async function ctlProcessEvent(env, user, ev) {
     const sessionGroupId = ctlNewId();
     addMark(ctlBuildSessionStart(action, rodSetups, {
       id: ctlNewId(), ...position, dateTime, createdAt: dateTime, sessionGroupId, sessionNumber, source,
-      water: evWater, waterDepth: evDepth,
+      water: evWater, waterDepth: evDepth, tripName: row.trip_name || "",
     }), ":start");
     nextState = { tripId: action.tripId, actionId: action.id, sessionGroupId, runId: tripRunId };
   } else if (ev.type === "action_end") {
@@ -4356,11 +4378,13 @@ async function ctlProcessEvent(env, user, ev) {
     const catchBait = ev.bait == null ? null : ctlNameList(ev.bait);
     if (ev.bait != null && (!catchBait || catchBait.length > 10)) return bad("bait must be a list of names");
     let action = null;
+    let tripName = "";
     let rodSetups = [];
     if (typeof ev.actionId === "string") {
-      const row = await env.DB.prepare("SELECT * FROM user_trip_actions WHERE id = ? AND user_id = ?").bind(ev.actionId, uid).first();
+      const row = await env.DB.prepare("SELECT a.*, t.name AS trip_name FROM user_trip_actions a LEFT JOIN user_trip_setups t ON t.id = a.trip_id WHERE a.id = ? AND a.user_id = ?").bind(ev.actionId, uid).first();
       if (row) {
         action = rowToTripAction(row);
+        tripName = row.trip_name || "";
         rodSetups = await ctlLoadRodSetups(env, uid);
       }
     }
@@ -4368,7 +4392,7 @@ async function ctlProcessEvent(env, user, ev) {
       ctlBuildCatch(
         {
           id: ctlNewId(), ...position, dateTime, species: ev.species.trim(), size: ev.size ?? null, released: ev.fate === "release", tooSmall: !!ev.tooSmall,
-          water: typeof ev.water === "string" ? ev.water : "", waterDepth: ev.depth ?? null, setupId: typeof ev.rodSetupId === "string" ? ev.rodSetupId : null, source,
+          water: typeof ev.water === "string" ? ev.water : "", waterDepth: ev.depth ?? null, setupId: typeof ev.rodSetupId === "string" ? ev.rodSetupId : null, source, tripName,
           bait: catchBait ? catchBait.join(", ") : undefined,
         },
         action,

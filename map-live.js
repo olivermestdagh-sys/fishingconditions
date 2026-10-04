@@ -490,7 +490,8 @@ async function saveLiveCatch(options, answers, defaults, gpsPromise, ctx) {
   }, { ...defaults, water: getLiveMarkDefaults().water || defaults.water }, tide, st.depth);
   if (defaults.tripAction) {
     const chosen = defaults.tripRodSetups.find((s) => s.name === st.rod);
-    Object.assign(mark, tdCatchFieldsFromAction(defaults.tripAction, liveTripData.rodSetups, chosen ? chosen.id : null));
+    const trip = liveTripData.trips.find((t) => t.id === defaults.tripAction.tripId);
+    Object.assign(mark, tdCatchFieldsFromAction(defaults.tripAction, liveTripData.rodSetups, chosen ? chosen.id : null, trip ? trip.name : ""));
     if (st.bait) mark.bait = st.bait; // the Bait card's answer, not all of the action's baits
   }
   const result = await saveMarkToD1(mark, true);
@@ -951,6 +952,7 @@ async function onTripActionTap(actionId) {
     const mark = buildSessionStartFromAction(action, liveTripData.rodSetups, {
       id: makeMarkId(), lat: position.lat, lng: position.lng, dateTime: now, createdAt: now, sessionGroupId: makeMarkId(),
       sessionNumber: nextSessionNumber(liveSessionStarts() || [], parseNaive(now)),
+      tripName: ((liveTripData.trips || []).find((t) => t.id === action.tripId) || {}).name || "",
       water: getLiveMarkDefaults().water || "", waterDepth: getLiveMarkDefaults().depth ?? getLastMarkFieldValues().waterDepth ?? null,
     }, tide);
     const result = await saveMarkToD1(mark, true);

@@ -30,7 +30,7 @@ function tdRigSublist(rigRow, overrides) {
  * The Session Start mark for a trip Action (Live mode): named "Session N Start" (the number nextSessionNumber gives), with
  * the Action's species / fishing method / berley / bait, and rod / rig / rigOptions gathered from its Rod Setups
  * (unique names, comma-joined; rigOptions = the rigs' sub-list items). `ctx` supplies what only the caller knows: id, lat,
- * lng, dateTime, createdAt, sessionGroupId, sessionNumber, water (Water Condition default) and waterDepth (the Depth default, or the last mark's). `tide` is
+ * lng, dateTime, createdAt, sessionGroupId, sessionNumber, tripName (the running trip's name; the mark also records the action's own name), water (Water Condition default) and waterDepth (the Depth default, or the last mark's). `tide` is
  * {tideCondition, tideExtreme} worked out for the time.
  */
 function buildSessionStartFromAction(action, rodSetups, ctx, tide) {
@@ -43,6 +43,8 @@ function buildSessionStartFromAction(action, rodSetups, ctx, tide) {
   const set = (key, list) => {
     if (list.length) mark[key] = list.join(", ");
   };
+  if (ctx.tripName) mark.tripName = ctx.tripName;
+  if (action.name) mark.actionName = action.name;
   set("species", uniq(action.species));
   set("fishingMethod", uniq(action.fishingMethod));
   if (action.berley) mark.berley = action.berley;
@@ -70,12 +72,14 @@ function tdOtherTargets(actions, action) {
 
 /**
  * The gear fields a Catch takes from a trip Action: berley, fishing method and bait from the Action itself, rod / rig /
- * rigOptions from the chosen Rod Setup (`setupId`, or the Action's only one). Fields with nothing to say are left off.
+ * rigOptions from the chosen Rod Setup (`setupId`, or the Action's only one), plus the trip's and the Action's names. Fields with nothing to say are left off.
  */
-function tdCatchFieldsFromAction(action, rodSetups, setupId) {
+function tdCatchFieldsFromAction(action, rodSetups, setupId, tripName) {
   const ids = tdLiveRodSetupIds(action.rodSetupIds, rodSetups);
   const setup = (rodSetups || []).find((r) => r.id === (setupId || (ids.length === 1 ? ids[0] : null)));
   const out = {};
+  if (tripName) out.tripName = tripName;
+  if (action.name) out.actionName = action.name;
   if (action.berley) out.berley = action.berley;
   if ((action.fishingMethod || []).length) out.fishingMethod = action.fishingMethod.join(", ");
   if ((action.bait || []).length) out.bait = action.bait.join(", ");

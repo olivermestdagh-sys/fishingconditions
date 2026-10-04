@@ -480,7 +480,7 @@ function buildSessionStartFromCards({ id, lat, lng, dateTime, createdAt, session
  * "End Session/Move" button both use this) — "the same values as the previous Session Start". Everything about
  * WHERE/WHEN the End record itself is (id/lat/lng/dateTime/createdAt) is the caller's own: ending a session
  * happens at a different time/place than starting it. */
-const SESSION_END_CARRIED_FIELDS = ["species", "waterCondition", "berley", "fishingMethod", "waterDepth", "rod", "rig", "bait", "rigOptions", "tideCondition", "tideExtreme"];
+const SESSION_END_CARRIED_FIELDS = ["species", "waterCondition", "berley", "fishingMethod", "waterDepth", "rod", "rig", "bait", "rigOptions", "tideCondition", "tideExtreme", "tripName", "actionName"];
 
 /**
  * The Session End mark that closes out `startMark` (a loaded Session Start mark): named "Session N End"

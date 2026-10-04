@@ -74,3 +74,12 @@ test("A session has no Size or Released; Catch still does", () => {
   const c = fns.fieldKeysForMarkType("Catch");
   assert.ok(c.includes("size") && c.includes("released"));
 });
+
+test("Trip and Action names apply to Catch and Session marks, as single text values", () => {
+  for (const t of ["Catch", "Session Start", "Session End"]) {
+    const keys = fns.fieldKeysForMarkType(t);
+    assert.ok(keys.includes("tripName") && keys.includes("actionName"), t);
+  }
+  assert.ok(!fns.fieldKeysForMarkType("POI").includes("tripName"));
+  for (const t of SESSION_TYPES) assert.equal(fns.typeAllowsMultipleValues(t, "tripName"), false, t);
+});

@@ -58,14 +58,14 @@ const at = { lat: -38.1, lng: 145.2, dateTime: "2026-10-02 10:15:30", createdAt:
 test("Session Start from an action: same mark as the browser's", () => {
   for (const [name, action] of Object.entries(actions)) {
     for (const extra of [{}, { water: "Murky", waterDepth: 4.2 }, { waterDepth: 0 }]) {
-      const ctx = { id: "m1", ...at, sessionGroupId: "g1", sessionNumber: 3, ...extra };
+      const ctx = { id: "m1", ...at, sessionGroupId: "g1", sessionNumber: 3, tripName: "Weekend", ...extra };
       assert.deepEqual(worker.ctlBuildSessionStart(action, rodSetups, ctx), browser.buildSessionStartFromAction(action, rodSetups, ctx, undefined), `${name} ${JSON.stringify(extra)}`);
     }
   }
 });
 
 test("Session End closing a start: same mark as the browser's", () => {
-  const start = browser.buildSessionStartFromAction(actions.full, rodSetups, { id: "m1", ...at, sessionGroupId: "g1", sessionNumber: 2, water: "Clear", waterDepth: 3 }, { tideCondition: "Running In", tideExtreme: "HHW" });
+  const start = browser.buildSessionStartFromAction(actions.full, rodSetups, { id: "m1", ...at, sessionGroupId: "g1", sessionNumber: 2, tripName: "Weekend", water: "Clear", waterDepth: 3 }, { tideCondition: "Running In", tideExtreme: "HHW" });
   const end = { id: "m2", lat: -38.2, lng: 145.3, dateTime: "2026-10-02 12:00:00", createdAt: "2026-10-02 12:00:00" };
   assert.deepEqual(worker.ctlBuildSessionEnd(start, end, 2), browser.buildSessionEndFromStart(start, end, 2));
   assert.equal(worker.ctlBuildSessionEnd(start, end, 2).tideCondition, "Running In", "tide is carried over from the start");
@@ -83,8 +83,8 @@ test("Catch on a running action: same mark as the Live +Catch flow saves", () =>
       // How map-live.js's saveLiveCatch builds it on a trip (tide left out): the card builder, then the Action's gear on top.
       const defaults = { water: c.water, berley: action.berley || "", fishingMethod: action.fishingMethod || [], rodSetups: {} };
       const viaBrowser = browser.buildCatchFromCards({ ...base, size: c.tooSmall ? null : c.size, rod: "", tooSmall: c.tooSmall, released: c.released }, defaults, undefined, c.depth);
-      Object.assign(viaBrowser, browser.tdCatchFieldsFromAction(action, rodSetups, c.setupId));
-      const viaWorker = worker.ctlBuildCatch({ ...base, size: c.size, released: c.released, tooSmall: c.tooSmall, water: c.water, waterDepth: c.depth, setupId: c.setupId }, action, rodSetups);
+      Object.assign(viaBrowser, browser.tdCatchFieldsFromAction(action, rodSetups, c.setupId, "Weekend"));
+      const viaWorker = worker.ctlBuildCatch({ ...base, size: c.size, released: c.released, tooSmall: c.tooSmall, water: c.water, waterDepth: c.depth, setupId: c.setupId, tripName: "Weekend" }, action, rodSetups);
       assert.deepEqual(viaWorker, viaBrowser, `${action.name} ${JSON.stringify(c)}`);
     }
   }
@@ -95,9 +95,9 @@ test("Catch with a Bait answer: the answer is the mark's bait, as the Live +Catc
     const base = { id: "m9", lat: at.lat, lng: at.lng, dateTime: at.dateTime, species: "Bream" };
     const defaults = { water: "", berley: action.berley || "", fishingMethod: action.fishingMethod || [], rodSetups: {} };
     const viaBrowser = browser.buildCatchFromCards({ ...base, size: 30, rod: "", bait: "Squid", released: false }, defaults, undefined, null);
-    Object.assign(viaBrowser, browser.tdCatchFieldsFromAction(action, rodSetups, null));
+    Object.assign(viaBrowser, browser.tdCatchFieldsFromAction(action, rodSetups, null, "Weekend"));
     viaBrowser.bait = "Squid"; // map-live.js puts the answer on after the action's gear
-    const viaWorker = worker.ctlBuildCatch({ ...base, size: 30, released: false, bait: "Squid", setupId: null }, action, rodSetups);
+    const viaWorker = worker.ctlBuildCatch({ ...base, size: 30, released: false, bait: "Squid", setupId: null, tripName: "Weekend" }, action, rodSetups);
     assert.deepEqual(viaWorker, viaBrowser, action.name);
   }
   // "none" (an empty answer from the controller) clears the action's bait; no answer keeps it

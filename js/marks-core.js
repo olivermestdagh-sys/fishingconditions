@@ -178,6 +178,7 @@ const MARK_TYPE_FIELD_KEYS = {
   Catch: [
     "species", "weatherCondition", "tideCondition", "tideExtreme", "waterCondition", "bait", "rig", "rod", "berley", "fishingMethod",
     "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed", "notes", "released", "rigOptions",
+    "tripName", "actionName", // the trip and Action a trip-made mark belongs to (text, a snapshot)
   ],
 };
 MARK_TYPE_FIELD_KEYS.Fish = MARK_TYPE_FIELD_KEYS.Catch;
@@ -609,6 +610,8 @@ function buildMarkPopupViewHtml(mark) {
     if (applicable.includes(f.key)) row(f.displayLabel, mark[f.key]);
   }
   if (applicable.includes("rigOptions")) row("Rig options", mark.rigOptions);
+  if (applicable.includes("tripName")) row("Trip", mark.tripName);
+  if (applicable.includes("actionName")) row("Action", mark.actionName);
   if (applicable.includes("size")) row("Size", mark.size != null ? `${mark.size} cm` : null);
   if (applicable.includes("barometer")) row("Barometer", mark.barometer != null ? `${mark.barometer} hPa` : null);
   if (applicable.includes("temperature")) row("Temperature", mark.temperature != null ? `${mark.temperature}°C` : null);
@@ -1173,6 +1176,12 @@ function buildMarkPopupEditHtml(mark, markLists, opts = {}) {
               <input type="number" name="${key}" ${attrs} data-unit="${unit}" value="${mark[key] != null ? mark[key] : ""}" style="${MARK_POPUP_INPUT_STYLE}" />
             </label>
           </div>`;
+  const textField = (key, label) => `
+          <div data-field-group="${key}">
+            <label class="mark-edit-field">${label}
+              <input type="text" name="${key}" maxlength="100" value="${escapeHtml(mark[key] || "")}" style="${MARK_POPUP_INPUT_STYLE}" />
+            </label>
+          </div>`;
   const speciesField = MARK_POPUP_OPTIONAL_FIELDS.find((f) => f.key === "species");
   const fieldByKey = (key) => MARK_POPUP_OPTIONAL_FIELDS.find((f) => f.key === key);
   // A pick-list inside a section: a small label over its pill row (the real <select>, and a Session's tick-boxes, stay hidden
@@ -1236,7 +1245,7 @@ function buildMarkPopupEditHtml(mark, markLists, opts = {}) {
         ${markEditGroupHtml(
           "gear",
           "Gear/Setup",
-          pickListRow(fieldByKey("bait")) + pickListRow(fieldByKey("rig")) + rigOptionsRow + pickListRow(fieldByKey("rod")) + pickListRow(fieldByKey("berley")) + pickListRow(fieldByKey("fishingMethod"))
+          pickListRow(fieldByKey("bait")) + pickListRow(fieldByKey("rig")) + rigOptionsRow + pickListRow(fieldByKey("rod")) + pickListRow(fieldByKey("berley")) + pickListRow(fieldByKey("fishingMethod")) + textField("tripName", "Trip") + textField("actionName", "Action")
         )}
         ${markEditGroupHtml(
           "weather",
@@ -1495,6 +1504,12 @@ function collectMarkFormValues(form, originalMark) {
     }
     if (rigOptions) updated.rigOptions = rigOptions;
   }
+  for (const key of ["tripName", "actionName"]) {
+    if (applicable.includes(key)) {
+      const text = val(key);
+      if (text) updated[key] = text;
+    }
+  }
   if (applicable.includes("notes")) {
     const notes = val("notes");
     if (notes) updated.notes = notes;
@@ -1544,7 +1559,7 @@ async function saveMarkToD1(updatedMark, isNew, fullForm = false) {
       payload = { ...updatedMark };
       const clearable = [
         ...MARK_POPUP_OPTIONAL_FIELDS.map((f) => f.key),
-        "notes", "rigOptions", "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed",
+        "notes", "rigOptions", "tripName", "actionName", "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed",
       ];
       for (const key of clearable) if (!(key in payload)) payload[key] = null;
     }
@@ -2051,6 +2066,8 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         for (const f of MARK_POPUP_OPTIONAL_FIELDS) if (!(f.key in updated)) delete mark[f.key];
         if (!("notes" in updated)) delete mark.notes;
         if (!("rigOptions" in updated)) delete mark.rigOptions;
+        if (!("tripName" in updated)) delete mark.tripName;
+        if (!("actionName" in updated)) delete mark.actionName;
         if (!("released" in updated)) delete mark.released;
         if (!("size" in updated)) delete mark.size;
         if (!("barometer" in updated)) delete mark.barometer;
