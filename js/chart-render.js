@@ -42,8 +42,11 @@ async function loadTideOffsets(allLocations) {
     if (!res.ok) return;
     const configLocations = await res.json();
     const offsetByName = new Map(configLocations.map((l) => [l.name, l.tideOffset]));
+    const configByName = new Map(configLocations.map((l) => [l.name, l]));
     for (const loc of allLocations) {
       if (offsetByName.has(loc.name)) loc.tideOffset = offsetByName.get(loc.name);
+      const cfg = configByName.get(loc.name);
+      if (cfg) for (const f of ["hhwOffset", "lhwOffset", "hlwOffset", "llwOffset"]) loc[f] = cfg[f] ?? null;
     }
   } catch (err) {
     console.error("Could not load tide offsets from config/locations.json:", err);
@@ -114,12 +117,14 @@ async function mergeLiveLocationConfig(allLocations) {
     if (!Array.isArray(live)) return false;
     const byName = new Map(live.map((l) => [l.name, l]));
     const SHARED = ["ownerId", "displayName", "shore", "tidal", "locationGroup", "locationGroups", "tideOffset", "tideMaxObserved", "lat", "lng"];
+    const TROUGH = ["hhwOffset", "lhwOffset", "hlwOffset", "llwOffset"];
     const PER_TYPE = ["driveTo", "driveBack", "setUp", "packUp", "timeToSpot", "timeFromSpot", "minTideHeight"];
     for (const loc of allLocations) {
       const src = byName.get(loc.name);
       if (!src) continue;
       for (const f of SHARED) if (src[f] !== undefined && src[f] !== null) loc[f] = src[f];
       loc.tideOffset = src.tideOffset; // null is meaningful here (offset cleared)
+      for (const f of TROUGH) loc[f] = src[f] ?? null; // likewise (cleared = off)
       const t = (src.types || []).find((x) => x.type === loc.type);
       if (t) for (const f of PER_TYPE) if (t[f] !== undefined) loc[f] = t[f];
     }
@@ -183,6 +188,68 @@ function applyTideOffsetToRows(rows, offsetMinutes) {
     if (r["Tide Height (m)"] == null) return r;
     const shifted = interpolatedTideHeightAt(tideRows, r._t - offsetMs);
     return shifted == null ? r : { ...r, "Tide Height (m)": shifted };
+  });
+}
+
+/**
+ * Trough widening (docs/lang-lang-trough-widening-spec.md): the synthetic tide curve rushes through a shallow low
+ * faster than the real tide, so the "too low" / "high enough" crossings of minTideHeight come out too narrow. For each
+ * LOW whose class (HLW/LLW, via rankExtremum) has a non-zero offset O in `offsets` ({hlw, llw} minutes), re-times the
+ * curve between the high before it and the high after it so that the falling crossing moves O minutes earlier, the low
+ * itself O later and the rising crossing O later (piecewise-linear time warp; the two highs and everything outside
+ * that bracket stay put). The warp is applied to the rows, so the drawn curve, the extrema labels and the crossing
+ * dots all agree. Needs minTideHeight (the crossings are what it anchors on); a low that never dips below it, or one
+ * without a high on both sides in `rows`, is left alone. hhw/lhw offsets are stored but inert (no evidence yet).
+ * Returns a new array; `rows` is never mutated. Run it AFTER applyTideOffsetToRows.
+ */
+function applyTroughWideningToRows(rows, offsets, minTideHeight) {
+  if (!offsets || minTideHeight == null || minTideHeight === "") return rows;
+  const byClass = { HLW: Number(offsets.hlw) || 0, LLW: Number(offsets.llw) || 0 };
+  if (!byClass.HLW && !byClass.LLW) return rows;
+  const tideRows = rows
+    .filter((r) => r["Tide Height (m)"] != null)
+    .slice()
+    .sort((a, b) => a._t - b._t);
+  if (tideRows.length < 3) return rows;
+  const extrema = findTideExtrema(tideRows);
+  const crossings = findTideThresholdCrossings(tideRows, Number(minTideHeight));
+  const MIN_GAP = 60000;
+  const warps = []; // { a, b, knots: [[newT, oldT], ...] }
+  extrema.forEach((ex, i) => {
+    if (ex.type !== "low") return;
+    const O = byClass[rankExtremum(extrema, ex)] || 0;
+    if (O <= 0) return;
+    const hi0 = extrema[i - 1];
+    const hi1 = extrema[i + 1];
+    if (!hi0 || !hi1 || hi0.type !== "high" || hi1.type !== "high") return;
+    const down = crossings.filter((c) => !c.becomingAccessible && c.t > hi0.t && c.t < ex.t).pop();
+    const up = crossings.find((c) => c.becomingAccessible && c.t > ex.t && c.t < hi1.t);
+    if (!down || !up) return;
+    // Never let the shifted crossings run into the highs (the warp has to stay increasing).
+    const shift = Math.min(O * 60000, down.t - hi0.t - MIN_GAP, hi1.t - up.t - MIN_GAP);
+    if (shift <= 0) return;
+    warps.push({
+      a: hi0.t,
+      b: hi1.t,
+      knots: [[hi0.t, hi0.t], [down.t - shift, down.t], [ex.t + shift, ex.t], [up.t + shift, up.t], [hi1.t, hi1.t]],
+    });
+  });
+  if (warps.length === 0) return rows;
+  return rows.map((r) => {
+    if (r["Tide Height (m)"] == null) return r;
+    const w = warps.find((x) => r._t > x.a && r._t < x.b);
+    if (!w) return r;
+    let oldT = r._t;
+    for (let k = 0; k < w.knots.length - 1; k++) {
+      const [n0, o0] = w.knots[k];
+      const [n1, o1] = w.knots[k + 1];
+      if (r._t >= n0 && r._t <= n1) {
+        oldT = n1 === n0 ? o0 : o0 + ((r._t - n0) / (n1 - n0)) * (o1 - o0);
+        break;
+      }
+    }
+    const h = interpolatedTideHeightAt(tideRows, oldT);
+    return h == null ? r : { ...r, "Tide Height (m)": h };
   });
 }
 
@@ -1271,7 +1338,7 @@ function buildSessionSpanPlugin(spans) {
   };
 }
 
-function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, computedSessionMarkers, dragPreviewState, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes, hideValueAxes = false, overlayHeading = false, extraPlugins = [] }) {
+function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, computedSessionMarkers, dragPreviewState, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes, troughOffsets, hideValueAxes = false, overlayHeading = false, extraPlugins = [] }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
   rows = bucketRowsHourly(rows);
@@ -1283,6 +1350,7 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   // for all three at once. See applyTideOffsetToRows for what this
   // deliberately does NOT touch (Tide Status, Condition scores).
   rows = applyTideOffsetToRows(rows, tideOffsetMinutes);
+  rows = applyTroughWideningToRows(rows, troughOffsets, minTideHeight);
 
   // On mobile, the full descriptive legend labels take up a lot of vertical space
   // under the chart (often wrapping to several lines) — shorten them there, since

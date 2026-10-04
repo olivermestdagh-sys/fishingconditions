@@ -227,13 +227,7 @@ async function findNearestTrackedLocation(lat, lng) {
   return best;
 }
 
-/** "YYYY-MM-DD HH:MM:SS" naive-string ms value -> "YYYY-MM-DD" (UTC
- * getters, per this site's naive convention — see parseNaive). */
-function naiveDateOnlyStr(ms) {
-  const d = new Date(ms);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-}
+// naiveDateOnlyStr lives in chart-base.js now (shared with rankExtremum).
 
 /**
  * Real historical Tide Condition for (lat, lng) at targetMs — snaps to the

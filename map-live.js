@@ -1224,6 +1224,7 @@ function renderForLocation(loc) {
     compact: false,
     disableBuiltinEvents: true, // this mode drives the tooltip itself — see wireHoldToShowTooltip in liveInitOnce
     tideOffsetMinutes: loc.tideOffset,
+    troughOffsets: { hlw: loc.hlwOffset, llw: loc.llwOffset },
     // Explicit, not left to auto-fit — guarantees "now" sits at EXACTLY
     // the horizontal midpoint of the canvas, which the mobile centering scroll below depends on.
     xRange: { min: windowStart, max: windowEnd },

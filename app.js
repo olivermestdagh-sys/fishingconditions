@@ -1019,6 +1019,7 @@ function renderCharts(rows, loc, sunTimesOverride) {
     // — updated by wireSessionRangeSelect (wired once in init()).
     dragPreviewState: () => state.dragPreview,
     tideOffsetMinutes: loc ? loc.tideOffset : null,
+    troughOffsets: loc ? { hlw: loc.hlwOffset, llw: loc.llwOffset } : null,
     // The floating panel is a quick-glance view — the °C/km/h axis numbers
     // aren't very readable at this size anyway, and hiding them frees up
     // real width/height for the plot itself.

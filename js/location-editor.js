@@ -81,6 +81,10 @@ async function locEdLoad(name) {
         shore: p.shore,
         tidal: p.tidal,
         tideOffset: p.tideOffset,
+        hhwOffset: p.hhwOffset,
+        lhwOffset: p.lhwOffset,
+        hlwOffset: p.hlwOffset,
+        llwOffset: p.llwOffset,
         locationGroups: rows[0].groups.map((g) => g.name),
         types: rows.map(typeOf),
       },
@@ -214,6 +218,10 @@ async function openLocationEditor(name, { onChanged, onRemoved } = {}) {
         displayName: loc.displayName,
         shore: loc.shore,
         tideOffset: loc.tideOffset,
+        hhwOffset: loc.hhwOffset ?? null,
+        lhwOffset: loc.lhwOffset ?? null,
+        hlwOffset: loc.hlwOffset ?? null,
+        llwOffset: loc.llwOffset ?? null,
         tidal: loc.tidal !== false,
       }),
       "the location"
@@ -349,7 +357,13 @@ async function openLocationEditor(name, { onChanged, onRemoved } = {}) {
            <div class="mark-pill-row">${pill("data-loced-tidal", "yes", "Yes", loc.tidal !== false)}${pill("data-loced-tidal", "no", "No", loc.tidal === false)}</div>
            <label class="mark-edit-field">Tide offset (min)
              <input type="number" step="1" inputmode="numeric" data-loced-tideoffset value="${loc.tideOffset != null ? loc.tideOffset : ""}" placeholder="0"
-               title="Positive: this location's tide runs later than the matched station. Negative: earlier." style="${MARK_POPUP_INPUT_STYLE}" /></label>`
+               title="Positive: this location's tide runs later than the matched station. Negative: earlier." style="${MARK_POPUP_INPUT_STYLE}" /></label>
+           <label class="mark-edit-field">Low-tide window widening, higher low (min)
+             <input type="number" step="1" min="0" inputmode="numeric" data-loced-trough="hlwOffset" value="${loc.hlwOffset != null ? loc.hlwOffset : ""}" placeholder="0"
+               title="Widens the too-low / launchable window around a higher-low (HLW) tide: the 'too low' time moves this many minutes earlier, the low and the 'high enough' time this many later. Needs a minimum tide height." style="${MARK_POPUP_INPUT_STYLE}" /></label>
+           <label class="mark-edit-field">Low-tide window widening, lower low (min)
+             <input type="number" step="1" min="0" inputmode="numeric" data-loced-trough="llwOffset" value="${loc.llwOffset != null ? loc.llwOffset : ""}" placeholder="0"
+               title="Same as the higher-low setting, for the lower low (LLW) of the day." style="${MARK_POPUP_INPUT_STYLE}" /></label>`
         )}
         ${group(
           "types",
@@ -544,6 +558,9 @@ async function openLocationEditor(name, { onChanged, onRemoved } = {}) {
       debounce("place", savePlace);
     } else if (t.hasAttribute("data-loced-tideoffset")) {
       loc.tideOffset = t.value === "" ? null : parseFloat(t.value);
+      debounce("place", savePlace);
+    } else if (t.dataset.locedTrough) {
+      loc[t.dataset.locedTrough] = t.value === "" ? null : parseFloat(t.value);
       debounce("place", savePlace);
     } else if (t.dataset.locedMintide !== undefined) {
       const type = loc.types[Number(t.dataset.locedMintide)];

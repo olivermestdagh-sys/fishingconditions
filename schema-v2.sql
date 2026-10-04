@@ -132,6 +132,10 @@ CREATE TABLE IF NOT EXISTS locations (
   willyweather_state TEXT,
   shore TEXT,                       -- compass shore-facing direction, e.g. "NW" — feeds Land Based's wind-only shore-angle scoring
   tide_offset REAL,
+  hhw_offset REAL,                  -- minutes: widen the too-low/launchable window around a tide extremum of
+  lhw_offset REAL,                  -- this class (HHW/LHW/HLW/LLW) — see applyTroughWideningToRows, js/chart-render.js.
+  hlw_offset REAL,                  -- NULL/0 = off. Manual ALTER TABLE on existing D1 (done 2026-10-05).
+  llw_offset REAL,
   tide_max_observed REAL,
   tidal INTEGER NOT NULL DEFAULT 1, -- 0/1 — strips tide/current data at the scoring source for
                                      -- inland rivers/lakes regardless of what the tide/marine

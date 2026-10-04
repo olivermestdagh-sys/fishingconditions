@@ -572,6 +572,39 @@ function nowAsNaiveString() {
   return `${d.year}-${p(d.month)}-${p(d.day)} ${p(d.hour)}:${p(d.minute)}:${p(d.second)}`;
 }
 
+/** "YYYY-MM-DD HH:MM:SS" naive-string ms value -> "YYYY-MM-DD" (UTC
+ * getters, per this site's naive convention — see parseNaive). */
+function naiveDateOnlyStr(ms) {
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
+/**
+ * Ranks one tide extremum against the other extrema of its own type
+ * (mixed semidiurnal tides: two unequal highs and lows a day). Returns
+ * "HHW"/"LHW" for a high, "HLW"/"LLW" for a low (H = higher of the day's
+ * pair, L = lower), or null if there is no same-type peer to compare with.
+ * Peers are the other same-type extrema on the same (naive, local)
+ * calendar date; if it is the only one that day (a lunar day can skip a
+ * high or low) it is compared with the nearest same-type neighbour in the
+ * list instead — previous first, then next. A tie counts as the higher.
+ */
+function rankExtremum(extrema, ex) {
+  const sameType = extrema.filter((e) => e.type === ex.type);
+  const day = naiveDateOnlyStr(ex.t);
+  let peers = sameType.filter((e) => e !== ex && naiveDateOnlyStr(e.t) === day);
+  if (peers.length === 0) {
+    const idx = sameType.indexOf(ex);
+    const neighbour = sameType[idx - 1] || sameType[idx + 1];
+    if (!neighbour) return null;
+    peers = [neighbour];
+  }
+  const isHigher = peers.every((p) => ex.height >= p.height);
+  if (ex.type === "high") return isHigher ? "HHW" : "LHW";
+  return isHigher ? "HLW" : "LLW";
+}
+
 const KAYAK_WIND_THRESHOLD_KMH = 15;
 
 /**
