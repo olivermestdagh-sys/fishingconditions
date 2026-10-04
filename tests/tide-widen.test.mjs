@@ -17,6 +17,7 @@ const fns = new Function(
     grab(/function findTideThresholdCrossings[\s\S]*?\r?\n}\r?\n/),
     grab(/function interpolatedTideHeightAt[\s\S]*?\r?\n}\r?\n/),
     grab(/function findTideExtrema[\s\S]*?\r?\n}\r?\n/),
+    grab(/function monotoneWarp[\s\S]*?\r?\n}\r?\n/),
     grab(/function applyTroughWideningToRows[\s\S]*?\r?\n}\r?\n/),
     "return { applyTroughWideningToRows, findTideExtrema, findTideThresholdCrossings };",
   ].join("\n")
@@ -104,4 +105,13 @@ test("a low-owned crossing is not touched by the high offsets", () => {
   // threshold 1.0 is below both the 2.0->0.5 and 0.5->1.8 midpoints, so the lows own it
   const out = fns.applyTroughWideningToRows(rows, { hhw: 40, lhw: 40 }, THRESH);
   assert.equal(out, rows);
+});
+
+test("widening keeps the curve smooth: same number of highs and lows, heights stay within the original range", () => {
+  const out = fns.applyTroughWideningToRows(rows, { hlw: 40, llw: 40 }, THRESH);
+  const count = (r) => fns.findTideExtrema(r).length;
+  assert.equal(count(out), count(rows));
+  const lo = Math.min(...rows.map((r) => r["Tide Height (m)"]));
+  const hi = Math.max(...rows.map((r) => r["Tide Height (m)"]));
+  for (const r of out) assert.ok(r["Tide Height (m)"] >= lo - 1e-9 && r["Tide Height (m)"] <= hi + 1e-9);
 });

@@ -192,6 +192,45 @@ function applyTideOffsetToRows(rows, offsetMinutes) {
 }
 
 /**
+ * Smooth, strictly increasing map through [[newT, oldT], ...] knots (sorted by newT): a monotone cubic Hermite
+ * (Fritsch-Carlson), so the tide curve re-timed by applyTroughWideningToRows has no slope kinks at the knots.
+ */
+function monotoneWarp(knots) {
+  const n = knots.length;
+  const x = knots.map((k) => k[0]);
+  const y = knots.map((k) => k[1]);
+  const h = [];
+  const d = [];
+  for (let i = 0; i < n - 1; i++) {
+    h.push(x[i + 1] - x[i]);
+    d.push((y[i + 1] - y[i]) / h[i]);
+  }
+  const m = new Array(n);
+  m[0] = d[0];
+  m[n - 1] = d[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    if (d[i - 1] * d[i] <= 0) m[i] = 0;
+    else m[i] = (3 * (h[i - 1] + h[i])) / ((2 * h[i] + h[i - 1]) / d[i - 1] + (h[i] + 2 * h[i - 1]) / d[i]);
+  }
+  // A knot that doesn't move keeps slope 1 (capped to stay monotone), so legs the widening doesn't touch stay exactly as drawn.
+  for (let i = 0; i < n; i++) {
+    if (x[i] !== y[i]) continue;
+    const neighbours = [i > 0 ? d[i - 1] : Infinity, i < n - 1 ? d[i] : Infinity];
+    m[i] = Math.min(1, 3 * Math.min(...neighbours));
+  }
+  return (t) => {
+    if (t <= x[0]) return y[0];
+    if (t >= x[n - 1]) return y[n - 1];
+    let k = 0;
+    while (t > x[k + 1]) k++;
+    const u = (t - x[k]) / h[k];
+    const u2 = u * u;
+    const u3 = u2 * u;
+    return (2 * u3 - 3 * u2 + 1) * y[k] + (u3 - 2 * u2 + u) * h[k] * m[k] + (-2 * u3 + 3 * u2) * y[k + 1] + (u3 - u2) * h[k] * m[k + 1];
+  };
+}
+
+/**
  * Tide-extremum widening (docs/lang-lang-trough-widening-spec V2.md): the synthetic tide curve rushes through a shallow
  * low faster than the real tide, so the "too low" / "high enough" crossings of minTideHeight come out too narrow.
  * `offsets` ({hhw, lhw, hlw, llw} minutes, by rankExtremum class) widen the feature around each extremum:
@@ -251,20 +290,12 @@ function applyTroughWideningToRows(rows, offsets, minTideHeight) {
     knots.push([pos, c.t]);
   }
   if (!changed) return rows;
+  const warp = monotoneWarp(knots);
   const first = knots[0][0];
   const last = knots[knots.length - 1][0];
   return rows.map((r) => {
     if (r["Tide Height (m)"] == null || r._t <= first || r._t >= last) return r;
-    let oldT = r._t;
-    for (let k = 0; k < knots.length - 1; k++) {
-      const [n0, o0] = knots[k];
-      const [n1, o1] = knots[k + 1];
-      if (r._t >= n0 && r._t <= n1) {
-        oldT = n1 === n0 ? o0 : o0 + ((r._t - n0) / (n1 - n0)) * (o1 - o0);
-        break;
-      }
-    }
-    const h = interpolatedTideHeightAt(tideRows, oldT);
+    const h = interpolatedTideHeightAt(tideRows, warp(r._t));
     return h == null ? r : { ...r, "Tide Height (m)": h };
   });
 }
