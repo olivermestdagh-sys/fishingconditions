@@ -235,7 +235,7 @@ function monotoneWarp(knots) {
  * low faster than the real tide, so the "too low" / "high enough" crossings of minTideHeight come out too narrow.
  * `offsets` ({hhw, lhw, hlw, llw} minutes, by rankExtremum class) widen the feature around each extremum:
  *  - LOW with offset O: the falling crossing on the leg into it moves O earlier, the rising crossing out of it O later,
- *    and the low itself O later (the displayed low was measured ~29 min early). Needs a crossing on both legs.
+ *    (the low gets no knot of its own, so the basin stays smooth; the spec's "low moves O later" was dropped: it gave a flat floor with steep walls). Needs a crossing on both legs.
  *  - HIGH with offset O: the crossing on the leg into it moves O earlier and the one out of it O later (a wider
  *    high-water plateau); the displayed high time is deliberately NOT moved (logged highs are accurate).
  * Each leg's crossing is owned by the low if the threshold is at or below the leg's height-midpoint, else by the high
@@ -260,18 +260,14 @@ function applyTroughWideningToRows(rows, offsets, minTideHeight) {
   const MIN_GAP = 60000;
   const offMs = extrema.map((ex) => (byClass[rankExtremum(extrema, ex)] || 0) * 60000);
   const legCrossing = (i) => crossings.find((c) => c.t > extrema[i].t && c.t < extrema[i + 1].t);
-  // New time of each extremum: only lows move (and only if both neighbouring legs have a crossing to widen).
-  const newT = extrema.map((ex, i) => {
-    if (ex.type !== "low" || offMs[i] <= 0 || i === 0 || i === extrema.length - 1) return ex.t;
-    if (!legCrossing(i - 1) || !legCrossing(i)) return ex.t;
-    const room = Math.min(ex.t - extrema[i - 1].t, extrema[i + 1].t - ex.t) / 2;
-    return ex.t + Math.min(offMs[i], room);
-  });
+  // A widened low gets no knot of its own (the curve decides where its minimum ends up): pinning it later by O as
+  // well squeezed the extra time into the short stretch between "too low" and the low and gave a flat floor with
+  // steep walls. Stretching [down crossing, up crossing] outward by O each side keeps a smooth, rounded basin.
+  const free = extrema.map((ex, i) => ex.type === "low" && offMs[i] > 0 && i > 0 && i < extrema.length - 1 && !!legCrossing(i - 1) && !!legCrossing(i));
   const knots = [];
   let changed = false;
   for (let i = 0; i < extrema.length; i++) {
-    knots.push([newT[i], extrema[i].t]);
-    if (newT[i] !== extrema[i].t) changed = true;
+    if (!free[i]) knots.push([extrema[i].t, extrema[i].t]);
     if (i === extrema.length - 1) break;
     const a = extrema[i];
     const b = extrema[i + 1];
@@ -285,7 +281,7 @@ function applyTroughWideningToRows(rows, offsets, minTideHeight) {
     if (O <= 0) continue;
     // the leg into an extremum moves its crossing earlier, the leg out of it later
     const delta = owner === i + 1 ? -O : O;
-    const pos = Math.min(Math.max(c.t + delta, newT[i] + MIN_GAP), newT[i + 1] - MIN_GAP);
+    const pos = Math.min(Math.max(c.t + delta, a.t + MIN_GAP), b.t - MIN_GAP);
     if (pos !== c.t) changed = true;
     knots.push([pos, c.t]);
   }

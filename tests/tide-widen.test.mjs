@@ -46,7 +46,7 @@ test("zero / missing offsets and missing threshold leave rows untouched", () => 
   assert.equal(fns.applyTroughWideningToRows(rows, { hlw: 40 }, null), rows);
 });
 
-test("HLW offset widens the window around the higher low and moves the low later", () => {
+test("HLW offset widens the window around the higher low", () => {
   const before = crossings(rows).filter((c) => c.t > T0 && c.t < T0 + 12 * H);
   const lowBefore = firstLow(rows);
   const out = fns.applyTroughWideningToRows(rows, { hlw: 40 }, THRESH);
@@ -57,7 +57,7 @@ test("HLW offset widens the window around the higher low and moves the low later
   const tol = 15 * 60000; // hourly sampling + linear crossing interpolation
   assert.ok(Math.abs(before[0].t - after[0].t - O) < tol, "too-low crossing ~40 min earlier");
   assert.ok(Math.abs(after[1].t - before[1].t - O) < tol, "high-enough crossing ~40 min later");
-  assert.ok(Math.abs(firstLow(out).t - lowBefore.t - O) < tol, "the low itself ~40 min later");
+  assert.ok(Math.abs(firstLow(out).t - lowBefore.t) < tol, "the low is not pinned later: it stays where the smooth curve puts it");
 });
 
 test("rows outside the bracket, and the other low, are untouched with hlw only", () => {
