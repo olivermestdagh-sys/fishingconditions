@@ -448,11 +448,11 @@ function liveCatchDefaultsForAction(options, action) {
   const setups = tdLiveRodSetupIds(action.rodSetupIds, liveTripData.rodSetups).map((id) => liveTripData.rodSetups.find((r) => r.id === id));
   return {
     species: action.species || [],
-    bait: [...new Set([...(action.bait || []), ...setups.flatMap((s) => (s && s.bait) || [])])], // the Bait card lists these first (the Action's, then its Rod Setups')
-    // the Bait options card starts from the Action's options plus the chosen Rod Setup's (the only one when there is just one)
+    bait: [...new Set(setups.flatMap((s) => (s && s.bait) || []))], // the Bait card lists these first (the Action's Rod Setups' baits)
+    // the Bait options card starts from the chosen Rod Setup's options (the only one when there is just one)
     baitOptionsFor: (rodName) => {
       const chosen = setups.length === 1 ? setups[0] : setups.find((x) => x && x.name === rodName);
-      return [...new Set([...(action.baitOptions || []), ...((chosen && chosen.baitOptions) || [])])];
+      return [...new Set((chosen && chosen.baitOptions) || [])];
     },
     otherTargets: tdOtherTargets(liveTripData.actions, action),
     water: getLiveMarkDefaults().water || "",
@@ -502,7 +502,7 @@ async function saveLiveCatch(options, answers, defaults, gpsPromise, ctx) {
     mark.name = tripCatchName(st.species, mark.tripName, mark.actionName, running ? running.number : null); // "[Species] [Trip] [Action] [Number]"
     if (st.bait) mark.bait = st.bait; // the Bait card's answer, not all of the action's baits
     // the bait options belong to the configured baits: kept only when the answer is one of them
-    const configuredBaits = [...(defaults.tripAction.bait || []), ...liveTripData.rodSetups.flatMap((r) => r.bait || [])];
+    const configuredBaits = liveTripData.rodSetups.flatMap((r) => r.bait || []);
     if (!st.bait || !configuredBaits.includes(st.bait)) delete mark.baitOptions;
     if (st.baitOptions) {
       // picked (or cleared) on the Bait options card: that wins over what the Action / Rod Setup carry

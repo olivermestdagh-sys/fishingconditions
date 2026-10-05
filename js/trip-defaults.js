@@ -28,7 +28,7 @@ function tdRigSublist(rigRow, overrides) {
 
 /**
  * The Session Start mark for a trip Action (Live mode): named "Session N Start" (the number nextSessionNumber gives), with
- * the Action's species / fishing method / berley / bait, and rod / rig / rigOptions gathered from its Rod Setups
+ * the Action's species / fishing method / berley, and rod / rig / rigOptions / bait / baitOptions gathered from its Rod Setups
  * (unique names, comma-joined; rigOptions = the rigs' sub-list items). `ctx` supplies what only the caller knows: id, lat,
  * lng, dateTime, createdAt, sessionGroupId, sessionNumber, tripName (the running trip's name; the mark also records the action's own name), water (Water Condition default) and waterDepth (the Depth default, or the last mark's). `tide` is
  * {tideCondition, tideExtreme} worked out for the time.
@@ -48,11 +48,11 @@ function buildSessionStartFromAction(action, rodSetups, ctx, tide) {
   set("species", uniq(action.species));
   set("fishingMethod", uniq(action.fishingMethod));
   if (action.berley) mark.berley = action.berley;
-  set("bait", uniq([...(action.bait || []), ...setups.flatMap((s) => s.bait || [])]));
+  set("bait", uniq(setups.flatMap((s) => s.bait || [])));
   set("rod", uniq(setups.map((s) => s.rod)));
   set("rig", uniq(setups.map((s) => s.rig)));
   set("rigOptions", uniq(setups.flatMap((s) => s.subListItems || [])));
-  set("baitOptions", uniq([...(action.baitOptions || []), ...setups.flatMap((s) => s.baitOptions || [])]));
+  set("baitOptions", uniq(setups.flatMap((s) => s.baitOptions || [])));
   if (ctx.water) mark.waterCondition = ctx.water;
   if (ctx.waterDepth != null) mark.waterDepth = ctx.waterDepth;
   if (tide && tide.tideCondition) mark.tideCondition = tide.tideCondition;
@@ -72,7 +72,7 @@ function tdOtherTargets(actions, action) {
 }
 
 /**
- * The gear fields a Catch takes from a trip Action: berley, fishing method and bait from the Action itself, rod / rig /
+ * The gear fields a Catch takes from a trip Action: berley and fishing method from the Action itself, rod / rig / bait / baitOptions /
  * rigOptions from the chosen Rod Setup (`setupId`, or the Action's only one), plus the trip's and the Action's names. Fields with nothing to say are left off.
  */
 function tdCatchFieldsFromAction(action, rodSetups, setupId, tripName) {
@@ -83,10 +83,8 @@ function tdCatchFieldsFromAction(action, rodSetups, setupId, tripName) {
   if (action.name) out.actionName = action.name;
   if (action.berley) out.berley = action.berley;
   if ((action.fishingMethod || []).length) out.fishingMethod = action.fishingMethod.join(", ");
-  const baits = [...new Set([...(action.bait || []), ...(setup ? setup.bait || [] : [])])];
-  if (baits.length) out.bait = baits.join(", ");
-  const baitOptions = [...new Set([...(action.baitOptions || []), ...(setup ? setup.baitOptions || [] : [])])];
-  if (baitOptions.length) out.baitOptions = baitOptions.join(", ");
+  if (setup && (setup.bait || []).length) out.bait = setup.bait.join(", ");
+  if (setup && (setup.baitOptions || []).length) out.baitOptions = setup.baitOptions.join(", ");
   if (setup) {
     if (setup.rod) out.rod = setup.rod;
     if (setup.rig) out.rig = setup.rig;
@@ -299,7 +297,6 @@ async function showTripDefaults({ onClose, start } = {}) {
   const QUICK_CATEGORIES = [
     { key: "method", label: "Method" },
     { key: "berley", label: "Berley" },
-    { key: "bait", label: "Bait" },
     { key: "rods", label: "Rod setups" },
     { key: "species", label: "Species" },
   ];
@@ -319,9 +316,6 @@ async function showTripDefaults({ onClose, start } = {}) {
     const sections = {
       method: section("Fishing method", o.fishingMethod.map((m) => choice(m, `data-method="${esc(m)}"`, a.fishingMethod.includes(m), o.thumbs.fishingMethod[m])).join("") || "", "method"),
       berley: section("Berley", o.berley.map((b) => choice(b, `data-berley="${esc(b)}"`, a.berley === b, o.thumbs.berley[b])).join("") || "", "berley"),
-      bait:
-        section("Bait", o.baits.map((b) => choice(b, `data-bait="${esc(b)}"`, (a.bait || []).includes(b), o.thumbs.baits[b])).join("") || "", "bait") +
-        baitOptionsSection(a.bait, a.baitOptions, "data-bait-opt"),
       rods: `<div class="td-section"><div class="td-section-title">Rod setups</div><div class="td-pills">${pills}</div>${addRow("rodsetup", "+ Add rod setup")}</div>`,
       species: section("Species", o.species.map((s) => choice(s, `data-species="${esc(s)}"`, a.species.includes(s))).join("") || `<p class="live-card-empty">Nothing to choose yet.</p>`),
     };
@@ -331,7 +325,6 @@ async function showTripDefaults({ onClose, start } = {}) {
       const values = {
         method: a.fishingMethod.join(", "),
         berley: a.berley || "",
-        bait: [...(a.bait || []), ...(a.baitOptions || [])].join(", "),
         rods: rodNames.join(", "),
         species: a.species.join(", "),
       };
@@ -457,11 +450,6 @@ async function showTripDefaults({ onClose, start } = {}) {
     // Action fields
     const setAction = (patch) => attempt(() => put("/api/tripactions", data.actions, view.actionId, patch));
     on("[data-method]", (el) => setAction({ fishingMethod: tdToggle(action().fishingMethod, el.dataset.method) }));
-    on("[data-bait]", (el) => {
-      const bait = tdToggle(action().bait, el.dataset.bait);
-      setAction({ bait, baitOptions: tdPruneBaitOptions(action().baitOptions, bait, data.baitRows, data.overrides) });
-    });
-    on("[data-bait-opt]", (el) => setAction({ baitOptions: tdToggle(action().baitOptions, el.dataset.baitOpt) }));
     on("[data-berley]", (el) => setAction({ berley: tdToggleSingle(action().berley, el.dataset.berley) }));
     on("[data-species]", (el) => setAction({ species: tdToggle(action().species, el.dataset.species) }));
     on("[data-toggle-rodsetup]", (el) => setAction({ rodSetupIds: tdToggle(tdLiveRodSetupIds(action().rodSetupIds, data.rodSetups), el.dataset.toggleRodsetup) }));
@@ -549,7 +537,6 @@ async function showTripDefaults({ onClose, start } = {}) {
         // The new value is picked straight away.
         if (kind === "method") await put("/api/tripactions", data.actions, view.actionId, { fishingMethod: tdToggle(action().fishingMethod, value) });
         else if (kind === "bait" && view.name === "rod") await put("/api/rodsetups", data.rodSetups, view.rodId, { bait: tdToggle(rod().bait, value) });
-        else if (kind === "bait") await put("/api/tripactions", data.actions, view.actionId, { bait: tdToggle(action().bait, value) });
         else if (kind === "berley") await put("/api/tripactions", data.actions, view.actionId, { berley: value });
         else if (kind === "rod") await put("/api/rodsetups", data.rodSetups, view.rodId, { rod: value });
         else await put("/api/rodsetups", data.rodSetups, view.rodId, { rig: value, subListItems: [] });

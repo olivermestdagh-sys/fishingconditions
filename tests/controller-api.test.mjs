@@ -70,11 +70,11 @@ function makeDb() {
 async function seeded() {
   const { sqlite, env } = makeDb();
   const ins = (sql, ...a) => sqlite.prepare(sql).run(...a);
-  ins("INSERT INTO user_rod_setups (id, user_id, name, rod, rig, sub_list_items, created_at) VALUES ('r1', 'u1', 'Light', 'L Wilson', 'Paternoster', NULL, 1), ('r2', 'u1', 'Lure', 'L Raider', 'Jig Head', '[\"Vibe\"]', 1)");
+  ins("INSERT INTO user_rod_setups (id, user_id, name, rod, rig, sub_list_items, bait, created_at) VALUES ('r1', 'u1', 'Light', 'L Wilson', 'Paternoster', NULL, '[\"Prawn\"]', 1), ('r2', 'u1', 'Lure', 'L Raider', 'Jig Head', '[\"Vibe\"]', NULL, 1)");
   ins("INSERT INTO user_trip_setups (id, user_id, name, created_at) VALUES ('t1', 'u1', 'Estuary', 1), ('t2', 'u1', 'Offshore', 1), ('tx', 'u2', 'Someone else', 1)");
   ins(
     "INSERT INTO user_trip_actions (id, user_id, trip_id, name, fishing_method, berley, bait, rod_setup_ids, species, created_at) VALUES " +
-      "('a1', 'u1', 't1', 'Drift', '[\"Drifting\"]', 'Pilchard Mix', '[\"Prawn\"]', '[\"r1\",\"r2\"]', '[\"Bream\"]', 1)," +
+      "('a1', 'u1', 't1', 'Drift', '[\"Drifting\"]', 'Pilchard Mix', '[]', '[\"r1\",\"r2\"]', '[\"Bream\"]', 1)," +
       "('a2', 'u1', 't1', 'Anchor', '[]', NULL, '[]', '[\"r1\"]', '[\"Flathead\"]', 1)," +
       "('ax', 'u2', 'tx', 'Not mine', '[]', NULL, '[]', '[]', '[]', 1)"
   );
@@ -298,7 +298,7 @@ test("events: a Too small catch has no size, is released and carries the Too sma
   assert.equal(m.notes, "Too small");
 });
 
-test("events: the Bait answer on a catch replaces the action's bait; [] means none; leaving it out keeps the action's", async () => {
+test("events: the Bait answer on a catch is the mark's bait; [] means none; leaving it out takes the chosen rod setup's (none when several and none chosen)", async () => {
   const { sqlite, env, token } = await seeded();
   await send(env, token, [ev(1, "trip_start", { tripId: "t1" }), ev(2, "action_start", { actionId: "a1" })]);
   await send(env, token, [
@@ -307,7 +307,7 @@ test("events: the Bait answer on a catch replaces the action's bait; [] means no
     ev(5, "catch", { actionId: "a1", species: "Bream", size: 32, fate: "keep", bait: [] }),
   ]);
   const by = Object.fromEntries(marks(sqlite, "type = 'Catch'").map((m) => [m.size, m]));
-  assert.ok(by[30].bait, "no answer: the action's own bait is kept");
+  assert.equal(by[30].bait, null, "no answer, two rod setups and none chosen: no bait guessed");
   assert.equal(by[31].bait, "Pipi");
   assert.equal(by[32].bait, null, "answered none");
   const bad = await send(env, token, [ev(6, "catch", { actionId: "a1", species: "Bream", size: 33, bait: "Pipi" })]);
@@ -484,7 +484,7 @@ test("config: carries what the defaults editor needs — each action's own choic
   const drift = cfg.actions.find((a) => a.name === "Drift");
   assert.deepEqual(drift.fishingMethod, ["Drifting"]);
   assert.equal(drift.berley, "Pilchard Mix");
-  assert.deepEqual(drift.bait, ["Prawn"]);
+  assert.deepEqual(cfg.rodSetups.find((r) => r.id === "r1").bait, ["Prawn"], "bait is chosen on the rod setup");
   assert.deepEqual(drift.targets, ["Bream"], "its own targets, apart from the catch-card order in 'species'");
   assert.equal(cfg.actions.find((a) => a.name === "Anchor").berley, "");
   assert.deepEqual(cfg.rodSetups.find((r) => r.id === "r2").subListItems, ["Vibe"]);
@@ -505,25 +505,23 @@ test("action_update: changes an action's choices, from existing values only, ide
   const { sqlite, env, token } = await seeded();
   const v1 = (await (await api(env, token, "GET", "/api/controller/config")).json()).configVersion;
 
-  let r = await update(env, token, "action_update", 1, { actionId: "a1", fishingMethod: ["Anchored", "Drifting"], bait: ["Squid"], targets: ["Flathead", "Bream"], berley: "" });
+  let r = await update(env, token, "action_update", 1, { actionId: "a1", fishingMethod: ["Anchored", "Drifting"], targets: ["Flathead", "Bream"], berley: "" });
   assert.equal(r[0].status, "created");
   const row = actionRow(sqlite, "a1");
   assert.deepEqual(JSON.parse(row.fishing_method), ["Anchored", "Drifting"]);
-  assert.deepEqual(JSON.parse(row.bait), ["Squid"]);
   assert.deepEqual(JSON.parse(row.species), ["Flathead", "Bream"]);
   assert.equal(row.berley, null, "an empty berley clears it");
   assert.deepEqual(JSON.parse(row.rod_setup_ids), ["r1", "r2"], "fields not sent are untouched");
 
-  r = await update(env, token, "action_update", 1, { actionId: "a1", bait: ["Prawn"] });
+  r = await update(env, token, "action_update", 1, { actionId: "a1", targets: ["Bream"] });
   assert.equal(r[0].status, "duplicate", "a replay changes nothing");
-  assert.deepEqual(JSON.parse(actionRow(sqlite, "a1").bait), ["Squid"]);
+  assert.deepEqual(JSON.parse(actionRow(sqlite, "a1").species), ["Flathead", "Bream"]);
 
-  r = await update(env, token, "action_update", 2, { actionId: "a1", berley: "Pilchard Mix", rodSetupIds: ["r2"], bait: [] });
+  r = await update(env, token, "action_update", 2, { actionId: "a1", berley: "Pilchard Mix", rodSetupIds: ["r2"] });
   assert.equal(r[0].status, "created");
   const after = actionRow(sqlite, "a1");
   assert.equal(after.berley, "Pilchard Mix");
   assert.deepEqual(JSON.parse(after.rod_setup_ids), ["r2"]);
-  assert.equal(after.bait, null, "an empty list clears it");
   assert.notEqual((await (await api(env, token, "GET", "/api/controller/config")).json()).configVersion, v1, "the config the controller reads changed");
 });
 

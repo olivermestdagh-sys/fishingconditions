@@ -47,10 +47,10 @@ test("tdHasValue is a trimmed, case-insensitive membership check", () => {
 
 test("buildSessionStartFromAction maps an Action and its rod setups onto a Session Start mark", () => {
   const rodSetups = [
-    { id: "a", rod: "Light", rig: "Soft plastic rig", subListItems: ["Vibe", "Paddle Tail"] },
+    { id: "a", rod: "Light", rig: "Soft plastic rig", subListItems: ["Vibe", "Paddle Tail"], bait: ["Prawn"], baitOptions: ["Peeled"] },
     { id: "b", rod: "Heavy", rig: "Soft plastic rig", subListItems: ["Vibe"] },
   ];
-  const action = { species: ["Bream", "Whiting"], fishingMethod: ["Lure"], berley: "Pilchard", bait: ["Prawn"], rodSetupIds: ["a", "b", "gone"] };
+  const action = { species: ["Bream", "Whiting"], fishingMethod: ["Lure"], berley: "Pilchard", rodSetupIds: ["a", "b", "gone"] };
   const ctx = { id: "m1", lat: -38, lng: 145, dateTime: "2026-09-29 06:00:00", createdAt: "2026-09-29 06:00:00", sessionGroupId: "g1", sessionNumber: 3, water: "Clear", waterDepth: 2.5 };
   const mark = fns.buildSessionStartFromAction(action, rodSetups, ctx, { tideCondition: "Rising", tideExtreme: "HHW" });
   assert.equal(mark.name, "Session 3 Start", "no trip/action name: the plain session name");
@@ -62,7 +62,8 @@ test("buildSessionStartFromAction maps an Action and its rod setups onto a Sessi
   assert.equal(mark.species, "Bream, Whiting");
   assert.equal(mark.fishingMethod, "Lure");
   assert.equal(mark.berley, "Pilchard");
-  assert.equal(mark.bait, "Prawn");
+  assert.equal(mark.bait, "Prawn", "bait comes from the rod setups");
+  assert.equal(mark.baitOptions, "Peeled");
   assert.equal(mark.rod, "Light, Heavy");
   assert.equal(mark.rig, "Soft plastic rig"); // de-duplicated
   assert.equal(mark.rigOptions, "Vibe, Paddle Tail");
@@ -86,12 +87,12 @@ test("tdOtherTargets lists the trip's other actions' species, without the action
 test("tdCatchFieldsFromAction takes gear from the Action and the chosen (or only) rod setup", () => {
   const setups = [
     { id: "a", rod: "Light", rig: "Paternoster", subListItems: ["Vibe"] },
-    { id: "b", rod: "Heavy", rig: "Running sinker", subListItems: [] },
+    { id: "b", rod: "Heavy", rig: "Running sinker", subListItems: [], bait: ["Prawn", "Squid"] },
   ];
-  const action = { rodSetupIds: ["a", "b"], berley: "Pilchard", bait: ["Prawn", "Squid"], fishingMethod: ["Bait"] };
+  const action = { rodSetupIds: ["a", "b"], berley: "Pilchard", fishingMethod: ["Bait"] };
   assert.deepEqual(fns.tdCatchFieldsFromAction(action, setups, "b"), { berley: "Pilchard", fishingMethod: "Bait", bait: "Prawn, Squid", rod: "Heavy", rig: "Running sinker" });
   // several setups and none chosen: no rod fields guessed
-  assert.deepEqual(fns.tdCatchFieldsFromAction(action, setups, null), { berley: "Pilchard", fishingMethod: "Bait", bait: "Prawn, Squid" });
+  assert.deepEqual(fns.tdCatchFieldsFromAction(action, setups, null), { berley: "Pilchard", fishingMethod: "Bait" });
   // one setup: used without being chosen
   assert.equal(fns.tdCatchFieldsFromAction({ rodSetupIds: ["a"] }, setups, null).rigOptions, "Vibe");
 });

@@ -3817,11 +3817,11 @@ function ctlBuildSessionStart(action, rodSetups, ctx) {
   set("species", ctlUniq(action.species));
   set("fishingMethod", ctlUniq(action.fishingMethod));
   if (action.berley) mark.berley = action.berley;
-  set("bait", ctlUniq([...(action.bait || []), ...setups.flatMap((s) => s.bait || [])]));
+  set("bait", ctlUniq(setups.flatMap((s) => s.bait || [])));
   set("rod", ctlUniq(setups.map((s) => s.rod)));
   set("rig", ctlUniq(setups.map((s) => s.rig)));
   set("rigOptions", ctlUniq(setups.flatMap((s) => s.subListItems || [])));
-  set("baitOptions", ctlUniq([...(action.baitOptions || []), ...setups.flatMap((s) => s.baitOptions || [])]));
+  set("baitOptions", ctlUniq(setups.flatMap((s) => s.baitOptions || [])));
   if (ctx.water) mark.waterCondition = ctx.water;
   if (ctx.waterDepth != null) mark.waterDepth = ctx.waterDepth;
   return mark;
@@ -3853,10 +3853,8 @@ function ctlCatchFieldsFromAction(action, rodSetups, setupId, tripName) {
   if (action.name) out.actionName = action.name;
   if (action.berley) out.berley = action.berley;
   if ((action.fishingMethod || []).length) out.fishingMethod = action.fishingMethod.join(", ");
-  const baits = ctlUniq([...(action.bait || []), ...(setup ? setup.bait || [] : [])]);
-  if (baits.length) out.bait = baits.join(", ");
-  const baitOptions = ctlUniq([...(action.baitOptions || []), ...(setup ? setup.baitOptions || [] : [])]);
-  if (baitOptions.length) out.baitOptions = baitOptions.join(", ");
+  if (setup && (setup.bait || []).length) out.bait = setup.bait.join(", ");
+  if (setup && (setup.baitOptions || []).length) out.baitOptions = setup.baitOptions.join(", ");
   if (setup) {
     if (setup.rod) out.rod = setup.rod;
     if (setup.rig) out.rig = setup.rig;
@@ -3889,7 +3887,7 @@ function ctlBuildCatch(c, action, rodSetups) {
     if (c.bait) mark.bait = c.bait;
     else delete mark.bait; // the Bait question was answered "none"
     // the options belong to the configured baits: kept only when the answer is one of them
-    if (!Array.isArray(c.baitOptions) && (!c.bait || !action || !ctlUniq([...(action.bait || []), ...(rodSetups || []).flatMap((r) => r.bait || [])]).includes(c.bait))) delete mark.baitOptions;
+    if (!Array.isArray(c.baitOptions) && (!c.bait || !action || !ctlUniq((rodSetups || []).flatMap((r) => r.bait || [])).includes(c.bait))) delete mark.baitOptions;
   }
   if (Array.isArray(c.baitOptions)) {
     if (c.baitOptions.length) mark.baitOptions = c.baitOptions.join(", ");
@@ -4079,7 +4077,7 @@ async function ctlBaitOptionsOf(env, uid, baits) {
 
 const ctlJsonOrNull = (list) => (list && list.length ? JSON.stringify(list) : null);
 
-/** The UPDATE for an `action_update` event: {actionId, fishingMethod?, berley?, bait?, baitOptions?, targets?, rodSetupIds?}. Only existing values may be chosen. */
+/** The UPDATE for an `action_update` event: {actionId, fishingMethod?, berley?, targets?, rodSetupIds?} (bait lives on the Rod Setups). Only existing values may be chosen. */
 async function ctlActionUpdateStatements(env, uid, ev) {
   const row = typeof ev.actionId === "string" ? await env.DB.prepare("SELECT a.*, t.name AS trip_name FROM user_trip_actions a LEFT JOIN user_trip_setups t ON t.id = a.trip_id WHERE a.id = ? AND a.user_id = ?").bind(ev.actionId, uid).first() : null;
   if (!row) return { error: "action not found" };
@@ -4097,23 +4095,8 @@ async function ctlActionUpdateStatements(env, uid, ev) {
     changed = true;
     return null;
   };
-  const problem = pick("fishingMethod", "Fishing Method", "fishingMethod", "fishing method") || pick("bait", "Bait", "bait", "bait") || pick("targets", "Species", "species", "species");
+  const problem = pick("fishingMethod", "Fishing Method", "fishingMethod", "fishing method") || pick("targets", "Species", "species", "species");
   if (problem) return { error: problem };
-  if (ev.bait !== undefined && ev.baitOptions === undefined && next.baitOptions.length) {
-    const valid = await ctlBaitOptionsOf(env, uid, next.bait); // a bait change keeps only the options that still belong to a chosen bait
-    next.baitOptions = next.baitOptions.filter((o) => valid.has(o));
-  }
-  if (ev.baitOptions !== undefined) {
-    const items = ctlNameList(ev.baitOptions);
-    if (!items) return { error: "baitOptions must be a list of option names" };
-    if (items.length) {
-      const valid = await ctlBaitOptionsOf(env, uid, next.bait);
-      const bad = items.find((i) => !valid.has(i));
-      if (bad) return { error: `"${bad}" is not an option of the chosen bait` };
-    }
-    next.baitOptions = items;
-    changed = true;
-  }
   if (ev.berley !== undefined) {
     if (ev.berley !== null && typeof ev.berley !== "string") return { error: "berley must be text (empty to clear it)" };
     const b = (ev.berley || "").trim();
@@ -4363,8 +4346,6 @@ async function ctlBuildConfig(env, user) {
       // what the controller's "Modify defaults" shows and edits (the website's Trip Defaults): this action's own choices
       fishingMethod: a.fishingMethod,
       berley: a.berley || "",
-      bait: a.bait,
-      baitOptions: a.baitOptions,
       targets: a.species,
     })),
     rodSetups: rodSetups.map((r) => ({ id: r.id, name: r.name, rod: r.rod, rig: r.rig, subListItems: r.subListItems, bait: r.bait, baitOptions: r.baitOptions })),

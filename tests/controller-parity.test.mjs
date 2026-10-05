@@ -48,10 +48,11 @@ const worker = new Function(
 const rodSetups = [
   { id: "r1", name: "Light", rod: "L Wilson", rig: "Paternoster", subListItems: [] },
   { id: "r2", name: "Lure", rod: "L Raider", rig: "Jig Head", subListItems: ["Vibe", "Paddle Tail"], bait: ["Squid", "Worm"], baitOptions: ["Whole"] },
+  { id: "r4", name: "Bottom", rod: "M Penn", rig: "Paternoster", subListItems: [], bait: ["Prawn"], baitOptions: ["Peeled", "Whole"] },
   { id: "r3", name: "Heavy", rod: "M Penn", rig: "Paternoster", subListItems: [] },
 ];
 const actions = {
-  full: { id: "a1", tripId: "t1", name: "Drift", species: ["Bream", "Flathead", "Bream"], fishingMethod: ["Drifting"], berley: "Pilchard Mix", bait: ["Prawn", "Squid"], baitOptions: ["Peeled", "Whole"], rodSetupIds: ["r1", "r2", "gone"] },
+  full: { id: "a1", tripId: "t1", name: "Drift", species: ["Bream", "Flathead", "Bream"], fishingMethod: ["Drifting"], berley: "Pilchard Mix", rodSetupIds: ["r1", "r2", "gone"] },
   one: { id: "a2", tripId: "t1", name: "Anchor", species: ["Snapper"], fishingMethod: [], berley: "", bait: [], rodSetupIds: ["r3"] },
   empty: { id: "a3", tripId: "t1", name: "Move", species: [], fishingMethod: [], berley: null, bait: [], rodSetupIds: [] },
 };
@@ -104,13 +105,10 @@ test("Catch with a Bait answer: the answer is the mark's bait, as the Live +Catc
     const viaWorker = worker.ctlBuildCatch({ ...base, size: 30, released: false, bait: "Squid", setupId: null, tripName: "Weekend" }, action, rodSetups);
     assert.deepEqual(viaWorker, viaBrowser, action.name);
   }
-  // "none" (an empty answer from the controller) clears the action's bait; no answer keeps it
-  const withBait = Object.values(actions).find((a) => (a.bait || []).length);
-  if (withBait) {
-    const base = { id: "m9", lat: at.lat, lng: at.lng, dateTime: at.dateTime, species: "Bream", size: 30, released: false, setupId: null };
-    assert.equal(worker.ctlBuildCatch({ ...base, bait: "" }, withBait, rodSetups).bait, undefined);
-    assert.equal(worker.ctlBuildCatch({ ...base }, withBait, rodSetups).bait, withBait.bait.join(", "));
-  }
+  // "none" (an empty answer from the controller) clears the rod setup's bait; no answer keeps it
+  const base = { id: "m9", lat: at.lat, lng: at.lng, dateTime: at.dateTime, species: "Bream", size: 30, released: false, setupId: "r2" };
+  assert.equal(worker.ctlBuildCatch({ ...base, bait: "" }, actions.full, rodSetups).bait, undefined);
+  assert.equal(worker.ctlBuildCatch({ ...base }, actions.full, rodSetups).bait, "Squid, Worm");
 });
 
 test("a catch with no running action has only what the controller sent", () => {
