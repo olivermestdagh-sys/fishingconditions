@@ -682,6 +682,7 @@ function renderSessionLines(map, state, marks) {
     map.removeLayer(state.sessionLineLayer);
   }
   state.sessionLineLayer = L.layerGroup().addTo(map);
+  if (state.hideSessions) return; // Session marks are toggled off, so their connecting lines go too
 
   const groups = new Map(); // sessionGroupId -> {start, end}
   for (const mark of marks) {

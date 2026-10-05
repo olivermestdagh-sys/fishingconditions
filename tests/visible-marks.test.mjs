@@ -10,7 +10,7 @@ const fn = (name) => {
   return m[0];
 };
 const getVisibleMarks = new Function(
-  [fn("markOwnerLabel"), fn("markFieldValue"), "const MARK_FILTER_MULTI_VALUE_KEYS = [\"species\", \"bait\", \"rig\", \"rod\", \"berley\", \"fishingMethod\", \"rigOptions\"];", fn("markFieldValues"), fn("markMatchesFilters"), fn("getVisibleMarks"), "return getVisibleMarks;"].join("\n")
+  [fn("markOwnerLabel"), fn("markFieldValue"), "const MARK_FILTER_MULTI_VALUE_KEYS = [\"species\", \"bait\", \"rig\", \"rod\", \"berley\", \"fishingMethod\", \"rigOptions\"];", fn("markFieldValues"), fn("markMatchesFilters"), "const SESSION_TYPE_ROLES = { \"Session Start\": \"start\", \"Session End\": \"end\" };", fn("isSessionType"), fn("markPassesView"), fn("getVisibleMarks"), "return getVisibleMarks;"].join("\n")
 )();
 
 function stateWith(marks, filters) {
@@ -91,4 +91,10 @@ test("a comma-joined multi-value field (Session bait) matches each of its picks"
   assert.deepEqual(ids(getVisibleMarks(stateWith(sessions, inc))), ["s1"]);
   const exc = { bait: { include: new Set(), exclude: new Set(["Squid Jig"]) } };
   assert.deepEqual(ids(getVisibleMarks(stateWith(sessions, exc))), ["s2", "s3"]);
+});
+
+test("hideSessions drops Session Start/End marks but keeps everything else", () => {
+  const withSessions = [...marks, { id: "s", type: "Session Start" }, { id: "e", type: "Session End" }];
+  assert.deepEqual(ids(getVisibleMarks({ ...stateWith(withSessions, {}), hideSessions: true })), ["a", "b", "c"]);
+  assert.deepEqual(ids(getVisibleMarks(stateWith(withSessions, {}))), ["a", "b", "c", "e", "s"]);
 });

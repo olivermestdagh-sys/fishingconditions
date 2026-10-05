@@ -3022,6 +3022,10 @@ main.wide {
   background: var(--navy, #0b2a4a);
   color: #fff;
 }
+.map-toolbar #markSessionsBtn.active {
+  background: var(--navy, #0b2a4a);
+  color: #fff;
+}
 .map-toolbar .map-filter-btn {
   display: inline-flex;
   align-items: center;

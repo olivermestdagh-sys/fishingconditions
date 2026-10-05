@@ -111,9 +111,35 @@ function markMatchesFilters(mark, filters) {
 function getVisibleMarks(state) {
   const visible = [];
   state.marksById.forEach((mark) => {
-    if (markMatchesFilters(mark, state.filters)) visible.push(mark);
+    if (markPassesView(mark, state)) visible.push(mark);
   });
   return visible;
+}
+
+// Session Start/End marks are hidden on the map by default (trips replace them visually; the marks stay in the
+// data because Live, the ribbon and the trip log all read them). A per-device toggle, NOT synced.
+const SHOW_SESSION_MARKS_KEY = "goodConditionsShowSessionMarks";
+
+function loadShowSessionMarks() {
+  try {
+    return localStorage.getItem(SHOW_SESSION_MARKS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveShowSessionMarks(show) {
+  try {
+    localStorage.setItem(SHOW_SESSION_MARKS_KEY, show ? "1" : "0");
+  } catch {
+    // device-local convenience only
+  }
+}
+
+/** The filters plus the Session-marks toggle (state.hideSessions, set by initMarkControls; unset = show, as on the Import map). */
+function markPassesView(mark, state) {
+  if (state.hideSessions && isSessionType(mark.type)) return false;
+  return markMatchesFilters(mark, state.filters);
 }
 
 /**
@@ -130,7 +156,7 @@ function applyMarkFiltersAndGrouping(map, state) {
   state.marksById.forEach((mark, id) => {
     const marker = state.markersById.get(id);
     if (!marker) return;
-    const passes = markMatchesFilters(mark, state.filters);
+    const passes = markPassesView(mark, state);
     const onMap = layer.hasLayer(marker);
     if (passes) {
       if (!onMap) layer.addLayer(marker);
@@ -453,12 +479,20 @@ function initMarkControls(map, state) {
   if (!bar || !filterBtn || !colourBtn) return; // page doesn't have the controls markup (shouldn't happen on Location/Live, defensive)
   filterBtn.style.display = "";
   colourBtn.style.display = "";
+  const sessionsBtn = document.getElementById("markSessionsBtn");
+  state.hideSessions = !loadShowSessionMarks();
+  if (sessionsBtn) {
+    sessionsBtn.style.display = "";
+    sessionsBtn.setAttribute("aria-pressed", state.hideSessions ? "false" : "true");
+    sessionsBtn.classList.toggle("active", !state.hideSessions);
+  }
 
   const chipsContainer = document.getElementById("markActiveFilterChips");
   const badge = document.getElementById("markFilterBadge");
 
   function refresh() {
     applyMarkFiltersAndGrouping(map, state);
+    renderSessionLines(map, state, Array.from(state.marksById.values()));
     renderActiveFilterChips(chipsContainer, state, refresh);
     const activeCount = Object.entries(state.filters).reduce((n, [key, f]) => n + (!f ? 0 : key === "dateTime" ? (f.from ? 1 : 0) + (f.to ? 1 : 0) : f.include.size + f.exclude.size), 0);
     badge.textContent = activeCount > 0 ? `(${activeCount})` : "";
@@ -474,6 +508,15 @@ function initMarkControls(map, state) {
     await showMarkFilterModal(state, "filter");
     refresh();
   };
+  if (sessionsBtn) {
+    sessionsBtn.onclick = () => {
+      state.hideSessions = !state.hideSessions;
+      saveShowSessionMarks(!state.hideSessions);
+      sessionsBtn.setAttribute("aria-pressed", state.hideSessions ? "false" : "true");
+      sessionsBtn.classList.toggle("active", !state.hideSessions);
+      refresh();
+    };
+  }
   colourBtn.onclick = async () => {
     await showMarkFilterModal(state, "colour");
     refresh();
