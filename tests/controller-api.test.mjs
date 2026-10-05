@@ -703,3 +703,20 @@ test("mark_update: the date and time can be edited (and a bad one is refused)", 
   assert.equal(sqlite.prepare("SELECT date_time FROM marks WHERE id = ?").get(id).date_time, "2026-10-02 10:25:00");
   assert.equal((await update(env, token, "mark_update", 11, { markId: id, changes: { dateTime: "yesterday" } }))[0].status, "rejected");
 });
+
+test("action_update: rodSlots moves or swaps rod setups between the four positions; the config reports them", async () => {
+  const { sqlite, env, token } = await seeded();
+  let cfg = await (await api(env, token, "GET", "/api/controller/config")).json();
+  assert.deepEqual(cfg.actions.find((a) => a.id === "a1").rodSlots, ["r1", "r2", null, null], "an action saved without positions is laid out from the first");
+  const r = await update(env, token, "action_update", 1, { actionId: "a1", rodSlots: ["r2", null, null, "r1"] });
+  assert.equal(r[0].status, "created");
+  const row = actionRow(sqlite, "a1");
+  assert.deepEqual(JSON.parse(row.rod_slots), ["r2", null, null, "r1"]);
+  assert.deepEqual(JSON.parse(row.rod_setup_ids), ["r2", "r1"], "the plain list follows, in position order");
+  cfg = await (await api(env, token, "GET", "/api/controller/config")).json();
+  assert.deepEqual(cfg.actions.find((a) => a.id === "a1").rodSlots, ["r2", null, null, "r1"]);
+  assert.deepEqual(cfg.actions.find((a) => a.id === "a1").rodSetupIds, ["r2", "r1"]);
+  for (const [i, rodSlots] of [["r9", null, null, null], ["r1", "r1", "r1", "r1", "r1"], "r1", [5]].entries()) {
+    assert.equal((await update(env, token, "action_update", 10 + i, { actionId: "a1", rodSlots }))[0].status, "rejected", JSON.stringify(rodSlots));
+  }
+});

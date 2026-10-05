@@ -4112,7 +4112,7 @@ async function ctlBaitOptionsOf(env, uid, baits) {
 
 const ctlJsonOrNull = (list) => (list && list.length ? JSON.stringify(list) : null);
 
-/** The UPDATE for an `action_update` event: {actionId, fishingMethod?, berley?, targets?, rodSetupIds?} (bait lives on the Rod Setups). Only existing values may be chosen. */
+/** The UPDATE for an `action_update` event: {actionId, fishingMethod?, berley?, targets?, rodSetupIds?, rodSlots?} (bait lives on the Rod Setups; rodSlots = the four rod positions, all four sent). Only existing values may be chosen. */
 async function ctlActionUpdateStatements(env, uid, ev) {
   const row = typeof ev.actionId === "string" ? await env.DB.prepare("SELECT a.*, t.name AS trip_name FROM user_trip_actions a LEFT JOIN user_trip_setups t ON t.id = a.trip_id WHERE a.id = ? AND a.user_id = ?").bind(ev.actionId, uid).first() : null;
   if (!row) return { error: "action not found" };
@@ -4148,11 +4148,24 @@ async function ctlActionUpdateStatements(env, uid, ev) {
     next.rodSetupIds = ids;
     changed = true;
   }
+  let rodSlotsText = row.rod_slots ?? null;
+  if (ev.rodSlots !== undefined) {
+    // the four rod positions (the website's 2x2 grid): moving or swapping a rod setup sends all four
+    const slots = ev.rodSlots;
+    if (!Array.isArray(slots) || slots.length > ROD_SLOT_COUNT || slots.some((v) => v !== null && (typeof v !== "string" || !v.trim()))) return { error: "rodSlots must be up to 4 rod setup ids or nulls" };
+    const known = new Set((await env.DB.prepare("SELECT id FROM user_rod_setups WHERE user_id = ?").bind(uid).all()).results.map((r) => r.id));
+    if (slots.some((id) => id && !known.has(id))) return { error: "a rod setup in that list isn't yours" };
+    const padded = [...slots];
+    while (padded.length < ROD_SLOT_COUNT) padded.push(null);
+    rodSlotsText = JSON.stringify(padded);
+    next.rodSetupIds = rodIdsFromSlots(padded);
+    changed = true;
+  }
   if (!changed) return { error: "nothing to change" };
   return {
     stmts: [
-      env.DB.prepare("UPDATE user_trip_actions SET fishing_method = ?, berley = ?, bait = ?, bait_options = ?, rod_setup_ids = ?, species = ? WHERE id = ? AND user_id = ?")
-        .bind(ctlJsonOrNull(next.fishingMethod), next.berley, ctlJsonOrNull(next.bait), ctlJsonOrNull(next.baitOptions), ctlJsonOrNull(next.rodSetupIds), ctlJsonOrNull(next.species), cur.id, uid),
+      env.DB.prepare("UPDATE user_trip_actions SET fishing_method = ?, berley = ?, bait = ?, bait_options = ?, rod_setup_ids = ?, rod_slots = ?, species = ? WHERE id = ? AND user_id = ?")
+        .bind(ctlJsonOrNull(next.fishingMethod), next.berley, ctlJsonOrNull(next.bait), ctlJsonOrNull(next.baitOptions), ctlJsonOrNull(next.rodSetupIds), rodSlotsText, ctlJsonOrNull(next.species), cur.id, uid),
     ],
   };
 }
@@ -4377,6 +4390,7 @@ async function ctlBuildConfig(env, user) {
       tripId: a.tripId,
       name: a.name,
       rodSetupIds: ctlLiveRodSetupIds(a.rodSetupIds, rodSetups),
+      rodSlots: (a.rodSlots || []).map((id) => (id && rodSetups.some((r) => r.id === id) ? id : null)), // the four rod positions, null = empty
       species: ctlSpeciesOrder(a, actions, allSpecies),
       // what the controller's "Modify defaults" shows and edits (the website's Trip Defaults): this action's own choices
       fishingMethod: a.fishingMethod,
