@@ -125,8 +125,22 @@ function stepThumbs(options, key) {
 }
 
 /** Everything the cards can offer, keyed the way normaliseSessionDefaults expects. */
+/** {bait: [its sub-list options]} for every Bait with a Sub List (its own, plus your private one on a Public bait). */
+function baitSublistsFromMarkLists(markLists) {
+  const overrides = typeof rigSublistOverridesMap !== "undefined" ? rigSublistOverridesMap : new Map();
+  const out = {};
+  for (const row of markLists || []) {
+    if (row.field !== "Bait") continue;
+    const items = [...(row.hasSublist && Array.isArray(row.subList) ? row.subList : []), ...(overrides.get(row.id) || [])];
+    const unique = [...new Set(items.map((v) => String(v).trim()).filter(Boolean))];
+    if (unique.length) out[row.value] = unique;
+  }
+  return out;
+}
+
 function sessionCardOptions(markLists) {
   return {
+    baitSublists: baitSublistsFromMarkLists(markLists), // a Bait's options, offered on the Catch flow's Bait options card
     species: markListValues(markLists, "Species"),
     water: markListValues(markLists, "Water Condition"),
     berley: markListValues(markLists, "Berley"),
@@ -240,7 +254,7 @@ function catchCardState(options, ctx) {
   const fate = tooSmall ? "Release" : answers.fate || rec.fate;
   // Water depth: what was set on its card, else the default for new marks (ctx.depthDefault), else unknown.
   const depth = typeof answers.depth === "number" ? answers.depth : Number.isFinite(ctx.depthDefault) ? ctx.depthDefault : null;
-  return { species, lim, start, size, tooSmall, counts, rec, fate, released: fate === "Release", rod: answers.rod || "", bait: answers.bait || "", depth };
+  return { species, lim, start, size, tooSmall, counts, rec, fate, released: fate === "Release", rod: answers.rod || "", bait: answers.bait || "", baitOptions: Array.isArray(answers.baitOptions) ? answers.baitOptions : undefined, depth };
 }
 
 /** A press on the water depth card ("depth:-1", "depth:0.1", ...). `current` is the depth so far (metres) or null; a press
@@ -330,6 +344,17 @@ function buildCatchCardSteps(options, defaults, ctx = {}) {
       ...stepThumbs(options, "baits"),
       hint: preferredBaits.length ? "" : "No bait set — showing every bait.",
     });
+    // Bait options: the chosen bait's sub-list options (any number). Starts from the options the Action / Rod Setup carry; leaving it
+    // alone keeps them.
+    const chosenBaits = answers.bait ? [answers.bait] : preferredBaits.length === 1 ? [preferredBaits[0]] : [];
+    const offered = [...new Set(chosenBaits.flatMap((b) => (options.baitSublists || {})[b] || []))];
+    if (offered.length) {
+      const carried = (typeof defaults.baitOptionsFor === "function" ? defaults.baitOptionsFor(answers.rod) : defaults.baitOptions || []).filter((o) => offered.includes(o));
+      steps.push({
+        id: "baitOptions", title: "Bait options", prompt: `How was the ${chosenBaits.join(", ")} prepared?`, multi: true, required: false, options: offered,
+        selected: Array.isArray(answers.baitOptions) ? answers.baitOptions.filter((o) => offered.includes(o)) : carried,
+      });
+    }
   }
   return steps;
 }
@@ -342,7 +367,7 @@ function buildCatchCardSteps(options, defaults, ctx = {}) {
  * than asked about. Weather, barometer, temperature and wind are left blank here; saving a new mark fills them (see
  * saveMarkToD1).
  */
-function buildCatchFromCards({ id, lat, lng, dateTime, species, size, rod, bait, tooSmall, released }, defaults, tide, lastWaterDepth) {
+function buildCatchFromCards({ id, lat, lng, dateTime, species, size, rod, bait, baitOptions, tooSmall, released }, defaults, tide, lastWaterDepth) {
   const mark = { id, lat, lng, name: species, type: "Catch", dateTime, createdAt: dateTime, source: "Manual", species };
   const cm = size === "" || size == null ? NaN : Number(size);
   if (Number.isFinite(cm) && !tooSmall) mark.size = cm;
@@ -355,6 +380,7 @@ function buildCatchFromCards({ id, lat, lng, dateTime, species, size, rod, bait,
     if (setup.bait) mark.bait = setup.bait;
   }
   if (bait) mark.bait = bait; // the Bait question's answer wins over the rod's saved bait
+  if (Array.isArray(baitOptions) && baitOptions.length) mark.baitOptions = baitOptions.join(", ");
   if (defaults.water) mark.waterCondition = defaults.water;
   if (defaults.berley) mark.berley = defaults.berley;
   if (defaults.fishingMethod && defaults.fishingMethod.length) mark.fishingMethod = defaults.fishingMethod.join(", ");

@@ -3889,7 +3889,11 @@ function ctlBuildCatch(c, action, rodSetups) {
     if (c.bait) mark.bait = c.bait;
     else delete mark.bait; // the Bait question was answered "none"
     // the options belong to the configured baits: kept only when the answer is one of them
-    if (!c.bait || !action || !ctlUniq([...(action.bait || []), ...(rodSetups || []).flatMap((r) => r.bait || [])]).includes(c.bait)) delete mark.baitOptions;
+    if (!Array.isArray(c.baitOptions) && (!c.bait || !action || !ctlUniq([...(action.bait || []), ...(rodSetups || []).flatMap((r) => r.bait || [])]).includes(c.bait))) delete mark.baitOptions;
+  }
+  if (Array.isArray(c.baitOptions)) {
+    if (c.baitOptions.length) mark.baitOptions = c.baitOptions.join(", ");
+    else delete mark.baitOptions;
   }
   return mark;
 }

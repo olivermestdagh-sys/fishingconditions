@@ -449,6 +449,11 @@ function liveCatchDefaultsForAction(options, action) {
   return {
     species: action.species || [],
     bait: [...new Set([...(action.bait || []), ...setups.flatMap((s) => (s && s.bait) || [])])], // the Bait card lists these first (the Action's, then its Rod Setups')
+    // the Bait options card starts from the Action's options plus the chosen Rod Setup's (the only one when there is just one)
+    baitOptionsFor: (rodName) => {
+      const chosen = setups.length === 1 ? setups[0] : setups.find((x) => x && x.name === rodName);
+      return [...new Set([...(action.baitOptions || []), ...((chosen && chosen.baitOptions) || [])])];
+    },
     otherTargets: tdOtherTargets(liveTripData.actions, action),
     water: getLiveMarkDefaults().water || "",
     berley: action.berley || "",
@@ -485,6 +490,7 @@ async function saveLiveCatch(options, answers, defaults, gpsPromise, ctx) {
     size: st.tooSmall ? null : st.size,
     rod: defaults.tripAction ? "" : st.rod, // on a trip the rod/rig come from the chosen Rod Setup, below
     bait: st.bait,
+    baitOptions: st.baitOptions,
     tooSmall: st.tooSmall,
     released: st.released,
   }, { ...defaults, water: getLiveMarkDefaults().water || defaults.water }, tide, st.depth);
@@ -498,6 +504,11 @@ async function saveLiveCatch(options, answers, defaults, gpsPromise, ctx) {
     // the bait options belong to the configured baits: kept only when the answer is one of them
     const configuredBaits = [...(defaults.tripAction.bait || []), ...liveTripData.rodSetups.flatMap((r) => r.bait || [])];
     if (!st.bait || !configuredBaits.includes(st.bait)) delete mark.baitOptions;
+    if (st.baitOptions) {
+      // picked (or cleared) on the Bait options card: that wins over what the Action / Rod Setup carry
+      if (st.baitOptions.length) mark.baitOptions = st.baitOptions.join(", ");
+      else delete mark.baitOptions;
+    }
   }
   const result = await saveMarkToD1(mark, true);
   if (!result.success) {
@@ -543,7 +554,11 @@ async function startLiveCatch() {
         answers.fate = value;
       } else if (step.id === "depth") {
         answers.depth = applyDepthAction(catchCardState(options, { ...ctx, answers }).depth, value);
+      } else if (step.id === "baitOptions") {
+        const current = Array.isArray(answers.baitOptions) ? answers.baitOptions : step.selected;
+        answers.baitOptions = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
       } else {
+        if (step.id === "bait" && answers.bait !== value) delete answers.baitOptions; // a different bait: its own options start again
         answers[step.id] = answers[step.id] === value ? "" : value;
       }
     },
