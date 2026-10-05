@@ -495,6 +495,9 @@ async function saveLiveCatch(options, answers, defaults, gpsPromise, ctx) {
     const running = liveActiveSession();
     mark.name = tripCatchName(st.species, mark.tripName, mark.actionName, running ? running.number : null); // "[Species] [Trip] [Action] [Number]"
     if (st.bait) mark.bait = st.bait; // the Bait card's answer, not all of the action's baits
+    // the bait options belong to the configured baits: kept only when the answer is one of them
+    const configuredBaits = [...(defaults.tripAction.bait || []), ...liveTripData.rodSetups.flatMap((r) => r.bait || [])];
+    if (!st.bait || !configuredBaits.includes(st.bait)) delete mark.baitOptions;
   }
   const result = await saveMarkToD1(mark, true);
   if (!result.success) {

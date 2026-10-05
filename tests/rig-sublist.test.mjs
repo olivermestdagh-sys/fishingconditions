@@ -67,12 +67,12 @@ test("a Rig can turn on a sub list and save its options", async () => {
   assert.equal(env.updates.length, 2);
 });
 
-test("only Rig values can have a sub list", async () => {
-  for (const field of ["Rod", "Bait", "Species"]) {
+test("only Rig and Bait values can have a sub list", async () => {
+  for (const field of ["Rod", "Species"]) {
     const env = makeEnv(field);
     const res = await put(env, { hasSublist: true });
     assert.equal(res.status, 400, field);
-    assert.match((await res.json()).error, /Only Rig values/);
+    assert.match((await res.json()).error, /Only Rig and Bait values/);
     assert.deepEqual(env.updates, [], field);
   }
 });

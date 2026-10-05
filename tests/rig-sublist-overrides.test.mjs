@@ -96,8 +96,8 @@ test("rejected if you own the rig — edit its Sub List directly instead", async
   assert.match((await res.json()).error, /own this rig/);
 });
 
-test("404 for a missing rig or a non-Rig field", async () => {
-  const env = makeEnv([{ id: "rig1", user_id: "public", field: "Bait" }]);
+test("404 for a missing rig or a field with no sub lists", async () => {
+  const env = makeEnv([{ id: "rig1", user_id: "public", field: "Rod" }]);
   let res = await req(env, "PUT", "/api/rig-sublist-overrides/rig1", { subList: ["x"] });
   assert.equal(res.status, 404);
   res = await req(env, "PUT", "/api/rig-sublist-overrides/nope", { subList: ["x"] });

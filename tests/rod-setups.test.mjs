@@ -46,14 +46,14 @@ function makeEnv() {
           },
           async run() {
             if (/^INSERT INTO user_rod_setups/.test(sql)) {
-              const [id, user_id, name, rod, rig, sub_list_items, bait, created_at] = args;
+              const [id, user_id, name, rod, rig, sub_list_items, bait, bait_options, created_at] = args;
               if (rows.some((r) => r.user_id === user_id && r.name === name)) throw new Error("UNIQUE constraint failed");
-              rows.push({ id, user_id, name, rod, rig, sub_list_items, bait, created_at });
+              rows.push({ id, user_id, name, rod, rig, sub_list_items, bait, bait_options, created_at });
             } else if (/^UPDATE user_rod_setups/.test(sql)) {
-              const [name, rod, rig, sub_list_items, bait, id, user_id] = args;
+              const [name, rod, rig, sub_list_items, bait, bait_options, id, user_id] = args;
               if (rows.some((r) => r.user_id === user_id && r.name === name && r.id !== id)) throw new Error("UNIQUE constraint failed");
               const row = rows.find((r) => r.id === id && r.user_id === user_id);
-              Object.assign(row, { name, rod, rig, sub_list_items, bait });
+              Object.assign(row, { name, rod, rig, sub_list_items, bait, bait_options });
             } else if (/^DELETE FROM user_rod_setups/.test(sql)) {
               const idx = rows.findIndex((r) => r.id === args[0] && r.user_id === args[1]);
               if (idx !== -1) rows.splice(idx, 1);
@@ -127,4 +127,16 @@ test("a missing setup 404s", async () => {
   const env = makeEnv();
   const res = await req(env, "PUT", "/api/rodsetups/nope", { name: "x" });
   assert.equal(res.status, 404);
+});
+
+test("bait and baitOptions are saved with a rod setup", async () => {
+  const env = makeEnv();
+  const created = await (await req(env, "POST", "/api/rodsetups", { name: "Bait rig", bait: ["Prawn", "Squid"], baitOptions: ["Peeled"] })).json();
+  assert.deepEqual(created.bait, ["Prawn", "Squid"]);
+  assert.deepEqual(created.baitOptions, ["Peeled"]);
+  const updated = await (await req(env, "PUT", `/api/rodsetups/${created.id}`, { baitOptions: [] })).json();
+  assert.deepEqual(updated.bait, ["Prawn", "Squid"], "bait is kept when only the options change");
+  assert.deepEqual(updated.baitOptions, []);
+  const bad = await req(env, "PUT", `/api/rodsetups/${created.id}`, { baitOptions: [""] });
+  assert.equal(bad.status, 400);
 });

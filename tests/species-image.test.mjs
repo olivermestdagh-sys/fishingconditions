@@ -209,10 +209,10 @@ test("option pictures can be replaced and deleted; the index empties back to non
   assert.equal(env.images.has(a.id), false);
 });
 
-test("option pictures are refused for an option that isn't in the sub list, and for a non-Rig", async () => {
+test("option pictures are refused for an option that isn't in the sub list, and for a field with no sub lists", async () => {
   const env = makeEnv({ field: "Rig", subList: ["Vibe"] });
   assert.equal((await call(env, "POST", optPath("Nope") + "?userId=public")).status, 404);
-  const bait = makeEnv({ field: "Bait", subList: ["Vibe"] });
+  const bait = makeEnv({ field: "Rod", subList: ["Vibe"] });
   assert.equal((await call(bait, "POST", optPath("Vibe") + "?userId=public")).status, 404);
   assert.equal((await call(makeEnv({ field: "Rig", subList: ["Vibe"], signedIn: false }), "POST", optPath("Vibe"))).status, 401);
 });

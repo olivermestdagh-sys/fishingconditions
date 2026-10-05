@@ -1245,7 +1245,7 @@ async function insertGroupMemberships(env, uid, locationId, groupIds) {
 // ---------------------------------------------------------------------
 
 function rowToRodSetup(row) {
-  return { id: row.id, name: row.name, rod: row.rod, rig: row.rig, subListItems: parseSubList(row.sub_list_items), bait: parseSubList(row.bait) };
+  return { id: row.id, name: row.name, rod: row.rod, rig: row.rig, subListItems: parseSubList(row.sub_list_items), bait: parseSubList(row.bait), baitOptions: parseSubList(row.bait_options) };
 }
 
 async function handleRodSetupsCollection(request, url, env) {
@@ -1271,10 +1271,13 @@ async function handleRodSetupsCollection(request, url, env) {
     if (body.bait !== undefined && (!Array.isArray(body.bait) || body.bait.some((v) => typeof v !== "string" || !v.trim()))) {
       return jsonResponse({ error: "bait must be a list of bait names." }, 400, env);
     }
+    if (body.baitOptions !== undefined && (!Array.isArray(body.baitOptions) || body.baitOptions.some((v) => typeof v !== "string" || !v.trim()))) {
+      return jsonResponse({ error: "baitOptions must be a list of option names." }, 400, env);
+    }
     const id = crypto.randomUUID();
     try {
-      await env.DB.prepare("INSERT INTO user_rod_setups (id, user_id, name, rod, rig, sub_list_items, bait, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-        .bind(id, uid, body.name, body.rod ?? null, body.rig ?? null, body.subListItems && body.subListItems.length ? JSON.stringify(body.subListItems) : null, body.bait && body.bait.length ? JSON.stringify(body.bait) : null, Date.now())
+      await env.DB.prepare("INSERT INTO user_rod_setups (id, user_id, name, rod, rig, sub_list_items, bait, bait_options, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(id, uid, body.name, body.rod ?? null, body.rig ?? null, body.subListItems && body.subListItems.length ? JSON.stringify(body.subListItems) : null, body.bait && body.bait.length ? JSON.stringify(body.bait) : null, body.baitOptions && body.baitOptions.length ? JSON.stringify(body.baitOptions) : null, Date.now())
         .run();
     } catch (err) {
       return jsonResponse({ error: `You already have a rod setup named "${body.name}".` }, 409, env);
@@ -1307,16 +1310,20 @@ async function handleRodSetupItem(request, url, env, id) {
     if (body.bait !== undefined && (!Array.isArray(body.bait) || body.bait.some((v) => typeof v !== "string" || !v.trim()))) {
       return jsonResponse({ error: "bait must be a list of bait names." }, 400, env);
     }
+    if (body.baitOptions !== undefined && (!Array.isArray(body.baitOptions) || body.baitOptions.some((v) => typeof v !== "string" || !v.trim()))) {
+      return jsonResponse({ error: "baitOptions must be a list of option names." }, 400, env);
+    }
     const merged = {
       name: body.name ?? existing.name,
       rod: body.rod !== undefined ? body.rod : existing.rod,
       rig: body.rig !== undefined ? body.rig : existing.rig,
       subListItems: body.subListItems !== undefined ? body.subListItems : parseSubList(existing.sub_list_items),
       bait: body.bait !== undefined ? body.bait : parseSubList(existing.bait),
+      baitOptions: body.baitOptions !== undefined ? body.baitOptions : parseSubList(existing.bait_options),
     };
     try {
-      await env.DB.prepare("UPDATE user_rod_setups SET name=?, rod=?, rig=?, sub_list_items=?, bait=? WHERE id = ? AND user_id = ?")
-        .bind(merged.name, merged.rod, merged.rig, merged.subListItems.length ? JSON.stringify(merged.subListItems) : null, merged.bait.length ? JSON.stringify(merged.bait) : null, id, uid)
+      await env.DB.prepare("UPDATE user_rod_setups SET name=?, rod=?, rig=?, sub_list_items=?, bait=?, bait_options=? WHERE id = ? AND user_id = ?")
+        .bind(merged.name, merged.rod, merged.rig, merged.subListItems.length ? JSON.stringify(merged.subListItems) : null, merged.bait.length ? JSON.stringify(merged.bait) : null, merged.baitOptions.length ? JSON.stringify(merged.baitOptions) : null, id, uid)
         .run();
     } catch (err) {
       return jsonResponse({ error: `You already have a rod setup named "${merged.name}".` }, 409, env);
@@ -1467,6 +1474,7 @@ function rowToTripAction(row) {
     fishingMethod: parseSubList(row.fishing_method),
     berley: row.berley,
     bait: parseSubList(row.bait),
+    baitOptions: parseSubList(row.bait_options),
     rodSetupIds: parseSubList(row.rod_setup_ids),
     species: parseSubList(row.species),
   };
@@ -1500,9 +1508,9 @@ async function handleTripActionsCollection(request, url, env) {
     const arr = (v) => (v && v.length ? JSON.stringify(v) : null);
     try {
       await env.DB.prepare(
-        "INSERT INTO user_trip_actions (id, user_id, trip_id, name, fishing_method, berley, bait, rod_setup_ids, species, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO user_trip_actions (id, user_id, trip_id, name, fishing_method, berley, bait, bait_options, rod_setup_ids, species, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       )
-        .bind(id, uid, body.tripId, body.name, arr(body.fishingMethod), body.berley ?? null, arr(body.bait), arr(body.rodSetupIds), arr(body.species), Date.now())
+        .bind(id, uid, body.tripId, body.name, arr(body.fishingMethod), body.berley ?? null, arr(body.bait), arr(body.baitOptions), arr(body.rodSetupIds), arr(body.species), Date.now())
         .run();
     } catch (err) {
       return jsonResponse({ error: `This trip already has an action named "${body.name}".` }, 409, env);
@@ -1536,13 +1544,14 @@ async function handleTripActionItem(request, url, env, id) {
       fishingMethod: body.fishingMethod !== undefined ? body.fishingMethod : parseSubList(existing.fishing_method),
       berley: body.berley !== undefined ? body.berley : existing.berley,
       bait: body.bait !== undefined ? body.bait : parseSubList(existing.bait),
+      baitOptions: body.baitOptions !== undefined ? body.baitOptions : parseSubList(existing.bait_options),
       rodSetupIds: body.rodSetupIds !== undefined ? body.rodSetupIds : parseSubList(existing.rod_setup_ids),
       species: body.species !== undefined ? body.species : parseSubList(existing.species),
     };
     const arr = (v) => (v && v.length ? JSON.stringify(v) : null);
     try {
-      await env.DB.prepare("UPDATE user_trip_actions SET name=?, fishing_method=?, berley=?, bait=?, rod_setup_ids=?, species=? WHERE id = ? AND user_id = ?")
-        .bind(merged.name, arr(merged.fishingMethod), merged.berley ?? null, arr(merged.bait), arr(merged.rodSetupIds), arr(merged.species), id, uid)
+      await env.DB.prepare("UPDATE user_trip_actions SET name=?, fishing_method=?, berley=?, bait=?, bait_options=?, rod_setup_ids=?, species=? WHERE id = ? AND user_id = ?")
+        .bind(merged.name, arr(merged.fishingMethod), merged.berley ?? null, arr(merged.bait), arr(merged.baitOptions), arr(merged.rodSetupIds), arr(merged.species), id, uid)
         .run();
     } catch (err) {
       return jsonResponse({ error: `This trip already has an action named "${merged.name}".` }, 409, env);
@@ -1568,6 +1577,9 @@ async function handleTripActionItem(request, url, env, id) {
 // per-viewer private layer, so ?userId= is never honored here at all.
 // ---------------------------------------------------------------------
 
+/** The pick-list fields whose values can carry a Sub List (options): a Rig's, and a Bait's. */
+const SUBLIST_FIELDS = ["Rig", "Bait"];
+
 async function handleRigSublistOverridesCollection(request, url, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
@@ -1590,7 +1602,7 @@ async function handleRigSublistOverrideItem(request, url, env, rigId) {
       return jsonResponse({ error: "subList must be a list of option names." }, 400, env);
     }
     const rig = await env.DB.prepare("SELECT user_id, field FROM user_mark_lists WHERE id = ?").bind(rigId).first();
-    if (!rig || rig.field !== "Rig") return jsonResponse({ error: "Rig not found." }, 404, env);
+    if (!rig || !SUBLIST_FIELDS.includes(rig.field)) return jsonResponse({ error: "Rig or bait not found." }, 404, env);
     if (rig.user_id === user.id) return jsonResponse({ error: "You own this rig — edit its Sub List directly." }, 400, env);
     const existing = await env.DB.prepare("SELECT id, option_images FROM user_rig_sublist_overrides WHERE user_id = ? AND rig_id = ?").bind(user.id, rigId).first();
     let optionImages = {};
@@ -1738,8 +1750,8 @@ async function handleMarkListsCollection(request, url, env) {
     const body = await readJsonBody(request);
     const validationError = validateMarkListInput(body, { partial: false });
     if (validationError) return jsonResponse({ error: validationError }, 400, env);
-    if ((body.hasSublist !== undefined || body.subList !== undefined) && body.field !== "Rig") {
-      return jsonResponse({ error: "Only Rig values can have a sub list." }, 400, env);
+    if ((body.hasSublist !== undefined || body.subList !== undefined) && !SUBLIST_FIELDS.includes(body.field)) {
+      return jsonResponse({ error: "Only Rig and Bait values can have a sub list." }, 400, env);
     }
     const id = crypto.randomUUID();
     try {
@@ -1780,8 +1792,8 @@ async function handleMarkListItem(request, url, env, id) {
     const body = await readJsonBody(request);
     const validationError = validateMarkListInput(body, { partial: true });
     if (validationError) return jsonResponse({ error: validationError }, 400, env);
-    if ((body.hasSublist !== undefined || body.subList !== undefined) && (body.field ?? existing.field) !== "Rig") {
-      return jsonResponse({ error: "Only Rig values can have a sub list." }, 400, env);
+    if ((body.hasSublist !== undefined || body.subList !== undefined) && !SUBLIST_FIELDS.includes(body.field ?? existing.field)) {
+      return jsonResponse({ error: "Only Rig and Bait values can have a sub list." }, 400, env);
     }
     const merged = {
       field: body.field ?? existing.field,
@@ -2030,7 +2042,7 @@ async function handleRigOptionImages(request, url, env, rigId, option, imageId) 
   let saveAll;
   if (priv) {
     const rig = await env.DB.prepare("SELECT * FROM user_mark_lists WHERE id = ?").bind(rigId).first();
-    if (!rig || rig.field !== "Rig") return jsonResponse({ error: "Rig not found." }, 404, env);
+    if (!rig || !SUBLIST_FIELDS.includes(rig.field)) return jsonResponse({ error: "Rig or bait not found." }, 404, env);
     if (rig.user_id === user.id) return jsonResponse({ error: "You own this rig — add pictures to its options directly." }, 400, env);
     const override = await env.DB.prepare("SELECT * FROM user_rig_sublist_overrides WHERE user_id = ? AND rig_id = ?").bind(user.id, rigId).first();
     subList = override ? parseSubList(override.sub_list) : [];
@@ -2042,7 +2054,7 @@ async function handleRigOptionImages(request, url, env, rigId, option, imageId) 
     if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
     const uid = resolved.id;
     const rig = await env.DB.prepare("SELECT * FROM user_mark_lists WHERE id = ? AND user_id = ?").bind(rigId, uid).first();
-    if (!rig || rig.field !== "Rig") return jsonResponse({ error: "Rig not found." }, 404, env);
+    if (!rig || !SUBLIST_FIELDS.includes(rig.field)) return jsonResponse({ error: "Rig or bait not found." }, 404, env);
     subList = parseSubList(rig.sub_list);
     if (!subList.includes(option)) return jsonResponse({ error: "Option not found." }, 404, env);
     all = parseOptionImages(rig.option_images);
@@ -2315,7 +2327,7 @@ async function handleMarkItem(request, url, env, id) {
       `UPDATE marks SET lat=?, lng=?, name=?, type=?, date_time=?, source=?, source_uuid=?, species=?, bait=?, rig=?,
                         rod=?, berley=?, notes=?, size=?, released=?, weather_condition=?, tide_condition=?, tide_extreme=?, water_condition=?,
                         water_depth=?, water_temperature=?, temperature=?, barometer=?, wind_direction=?, wind_speed=?,
-                        fishing_method=?, rig_options=?, session_role=?, session_group_id=?, trip_name=?, action_name=?, user_id=?
+                        fishing_method=?, rig_options=?, session_role=?, session_group_id=?, trip_name=?, action_name=?, bait_options=?, user_id=?
        WHERE id = ? AND user_id = ?`
     )
       .bind(
@@ -2323,7 +2335,7 @@ async function handleMarkItem(request, url, env, id) {
         merged.species, merged.bait, merged.rig, merged.rod, merged.berley, merged.notes, merged.size, merged.released,
         merged.weatherCondition, merged.tideCondition, merged.tideExtreme, merged.waterCondition, merged.waterDepth,
         merged.waterTemperature, merged.temperature, merged.barometer, merged.windDirection, merged.windSpeed,
-        merged.fishingMethod, merged.rigOptions, merged.sessionRole, merged.sessionGroupId, merged.tripName, merged.actionName, newOwner,
+        merged.fishingMethod, merged.rigOptions, merged.sessionRole, merged.sessionGroupId, merged.tripName, merged.actionName, merged.baitOptions, newOwner,
         id, uid
       )
       .run();
@@ -2349,8 +2361,8 @@ function markInsertStatement(env, id, uid, body, now) {
     `INSERT INTO marks (id, user_id, lat, lng, name, type, date_time, source, source_uuid, species, bait, rig, rod,
                          berley, notes, size, released, weather_condition, tide_condition, tide_extreme, water_condition, water_depth,
                          water_temperature, temperature, barometer, wind_direction, wind_speed,
-                         fishing_method, rig_options, session_role, session_group_id, created_at, trip_run_id, trip_name, action_name)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                         fishing_method, rig_options, session_role, session_group_id, created_at, trip_run_id, trip_name, action_name, bait_options)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       id, uid, body.lat, body.lng, body.name ?? null, body.type, body.dateTime, body.source ?? "manual",
@@ -2358,7 +2370,7 @@ function markInsertStatement(env, id, uid, body, now) {
       body.berley ?? null, body.notes ?? null, body.size ?? null, body.released ? 1 : 0, body.weatherCondition ?? null, body.tideCondition ?? null, body.tideExtreme ?? null,
       body.waterCondition ?? null, body.waterDepth ?? null, body.waterTemperature ?? null, body.temperature ?? null,
       body.barometer ?? null, body.windDirection ?? null, body.windSpeed ?? null,
-      body.fishingMethod ?? null, body.rigOptions ?? null, body.sessionRole ?? null, body.sessionGroupId ?? null, now, body.tripRunId ?? null, body.tripName ?? null, body.actionName ?? null
+      body.fishingMethod ?? null, body.rigOptions ?? null, body.sessionRole ?? null, body.sessionGroupId ?? null, now, body.tripRunId ?? null, body.tripName ?? null, body.actionName ?? null, body.baitOptions ?? null
     );
 }
 
@@ -2385,6 +2397,7 @@ function mergeMarkFields(existing, body) {
     waterCondition: body.waterCondition !== undefined ? body.waterCondition : existing.water_condition,
     fishingMethod: body.fishingMethod !== undefined ? body.fishingMethod : existing.fishing_method,
     rigOptions: body.rigOptions !== undefined ? body.rigOptions : existing.rig_options,
+    baitOptions: body.baitOptions !== undefined ? body.baitOptions : existing.bait_options,
     waterDepth: body.waterDepth !== undefined ? body.waterDepth : existing.water_depth,
     waterTemperature: body.waterTemperature !== undefined ? body.waterTemperature : existing.water_temperature,
     temperature: body.temperature !== undefined ? body.temperature : existing.temperature,
@@ -2422,6 +2435,7 @@ function rowToMark(row) {
     waterCondition: row.water_condition,
     fishingMethod: row.fishing_method,
     rigOptions: row.rig_options,
+    baitOptions: row.bait_options,
     waterDepth: row.water_depth,
     waterTemperature: row.water_temperature,
     temperature: row.temperature,
@@ -3807,12 +3821,13 @@ function ctlBuildSessionStart(action, rodSetups, ctx) {
   set("rod", ctlUniq(setups.map((s) => s.rod)));
   set("rig", ctlUniq(setups.map((s) => s.rig)));
   set("rigOptions", ctlUniq(setups.flatMap((s) => s.subListItems || [])));
+  set("baitOptions", ctlUniq([...(action.baitOptions || []), ...setups.flatMap((s) => s.baitOptions || [])]));
   if (ctx.water) mark.waterCondition = ctx.water;
   if (ctx.waterDepth != null) mark.waterDepth = ctx.waterDepth;
   return mark;
 }
 
-const CTL_SESSION_END_CARRIED_FIELDS = ["species", "waterCondition", "berley", "fishingMethod", "waterDepth", "rod", "rig", "bait", "rigOptions", "tideCondition", "tideExtreme", "tripName", "actionName"];
+const CTL_SESSION_END_CARRIED_FIELDS = ["species", "waterCondition", "berley", "fishingMethod", "waterDepth", "rod", "rig", "bait", "rigOptions", "baitOptions", "tideCondition", "tideExtreme", "tripName", "actionName"];
 
 /** The Session End that closes `startMark` — buildSessionEndFromStart (js/live-cards.js). */
 function ctlBuildSessionEnd(startMark, { id, lat, lng, dateTime, createdAt, source, water, waterDepth }, sessionNumber) {
@@ -3840,6 +3855,8 @@ function ctlCatchFieldsFromAction(action, rodSetups, setupId, tripName) {
   if ((action.fishingMethod || []).length) out.fishingMethod = action.fishingMethod.join(", ");
   const baits = ctlUniq([...(action.bait || []), ...(setup ? setup.bait || [] : [])]);
   if (baits.length) out.bait = baits.join(", ");
+  const baitOptions = ctlUniq([...(action.baitOptions || []), ...(setup ? setup.baitOptions || [] : [])]);
+  if (baitOptions.length) out.baitOptions = baitOptions.join(", ");
   if (setup) {
     if (setup.rod) out.rod = setup.rod;
     if (setup.rig) out.rig = setup.rig;
@@ -3871,6 +3888,8 @@ function ctlBuildCatch(c, action, rodSetups) {
   if (typeof c.bait === "string") {
     if (c.bait) mark.bait = c.bait;
     else delete mark.bait; // the Bait question was answered "none"
+    // the options belong to the configured baits: kept only when the answer is one of them
+    if (!c.bait || !action || !ctlUniq([...(action.bait || []), ...(rodSetups || []).flatMap((r) => r.bait || [])]).includes(c.bait)) delete mark.baitOptions;
   }
   return mark;
 }
@@ -4033,8 +4052,8 @@ async function ctlListValues(env, uid) {
 }
 
 /** A rig's options: its own Sub List, else your private one on a Public rig (nothing when it has none). */
-async function ctlRigOptions(env, uid, rigName) {
-  const rows = (await env.DB.prepare("SELECT id, user_id, has_sublist, sub_list FROM user_mark_lists WHERE field = 'Rig' AND value = ? AND user_id IN (?, ?)").bind(rigName, uid, PUBLIC_USER_ID).all()).results;
+async function ctlRigOptions(env, uid, rigName, field = "Rig") {
+  const rows = (await env.DB.prepare("SELECT id, user_id, has_sublist, sub_list FROM user_mark_lists WHERE field = ? AND value = ? AND user_id IN (?, ?)").bind(field, rigName, uid, PUBLIC_USER_ID).all()).results;
   const row = rows.find((r) => r.user_id === uid) || rows[0]; // your own row wins over Public's
   if (!row) return [];
   if (row.has_sublist) return parseSubList(row.sub_list);
@@ -4047,14 +4066,21 @@ function ctlNameList(v) {
   return Array.isArray(v) && v.every((x) => typeof x === "string" && x.trim()) ? [...new Set(v.map((x) => x.trim()))] : null;
 }
 
+/** Every option of the given baits (their Sub Lists, or your private one on a Public bait). */
+async function ctlBaitOptionsOf(env, uid, baits) {
+  const options = new Set();
+  for (const b of baits || []) for (const o of await ctlRigOptions(env, uid, b, "Bait")) options.add(o);
+  return options;
+}
+
 const ctlJsonOrNull = (list) => (list && list.length ? JSON.stringify(list) : null);
 
-/** The UPDATE for an `action_update` event: {actionId, fishingMethod?, berley?, bait?, targets?, rodSetupIds?}. Only existing values may be chosen. */
+/** The UPDATE for an `action_update` event: {actionId, fishingMethod?, berley?, bait?, baitOptions?, targets?, rodSetupIds?}. Only existing values may be chosen. */
 async function ctlActionUpdateStatements(env, uid, ev) {
   const row = typeof ev.actionId === "string" ? await env.DB.prepare("SELECT a.*, t.name AS trip_name FROM user_trip_actions a LEFT JOIN user_trip_setups t ON t.id = a.trip_id WHERE a.id = ? AND a.user_id = ?").bind(ev.actionId, uid).first() : null;
   if (!row) return { error: "action not found" };
   const cur = rowToTripAction(row);
-  const next = { fishingMethod: cur.fishingMethod, berley: cur.berley || null, bait: cur.bait, species: cur.species, rodSetupIds: cur.rodSetupIds };
+  const next = { fishingMethod: cur.fishingMethod, berley: cur.berley || null, bait: cur.bait, baitOptions: cur.baitOptions, species: cur.species, rodSetupIds: cur.rodSetupIds };
   const lists = await ctlListValues(env, uid);
   let changed = false;
   const pick = (key, field, column, label) => {
@@ -4069,6 +4095,21 @@ async function ctlActionUpdateStatements(env, uid, ev) {
   };
   const problem = pick("fishingMethod", "Fishing Method", "fishingMethod", "fishing method") || pick("bait", "Bait", "bait", "bait") || pick("targets", "Species", "species", "species");
   if (problem) return { error: problem };
+  if (ev.bait !== undefined && ev.baitOptions === undefined && next.baitOptions.length) {
+    const valid = await ctlBaitOptionsOf(env, uid, next.bait); // a bait change keeps only the options that still belong to a chosen bait
+    next.baitOptions = next.baitOptions.filter((o) => valid.has(o));
+  }
+  if (ev.baitOptions !== undefined) {
+    const items = ctlNameList(ev.baitOptions);
+    if (!items) return { error: "baitOptions must be a list of option names" };
+    if (items.length) {
+      const valid = await ctlBaitOptionsOf(env, uid, next.bait);
+      const bad = items.find((i) => !valid.has(i));
+      if (bad) return { error: `"${bad}" is not an option of the chosen bait` };
+    }
+    next.baitOptions = items;
+    changed = true;
+  }
   if (ev.berley !== undefined) {
     if (ev.berley !== null && typeof ev.berley !== "string") return { error: "berley must be text (empty to clear it)" };
     const b = (ev.berley || "").trim();
@@ -4088,18 +4129,18 @@ async function ctlActionUpdateStatements(env, uid, ev) {
   if (!changed) return { error: "nothing to change" };
   return {
     stmts: [
-      env.DB.prepare("UPDATE user_trip_actions SET fishing_method = ?, berley = ?, bait = ?, rod_setup_ids = ?, species = ? WHERE id = ? AND user_id = ?")
-        .bind(ctlJsonOrNull(next.fishingMethod), next.berley, ctlJsonOrNull(next.bait), ctlJsonOrNull(next.rodSetupIds), ctlJsonOrNull(next.species), cur.id, uid),
+      env.DB.prepare("UPDATE user_trip_actions SET fishing_method = ?, berley = ?, bait = ?, bait_options = ?, rod_setup_ids = ?, species = ? WHERE id = ? AND user_id = ?")
+        .bind(ctlJsonOrNull(next.fishingMethod), next.berley, ctlJsonOrNull(next.bait), ctlJsonOrNull(next.baitOptions), ctlJsonOrNull(next.rodSetupIds), ctlJsonOrNull(next.species), cur.id, uid),
     ],
   };
 }
 
-/** The UPDATE for a `rodsetup_update` event: {rodSetupId, rod?, rig?, subListItems?, bait?}. Changing the rig clears its options unless new ones are given (as on the website). */
+/** The UPDATE for a `rodsetup_update` event: {rodSetupId, rod?, rig?, subListItems?, bait?, baitOptions?}. Changing the rig clears its options unless new ones are given (as on the website). */
 async function ctlRodSetupUpdateStatements(env, uid, ev) {
   const row = typeof ev.rodSetupId === "string" ? await env.DB.prepare("SELECT * FROM user_rod_setups WHERE id = ? AND user_id = ?").bind(ev.rodSetupId, uid).first() : null;
   if (!row) return { error: "rod setup not found" };
   const cur = rowToRodSetup(row);
-  const next = { rod: cur.rod || null, rig: cur.rig || null, subListItems: cur.subListItems, bait: cur.bait };
+  const next = { rod: cur.rod || null, rig: cur.rig || null, subListItems: cur.subListItems, bait: cur.bait, baitOptions: cur.baitOptions };
   const lists = await ctlListValues(env, uid);
   let changed = false;
   for (const [key, field] of [["rod", "Rod"], ["rig", "Rig"]]) {
@@ -4128,11 +4169,26 @@ async function ctlRodSetupUpdateStatements(env, uid, ev) {
     const bad = items.find((i) => !(lists.Bait && lists.Bait.has(i)));
     if (bad) return { error: `"${bad}" is not one of your bait options` };
     next.bait = items;
+    if (ev.baitOptions === undefined && next.baitOptions.length) {
+      const valid = await ctlBaitOptionsOf(env, uid, items);
+      next.baitOptions = next.baitOptions.filter((o) => valid.has(o));
+    }
+    changed = true;
+  }
+  if (ev.baitOptions !== undefined) {
+    const items = ctlNameList(ev.baitOptions);
+    if (!items) return { error: "baitOptions must be a list of option names" };
+    if (items.length) {
+      const valid = await ctlBaitOptionsOf(env, uid, next.bait);
+      const bad = items.find((i) => !valid.has(i));
+      if (bad) return { error: `"${bad}" is not an option of the chosen bait` };
+    }
+    next.baitOptions = items;
     changed = true;
   }
   if (!changed) return { error: "nothing to change" };
   return {
-    stmts: [env.DB.prepare("UPDATE user_rod_setups SET rod = ?, rig = ?, sub_list_items = ?, bait = ? WHERE id = ? AND user_id = ?").bind(next.rod, next.rig, ctlJsonOrNull(next.subListItems), ctlJsonOrNull(next.bait), cur.id, uid)],
+    stmts: [env.DB.prepare("UPDATE user_rod_setups SET rod = ?, rig = ?, sub_list_items = ?, bait = ?, bait_options = ? WHERE id = ? AND user_id = ?").bind(next.rod, next.rig, ctlJsonOrNull(next.subListItems), ctlJsonOrNull(next.bait), ctlJsonOrNull(next.baitOptions), cur.id, uid)],
   };
 }
 
@@ -4169,6 +4225,7 @@ async function ctlMarkUpdateStatements(env, uid, ev) {
   const keys = Object.keys(ch);
   if (!keys.length) return { error: "nothing to change" };
   let rigsNow = ctlUniq((row.rig || "").split(","));
+  let baitsNow = ctlUniq((row.bait || "").split(","));
   for (const key of keys) {
     const v = ch[key];
     if (CTL_MARK_LIST_FIELDS[key]) {
@@ -4182,6 +4239,10 @@ async function ctlMarkUpdateStatements(env, uid, ev) {
       if (key === "rig") {
         rigsNow = values;
         if (ch.rigOptions === undefined) sets.rig_options = null; // changing the rig clears its options, like the site
+      }
+      if (key === "bait") {
+        baitsNow = values;
+        if (ch.baitOptions === undefined) sets.bait_options = null; // changing the bait clears its options, like the rig's
       }
       if (key === "species" && !isSession) sets.name = values[0] || row.name; // a Catch is named after its species
     } else if (CTL_MARK_NUMBER_FIELDS[key]) {
@@ -4215,7 +4276,7 @@ async function ctlMarkUpdateStatements(env, uid, ev) {
     } else if (key === "dateTime") {
       if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(v) || ctlParseNaive(v) == null) return { error: "dateTime must be YYYY-MM-DD HH:MM:SS" };
       sets.date_time = v;
-    } else if (key !== "rigOptions") {
+    } else if (key !== "rigOptions" && key !== "baitOptions") {
       return { error: `${key} can't be edited` };
     }
   }
@@ -4229,6 +4290,16 @@ async function ctlMarkUpdateStatements(env, uid, ev) {
       if (stranger) return { error: `"${stranger}" is not an option of the chosen rig` };
     }
     sets.rig_options = items.length ? items.join(", ") : null;
+  }
+  if (ch.baitOptions !== undefined) {
+    const items = ch.baitOptions === null ? [] : ctlNameList(ch.baitOptions);
+    if (!items) return { error: "baitOptions must be a list of option names" };
+    if (items.length) {
+      const options = await ctlBaitOptionsOf(env, uid, baitsNow);
+      const stranger = items.find((i) => !options.has(i));
+      if (stranger) return { error: `"${stranger}" is not an option of the chosen bait` };
+    }
+    sets.bait_options = items.length ? items.join(", ") : null;
   }
   const cols = Object.keys(sets);
   if (!cols.length) return { error: "nothing to change" };
@@ -4289,11 +4360,13 @@ async function ctlBuildConfig(env, user) {
       fishingMethod: a.fishingMethod,
       berley: a.berley || "",
       bait: a.bait,
+      baitOptions: a.baitOptions,
       targets: a.species,
     })),
-    rodSetups: rodSetups.map((r) => ({ id: r.id, name: r.name, rod: r.rod, rig: r.rig, subListItems: r.subListItems, bait: r.bait })),
+    rodSetups: rodSetups.map((r) => ({ id: r.id, name: r.name, rod: r.rod, rig: r.rig, subListItems: r.subListItems, bait: r.bait, baitOptions: r.baitOptions })),
     rods: names("Rod"),
     // A rig's options: its own Sub List, else your private one on a Public rig (same rule as the website's tdRigSublist).
+    baitLists: (byField.Bait || []).map((r) => ({ name: r.value, options: r.has_sublist ? parseSubList(r.sub_list) : overrideByRig.get(r.id) || [], optionImages: rigOptionImages(r) })).sort((a, b) => a.name.localeCompare(b.name)),
     rigs: (byField.Rig || []).map((r) => ({ name: r.value, options: r.has_sublist ? parseSubList(r.sub_list) : overrideByRig.get(r.id) || [], optionImages: rigOptionImages(r) })).sort((a, b) => a.name.localeCompare(b.name)),
     images,
     species: allSpecies,

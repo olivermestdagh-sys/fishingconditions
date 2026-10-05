@@ -287,6 +287,7 @@ CREATE TABLE IF NOT EXISTS user_rod_setups (
   rig TEXT,
   sub_list_items TEXT,
   bait TEXT, -- JSON list of Bait names (multi-select); needs a manual ALTER TABLE on an existing D1
+  bait_options TEXT, -- JSON list of Bait Sub List items for those baits (manual ALTER TABLE on an existing D1)
   created_at INTEGER NOT NULL,
   UNIQUE (user_id, name)
 );
@@ -322,6 +323,7 @@ CREATE TABLE IF NOT EXISTS user_trip_actions (
   fishing_method TEXT,
   berley TEXT,
   bait TEXT, -- JSON array of Bait names (added later via ALTER TABLE)
+  bait_options TEXT, -- JSON array of Bait Sub List items (added later via ALTER TABLE)
   rod_setup_ids TEXT,
   species TEXT,
   created_at INTEGER NOT NULL,
@@ -432,6 +434,7 @@ CREATE TABLE IF NOT EXISTS marks (
   tide_condition TEXT,
   tide_extreme TEXT, -- HHW/LHW/HLW/LLW modifier for tide_condition (added later via ALTER TABLE)
   rig_options TEXT, -- comma-joined Rig Sub List items picked for the rig(s) used (added later via ALTER TABLE)
+  bait_options TEXT, -- comma-joined Bait Sub List items picked for the bait(s) used (added later via ALTER TABLE)
   fishing_method TEXT, -- comma-joined on Session Start/End (multi-value, like bait/rig/rod/berley); single value on a Catch (added later via ALTER TABLE)
   water_condition TEXT,
   water_depth REAL,

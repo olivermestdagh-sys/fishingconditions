@@ -743,6 +743,7 @@ const MARK_FILTER_ONLY_FIELDS = [
   { key: "source", label: "Source" },
   { key: "tripName", label: "Trip" }, // the trip a trip-made mark belongs to (text); options come from the marks themselves
   { key: "actionName", label: "Action" },
+  { key: "baitOptions", label: "Bait Options" }, // the chosen Bait's Sub List items; like Rig Options, taken from the marks themselves
   { key: "rigOptions", label: "Rig Options" }, // the chosen Rig's Sub List items; the options come from the marks themselves, like Source
   { key: "owner", label: "Mark Owner" }, // "Mine", "Public" (Mark, POI) or, Admin only, "Other" (a different real user's own mark, now that Admin can see those too) — see markOwnerLabel
 ];
@@ -771,7 +772,7 @@ function markFieldValue(mark, key) {
 /** A mark's value(s) for a filterable field as a list: a Session's multi-value fields (species, bait, rig, rod, berley,
  * method, rig options) are stored comma-joined, so each pick counts separately — filtering on "Squid Jig" has to find
  * "Squid Jig, Prawn, Squid" too. */
-const MARK_FILTER_MULTI_VALUE_KEYS = ["species", "bait", "rig", "rod", "berley", "fishingMethod", "rigOptions"];
+const MARK_FILTER_MULTI_VALUE_KEYS = ["species", "bait", "rig", "rod", "berley", "fishingMethod", "rigOptions", "baitOptions"];
 function markFieldValues(mark, key) {
   const value = markFieldValue(mark, key);
   if (!value) return [];

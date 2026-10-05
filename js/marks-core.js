@@ -177,7 +177,7 @@ const MARK_TYPE_FIELD_KEYS = {
   Mark: ["species"],
   Catch: [
     "species", "weatherCondition", "tideCondition", "tideExtreme", "waterCondition", "bait", "rig", "rod", "berley", "fishingMethod",
-    "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed", "notes", "released", "rigOptions",
+    "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed", "notes", "released", "rigOptions", "baitOptions",
     "tripName", "actionName", // the trip and Action a trip-made mark belongs to (text, a snapshot)
   ],
 };
@@ -231,7 +231,7 @@ function typeAllowsMultipleSpecies(type) {
 
 /** Fields where a Session can hold several values (stored comma-joined, the
  * same convention the Sync import already uses for bait/rig/rod/berley). */
-const SESSION_MULTI_VALUE_FIELDS = ["species", "bait", "rig", "rod", "berley", "fishingMethod", "rigOptions"];
+const SESSION_MULTI_VALUE_FIELDS = ["species", "bait", "rig", "rod", "berley", "fishingMethod", "rigOptions", "baitOptions"];
 function typeAllowsMultipleValues(type, key) {
   return isSessionType(type) && SESSION_MULTI_VALUE_FIELDS.includes(key);
 }
@@ -586,6 +586,7 @@ function buildMarkPopupViewHtml(mark) {
   for (const f of MARK_POPUP_OPTIONAL_FIELDS) {
     if (applicable.includes(f.key)) row(f.displayLabel, mark[f.key]);
   }
+  if (applicable.includes("baitOptions")) row("Bait options", mark.baitOptions);
   if (applicable.includes("rigOptions")) row("Rig options", mark.rigOptions);
   if (applicable.includes("tripName")) row("Trip", mark.tripName);
   if (applicable.includes("actionName")) row("Action", mark.actionName);
@@ -666,14 +667,15 @@ const markEditOpenGroups = new Set();
 // The synthetic mark-list "field" the Rig options pills/tick-boxes are built under (their options come from a Rig's own Sub List,
 // not from a list of their own).
 const RIG_OPTIONS_LIST = "__rigOptions";
+const BAIT_OPTIONS_LIST = "__baitOptions";
 
 /** {rig value: [its sub-options]} for every Rig in `markLists`: a rig's own Sub List when it has one, plus your private
  * sub-list on a rig you don't own (rigSublistOverridesMap, js/backend.js). Rigs with none are left out. */
-function rigSublistMapFor(markLists) {
+function rigSublistMapFor(markLists, field = "Rig") {
   const out = {};
-  const overrides = typeof rigSublistOverridesMap !== "undefined" ? rigSublistOverridesMap : new Map();
+  const overrides = typeof rigSublistOverridesMap !== "undefined" ? rigSublistOverridesMap : new Map(); // keyed by list row id: covers Bait rows too
   for (const row of markLists || []) {
-    if (row.field !== "Rig") continue;
+    if (row.field !== field) continue;
     const items = [...(row.hasSublist && Array.isArray(row.subList) ? row.subList : []), ...(overrides.get(row.id) || [])];
     const unique = [...new Set(items.map((v) => String(v).trim()).filter(Boolean))];
     if (unique.length) out[row.value] = unique;
@@ -685,32 +687,38 @@ function rigSublistMapFor(markLists) {
  * sub-options and any picked option that no longer belongs to it is dropped; the row hides when there are none. A no-op
  * while the rig selection is unchanged (so it never disturbs what was picked). Called from syncMarkFormPills. */
 function refreshRigOptionsControls(form) {
-  const holder = form.querySelector("[data-rig-sublists]");
-  const rigState = markPillState(form, "rig");
-  const select = form.querySelector('select[name="rigOptions"]');
+  refreshSublistOptionsControls(form, "rig", "rigOptions", RIG_OPTIONS_LIST, "data-rig-sublists", "rigSublists", "rigKey", "data-rig-options-row");
+  refreshSublistOptionsControls(form, "bait", "baitOptions", BAIT_OPTIONS_LIST, "data-bait-sublists", "baitSublists", "baitKey", "data-bait-options-row");
+}
+
+/** The shared body of refreshRigOptionsControls: `parentKey` is the pill field whose choice drives `optionsKey`'s options. */
+function refreshSublistOptionsControls(form, parentKey, optionsKey, listLabel, holderAttr, mapDataKey, stateDataKey, rowAttr) {
+  const holder = form.querySelector(`[${holderAttr}]`);
+  const rigState = markPillState(form, parentKey);
+  const select = form.querySelector(`select[name="${optionsKey}"]`);
   if (!holder || !rigState || !select) return;
   const rigKey = JSON.stringify(rigState.selected);
-  if (holder.dataset.rigKey === rigKey) return;
+  if (holder.dataset[stateDataKey] === rigKey) return;
   let map = {};
   try {
-    map = JSON.parse(holder.dataset.rigSublists || "{}");
+    map = JSON.parse(holder.dataset[mapDataKey] || "{}");
   } catch {
     map = {};
   }
   const allowed = [...new Set(rigState.selected.flatMap((r) => map[r] || []))];
-  const lists = allowed.map((v) => ({ field: RIG_OPTIONS_LIST, value: v }));
-  const multiWrap = form.querySelector('[data-multi-multi="rigOptions"]');
+  const lists = allowed.map((v) => ({ field: listLabel, value: v }));
+  const multiWrap = form.querySelector(`[data-multi-multi="${optionsKey}"]`);
   const multiActive = !!multiWrap && multiWrap.dataset.active === "1";
   const chosen = (multiActive ? Array.from(multiWrap.querySelectorAll("[data-multi-check]:checked")).map((b) => b.value) : select.value ? [select.value] : []).filter((v) => allowed.includes(v));
-  select.innerHTML = markListOptionsHtml(lists, RIG_OPTIONS_LIST, "");
+  select.innerHTML = markListOptionsHtml(lists, listLabel, "");
   if (!multiActive && chosen[0]) select.value = chosen[0];
   if (multiWrap) {
     const box = multiWrap.lastElementChild;
-    if (box) box.innerHTML = multiCheckboxesHtml(lists, RIG_OPTIONS_LIST, chosen.join(", "), "rigOptions");
+    if (box) box.innerHTML = multiCheckboxesHtml(lists, listLabel, chosen.join(", "), optionsKey);
   }
-  const row = holder.querySelector("[data-rig-options-row]");
+  const row = holder.querySelector(`[${rowAttr}]`);
   if (row) row.style.display = allowed.length ? "" : "none";
-  holder.dataset.rigKey = rigKey;
+  holder.dataset[stateDataKey] = rigKey;
 }
 
 /** One collapsible section of the mark edit form, styled like the filter dialog's groups (see showMarkFilterModal,
@@ -1184,6 +1192,19 @@ function buildMarkPopupEditHtml(mark, markLists, opts = {}) {
               ${markPillRowHtml("rigOptions")}<div class="mark-edit-hidden-controls">${multiCapableControlsHtml(rigOptionsField, rigOptionLists, mark.rigOptions)}</div>
             </div>
           </div>`;
+  const baitSublistMap = rigSublistMapFor(markLists, "Bait");
+  const currentBaits = splitCsv(mark.bait);
+  const currentBaitOptions = splitCsv(mark.baitOptions);
+  const baitOptionValues = [...new Set([...currentBaits.flatMap((r) => baitSublistMap[r] || []), ...currentBaitOptions])];
+  const baitOptionLists = baitOptionValues.map((v) => ({ field: BAIT_OPTIONS_LIST, value: v }));
+  const baitOptionsField = { key: "baitOptions", listLabel: BAIT_OPTIONS_LIST, displayLabel: "Bait options" };
+  const baitOptionsRow = `
+          <div data-field-group="baitOptions" data-bait-sublists="${escapeHtml(JSON.stringify(baitSublistMap))}" data-bait-key="${escapeHtml(JSON.stringify(currentBaits))}">
+            <div data-bait-options-row style="display:${baitOptionValues.length ? "" : "none"};">
+              <div class="mark-edit-sublabel">Bait options</div>
+              ${markPillRowHtml("baitOptions")}<div class="mark-edit-hidden-controls">${multiCapableControlsHtml(baitOptionsField, baitOptionLists, mark.baitOptions)}</div>
+            </div>
+          </div>`;
   const windRow = `
           <div data-field-group="windDirection">
             <div class="mark-edit-sublabel">Wind direction</div>
@@ -1222,7 +1243,7 @@ function buildMarkPopupEditHtml(mark, markLists, opts = {}) {
         ${markEditGroupHtml(
           "gear",
           "Gear/Setup",
-          pickListRow(fieldByKey("bait")) + pickListRow(fieldByKey("rig")) + rigOptionsRow + pickListRow(fieldByKey("rod")) + pickListRow(fieldByKey("berley")) + pickListRow(fieldByKey("fishingMethod")) + textField("tripName", "Trip") + textField("actionName", "Action")
+          pickListRow(fieldByKey("bait")) + baitOptionsRow + pickListRow(fieldByKey("rig")) + rigOptionsRow + pickListRow(fieldByKey("rod")) + pickListRow(fieldByKey("berley")) + pickListRow(fieldByKey("fishingMethod")) + textField("tripName", "Trip") + textField("actionName", "Action")
         )}
         ${markEditGroupHtml(
           "weather",
@@ -1481,6 +1502,13 @@ function collectMarkFormValues(form, originalMark) {
     }
     if (rigOptions) updated.rigOptions = rigOptions;
   }
+  if (applicable.includes("baitOptions")) {
+    let baitOptions = val("baitOptions");
+    if (typeAllowsMultipleValues(type, "baitOptions")) {
+      baitOptions = Array.from(form.querySelectorAll('[data-multi-check="baitOptions"]:checked')).map((el) => el.value).join(", ");
+    }
+    if (baitOptions) updated.baitOptions = baitOptions;
+  }
   for (const key of ["tripName", "actionName"]) {
     if (applicable.includes(key)) {
       const text = val(key);
@@ -1536,7 +1564,7 @@ async function saveMarkToD1(updatedMark, isNew, fullForm = false) {
       payload = { ...updatedMark };
       const clearable = [
         ...MARK_POPUP_OPTIONAL_FIELDS.map((f) => f.key),
-        "notes", "rigOptions", "tripName", "actionName", "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed",
+        "notes", "rigOptions", "baitOptions", "tripName", "actionName", "size", "barometer", "temperature", "waterTemperature", "waterDepth", "windDirection", "windSpeed",
       ];
       for (const key of clearable) if (!(key in payload)) payload[key] = null;
     }
@@ -2043,6 +2071,7 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
         for (const f of MARK_POPUP_OPTIONAL_FIELDS) if (!(f.key in updated)) delete mark[f.key];
         if (!("notes" in updated)) delete mark.notes;
         if (!("rigOptions" in updated)) delete mark.rigOptions;
+        if (!("baitOptions" in updated)) delete mark.baitOptions;
         if (!("tripName" in updated)) delete mark.tripName;
         if (!("actionName" in updated)) delete mark.actionName;
         if (!("released" in updated)) delete mark.released;

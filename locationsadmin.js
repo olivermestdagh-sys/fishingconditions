@@ -1360,7 +1360,7 @@ function listImagesHtml(entry) {
 
 /** The pictures row under one option chip of a Rig's sub list: `scope` "" = the rig's own list, "private" = your override, "public" = Public's (view only). */
 function rigOptionImagesHtml(rig, option, scope) {
-  const target = { field: "Rig", value: rig.value, option, scope: scope === "private" ? "private" : "" };
+  const target = { field: rig.field || "Rig", value: rig.value, option, scope: scope === "private" ? "private" : "" };
   const images = scope === "private" ? (rigOverrideOptionImages.get(rig.id) || {})[option] || [] : (rig.optionImages || {})[option] || [];
   return imagesRowHtml(target, images, scope !== "public", { fullWidth: false });
 }
@@ -1555,7 +1555,7 @@ async function onChangeSpeciesLinks(speciesValue, detailsEl) {
   }
 }
 
-/** A Rig's own free-form sub list (the Map's Trip Defaults reads it): a "Sub List" checkbox, and
+/** A Rig's or Bait's own free-form sub list (the Map's Trip Defaults reads it): a "Sub List" checkbox, and
  * — once ticked — the option chips themselves plus an add row. `escAttr` is the rig value already escaped
  * for an HTML attribute (the caller's own, so it matches exactly what's in the surrounding chip markup).
  * A Public-sourced rig (entry._isPublic) gets a different, read-only-plus-private treatment instead —
@@ -1565,7 +1565,7 @@ function rigSublistHtml(entry, escAttr) {
   if (entry._isPublic) return publicRigSublistHtml(entry, esc);
   const toggleHtml = `
     <label class="live-toggle" style="font-size:0.7rem;flex-basis:100%;">
-      <input type="checkbox" class="mark-list-rig-sublist-toggle" data-value="${escAttr}"${entry.hasSublist ? " checked" : ""} />
+      <input type="checkbox" class="mark-list-rig-sublist-toggle" data-field="${entry.field}" data-value="${escAttr}"${entry.hasSublist ? " checked" : ""} />
       <span class="live-toggle-track" aria-hidden="true"></span>
       <span>Sub List</span>
     </label>`;
@@ -1583,7 +1583,7 @@ function rigSublistHtml(entry, escAttr) {
         </span>`).join("")
     : `<span class="footnote" style="margin:0;">No options yet.</span>`;
   return `${toggleHtml}
-    <div class="mark-list-rig-sublist" data-value="${escAttr}" style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:2px;padding:6px 8px;border-radius:8px;background:var(--white);color:#111827;">
+    <div class="mark-list-rig-sublist" data-field="${entry.field}" data-value="${escAttr}" style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:2px;padding:6px 8px;border-radius:8px;background:var(--white);color:#111827;">
       ${chipsHtml}
       <span style="display:inline-flex;gap:4px;">
         <input type="text" class="mark-list-rig-sublist-new" placeholder="Add option"
@@ -1593,14 +1593,14 @@ function rigSublistHtml(entry, escAttr) {
     </div>`;
 }
 
-async function onToggleRigSublist(value, checked) {
-  const entry = markLists.find((r) => r.field === "Rig" && r.value === value);
+async function onToggleRigSublist(value, checked, field = "Rig") {
+  const entry = markLists.find((r) => r.field === field && r.value === value);
   if (!entry || !entry.id) return;
   await saveRigSublist(entry, { hasSublist: checked });
 }
 
-function onAddRigSublistItem(value, raw) {
-  const entry = markLists.find((r) => r.field === "Rig" && r.value === value);
+function onAddRigSublistItem(value, raw, field = "Rig") {
+  const entry = markLists.find((r) => r.field === field && r.value === value);
   if (!entry || !entry.id) return;
   const item = raw.trim();
   const list = entry.subList || [];
@@ -1608,12 +1608,12 @@ function onAddRigSublistItem(value, raw) {
   saveRigSublist(entry, { subList: [...list, item] });
 }
 
-async function onRemoveRigSublistItem(value, index) {
-  const entry = markLists.find((r) => r.field === "Rig" && r.value === value);
+async function onRemoveRigSublistItem(value, index, field = "Rig") {
+  const entry = markLists.find((r) => r.field === field && r.value === value);
   if (!entry || !entry.id) return;
   const option = (entry.subList || [])[index];
   const pictures = ((entry.optionImages || {})[option] || []).length;
-  if (!(await confirmRemoveListItem({ rig: value, option, pictures }))) return;
+  if (!(await confirmRemoveListItem({ rig: value, option, pictures, field }))) return;
   saveRigSublist(entry, { subList: (entry.subList || []).filter((_, i) => i !== index) });
 }
 
@@ -1653,7 +1653,7 @@ function publicRigSublistHtml(entry, esc) {
 
   const override = rigSublistOverrides.get(entry.id);
   const overrideHtml = override !== undefined
-    ? `<div class="mark-list-rig-override" data-rig-id="${entry.id}" title="Private — only visible to you" style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px;padding:6px 8px;border-radius:8px;background:var(--white);color:#111827;">
+    ? `<div class="mark-list-rig-override" data-field="${entry.field}" data-rig-id="${entry.id}" title="Private — only visible to you" style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px;padding:6px 8px;border-radius:8px;background:var(--white);color:#111827;">
         ${override.length
           ? override.map((item, i) => `
               <span class="rig-option-item" style="display:inline-flex;flex-direction:column;align-items:flex-start;gap:4px;">
@@ -1676,7 +1676,7 @@ function publicRigSublistHtml(entry, esc) {
     : `<label class="live-toggle" style="flex-basis:100%;font-size:0.7rem;margin-top:2px;">
         <input type="checkbox" class="mark-list-rig-override-start" data-rig-id="${entry.id}" />
         <span class="live-toggle-track" aria-hidden="true"></span>
-        <span>Keep a private sub list for this rig (only visible to you)</span>
+        <span>Keep a private sub list for this ${entry.field === "Bait" ? "bait" : "rig"} (only visible to you)</span>
       </label>`;
 
   return `${publicHtml}${overrideHtml}`;
@@ -1697,9 +1697,9 @@ function onAddRigSublistOverrideItem(rigId, raw) {
 async function onRemoveRigSublistOverrideItem(rigId, index) {
   const list = rigSublistOverrides.get(rigId) || [];
   const option = list[index];
-  const rig = mergedMarkListsFor("Rig").find((r) => r.id === rigId);
+  const rig = [...mergedMarkListsFor("Rig"), ...mergedMarkListsFor("Bait")].find((r) => r.id === rigId);
   const pictures = ((rigOverrideOptionImages.get(rigId) || {})[option] || []).length;
-  if (!(await confirmRemoveListItem({ rig: rig ? rig.value : "this rig", option, pictures }))) return;
+  if (!(await confirmRemoveListItem({ rig: rig ? rig.value : "this one", option, pictures, field: rig ? rig.field : "Rig" }))) return;
   saveRigSublistOverride(rigId, list.filter((_, i) => i !== index));
 }
 
@@ -1729,7 +1729,7 @@ async function saveRigSublistOverride(rigId, subList) {
 
 async function onClearRigSublistOverride(rigId) {
   const pictureCount = Object.values(rigOverrideOptionImages.get(rigId) || {}).reduce((n, list) => n + list.length, 0);
-  if (!confirm(`Remove your private sub list for this rig?${pictureCount ? `\n\nIts ${pictureCount} picture${pictureCount === 1 ? "" : "s"} will be deleted too.` : ""}`)) return;
+  if (!confirm(`Remove your private sub list for this one?${pictureCount ? `\n\nIts ${pictureCount} picture${pictureCount === 1 ? "" : "s"} will be deleted too.` : ""}`)) return;
   try {
     const res = await fetch(`${USER_BACKEND_URL}/api/rig-sublist-overrides/${rigId}`, { method: "DELETE", credentials: "include" });
     if (!res.ok && res.status !== 404) throw new Error(`status ${res.status}`);
@@ -1899,7 +1899,7 @@ function renderMarkLists() {
       // Rig values can each maintain their own free-form sub list (the Map's Trip Defaults reads
       // it: choosing that rig there reveals a multi-pick of exactly these items). A Public rig instead
       // shows Public's own sub list read-only, plus your own PRIVATE layer on top (rigSublistHtml).
-      const sublistHtml = key === "rig" ? rigSublistHtml(v, escAttr) : "";
+      const sublistHtml = key === "rig" || key === "bait" ? rigSublistHtml(v, escAttr) : "";
       const imagesHtml = IMAGE_FIELD_KEYS.includes(key) ? listImagesHtml(v) : "";
       const combinedBadge = key === "species" && v.qtyGroup
         ? `<span title="Max qty shared with: ${speciesLinkedNames(v).join(", ").replace(/"/g, "&quot;").replace(/</g, "&lt;")}" style="font-size:0.65rem;opacity:0.85;">qty shared</span>`
@@ -1967,16 +1967,17 @@ function renderMarkLists() {
     });
   });
   container.querySelectorAll(".mark-list-rig-sublist-toggle").forEach((cb) => {
-    cb.addEventListener("change", (e) => onToggleRigSublist(e.currentTarget.dataset.value, e.currentTarget.checked));
+    cb.addEventListener("change", (e) => onToggleRigSublist(e.currentTarget.dataset.value, e.currentTarget.checked, e.currentTarget.dataset.field || "Rig"));
   });
   container.querySelectorAll(".mark-list-rig-sublist").forEach((wrap) => {
     const rigValue = wrap.dataset.value;
+    const rigField = wrap.dataset.field || "Rig";
     wrap.querySelectorAll(".mark-list-rig-sublist-remove").forEach((btn) => {
-      btn.addEventListener("click", () => onRemoveRigSublistItem(rigValue, Number(btn.dataset.index)));
+      btn.addEventListener("click", () => onRemoveRigSublistItem(rigValue, Number(btn.dataset.index), rigField));
     });
     const addBtn = wrap.querySelector(".mark-list-rig-sublist-add");
     const newInput = wrap.querySelector(".mark-list-rig-sublist-new");
-    const add = () => onAddRigSublistItem(rigValue, newInput.value);
+    const add = () => onAddRigSublistItem(rigValue, newInput.value, rigField);
     addBtn.addEventListener("click", add);
     newInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
@@ -2516,12 +2517,12 @@ async function loadMarksForCounts({ fresh = false } = {}) {
  * How many marks use a list value. `key` is the MARK_LIST_FIELDS key ("bait", "rigOptions", ...); multi-value fields count each
  * pick separately (a Session's "Prawn, Squid" uses both). `rig` narrows a Rig option's count to marks on that rig. Case-insensitive.
  */
-function marksUsingValue(marks, key, value, rig) {
+function marksUsingValue(marks, key, value, rig, parentKey = "rig") {
   const wanted = String(value).toLowerCase();
   const wantedRig = rig ? String(rig).toLowerCase() : "";
   let count = 0;
   for (const mark of marks || []) {
-    if (wantedRig && !markFieldValues(mark, "rig").some((r) => String(r).toLowerCase() === wantedRig)) continue;
+    if (wantedRig && !markFieldValues(mark, parentKey).some((r) => String(r).toLowerCase() === wantedRig)) continue;
     if (markFieldValues(mark, key).some((v) => String(v).toLowerCase() === wanted)) count++;
   }
   return count;
@@ -2532,10 +2533,11 @@ function marksUsingValue(marks, key, value, rig) {
  * with it: its pictures and how many marks use it. Resolves to true when the person confirms. `pictures` is the number of pictures that
  * would be deleted too.
  */
-async function confirmRemoveListItem({ label, key, value, option, rig, pictures }) {
+async function confirmRemoveListItem({ label, key, value, option, rig, pictures, field = "Rig" }) {
   const isOption = option != null;
+  const isBait = field === "Bait";
   const marks = await loadMarksForCounts();
-  const used = marks ? marksUsingValue(marks, isOption ? "rigOptions" : key, isOption ? option : value, isOption ? rig : undefined) : null;
+  const used = marks ? marksUsingValue(marks, isOption ? (isBait ? "baitOptions" : "rigOptions") : key, isOption ? option : value, isOption ? rig : undefined, isBait ? "bait" : "rig") : null;
   const lines = [isOption ? `Remove "${option}" from ${rig}'s sub list?` : `Remove "${value}" from ${label}?`];
   if (pictures) lines.push(`Its ${pictures} picture${pictures === 1 ? "" : "s"} will be deleted too.`);
   if (used) lines.push(`${used} of your marks use it. They keep the name, but this can't be undone — "Restore missing values" only brings back the name.`);
