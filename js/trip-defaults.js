@@ -443,6 +443,8 @@ async function showTripDefaults({ onClose, start } = {}) {
       const saved = await tdApi(`${path}/${id}`, "PUT", patch);
       const i = list.findIndex((x) => x.id === id);
       if (i >= 0) list[i] = saved;
+      // while this Action is running on the Live page, the edit is a change to log (js/trip-log.js)
+      if (typeof liveTripRunState === "function" && typeof tripLogNoteDefaultsEdit === "function") tripLogNoteDefaultsEdit(path, id, data, liveTripRunState(), liveTripPosition());
     };
 
     on('[data-nav="close"]', close);

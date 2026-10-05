@@ -510,6 +510,7 @@ async function saveLiveCatch(options, answers, defaults, gpsPromise, ctx) {
       else delete mark.baitOptions;
     }
   }
+  const prevDepthDefault = getLiveMarkDefaults().depth;
   const result = await saveMarkToD1(mark, true);
   if (!result.success) {
     showLiveToast("Catch not saved: " + result.error, true);
@@ -522,6 +523,19 @@ async function saveLiveCatch(options, answers, defaults, gpsPromise, ctx) {
     renderLiveDefaultsUI();
   }
   addCatchToLiveMap(mark);
+  if (defaults.tripAction) {
+    // the trip log: a Depth changed on the catch card is a change in its own right, then the catch with the rod setup it used
+    const runState = liveTripRunState();
+    if (runState && typeof answers.depth === "number" && answers.depth !== prevDepthDefault) liveLogConditionChange("depth");
+    const chosen = defaults.tripRodSetups.find((s) => s.name === st.rod);
+    const trip = liveTripData.trips.find((t) => t.id === defaults.tripAction.tripId);
+    const rods = tripLogCatchRodRows(defaults.tripAction, liveTripData.rodSetups, chosen ? chosen.id : null);
+    logTripEvent(runState, {
+      type: "catch", tripId: defaults.tripAction.tripId, tripName: trip ? trip.name : null, actionId: defaults.tripAction.id, actionName: defaults.tripAction.name,
+      sessionGroupId: runState ? runState.sessionGroupId || null : null, water: mark.waterCondition || null, depth: mark.waterDepth ?? null, lat: mark.lat, lng: mark.lng,
+      markId: mark.id, species: mark.species || st.species, size: mark.size ?? null, released: !!mark.released, rods, rodSetupId: rods.length ? rods[0].rodSetupId : null,
+    });
+  }
   // Say where the bag stands now (the new catch is on the map, so it is part of the run).
   const after = liveCatchContext();
   const counts = after.run ? speciesCounts(after.run, options.limits || {}, st.species) : null;
@@ -694,6 +708,7 @@ async function cycleLiveWater() {
   const d = getLiveMarkDefaults();
   setLiveMarkDefaults({ ...d, water: nextCycleValue(liveWaterOptions, d.water) });
   renderLiveDefaultsUI();
+  liveLogConditionChange("water");
 }
 
 // The Depth button: a full-screen stepper (same look as the old "+ Session" water depth card). Saved as it changes.
@@ -706,11 +721,13 @@ function openLiveDepth() {
   document.body.appendChild(overlay);
   document.body.classList.add("live-card-open");
   const finish = () => { activeCardFlow = null; };
+  const depthAtOpen = getLiveMarkDefaults().depth;
   const close = () => {
     overlay.remove();
     document.body.classList.remove("live-card-open");
     finish();
     renderLiveDefaultsUI();
+    if (getLiveMarkDefaults().depth !== depthAtOpen) liveLogConditionChange("depth"); // one log row for the whole stepping, not one per tap
   };
   activeCardFlow = { close };
   const render = () => {
@@ -779,6 +796,37 @@ function setLiveTripState(state) {
   Prefs.set(LIVE_TRIP_KEY, JSON.stringify(state && state.tripId ? state : { tripId: null }));
 }
 
+// --- Trip log (js/trip-log.js): everything done on a trip is also logged to D1, in addition to the marks ----------
+/** The running trip's state with a run id (a trip started before the log existed gets one now), or null. */
+function liveTripRunState() {
+  const state = getLiveTripState();
+  if (!state) return null;
+  if (state.runId) return state;
+  const withRun = { ...state, runId: tripLogNewRunId() };
+  setLiveTripState(withRun);
+  return withRun;
+}
+/** The last known position, for log rows made without a fresh GPS fix (Start Trip, Water / Depth changes, setting edits). */
+function liveTripPosition() {
+  return typeof currentGpsPosition !== "undefined" && currentGpsPosition && Number.isFinite(currentGpsPosition.lat) ? { lat: currentGpsPosition.lat, lng: currentGpsPosition.lng } : null;
+}
+function liveTripNameOf(tripId) {
+  const trip = liveTripData && (liveTripData.trips || []).find((t) => t.id === tripId);
+  return trip ? trip.name : null;
+}
+/** Logs a Water / Depth change made while an Action runs: a `change` row carrying the whole state in force. */
+function liveLogConditionChange(field) {
+  const state = liveTripRunState();
+  const action = state && state.actionId && liveTripData ? liveActiveTripAction() : null;
+  if (!action) return;
+  const d = getLiveMarkDefaults();
+  const pos = liveTripPosition();
+  logTripEvent(state, {
+    type: "change", changeField: field, tripId: state.tripId, tripName: liveTripNameOf(state.tripId), sessionGroupId: state.sessionGroupId || null,
+    water: d.water || null, depth: d.depth, lat: pos ? pos.lat : null, lng: pos ? pos.lng : null, ...tripLogActionState(action, liveTripData.rodSetups),
+  });
+}
+
 // Picks up what changed elsewhere while this page was open (a trip or action started on the Fishing Controller, a catch logged
 // from another device): the account's settings again, then the marks created since the last look.
 let liveAccountSyncAt = 0;
@@ -789,6 +837,8 @@ async function liveSyncFromAccount() {
   liveAccountSyncAt = Date.now();
   const state = liveMarkState;
   await Prefs.refresh();
+  flushTripLog(); // trip-log entries that couldn't be sent earlier (offline), then the weather/tide of older ones
+  enrichTripLog();
   try {
     const since = liveMarksPulledMs ? liveMarksPulledMs - 10 * 60 * 1000 : Date.now() - 12 * 60 * 60 * 1000; // a little overlap covers clock differences
     const res = await fetch(`${MARKS_FILE_PATH}?since=${since}&_=${Date.now()}`, { cache: "no-store", credentials: "include" });
@@ -902,7 +952,10 @@ async function onStartTripClick() {
       activeCardFlow.close();
       finish();
       if (!chosen) return;
-      setLiveTripState({ tripId: chosen.id });
+      const started = { tripId: chosen.id, runId: tripLogNewRunId() }; // the run id groups everything this trip logs
+      setLiveTripState(started);
+      const pos = liveTripPosition();
+      logTripEvent(started, { type: "trip_start", tripId: chosen.id, tripName: chosen.name, lat: pos ? pos.lat : null, lng: pos ? pos.lng : null });
       renderLiveTripUI();
       showLiveToast(`${chosen.name} started`);
     },
@@ -916,8 +969,9 @@ async function endLiveTrip(state) {
   liveTripBusy = true;
   try {
     const active = liveActiveSession();
+    let position = liveTripPosition();
     if (active && state.sessionGroupId && active.mark.sessionGroupId === state.sessionGroupId) {
-      const position = await getFreshGpsPosition();
+      position = await getFreshGpsPosition();
       if (!position) {
         showLiveToast("Couldn't get your location — trip not ended.", true);
         return;
@@ -925,6 +979,12 @@ async function endLiveTrip(state) {
       const ended = await liveCloseActiveSession(active, position);
       if (!ended) return;
     }
+    const runState = liveTripRunState() || state;
+    const d = getLiveMarkDefaults();
+    logTripEvent(runState, {
+      type: "trip_end", tripId: state.tripId, tripName: liveTripNameOf(state.tripId), actionId: state.actionId || null, sessionGroupId: state.sessionGroupId || null,
+      water: d.water || null, depth: d.depth, lat: position ? position.lat : null, lng: position ? position.lng : null,
+    });
     setLiveTripState(null);
     updateLiveSessionButtons();
     showLiveToast("Trip ended");
@@ -956,8 +1016,16 @@ async function onTripActionTap(actionId) {
       ended = await liveCloseActiveSession(active, position);
       if (!ended) return;
     }
+    const runState = liveTripRunState() || state;
+    const runId = runState.runId;
+    const logD = getLiveMarkDefaults();
     if (wasThisAction) {
-      setLiveTripState({ tripId: state.tripId });
+      setLiveTripState({ tripId: state.tripId, runId });
+      // an Action ending just marks the end of doing something one way: time and place (and the conditions it ended in)
+      logTripEvent({ ...runState, runId }, {
+        type: "action_end", tripId: state.tripId, tripName: liveTripNameOf(state.tripId), actionId: action.id, actionName: action.name, sessionGroupId: state.sessionGroupId || null,
+        water: logD.water || null, depth: logD.depth, lat: position.lat, lng: position.lng,
+      });
       updateLiveSessionButtons();
       showLiveToast(`${ended.name} saved`);
       return;
@@ -978,12 +1046,17 @@ async function onTripActionTap(actionId) {
     const result = await saveMarkToD1(mark, true);
     if (!result.success) {
       showLiveToast("Session not saved: " + result.error, true);
-      if (ended) setLiveTripState({ tripId: state.tripId }); // the old one is closed, the new one never started
+      if (ended) setLiveTripState({ tripId: state.tripId, runId }); // the old one is closed, the new one never started
       return;
     }
     saveLastMarkFieldValues(mark);
     addCatchToLiveMap(mark);
-    setLiveTripState({ tripId: state.tripId, actionId, sessionGroupId: mark.sessionGroupId });
+    setLiveTripState({ tripId: state.tripId, actionId, sessionGroupId: mark.sessionGroupId, runId });
+    // starting an Action logs its whole state (rod setups, water, depth); it also ends the previous Action, which needs no row of its own
+    logTripEvent({ ...runState, runId }, {
+      type: "action_start", tripId: state.tripId, tripName: liveTripNameOf(state.tripId), sessionGroupId: mark.sessionGroupId, markId: mark.id,
+      water: mark.waterCondition || null, depth: mark.waterDepth ?? null, lat: position.lat, lng: position.lng, ...tripLogActionState(action, liveTripData.rodSetups),
+    });
     updateLiveSessionButtons();
     showLiveToast(ended ? `${ended.name} saved; ${mark.name} saved` : `${mark.name} saved`);
   } finally {

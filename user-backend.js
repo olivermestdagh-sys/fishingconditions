@@ -245,6 +245,13 @@ export default {
       if (tripSetupMatch) {
         return handleTripSetupItem(request, url, env, tripSetupMatch[1]);
       }
+      if (url.pathname === "/api/triplog") {
+        return handleTripLogCollection(request, url, env);
+      }
+      const tripLogMatch = url.pathname.match(/^\/api\/triplog\/([^/]+)$/);
+      if (tripLogMatch) {
+        return handleTripLogItem(request, url, env, tripLogMatch[1]);
+      }
       if (url.pathname === "/api/tripactions") {
         return handleTripActionsCollection(request, url, env);
       }
@@ -3782,6 +3789,197 @@ function jsonResponse(body, status, env) {
 }
 
 // ---------------------------------------------------------------------
+// Trip log (trip_log + trip_log_rods, schema-v2.sql): an append-only record of what was done during a trip run, for later reports.
+// Written by the Controller API (ctlProcessEvent, in the same batch as the marks) and by the site (POST /api/triplog).
+// ---------------------------------------------------------------------
+
+const TLOG_EVENT_TYPES = ["trip_start", "trip_end", "action_start", "action_end", "change", "catch"];
+const TLOG_MAX_BATCH = 50;
+const TLOG_CONDITION_COLUMNS = {
+  tideCondition: ["tide_condition", "text"], tideExtreme: ["tide_extreme", "text"], weatherCondition: ["weather_condition", "text"],
+  windDirection: ["wind_direction", "text"], windSpeed: ["wind_speed", "number"], barometer: ["barometer", "number"],
+  temperature: ["temperature", "number"], waterTemperature: ["water_temperature", "number"],
+};
+
+const tlogJson = (list) => (Array.isArray(list) && list.length ? JSON.stringify(list.map(String)) : null);
+
+/**
+ * The rod setups an Action holds, as trip_log_rods rows (a snapshot: names/values as they are now). Placed ones take their position (1-4),
+ * the rest follow from 5. `onlyId` keeps just that setup (a Catch logs the one it used).
+ */
+function tlogRodRows(action, rodSetups, onlyId = null) {
+  const ids = ctlLiveRodSetupIds(action && action.rodSetupIds, rodSetups);
+  const slots = (action && action.rodSlots) || [];
+  let spare = 5;
+  const out = [];
+  for (const id of ids) {
+    if (onlyId && id !== onlyId) continue;
+    const s = rodSetups.find((r) => r.id === id);
+    const at = slots.indexOf(id);
+    out.push({
+      slot: at >= 0 ? at + 1 : spare++, rodSetupId: s.id, name: s.name || null, rod: s.rod || null, rig: s.rig || null,
+      rigOptions: s.subListItems || [], bait: s.bait || [], baitOptions: s.baitOptions || [],
+    });
+  }
+  return out;
+}
+
+/** The rows a Catch logs: the setup it used — the chosen one, else the Action's only one (as ctlCatchFieldsFromAction picks it). */
+function tlogCatchRodRows(action, rodSetups, setupId) {
+  const ids = ctlLiveRodSetupIds(action && action.rodSetupIds, rodSetups);
+  const used = setupId || (ids.length === 1 ? ids[0] : null);
+  return used ? tlogRodRows(action, rodSetups, used) : [];
+}
+
+/**
+ * INSERT statements for one log entry (+ its rod rows). The id is made from the idempotency key, so a resent entry is ignored whole.
+ * `e`: {runId, tripId, tripName, type, changeField, tsMs, dateTime, tz, lat, lng, actionId, actionName, sessionGroupId, water, depth,
+ * berley, fishingMethod[], targets[], markId, species, size, released, rodSetupId, source, sourceUuid}; `rods`: tlogRodRows output.
+ */
+function tlogStatements(env, uid, e, rods) {
+  const id = `tl_${uid}_${e.sourceUuid}`;
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const text = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const stmts = [
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO trip_log (id, user_id, run_id, trip_id, trip_name, event_type, change_field, ts, date_time, tz_offset_min, lat, lng, action_id, action_name,
+         session_group_id, water_condition, water_depth, berley, fishing_method, targets, mark_id, species, size, released, rod_setup_id, source, source_uuid, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id, uid, e.runId, text(e.tripId), text(e.tripName), e.type, text(e.changeField), e.tsMs, e.dateTime, num(e.tz), num(e.lat), num(e.lng), text(e.actionId), text(e.actionName),
+      text(e.sessionGroupId), text(e.water), num(e.depth), text(e.berley), tlogJson(e.fishingMethod), tlogJson(e.targets), text(e.markId), text(e.species), num(e.size),
+      e.released == null ? null : e.released ? 1 : 0, text(e.rodSetupId), e.source, e.sourceUuid, Date.now()
+    ),
+  ];
+  if (rods && rods.length) {
+    stmts.push(
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO trip_log_rods (log_id, slot, user_id, rod_setup_id, rod_setup_name, rod, rig, rig_options, bait, bait_options) VALUES ${rods.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ")}`
+      ).bind(...rods.flatMap((r) => [id, r.slot, uid, text(r.rodSetupId), text(r.name), text(r.rod), text(r.rig), tlogJson(r.rigOptions), tlogJson(r.bait), tlogJson(r.baitOptions)]))
+    );
+  }
+  return stmts;
+}
+
+function rowToTripLog(row, rods) {
+  const list = (v) => parseSubList(v);
+  return {
+    id: row.id, runId: row.run_id, tripId: row.trip_id ?? null, tripName: row.trip_name ?? null, type: row.event_type, changeField: row.change_field ?? null,
+    ts: row.ts, dateTime: row.date_time, tzOffsetMin: row.tz_offset_min ?? null, lat: row.lat ?? null, lng: row.lng ?? null,
+    actionId: row.action_id ?? null, actionName: row.action_name ?? null, sessionGroupId: row.session_group_id ?? null,
+    waterCondition: row.water_condition ?? null, waterDepth: row.water_depth ?? null, berley: row.berley ?? null, fishingMethod: list(row.fishing_method), targets: list(row.targets),
+    markId: row.mark_id ?? null, species: row.species ?? null, size: row.size ?? null, released: row.released == null ? null : !!row.released, rodSetupId: row.rod_setup_id ?? null,
+    tideCondition: row.tide_condition ?? null, tideExtreme: row.tide_extreme ?? null, weatherCondition: row.weather_condition ?? null, windSpeed: row.wind_speed ?? null,
+    windDirection: row.wind_direction ?? null, barometer: row.barometer ?? null, temperature: row.temperature ?? null, waterTemperature: row.water_temperature ?? null,
+    conditionsAt: row.conditions_at ?? null, source: row.source,
+    rods: (rods || []).map((r) => ({ slot: r.slot, rodSetupId: r.rod_setup_id ?? null, name: r.rod_setup_name ?? null, rod: r.rod ?? null, rig: r.rig ?? null, rigOptions: list(r.rig_options), bait: list(r.bait), baitOptions: list(r.bait_options) })),
+  };
+}
+
+/** Validates one entry the site posts; returns {entry, rods} or {error}. */
+function tlogParseSiteEntry(ev) {
+  if (!ev || typeof ev !== "object") return { error: "not an entry" };
+  if (typeof ev.uuid !== "string" || !ev.uuid.trim() || ev.uuid.length > 80) return { error: "uuid is required" };
+  if (!TLOG_EVENT_TYPES.includes(ev.type)) return { error: "unknown type" };
+  if (typeof ev.runId !== "string" || !ev.runId.trim() || ev.runId.length > 80) return { error: "runId is required" };
+  if (typeof ev.ts !== "number" || !Number.isFinite(ev.ts) || ev.ts <= 0) return { error: "ts must be UTC epoch milliseconds" };
+  if (typeof ev.dateTime !== "string" || ctlParseNaive(ev.dateTime) == null) return { error: "dateTime must be a naive local time" };
+  const pos = typeof ev.lat === "number" && typeof ev.lng === "number" && Math.abs(ev.lat) <= 90 && Math.abs(ev.lng) <= 180;
+  const rods = Array.isArray(ev.rods) ? ev.rods.slice(0, 8) : [];
+  const names = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()).slice(0, 20) : []);
+  const rodRows = rods.filter((r) => r && Number.isInteger(r.slot) && r.slot >= 1 && r.slot <= 12).map((r) => ({
+    slot: r.slot, rodSetupId: r.rodSetupId, name: r.name, rod: r.rod, rig: r.rig, rigOptions: names(r.rigOptions), bait: names(r.bait), baitOptions: names(r.baitOptions),
+  }));
+  const entry = {
+    runId: ev.runId.trim(), tripId: ev.tripId, tripName: ev.tripName, type: ev.type, changeField: ev.changeField, tsMs: Math.round(ev.ts), dateTime: ev.dateTime,
+    tz: Number.isFinite(ev.tzOffsetMin) ? ev.tzOffsetMin : null, lat: pos ? ev.lat : null, lng: pos ? ev.lng : null, actionId: ev.actionId, actionName: ev.actionName,
+    sessionGroupId: ev.sessionGroupId, water: ev.water, depth: ev.depth, berley: ev.berley, fishingMethod: names(ev.fishingMethod), targets: names(ev.targets),
+    markId: ev.markId, species: ev.species, size: ev.size, released: ev.released, rodSetupId: ev.rodSetupId, source: "Site", sourceUuid: ev.uuid.trim(),
+  };
+  return { entry, rods: rodRows };
+}
+
+async function handleTripLogCollection(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+
+  if (request.method === "POST") {
+    const body = await readJsonBody(request);
+    const events = body && Array.isArray(body.events) ? body.events : null;
+    if (!events || events.length === 0 || events.length > TLOG_MAX_BATCH) return jsonResponse({ error: `events must be a list of 1 to ${TLOG_MAX_BATCH}.` }, 400, env);
+    const stmts = [];
+    const results = [];
+    for (const ev of events) {
+      const parsed = tlogParseSiteEntry(ev);
+      if (parsed.error) {
+        results.push({ uuid: ev && ev.uuid, status: "rejected", error: parsed.error });
+        continue;
+      }
+      stmts.push(...tlogStatements(env, uid, parsed.entry, parsed.rods));
+      results.push({ uuid: parsed.entry.sourceUuid, status: "logged" });
+    }
+    // D1 batches are transactional and cap the statements per request, so go a few entries at a time
+    for (let i = 0; i < stmts.length; i += 40) await env.DB.batch(stmts.slice(i, i + 40));
+    return jsonResponse({ results }, 200, env);
+  }
+
+  if (request.method === "GET") {
+    if (url.searchParams.get("needsConditions")) {
+      // rows whose weather/tide is still to look up, with a position (their own, else the nearest in the same run that has one)
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 10, 1), 25);
+      const { results } = await env.DB.prepare(
+        `SELECT * FROM (
+           SELECT t.id, t.date_time, t.ts,
+                  COALESCE(t.lat, (SELECT t2.lat FROM trip_log t2 WHERE t2.user_id = t.user_id AND t2.run_id = t.run_id AND t2.lat IS NOT NULL ORDER BY ABS(t2.ts - t.ts) LIMIT 1)) AS lat,
+                  COALESCE(t.lng, (SELECT t2.lng FROM trip_log t2 WHERE t2.user_id = t.user_id AND t2.run_id = t.run_id AND t2.lat IS NOT NULL ORDER BY ABS(t2.ts - t.ts) LIMIT 1)) AS lng
+           FROM trip_log t WHERE t.user_id = ? AND t.conditions_at IS NULL AND t.ts < ? ORDER BY t.ts DESC LIMIT ?
+         ) WHERE lat IS NOT NULL`
+      ).bind(uid, Date.now() - 20 * 60000, limit).all();
+      return jsonResponse(results.map((r) => ({ id: r.id, dateTime: r.date_time, lat: r.lat, lng: r.lng })), 200, env);
+    }
+    let runId = url.searchParams.get("runId");
+    const markId = url.searchParams.get("markId");
+    if (!runId && markId) {
+      const hit = await env.DB.prepare("SELECT run_id FROM trip_log WHERE user_id = ? AND mark_id = ? LIMIT 1").bind(uid, markId).first();
+      runId = hit ? hit.run_id : null;
+    }
+    if (!runId) return jsonResponse({ runId: null, entries: [] }, 200, env);
+    const { results } = await env.DB.prepare("SELECT * FROM trip_log WHERE user_id = ? AND run_id = ? ORDER BY ts ASC, rowid ASC LIMIT 1000").bind(uid, runId).all();
+    const rodRows = (await env.DB.prepare("SELECT r.* FROM trip_log_rods r JOIN trip_log t ON t.id = r.log_id WHERE t.user_id = ? AND t.run_id = ? ORDER BY r.log_id, r.slot").bind(uid, runId).all()).results;
+    const byLog = new Map();
+    for (const r of rodRows) (byLog.get(r.log_id) || byLog.set(r.log_id, []).get(r.log_id)).push(r);
+    return jsonResponse({ runId, entries: results.map((r) => rowToTripLog(r, byLog.get(r.id))) }, 200, env);
+  }
+
+  return jsonResponse({ error: "Method not allowed." }, 405, env);
+}
+
+/** PATCH /api/triplog/<id>: the weather/tide backfill. Any subset of the condition fields; always notes conditions_at so a row isn't retried forever. */
+async function handleTripLogItem(request, url, env, id) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  if (request.method !== "PATCH") return jsonResponse({ error: "Method not allowed." }, 405, env);
+  const body = await readJsonBody(request);
+  if (!body || typeof body !== "object") return jsonResponse({ error: "Request body must be a JSON object." }, 400, env);
+  const sets = [];
+  const binds = [];
+  for (const [key, [column, kind]] of Object.entries(TLOG_CONDITION_COLUMNS)) {
+    if (body[key] === undefined || body[key] === null || body[key] === "") continue;
+    if (kind === "number" ? typeof body[key] !== "number" || !Number.isFinite(body[key]) : typeof body[key] !== "string") return jsonResponse({ error: `${key} is not valid.` }, 400, env);
+    sets.push(`${column} = ?`);
+    binds.push(body[key]);
+  }
+  const res = await env.DB.prepare(`UPDATE trip_log SET ${[...sets, "conditions_at = ?"].join(", ")} WHERE id = ? AND user_id = ?`).bind(...binds, Date.now(), id, resolved.id).run();
+  if (!res.meta || !res.meta.changes) return jsonResponse({ error: "Not found." }, 404, env);
+  return jsonResponse({ ok: true }, 200, env);
+}
+
+// ---------------------------------------------------------------------
 // Fishing Controller API (/api/controller/*) — see docs/Fishing Controller Design Brief.md, adapted to this site.
 //
 // A handheld Bluetooth controller talks to an Android app, which talks to these routes. Nothing here is a new data model:
@@ -4162,11 +4360,17 @@ async function ctlActionUpdateStatements(env, uid, ev) {
     changed = true;
   }
   if (!changed) return { error: "nothing to change" };
+  let slotsAfter = cur.rodSlots;
+  try {
+    const parsed = JSON.parse(rodSlotsText);
+    if (Array.isArray(parsed)) slotsAfter = parsed;
+  } catch {}
   return {
     stmts: [
       env.DB.prepare("UPDATE user_trip_actions SET fishing_method = ?, berley = ?, bait = ?, bait_options = ?, rod_setup_ids = ?, rod_slots = ?, species = ? WHERE id = ? AND user_id = ?")
         .bind(ctlJsonOrNull(next.fishingMethod), next.berley, ctlJsonOrNull(next.bait), ctlJsonOrNull(next.baitOptions), ctlJsonOrNull(next.rodSetupIds), rodSlotsText, ctlJsonOrNull(next.species), cur.id, uid),
     ],
+    action: { ...cur, fishingMethod: next.fishingMethod, berley: next.berley, species: next.species, rodSetupIds: next.rodSetupIds, rodSlots: ev.rodSlots === undefined && ev.rodSetupIds !== undefined ? next.rodSetupIds.slice(0, ROD_SLOT_COUNT) : slotsAfter }, // the Action as it is after the edit (for the trip log)
   };
 }
 
@@ -4224,6 +4428,7 @@ async function ctlRodSetupUpdateStatements(env, uid, ev) {
   if (!changed) return { error: "nothing to change" };
   return {
     stmts: [env.DB.prepare("UPDATE user_rod_setups SET rod = ?, rig = ?, sub_list_items = ?, bait = ?, bait_options = ? WHERE id = ? AND user_id = ?").bind(next.rod, next.rig, ctlJsonOrNull(next.subListItems), ctlJsonOrNull(next.bait), ctlJsonOrNull(next.baitOptions), cur.id, uid)],
+    setup: { ...cur, rod: next.rod, rig: next.rig, subListItems: next.subListItems, bait: next.bait, baitOptions: next.baitOptions }, // the Rod Setup as it is after the edit (for the trip log)
   };
 }
 
@@ -4496,12 +4701,28 @@ async function ctlProcessEvent(env, user, ev) {
     return { ended: true };
   };
 
+  // Trip log entries this event makes (written in the same batch, see tlogStatements). A state-changing entry carries the full state.
+  const logs = [];
+  const addLog = (kind, e, rods) => logs.push({ kind, e, rods });
+  const namesOf = async (tripId, actionId) => {
+    const r = tripId ? await env.DB.prepare("SELECT t.name AS trip_name, a.name AS action_name FROM user_trip_setups t LEFT JOIN user_trip_actions a ON a.id = ? AND a.user_id = t.user_id WHERE t.id = ? AND t.user_id = ?").bind(actionId || null, tripId, uid).first() : null;
+    return { tripName: r ? r.trip_name : null, actionName: r ? r.action_name : null };
+  };
+  // the water / depth last logged on this run (the state in force), for entries that don't carry their own
+  const lastCond = async () => {
+    const r = tripRunId ? await env.DB.prepare("SELECT water_condition, water_depth FROM trip_log WHERE user_id = ? AND run_id = ? AND (water_condition IS NOT NULL OR water_depth IS NOT NULL) ORDER BY ts DESC, rowid DESC LIMIT 1").bind(uid, tripRunId).first() : null;
+    return { water: r ? r.water_condition : null, depth: r ? r.water_depth : null };
+  };
+  const actionState = (action) => ({ berley: action.berley, fishingMethod: action.fishingMethod, targets: action.species });
+
   let nextState = null; // set when the running trip changes
   if (ev.type === "trip_start") {
-    const trip = typeof ev.tripId === "string" ? await env.DB.prepare("SELECT id FROM user_trip_setups WHERE id = ? AND user_id = ?").bind(ev.tripId, uid).first() : null;
+    const trip = typeof ev.tripId === "string" ? await env.DB.prepare("SELECT id, name FROM user_trip_setups WHERE id = ? AND user_id = ?").bind(ev.tripId, uid).first() : null;
     if (!trip) return bad("trip not found");
     nextState = { tripId: trip.id, runId: ctlNewId("run") }; // the run id stamps every mark this trip makes (the controller's log lists them)
+    addLog("trip_start", { type: "trip_start", runId: nextState.runId, tripId: trip.id, tripName: trip.name, water: evWater, depth: evDepth });
   } else if (ev.type === "trip_end") {
+    if (state.tripId) addLog("trip_end", { type: "trip_end", tripId: state.tripId, ...(await namesOf(state.tripId, state.actionId)), actionId: state.actionId, sessionGroupId: state.sessionGroupId, water: evWater, depth: evDepth });
     // Like the site's End Trip: closes the session this trip's action started (if still running), then clears the trip.
     if (state.sessionGroupId) {
       const active = await ctlActiveSession(env, uid);
@@ -4527,10 +4748,15 @@ async function ctlProcessEvent(env, user, ev) {
       water: evWater, waterDepth: evDepth, tripName: row.trip_name || "",
     }), ":start");
     nextState = { tripId: action.tripId, actionId: action.id, sessionGroupId, runId: tripRunId };
+    addLog("action_start", {
+      type: "action_start", runId: tripRunId, tripId: action.tripId, tripName: row.trip_name, actionId: action.id, actionName: action.name, sessionGroupId, water: evWater, depth: evDepth,
+      markId: markIds[markIds.length - 1], ...actionState(action),
+    }, tlogRodRows(action, rodSetups));
   } else if (ev.type === "action_end") {
     const closed = await closeRunning();
     if (closed && closed.error) return bad(closed.error);
     nextState = { tripId: state.tripId, ...(state.runId ? { runId: state.runId } : {}) };
+    if (state.tripId && state.actionId) addLog("action_end", { type: "action_end", tripId: state.tripId, ...(await namesOf(state.tripId, state.actionId)), actionId: state.actionId, sessionGroupId: state.sessionGroupId, water: evWater, depth: evDepth });
   } else if (ev.type === "catch") {
     if (!havePosition) return bad("lat/lng are required");
     if (typeof ev.species !== "string" || !ev.species.trim()) return bad("species is required");
@@ -4563,6 +4789,24 @@ async function ctlProcessEvent(env, user, ev) {
         rodSetups
       )
     );
+    if (action && tripRunId) {
+      const catchMarkId = markIds[markIds.length - 1];
+      const common = { runId: tripRunId, tripId: action.tripId, tripName, actionId: action.id, actionName: action.name, sessionGroupId: state.sessionGroupId, water: evWater, depth: evDepth };
+      // a Water / Depth that differs from the last one logged is a change in its own right (the controller sends them with each catch)
+      if (evWater || evDepth != null) {
+        const last = await lastCond();
+        const waterChanged = !!evWater && evWater !== (last.water || "");
+        const depthChanged = evDepth != null && evDepth !== last.depth;
+        if (waterChanged || depthChanged) {
+          addLog("cond", { ...common, type: "change", changeField: waterChanged && depthChanged ? "water+depth" : waterChanged ? "water" : "depth", ...actionState(action) }, tlogRodRows(action, rodSetups));
+        }
+      }
+      const usedSetup = tlogCatchRodRows(action, rodSetups, typeof ev.rodSetupId === "string" ? ev.rodSetupId : null);
+      addLog("catch", {
+        ...common, type: "catch", markId: catchMarkId, species: ev.species.trim(), size: ev.tooSmall ? null : ev.size ?? null, released: ev.fate === "release" || !!ev.tooSmall,
+        rodSetupId: usedSetup.length ? usedSetup[0].rodSetupId : null,
+      }, usedSetup);
+    }
   }
 
   // Edits made on the controller's "Modify defaults" screens: they change the website's Trip Defaults (an Action, a Rod Setup) and
@@ -4571,12 +4815,48 @@ async function ctlProcessEvent(env, user, ev) {
     const edit = ev.type === "action_update" ? await ctlActionUpdateStatements(env, uid, ev) : await ctlRodSetupUpdateStatements(env, uid, ev);
     if (edit.error) return bad(edit.error);
     stmts.push(...edit.stmts);
+    // while that Action is running, the edit is a change to the state in force: log it with the full new state
+    if (state.tripId && state.actionId && tripRunId) {
+      let action = null;
+      let rodSetups = null;
+      let field = "action";
+      if (ev.type === "action_update") {
+        if (edit.action.id === state.actionId) (action = edit.action, rodSetups = await ctlLoadRodSetups(env, uid));
+      } else {
+        const row = await env.DB.prepare("SELECT * FROM user_trip_actions WHERE id = ? AND user_id = ?").bind(state.actionId, uid).first();
+        const running = row ? rowToTripAction(row) : null;
+        if (running && running.rodSetupIds.includes(edit.setup.id)) {
+          action = running;
+          field = "rod_setups";
+          rodSetups = (await ctlLoadRodSetups(env, uid)).map((r) => (r.id === edit.setup.id ? edit.setup : r));
+        }
+      }
+      if (action) {
+        const names = await namesOf(state.tripId, action.id);
+        const last = await lastCond();
+        addLog("change", {
+          type: "change", changeField: field, runId: tripRunId, tripId: state.tripId, ...names, actionId: action.id, sessionGroupId: state.sessionGroupId,
+          water: last.water, depth: last.depth, ...actionState(action),
+        }, tlogRodRows(action, rodSetups));
+      }
+    }
   }
 
   if (ev.type === "mark_update") {
     const edit = await ctlMarkUpdateStatements(env, uid, ev);
     if (edit.error) return bad(edit.error);
     stmts.push(...edit.stmts);
+  }
+
+  // the trip log: entries made for a trip whose state has no run id yet (started on the site before it logged) persist the one used here
+  if (logs.length && !nextState && state.tripId && !state.runId && tripRunId) nextState = { ...state, runId: tripRunId };
+  for (const l of logs) {
+    const runId = l.e.runId || tripRunId;
+    if (!runId) continue;
+    stmts.push(...tlogStatements(env, uid, {
+      tsMs: Math.round(ev.ts * 1000), dateTime, tz, lat: havePosition ? ev.lat : null, lng: havePosition ? ev.lng : null, source, ...l.e, runId,
+      sourceUuid: `fc:${deviceId}:${ev.seq}:${l.kind}`,
+    }, l.rods));
   }
 
   if (nextState) stmts.push(ctlWriteStateStatement(env, uid, nextState));

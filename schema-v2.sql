@@ -402,6 +402,73 @@ CREATE TABLE IF NOT EXISTS controller_track (
   PRIMARY KEY (user_id, device_id, ts)
 ) WITHOUT ROWID;
 
+-- Trip log: an append-only record of everything done during a trip run, for later reports (e.g. hours fished with a bait). One row per
+-- event; names are text snapshots (trips/actions/rod setups get deleted and renamed freely). A STATE (action, rod setups, water, depth) holds
+-- from its row's ts until the next row of the same run that is a change, action_end, trip_end or action_start — so every action_start and
+-- change row carries the FULL state (trip_log_rods = the rod setups in force, one row each), never a diff. Weather/tide columns start NULL
+-- and are backfilled by the browser (conditions_at set once tried). Written by the Controller API (same batch as the marks) and by the
+-- site's POST /api/triplog. Needed a manual CREATE TABLE on D1 (done 2026-10-05).
+CREATE TABLE IF NOT EXISTS trip_log (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  run_id TEXT NOT NULL,              -- one trip run (liveActiveTrip.runId; a trip with no run id gets one at its first logged event)
+  trip_id TEXT,
+  trip_name TEXT,
+  event_type TEXT NOT NULL,          -- trip_start | trip_end | action_start | action_end | change | catch
+  change_field TEXT,                 -- for 'change': rod_setups | water | depth | action
+  ts INTEGER NOT NULL,               -- real UTC ms
+  date_time TEXT NOT NULL,           -- naive local "YYYY-MM-DD HH:MM:SS", like marks
+  tz_offset_min INTEGER,
+  lat REAL,
+  lng REAL,
+  action_id TEXT,
+  action_name TEXT,
+  session_group_id TEXT,
+  water_condition TEXT,
+  water_depth REAL,
+  berley TEXT,                       -- the action's berley / fishing method / targets in force (action_start and change rows)
+  fishing_method TEXT,               -- JSON array
+  targets TEXT,                      -- JSON array
+  mark_id TEXT,                      -- the Session / Catch mark made by this event (a mark opens its trip log through this)
+  species TEXT,                      -- catch rows
+  size REAL,
+  released INTEGER,
+  rod_setup_id TEXT,                 -- catch rows: the rod setup used
+  tide_condition TEXT,
+  tide_extreme TEXT,
+  weather_condition TEXT,
+  wind_speed REAL,
+  wind_direction TEXT,
+  barometer REAL,
+  temperature REAL,
+  water_temperature REAL,
+  conditions_at INTEGER,             -- NULL = weather/tide still to backfill; set (UTC ms) once looked up (or given up on)
+  source TEXT NOT NULL,              -- 'Site' | 'Controller'
+  source_uuid TEXT NOT NULL,         -- idempotency: fc:<device>:<seq>[:kind] for the controller, a client uuid for the site
+  created_at INTEGER NOT NULL,
+  UNIQUE (user_id, source_uuid)
+);
+CREATE INDEX IF NOT EXISTS idx_tlog_run ON trip_log(user_id, run_id, ts);
+CREATE INDEX IF NOT EXISTS idx_tlog_mark ON trip_log(user_id, mark_id);
+CREATE INDEX IF NOT EXISTS idx_tlog_todo ON trip_log(user_id) WHERE conditions_at IS NULL;
+
+-- The rod setups in force at a trip_log row (action_start / change: all of the action's; catch: the one used). List columns are JSON arrays
+-- (query with json_each). Needed a manual CREATE TABLE on D1 (done 2026-10-05).
+CREATE TABLE IF NOT EXISTS trip_log_rods (
+  log_id TEXT NOT NULL REFERENCES trip_log(id) ON DELETE CASCADE,
+  slot INTEGER NOT NULL,             -- the rod position 1-4 on the action (5+ = a setup with no position)
+  user_id TEXT NOT NULL,
+  rod_setup_id TEXT,
+  rod_setup_name TEXT,
+  rod TEXT,
+  rig TEXT,
+  rig_options TEXT,                  -- JSON array
+  bait TEXT,                         -- JSON array
+  bait_options TEXT,                 -- JSON array
+  PRIMARY KEY (log_id, slot)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_tlogrods_user ON trip_log_rods(user_id);
+
 -- A user's own logged fishing marks (catches and points of interest).
 -- Columns mirror data/marks.json's own record shape field-for-field
 -- (confirmed against the live file, not guessed) rather than normalizing
