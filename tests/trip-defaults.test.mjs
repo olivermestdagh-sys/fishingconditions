@@ -105,5 +105,5 @@ test("rod slots: a region is taken once, only its holder can give it back, and t
   assert.deepEqual(fns.tdToggleRodSlot(slots, 0, "b"), ["b", "a", null, null], "a free region is taken");
   assert.equal(fns.tdToggleRodSlot(slots, 1, "b"), slots, "another setup's region does nothing");
   assert.deepEqual(fns.tdToggleRodSlot(slots, 1, "a"), [null, null, null, null], "your own region is given back");
-  assert.deepEqual(fns.tdToggleRodSlot(slots, 2, "a"), [null, "a", "a", null], "one setup may hold several regions");
+  assert.deepEqual(fns.tdToggleRodSlot(slots, 2, "a"), [null, null, "a", null], "a setup holds one region: the new one is set, the previous is unset");
 });

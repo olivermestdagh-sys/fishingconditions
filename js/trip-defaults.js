@@ -135,11 +135,11 @@ function tdRodSlots(action, rodSetups) {
   return out;
 }
 
-/** Tapping region `index` of Rod Setup `id`'s pill: takes the position when it is free, gives it back when it is that setup's own; a position another setup holds does nothing. */
+/** Tapping region `index` of Rod Setup `id`'s pill: a setup holds one position at a time, so a free region is taken and any region it held before is let go; its own region is given back; a position another setup holds does nothing. */
 function tdToggleRodSlot(slots, index, id) {
   if (slots[index] && slots[index] !== id) return slots;
-  const next = [...slots];
-  next[index] = slots[index] === id ? null : id;
+  const next = slots.map((v) => (v === id ? null : v));
+  if (slots[index] !== id) next[index] = id;
   return next;
 }
 
