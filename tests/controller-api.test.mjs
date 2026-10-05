@@ -1018,6 +1018,11 @@ test("trip log edit (PATCH /api/triplog/<id>): fields, the time, the rod rows; c
     [2, "r1", "L Wilson", "Paternoster", '["Octopus 3/0"]', '["Squid"]', '["Wing Strip"]'],
   ], "the whole list replaces the old rows; a rod with no position takes the first free one");
 
+  // the page sends the id percent-encoded (it holds colons), which must find the same line
+  assert.ok(line.id.includes(":"));
+  assert.equal((await patch(encodeURIComponent(line.id), { actionName: "Drift 3" })).status, 200);
+  assert.equal(sqlite.prepare("SELECT action_name FROM trip_log WHERE id = ?").get(line.id).action_name, "Drift 3");
+
   // clearing, with the manual flag (the browser's weather backfill never clears)
   await patch(line.id, { berley: "", waterDepth: null, tideCondition: null, targets: [], released: null, rods: [] });
   const cleared = sqlite.prepare("SELECT * FROM trip_log WHERE id = ?").get(line.id);

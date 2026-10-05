@@ -261,7 +261,14 @@ export default {
       }
       const tripLogMatch = url.pathname.match(/^\/api\/triplog\/([^/]+)$/);
       if (tripLogMatch) {
-        return handleTripLogItem(request, url, env, tripLogMatch[1]);
+        // log ids hold colons (fc:<device>:<seq>:<kind>) and the page sends them percent-encoded; url.pathname is not decoded
+        let logId = tripLogMatch[1];
+        try {
+          logId = decodeURIComponent(logId);
+        } catch {
+          // a malformed escape: looked up as written, and not found
+        }
+        return handleTripLogItem(request, url, env, logId);
       }
       if (url.pathname === "/api/tripactions") {
         return handleTripActionsCollection(request, url, env);
