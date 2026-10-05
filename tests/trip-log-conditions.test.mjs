@@ -95,7 +95,7 @@ const H = 3600000;
 function seeded() {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("CREATE TABLE users (id TEXT PRIMARY KEY, role TEXT, email TEXT, name TEXT);");
-  for (const t of ["locations", "observations", "tide_events", "trip_log"]) sqlite.exec(table(t));
+  for (const t of ["locations", "observations", "tide_events", "trip_log", "marks"]) sqlite.exec(table(t));
   sqlite.prepare("INSERT INTO users VALUES ('u1', 'basic', 'a@x', 'A'), ('u2', 'basic', 'b@x', 'B'), ('public', 'public', 'p@x', 'P')").run();
   const loc = (id, owner, name, lat, lng, offset) =>
     sqlite.prepare("INSERT INTO locations (id, created_by_user_id, name, lat, lng, willyweather_id, tide_offset, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, 1)").run(id, owner, name, lat, lng, offset);
@@ -118,6 +118,13 @@ function seeded() {
   row("old", NOW - 4 * 86400000, "2026-10-01 07:30:00", -38.37, 145.56);
   row("nopos", NOW - 5 * H, "2026-10-05 06:30:00", null, null, "run2");
   row("neighbour", NOW - 6 * H, "2026-10-05 05:30:00", -38.37, 145.56, "run2");
+  const mark = (id, source, createdAt, dateTime, extra = {}) =>
+    sqlite.prepare("INSERT INTO marks (id, user_id, lat, lng, type, date_time, source, tide_condition, weather_condition, wind_speed, created_at) VALUES (?, 'u1', -38.37, 145.56, 'Session Start', ?, ?, ?, ?, ?, ?)").run(id, dateTime, source, extra.tide ?? null, extra.weather ?? null, extra.wind ?? null, createdAt);
+  mark("m-good", "Controller", NOW - 4 * H, "2026-10-05 07:30:00");
+  mark("m-young", "Controller", NOW - 1 * H, "2026-10-05 10:30:00");
+  mark("m-manual", "Manual", NOW - 4 * H, "2026-10-05 07:30:00");
+  mark("m-partial", "Controller", NOW - 4 * H, "2026-10-05 07:30:00", { tide: "Slack Low", wind: 99 });
+  mark("m-done", "Controller", NOW - 4 * H, "2026-10-05 07:30:00", { tide: "Running Out", weather: "Rain" });
   const d1 = {
     prepare(sql) {
       let args = [];
@@ -204,6 +211,7 @@ test("a row whose tide can't be worked out keeps what it got and is retried; a f
 test("nothing waiting means no work; a throwing fetch can't break the cron", async () => {
   const { sqlite, env } = seeded();
   sqlite.prepare("UPDATE trip_log SET conditions_at = 1").run();
+  sqlite.prepare("DELETE FROM marks").run();
   const calls = [];
   await runCron(env, meteo(calls));
   assert.equal(calls.length, 0);
@@ -213,4 +221,42 @@ test("nothing waiting means no work; a throwing fetch can't break the cron", asy
     throw new Error("offline");
   });
   assert.ok(rowOf(second.sqlite, "good").tide_condition, "the tide doesn't need the network");
+});
+
+const markOf = (sqlite, id) => sqlite.prepare("SELECT * FROM marks WHERE id = ?").get(id);
+
+test("Controller marks get the same backfill: blanks filled, values never overwritten, and only Controller marks that are old enough", async () => {
+  const { sqlite, env } = seeded();
+  const calls = [];
+  await runCron(env, meteo(calls));
+
+  const good = markOf(sqlite, "m-good");
+  assert.deepEqual([good.tide_condition, good.tide_extreme, good.weather_condition], ["Last Run In", "HHW", "Cloudy"], "the same answer the trip-log row at that time gets");
+  assert.deepEqual([good.wind_speed, good.wind_direction, good.barometer, good.temperature, good.water_temperature], [12, "SSW", 1022.9, 13.5, 14.5]);
+  assert.equal(good.tide_condition, rowOf(sqlite, "good").tide_condition);
+
+  const partial = markOf(sqlite, "m-partial");
+  assert.equal(partial.tide_condition, "Slack Low", "a value already there is kept");
+  assert.equal(partial.wind_speed, 99, "even a number the lookup would have set differently");
+  assert.equal(partial.weather_condition, "Cloudy", "the blank next to it is filled");
+  assert.equal(partial.wind_direction, "SSW");
+
+  assert.equal(markOf(sqlite, "m-young").tide_condition, null, "its hour isn't archived yet");
+  assert.equal(markOf(sqlite, "m-manual").tide_condition, null, "only Controller-made marks: a mark you made by hand is yours");
+  const done = markOf(sqlite, "m-done");
+  assert.deepEqual([done.tide_condition, done.weather_condition, done.wind_speed], ["Running Out", "Rain", null], "already complete: not touched at all");
+  assert.equal(calls.length, 1, "marks and log rows at the same place and day share one lookup");
+});
+
+test("with more waiting than one run takes, the newest go first so an unanswerable old one can't hold up the rest", async () => {
+  const { sqlite, env } = seeded();
+  sqlite.prepare("DELETE FROM trip_log").run();
+  sqlite.prepare("DELETE FROM marks").run();
+  for (let i = 0; i < 12; i++) {
+    sqlite.prepare("INSERT INTO marks (id, user_id, lat, lng, type, date_time, source, created_at) VALUES (?, 'u1', -38.37, 145.56, 'Catch', ?, 'Controller', ?)").run(`n${i}`, "2026-10-05 07:30:00", NOW - 4 * H - i * 60000);
+  }
+  await runCron(env, meteo([]));
+  const filled = sqlite.prepare("SELECT id FROM marks WHERE tide_condition IS NOT NULL ORDER BY id").all().map((r) => r.id);
+  assert.equal(filled.length, 10, "a batch of ten");
+  assert.ok(!filled.includes("n10") && !filled.includes("n11"), "the two oldest wait for the next run");
 });

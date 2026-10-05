@@ -4286,8 +4286,8 @@ async function handleControllerHistory(request, env, user) {
   return jsonResponse({ logged: r.rows, runs: r.runs, skipped: skippedEvents }, 200, env);
 }
 
-// --- Trip log: weather / tide backfill, on the Worker's hourly cron ---------------------------------------------------------------
-// A log row is written without weather or tide (the Worker can't know them at that moment: the hour isn't archived yet). `scheduled()`
+// --- Weather / tide backfill (trip-log rows AND Controller marks), on the Worker's hourly cron ---------------------------------------------------------------
+// A log row or Controller mark is written without weather or tide (the Worker can't know them at that moment: the hour isn't archived yet). `scheduled()`
 // (wrangler.toml [triggers]) fills them from what D1 already holds: the pipeline archive (`observations`: hourly temp / wind / pressure /
 // water temp per tracked location; `tide_events`: raw high/low events, the location's tide_offset applied on read) and, for the weather
 // CONDITION (Clear / Cloudy ...), which the archive doesn't hold, Open-Meteo's historical weather code. The browser's lookup
@@ -4295,7 +4295,9 @@ async function handleControllerHistory(request, env, user) {
 // classifyTideFromExtrema / rankExtremum (js/marks-core.js, js/chart-base.js), weatherCodeToCondition (js/mark-lookup.js) and
 // previewDegreesToCompass (js/weather-preview.js), pinned by tests/trip-log-conditions.test.mjs — change both together.
 // A row is only taken once its hour is archived (>= 3 h old) and is given up on after 3 days (older tide is the browser's billed
-// WillyWeather fallback, enrichTripLog); conditions_at is set only when the row got BOTH a tide and a weather condition.
+// WillyWeather fallback, enrichTripLog / enrichControllerMarks). A trip-log row is done when `conditions_at` is set, which happens only
+// when it got BOTH a tide and a weather condition; a mark has no such flag, it simply stops being picked once both are filled in
+// (its blank fields only: a value already there is never overwritten).
 
 const TLOG_COND_MIN_AGE_MS = 3 * 3600000;
 const TLOG_COND_MAX_AGE_MS = 3 * 86400000;
@@ -4426,7 +4428,8 @@ const tlogDistanceM = (lat1, lng1, lat2, lng2) => {
 };
 
 /**
- * Fills the weather / tide of up to TLOG_COND_BATCH waiting trip_log rows. Returns {rows, complete}. Shares one archive read per
+ * Fills the weather / tide of up to TLOG_COND_BATCH waiting trip_log rows and as many Controller-made marks (newest first, so a row the
+ * archive can never answer can't hold up the rest). Returns {rows, marks, complete}. Shares one archive read per
  * location + day and one Open-Meteo call per place + day, and stops early rather than run into the subrequest limit.
  */
 async function conditionsBackfill(env, { now = Date.now(), limit = TLOG_COND_BATCH } = {}) {
@@ -4440,11 +4443,19 @@ async function conditionsBackfill(env, { now = Date.now(), limit = TLOG_COND_BAT
        SELECT t.id, t.user_id, t.ts, t.date_time,
               COALESCE(t.lat, (SELECT t2.lat FROM trip_log t2 WHERE t2.user_id = t.user_id AND t2.run_id = t.run_id AND t2.lat IS NOT NULL ORDER BY ABS(t2.ts - t.ts) LIMIT 1)) AS lat,
               COALESCE(t.lng, (SELECT t2.lng FROM trip_log t2 WHERE t2.user_id = t.user_id AND t2.run_id = t.run_id AND t2.lat IS NOT NULL ORDER BY ABS(t2.ts - t.ts) LIMIT 1)) AS lng
-       FROM trip_log t WHERE t.conditions_at IS NULL AND t.ts < ? AND t.ts > ? ORDER BY t.ts ASC LIMIT ?
+       FROM trip_log t WHERE t.conditions_at IS NULL AND t.ts < ? AND t.ts > ? ORDER BY t.ts DESC LIMIT ?
      ) WHERE lat IS NOT NULL`,
     now - TLOG_COND_MIN_AGE_MS, now - TLOG_COND_MAX_AGE_MS, limit
   );
-  if (!rows.length) return { rows: 0, complete: 0 };
+  const { results: markRows } = await query(
+    `SELECT id, user_id, date_time, lat, lng FROM marks
+     WHERE source = 'Controller' AND created_at < ? AND created_at > ?
+       AND (tide_condition IS NULL OR tide_condition = '' OR weather_condition IS NULL OR weather_condition = '')
+     ORDER BY created_at DESC LIMIT ?`,
+    now - TLOG_COND_MIN_AGE_MS, now - TLOG_COND_MAX_AGE_MS, limit
+  );
+  if (!rows.length && !markRows.length) return { rows: 0, marks: 0, complete: 0 };
+  const work = [...rows.map((r) => ({ ...r, table: "trip_log" })), ...markRows.map((r) => ({ ...r, table: "marks" }))];
   const { results: locations } = await query("SELECT name, lat, lng, tide_offset, created_by_user_id FROM locations WHERE willyweather_id IS NOT NULL");
 
   const obsCache = new Map();
@@ -4452,7 +4463,7 @@ async function conditionsBackfill(env, { now = Date.now(), limit = TLOG_COND_BAT
   const weatherCache = new Map();
   const stmts = [];
   let complete = 0;
-  for (const r of rows) {
+  for (const r of work) {
     if (used >= TLOG_COND_SUBREQUEST_BUDGET) break;
     // the nearest tracked location the row's user can see (Public's, or their own) — findNearestTrackedLocation
     let loc = null;
@@ -4513,19 +4524,19 @@ async function conditionsBackfill(env, { now = Date.now(), limit = TLOG_COND_BAT
     const binds = [];
     for (const [key, [column]] of Object.entries(TLOG_CONDITION_COLUMNS)) {
       if (found[key] === undefined) continue;
-      sets.push(`${column} = COALESCE(${column}, ?)`);
+      sets.push(`${column} = COALESCE(NULLIF(${column}, ''), ?)`); // fills a blank, never overwrites a value
       binds.push(found[key]);
     }
     const done = found.tideCondition !== undefined && found.weatherCondition !== undefined;
-    if (done) {
+    if (done) complete++;
+    if (done && r.table === "trip_log") {
       sets.push("conditions_at = ?");
       binds.push(now);
-      complete++;
     }
-    if (sets.length) stmts.push(env.DB.prepare(`UPDATE trip_log SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...binds, r.id, r.user_id));
+    if (sets.length) stmts.push(env.DB.prepare(`UPDATE ${r.table} SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...binds, r.id, r.user_id));
   }
   if (stmts.length) await env.DB.batch(stmts);
-  return { rows: rows.length, complete };
+  return { rows: rows.length, marks: markRows.length, complete };
 }
 
 // ---------------------------------------------------------------------
