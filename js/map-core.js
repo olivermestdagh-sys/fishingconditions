@@ -394,7 +394,9 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
     return null;
   }
 
-  const map = L.map(container, { scrollWheelZoom: true });
+  // maxZoom lives on the map, not the base layer: the mark cluster group reads map.getMaxZoom(), and the
+  // Seamap (MapLibre) layer sets none, which left it Infinity and made every mark vanish.
+  const map = L.map(container, { scrollWheelZoom: true, maxZoom: 18 });
   leafletMapInstances[containerId] = map;
   applyMapBase(map, savedMapBase());
   const baseBtn = document.getElementById("baseMapBtn");
