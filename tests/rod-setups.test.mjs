@@ -46,14 +46,14 @@ function makeEnv() {
           },
           async run() {
             if (/^INSERT INTO user_rod_setups/.test(sql)) {
-              const [id, user_id, name, rod, rig, sub_list_items, created_at] = args;
+              const [id, user_id, name, rod, rig, sub_list_items, bait, created_at] = args;
               if (rows.some((r) => r.user_id === user_id && r.name === name)) throw new Error("UNIQUE constraint failed");
-              rows.push({ id, user_id, name, rod, rig, sub_list_items, created_at });
+              rows.push({ id, user_id, name, rod, rig, sub_list_items, bait, created_at });
             } else if (/^UPDATE user_rod_setups/.test(sql)) {
-              const [name, rod, rig, sub_list_items, id, user_id] = args;
+              const [name, rod, rig, sub_list_items, bait, id, user_id] = args;
               if (rows.some((r) => r.user_id === user_id && r.name === name && r.id !== id)) throw new Error("UNIQUE constraint failed");
               const row = rows.find((r) => r.id === id && r.user_id === user_id);
-              Object.assign(row, { name, rod, rig, sub_list_items });
+              Object.assign(row, { name, rod, rig, sub_list_items, bait });
             } else if (/^DELETE FROM user_rod_setups/.test(sql)) {
               const idx = rows.findIndex((r) => r.id === args[0] && r.user_id === args[1]);
               if (idx !== -1) rows.splice(idx, 1);

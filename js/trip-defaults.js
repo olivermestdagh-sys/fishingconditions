@@ -48,7 +48,7 @@ function buildSessionStartFromAction(action, rodSetups, ctx, tide) {
   set("species", uniq(action.species));
   set("fishingMethod", uniq(action.fishingMethod));
   if (action.berley) mark.berley = action.berley;
-  set("bait", uniq(action.bait));
+  set("bait", uniq([...(action.bait || []), ...setups.flatMap((s) => s.bait || [])]));
   set("rod", uniq(setups.map((s) => s.rod)));
   set("rig", uniq(setups.map((s) => s.rig)));
   set("rigOptions", uniq(setups.flatMap((s) => s.subListItems || [])));
@@ -82,7 +82,8 @@ function tdCatchFieldsFromAction(action, rodSetups, setupId, tripName) {
   if (action.name) out.actionName = action.name;
   if (action.berley) out.berley = action.berley;
   if ((action.fishingMethod || []).length) out.fishingMethod = action.fishingMethod.join(", ");
-  if ((action.bait || []).length) out.bait = action.bait.join(", ");
+  const baits = [...new Set([...(action.bait || []), ...(setup ? setup.bait || [] : [])])];
+  if (baits.length) out.bait = baits.join(", ");
   if (setup) {
     if (setup.rod) out.rod = setup.rod;
     if (setup.rig) out.rig = setup.rig;
@@ -332,6 +333,7 @@ async function showTripDefaults({ onClose, start } = {}) {
       body: `${nameInput(r.name, "Rod setup name")}
         ${section("Rod", o.rods.map((v) => choice(v, `data-rod="${esc(v)}"`, r.rod === v, o.thumbs.rods[v])).join("") || "", "rod")}
         ${section("Rig", o.rigs.map((v) => choice(v, `data-rig="${esc(v)}"`, r.rig === v, o.thumbs.rigs[v])).join("") || "", "rig")}
+        ${section("Bait", o.baits.map((v) => choice(v, `data-rod-bait="${esc(v)}"`, (r.bait || []).includes(v), o.thumbs.baits[v])).join("") || "", "bait")}
         ${r.rig ? section(`${r.rig} options`, sub.map((v) => choice(v, `data-sub="${esc(v)}"`, r.subListItems.includes(v), subThumbs[v])).join(""), "sub") : ""}
         ${confirmDeleteHtml("Delete this rod setup")}`,
       nav: navHtml("Back"),
@@ -436,6 +438,7 @@ async function showTripDefaults({ onClose, start } = {}) {
     const setRod = (patch) => attempt(() => put("/api/rodsetups", data.rodSetups, view.rodId, patch));
     on("[data-rod]", (el) => setRod({ rod: tdToggleSingle(rod().rod, el.dataset.rod) }));
     on("[data-rig]", (el) => setRod({ rig: tdToggleSingle(rod().rig, el.dataset.rig), subListItems: [] }));
+    on("[data-rod-bait]", (el) => setRod({ bait: tdToggle(rod().bait, el.dataset.rodBait) }));
     on("[data-sub]", (el) => setRod({ subListItems: tdToggle(rod().subListItems, el.dataset.sub) }));
 
     // "+ Add" on a pick-list: open the inline box, or save what was typed under the signed-in user and select it.
@@ -503,6 +506,7 @@ async function showTripDefaults({ onClose, start } = {}) {
         data.rigRows = data.lists.filter((r) => r.field === "Rig");
         // The new value is picked straight away.
         if (kind === "method") await put("/api/tripactions", data.actions, view.actionId, { fishingMethod: tdToggle(action().fishingMethod, value) });
+        else if (kind === "bait" && view.name === "rod") await put("/api/rodsetups", data.rodSetups, view.rodId, { bait: tdToggle(rod().bait, value) });
         else if (kind === "bait") await put("/api/tripactions", data.actions, view.actionId, { bait: tdToggle(action().bait, value) });
         else if (kind === "berley") await put("/api/tripactions", data.actions, view.actionId, { berley: value });
         else if (kind === "rod") await put("/api/rodsetups", data.rodSetups, view.rodId, { rod: value });

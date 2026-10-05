@@ -448,7 +448,7 @@ function liveCatchDefaultsForAction(options, action) {
   const setups = tdLiveRodSetupIds(action.rodSetupIds, liveTripData.rodSetups).map((id) => liveTripData.rodSetups.find((r) => r.id === id));
   return {
     species: action.species || [],
-    bait: action.bait || [], // the Bait card lists these first
+    bait: [...new Set([...(action.bait || []), ...setups.flatMap((s) => (s && s.bait) || [])])], // the Bait card lists these first (the Action's, then its Rod Setups')
     otherTargets: tdOtherTargets(liveTripData.actions, action),
     water: getLiveMarkDefaults().water || "",
     berley: action.berley || "",

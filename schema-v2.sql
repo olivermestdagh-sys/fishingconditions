@@ -286,6 +286,7 @@ CREATE TABLE IF NOT EXISTS user_rod_setups (
   rod TEXT,
   rig TEXT,
   sub_list_items TEXT,
+  bait TEXT, -- JSON list of Bait names (multi-select); needs a manual ALTER TABLE on an existing D1
   created_at INTEGER NOT NULL,
   UNIQUE (user_id, name)
 );
