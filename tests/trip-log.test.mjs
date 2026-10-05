@@ -11,7 +11,7 @@ const workerSrc = read("../user-backend.js");
 
 const parseNaive = String.raw`function parseNaive(iso) { const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/); if (!m) return null; const [, y, mo, d, h, mi, s] = m.map(Number); return Date.UTC(y, mo - 1, d, h, mi, s); }`;
 const browser = new Function(
-  `${parseNaive}\n${tripSrc.slice(0, tripSrc.indexOf("// --- Backend"))}\n${logSrc}\nreturn { tripLogRodRows, tripLogCatchRodRows, tripLogBuildEntry, tripLogActionState, tripLogDescribe, tripLogNewRunId };`
+  `${parseNaive}\n${tripSrc.slice(0, tripSrc.indexOf("// --- Backend"))}\n${logSrc}\nreturn { tripLogRodRows, tripLogCatchRodRows, tripLogBuildEntry, tripLogActionState, tripLogNewRunId };`
 )();
 
 const grab = (re) => {
@@ -64,13 +64,54 @@ test("an Action's state: berley, methods, targets and every rod setup", () => {
   assert.equal(s.rods.length, 1);
 });
 
-test("the viewer describes an entry: what happened, the gear in force, the conditions", () => {
-  const d = browser.tripLogDescribe({
-    type: "change", changeField: "rod_setups", actionName: "Drift", waterCondition: "Clear", waterDepth: 3,
-    rods: [{ name: "Light", rod: "L Wilson", rig: "Paternoster", rigOptions: [], bait: ["Squid", "Prawn"], baitOptions: [] }],
-  });
-  assert.equal(d.title, "Changed — (rod setups) — Drift");
-  assert.ok(d.lines[0].includes("Squid/Prawn"));
-  assert.equal(d.lines[1], "Clear, 3 m");
-  assert.equal(browser.tripLogDescribe({ type: "catch", species: "Bream", size: 31 }).title, "Catch — Bream 31 cm");
+// --- the Trip Logs tab's reading helpers (js/trip-log-view.js) ---------------------------------------------------------
+const view = new Function(read("../js/trip-log-view.js") + "\nreturn { tripLogEventLabel, tripLogGearLines, tripLogGearTitle, tripLogWaterText, tripLogConditionsText, tripLogCatchText, tripLogDurations, tripLogFormatDuration, tripLogElapsed, tripLogDateLabel, tripLogFlags, tripLogTotals, tripLogIsApprox };")();
+
+test("labels, gear, water, conditions and catch text", () => {
+  assert.equal(view.tripLogEventLabel({ type: "trip_start" }), "Trip started");
+  assert.equal(view.tripLogEventLabel({ type: "change", changeField: "rod_setups" }), "Changed (rod setups)");
+  assert.equal(view.tripLogEventLabel({ type: "change", changeField: "water+depth" }), "Changed (water + depth)");
+  assert.equal(view.tripLogEventLabel({ type: "catch" }), "Catch");
+  assert.deepEqual(
+    view.tripLogGearLines([{ name: "Light", rod: "L Wilson", rig: "Paternoster", rigOptions: ["Octopus 3/0"], bait: ["Squid", "Prawn"], baitOptions: ["Wing Strip"] }, { rod: "EGI", rig: "Squid Jig" }, { name: "Bare" }, {}]),
+    ["Light — Octopus 3/0 · Squid, Prawn · Wing Strip", "EGI · Squid Jig", "Bare", "Rod"]
+  );
+  assert.equal(view.tripLogGearTitle({ name: "Light", rod: "L Wilson", rig: "Paternoster" }), "L Wilson · Paternoster", "the rod and rig sit behind the setup's name");
+  assert.equal(view.tripLogGearTitle({ rod: "EGI" }), "", "no name: the line already says it");
+  assert.equal(view.tripLogWaterText({ waterCondition: "Murky", waterDepth: 2.5 }), "Murky, 2.5 m");
+  assert.equal(view.tripLogWaterText({}), "");
+  assert.equal(
+    view.tripLogConditionsText({ tideCondition: "Running In", tideExtreme: "HHW", weatherCondition: "Cloudy", windSpeed: 13, windDirection: "SSW", temperature: 14.2, barometer: 1022.9 }),
+    "Running In (HHW) · Cloudy · 13 km/h SSW · 14.2°C · 1022.9 hPa"
+  );
+  assert.equal(view.tripLogConditionsText({}), "", "still to be looked up");
+  assert.equal(view.tripLogCatchText({ type: "catch", species: "Bream", size: 31, released: true }), "Bream 31 cm (released)");
+  assert.equal(view.tripLogCatchText({ type: "action_start", species: "Bream" }), "");
+});
+
+test("how long each action ran: from its start to the next start / end, changes don't end it", () => {
+  const MIN = 60000;
+  const e = (type, min) => ({ type, ts: 1_000_000 + min * MIN });
+  const entries = [e("trip_start", 0), e("action_start", 5), e("change", 20), e("catch", 25), e("action_start", 40), e("action_end", 70), e("action_start", 75), e("trip_end", 80)];
+  const d = view.tripLogDurations(entries);
+  assert.deepEqual([...d.entries()], [[1, 35 * MIN], [4, 30 * MIN], [6, 5 * MIN]]);
+  assert.equal(view.tripLogDurations([e("trip_start", 0), e("action_start", 5)]).size, 0, "still running: nothing after it yet");
+  assert.equal([...view.tripLogDurations(entries).values()].reduce((a, b) => a + b, 0), 70 * MIN);
+});
+
+test("durations, elapsed time, dates, flags and totals", () => {
+  assert.equal(view.tripLogFormatDuration(8000), "8 s");
+  assert.equal(view.tripLogFormatDuration(12 * 60000), "12 min");
+  assert.equal(view.tripLogFormatDuration(65 * 60000), "1 h 05 min");
+  assert.equal(view.tripLogFormatDuration(NaN), "");
+  assert.equal(view.tripLogElapsed(0, 47 * 60000), "+0:47");
+  assert.equal(view.tripLogElapsed(0, 125 * 60000), "+2:05");
+  assert.equal(view.tripLogDateLabel("2026-10-04 09:37:45"), "Sun, 4 Oct");
+  assert.equal(view.tripLogDateLabel(""), "");
+  assert.deepEqual(view.tripLogFlags({ approximate: true, pending: true, hasTripEnd: false }), ["approx. times", "weather pending", "no end logged"]);
+  assert.deepEqual(view.tripLogFlags({ hasTripEnd: true }), []);
+  assert.deepEqual(view.tripLogTotals([{ fishedMs: 5, catches: 1 }, { fishedMs: 7 }]), { trips: 2, fishedMs: 12, catches: 1 });
+  assert.equal(view.tripLogIsApprox({ source: "Backfill", markId: null }), true);
+  assert.equal(view.tripLogIsApprox({ source: "Backfill", markId: "m1" }), false, "a rebuilt entry taking its time from a mark is exact");
+  assert.equal(view.tripLogIsApprox({ source: "Controller" }), false);
 });

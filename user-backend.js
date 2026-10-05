@@ -3907,6 +3907,36 @@ function tlogParseSiteEntry(ev) {
   return { entry, rods: rodRows };
 }
 
+/**
+ * The Trip Logs tab's headers: one row per trip run, newest first (GET /api/triplog?list=1[&from=YYYY-MM-DD&to=YYYY-MM-DD], filtering on the run's
+ * start). `fishedMs` = the time an action was running: from each action_start to the next action_start / action_end / trip_end of the run
+ * (the same rule as tripLogDurations, js/trip-log-view.js, which the page uses for the lines).
+ */
+async function tlogListRuns(env, uid, from, to) {
+  const day = /^\d{4}-\d{2}-\d{2}$/;
+  const lo = day.test(from || "") ? `${from} 00:00:00` : "0000-00-00 00:00:00";
+  const hi = day.test(to || "") ? `${to} 23:59:59` : "9999-12-31 23:59:59";
+  const [headers, fished] = await Promise.all([
+    env.DB.prepare(
+      `SELECT run_id, MAX(trip_id) AS trip_id, MAX(trip_name) AS trip_name, MIN(ts) AS start_ts, MAX(ts) AS end_ts, MIN(date_time) AS start_dt, MAX(date_time) AS end_dt,
+              COUNT(*) AS entries, SUM(event_type = 'action_start') AS actions, SUM(event_type = 'catch') AS catches, MAX(event_type = 'trip_end') AS has_end,
+              MAX(source = 'Backfill' AND mark_id IS NULL) AS approximate, MAX(conditions_at IS NULL) AS pending
+       FROM trip_log WHERE user_id = ? GROUP BY run_id HAVING MIN(date_time) >= ? AND MIN(date_time) <= ? ORDER BY MIN(ts) DESC LIMIT 500`
+    ).bind(uid, lo, hi).all(),
+    env.DB.prepare(
+      `SELECT run_id, SUM(CASE WHEN event_type = 'action_start' AND next_ts IS NOT NULL THEN next_ts - ts ELSE 0 END) AS fished_ms FROM (
+         SELECT run_id, event_type, ts, LEAD(ts) OVER (PARTITION BY run_id ORDER BY ts, rowid) AS next_ts
+         FROM trip_log WHERE user_id = ? AND event_type IN ('action_start', 'action_end', 'trip_end')
+       ) GROUP BY run_id`
+    ).bind(uid).all(),
+  ]);
+  const fishedBy = new Map(fished.results.map((r) => [r.run_id, r.fished_ms || 0]));
+  return headers.results.map((r) => ({
+    runId: r.run_id, tripId: r.trip_id ?? null, tripName: r.trip_name ?? null, startTs: r.start_ts, endTs: r.end_ts, startDateTime: r.start_dt, endDateTime: r.end_dt,
+    entries: r.entries, actions: r.actions, catches: r.catches, hasTripEnd: !!r.has_end, approximate: !!r.approximate, pending: !!r.pending, fishedMs: fishedBy.get(r.run_id) || 0,
+  }));
+}
+
 async function handleTripLogCollection(request, url, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
@@ -3948,6 +3978,7 @@ async function handleTripLogCollection(request, url, env) {
       ).bind(uid, Date.now() - 20 * 60000, limit).all();
       return jsonResponse(results.map((r) => ({ id: r.id, dateTime: r.date_time, lat: r.lat, lng: r.lng })), 200, env);
     }
+    if (url.searchParams.get("list")) return jsonResponse(await tlogListRuns(env, uid, url.searchParams.get("from"), url.searchParams.get("to")), 200, env);
     let runId = url.searchParams.get("runId");
     const markId = url.searchParams.get("markId");
     if (!runId && markId) {

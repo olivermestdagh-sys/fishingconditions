@@ -616,7 +616,7 @@ function buildMarkPopupViewHtml(mark) {
       <div style="margin-top:8px;display:flex;gap:6px;align-items:center;">
         <button type="button" class="btn-secondary" data-mark-edit style="padding:4px 10px;font-size:0.85rem;">Edit</button>
         <button type="button" class="btn-secondary" data-mark-copy style="padding:4px 10px;font-size:0.85rem;">Copy</button>
-        ${mark.tripName && typeof window.showTripLog === "function" ? `<button type="button" class="btn-secondary" data-mark-trip-log style="padding:4px 10px;font-size:0.85rem;">Trip log</button>` : ""}
+        ${mark.tripName ? `<a class="btn-secondary" data-mark-trip-log href="triplogs.html#mark=${encodeURIComponent(mark.id)}" style="padding:4px 10px;font-size:0.85rem;text-decoration:none;display:inline-block;">Trip log</a>` : ""}
         <button type="button" class="btn-secondary" data-mark-delete style="padding:4px 10px;font-size:0.85rem;color:#dc2626;">Delete</button>
       </div>
       <div data-mark-delete-confirm style="display:none;margin-top:8px;padding:8px;border:1px solid #fecaca;background:#fef2f2;border-radius:6px;font-size:0.85rem;">
@@ -1899,15 +1899,6 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
     copyBtn.addEventListener("click", (e) => {
       L.DomEvent.stop(e);
       if (options.map && options.state) startCopiedMarkEntry(options.map, mark, options.state);
-    });
-  }
-
-  // Trip log — a trip-made mark (Session / Catch) opens the log of the trip run it belongs to (js/trip-log.js; conditions.html only).
-  const tripLogBtn = popupEl.querySelector("[data-mark-trip-log]");
-  if (tripLogBtn) {
-    tripLogBtn.addEventListener("click", (e) => {
-      L.DomEvent.stop(e);
-      if (typeof window.showTripLog === "function") window.showTripLog({ markId: mark.id }); // via window: only conditions.html loads js/trip-log.js
     });
   }
 

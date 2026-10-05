@@ -830,6 +830,8 @@ test("/api/triplog: the site posts entries (idempotent), reads a run by mark, an
 
 // --- trip log backfill (past trips; the phone's events list) -------------------------------------------------------------
 
+const tripLogViewSrc = fs.readFileSync(new URL("../js/trip-log-view.js", import.meta.url), "utf8");
+const tripLogView = new Function(tripLogViewSrc + "\nreturn { tripLogDurations };")();
 const BF_DEV = "bf-dev";
 const BF_RUN = "run_1791066700234_abcde";
 /** A trip like a real one on the daylight-saving change day (Melbourne: UTC+10 until 02:00 on 2026-10-04, UTC+11 after): trip start, Drift
@@ -946,4 +948,38 @@ test("trip log history: the phone's events list gives exact times and the edit m
   assert.equal(tlog(sqlite).length, n, "a second upload changes nothing");
   assert.equal((await api(env, token, "POST", "/api/controller/history", { deviceId: BF_DEV, events: [] })).status, 400);
   assert.ok([401, 403].includes((await api(env, null, "POST", "/api/controller/history", { deviceId: BF_DEV, events })).status), "no token: refused");
+});
+
+test("trip log headers (GET /api/triplog?list=1): one row per run with counts, times, the fished time the lines add up to, and the flags", async () => {
+  const { sqlite, env } = await bfSeeded();
+  await site(env, "POST", "/api/triplog/backfill", {});
+
+  const list = await (await site(env, "GET", "/api/triplog?list=1")).json();
+  assert.equal(list.length, 1);
+  const h = list[0];
+  assert.equal(h.runId, BF_RUN);
+  assert.equal(h.tripName, "Estuary");
+  assert.deepEqual([h.entries, h.actions, h.catches, h.hasTripEnd], [7, 2, 1, true]);
+  assert.equal(h.startDateTime, "2026-10-04 09:31:40");
+  assert.equal(h.endDateTime, "2026-10-04 12:10:00", "ends at its last row");
+  assert.equal(h.approximate, true, "the trip start/end came from when the Worker heard of them");
+  assert.equal(h.pending, true, "weather/tide still to come");
+
+  // the header's fished time is what the lines add up to (same rule in the SQL and in js/trip-log-view.js)
+  const lines = await (await site(env, "GET", `/api/triplog?runId=${BF_RUN}`)).json();
+  const fromLines = [...tripLogView.tripLogDurations(lines.entries).values()].reduce((a, b) => a + b, 0);
+  assert.ok(h.fishedMs > 0);
+  assert.equal(h.fishedMs, fromLines);
+
+  // exact (history) rows are no longer approximate, and once the cron has filled the conditions nothing is pending
+  sqlite.prepare("UPDATE trip_log SET source = 'Controller', conditions_at = 1").run();
+  const exact = (await (await site(env, "GET", "/api/triplog?list=1")).json())[0];
+  assert.deepEqual([exact.approximate, exact.pending], [false, false]);
+
+  // filtering on the run's start date, and nobody else's runs
+  assert.equal((await (await site(env, "GET", "/api/triplog?list=1&from=2026-10-04&to=2026-10-04")).json()).length, 1);
+  assert.equal((await (await site(env, "GET", "/api/triplog?list=1&from=2026-10-05")).json()).length, 0);
+  assert.equal((await (await site(env, "GET", "/api/triplog?list=1&to=2026-10-03")).json()).length, 0);
+  assert.equal((await (await site(env, "GET", "/api/triplog?list=1", undefined, "s-u2")).json()).length, 0, "not someone else's");
+  assert.equal((await site(env, "GET", "/api/triplog?list=1", undefined, "nobody")).status, 401);
 });

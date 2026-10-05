@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Olie's Kayak and Surf Fishing Conditions – Trip Logs</title>
+<meta name="description" content="Trip logs: every trip with what was done during it, action by action." />
+<meta name="theme-color" content="#0b2a4a" />
+<link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+<link rel="apple-touch-icon" href="images/apple-touch-icon.png" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="stylesheet" href="style.css" />
+<style>
+  .tl-filters { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; }
+  .tl-filters label { display: block; font-size: 0.78rem; font-weight: 600; color: var(--grey-700, #444); margin-bottom: 3px; }
+  .tl-filters select, .tl-filters input { box-sizing: border-box; min-width: 130px; }
+  .tl-summary { font-size: 0.85rem; color: var(--grey-600, #666); margin: 10px 0 0; }
+  .tl-scroll { overflow-x: auto; }
+  table.tl-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  table.tl-table th, table.tl-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grey-200, #e5e5e5); vertical-align: top; }
+  table.tl-table th { font-weight: 600; white-space: nowrap; }
+  table.tl-table tbody td { white-space: normal; } /* style.css makes every table cell nowrap; here long gear / conditions text must wrap */
+  table.tl-table td.ev { white-space: nowrap; }
+  table.tl-table td.num, table.tl-table th.num { text-align: right; white-space: nowrap; }
+  table.tl-runs tbody tr { cursor: pointer; }
+  table.tl-runs tbody tr:hover { background: var(--blue-100, #eaf2fb); }
+  table.tl-runs tbody tr.selected { background: var(--blue-100, #eaf2fb); box-shadow: inset 3px 0 0 var(--blue-600, #1d5fa8); }
+  table.tl-runs tbody tr:focus-visible { outline: 2px solid var(--blue-600, #1d5fa8); outline-offset: -2px; }
+  table.tl-lines { min-width: 960px; } /* on a phone the lines scroll sideways rather than squeeze into a column per word */
+  table.tl-runs { min-width: 640px; }
+  table.tl-lines td.time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  table.tl-lines td.time small { display: block; color: var(--grey-500, #888); }
+  table.tl-lines tr.catch { background: rgba(22, 163, 74, 0.10); }
+  table.tl-lines tr.ends td { color: var(--grey-600, #666); }
+  .tl-flag { display: inline-block; font-size: 0.72rem; padding: 1px 6px; margin: 0 4px 2px 0; border-radius: 999px; background: var(--grey-200, #e5e5e5); color: var(--grey-700, #444); white-space: nowrap; }
+  .tl-head { display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: baseline; margin-bottom: 8px; }
+  .tl-head h3 { margin: 0; }
+  .tl-head span { font-size: 0.85rem; color: var(--grey-600, #666); }
+  /* table cells ignore max-width, so these are widths: long text wraps inside them instead of pushing the right-hand columns off screen */
+  table.tl-lines td.tl-gear { width: 24rem; }
+  .tl-gear div { padding: 1px 0; }
+  table.tl-lines td.cond { width: 13rem; }
+  table.tl-lines td.pos { width: 7rem; font-size: 0.8rem; color: var(--grey-600, #666); }
+  .tl-empty { font-size: 0.85rem; color: var(--grey-500, #888); padding: 12px 0; }
+</style>
+<script src="js/install-app.js"></script>
+</head>
+<body>
+
+<div class="sitebar"><header class="topbar">
+  <h1>Olie's Kayak and Surf Fishing Conditions</h1>
+  <div id="status" class="updated">Trip Logs</div>
+  <button type="button" id="installAppBtn" class="install-btn" hidden>Install app</button>
+</header>
+
+<nav class="tabnav">
+  <a href="index.html">Week Ahead</a>
+  <a href="conditions.html">Map</a>
+  <a href="reports.html">Reports</a>
+  <a href="triplogs.html" class="active" aria-current="page">Trip Logs</a>
+  <a href="locations.html">Settings</a>
+</nav></div>
+
+<main class="wide">
+  <section id="tlNotConnected" class="summary-card" style="display:none;">
+    <div class="summary-title" style="margin-bottom:6px;">Not signed in</div>
+    <p class="footnote" style="margin:0;text-align:left;">
+      Trip logs are only available when you're signed in — see the Settings tab to sign in.
+    </p>
+  </section>
+
+  <section id="tlMain" style="display:none;">
+    <section class="summary-card">
+      <div class="summary-title" style="margin-bottom:8px;">Trips</div>
+      <div class="tl-filters">
+        <div><label for="tlTripFilter">Trip</label><select id="tlTripFilter"><option value="">All trips</option></select></div>
+        <div><label for="tlFrom">From date</label><input type="date" id="tlFrom" /></div>
+        <div><label for="tlTo">To date</label><input type="date" id="tlTo" /></div>
+        <button type="button" class="btn-secondary" id="tlClear">Clear</button>
+      </div>
+      <p class="tl-summary" id="tlSummary"></p>
+      <div class="tl-scroll" id="tlRuns"></div>
+    </section>
+
+    <section class="summary-card" id="tlDetailCard" style="display:none;">
+      <div id="tlDetail"></div>
+    </section>
+  </section>
+</main>
+
+<script src="js/backend.js"></script>
+<script src="js/trip-log-view.js"></script>
+<script src="triplogs.js"></script>
+</body>
+</html>

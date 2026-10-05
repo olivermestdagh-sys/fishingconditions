@@ -4006,8 +4006,3 @@ body.live-card-open { overflow: hidden; }
 .map-toolbar .live-trip-action:disabled { opacity: 0.55; }
 .map-toolbar #btnLiveWater, .map-toolbar #btnLiveDepth { font-weight: 600; }
 .mark-edit-sublabel { font-size: 0.75rem; font-weight: 600; margin: 8px 0 3px; opacity: 0.85; }
-
-/* Trip log viewer (js/trip-log.js showTripLog): a read-only chronological list inside the .live-card look. */
-.trip-log-list { list-style: none; margin: 0; padding: 0 4px; overflow-y: auto; max-height: 60vh; text-align: left; }
-.trip-log-item { padding: 8px 4px; border-bottom: 1px solid rgba(128, 128, 128, 0.25); font-size: 0.95rem; }
-.trip-log-line { font-size: 0.82rem; opacity: 0.8; margin-top: 2px; }

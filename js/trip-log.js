@@ -5,7 +5,7 @@
 // Marks are unaffected: the log is written in ADDITION, queued in localStorage and retried, so a failed log never blocks a mark.
 // A state (action, rod setups, water, depth) lasts from its row until the next row of the run — see schema-v2.sql — so action starts and
 // changes always carry the full state.
-// Also: the weather/tide backfill (enrichTripLog) and a read-only viewer for one run (showTripLog).
+// Also: the browser's weather/tide fallback (enrichTripLog). Reading the log is the Trip Logs tab (triplogs.html, js/trip-log-view.js).
 
 const TRIP_LOG_QUEUE_KEY = "tripLogQueue";
 const TRIP_LOG_MAX_QUEUE = 500;
@@ -182,60 +182,4 @@ async function enrichTripLog() {
       // next time
     }
   }
-}
-
-// --- Viewer --------------------------------------------------------------------------------------------------
-
-const TRIP_LOG_TYPE_LABELS = { trip_start: "Trip started", trip_end: "Trip ended", action_start: "Action started", action_end: "Action ended", change: "Changed", catch: "Catch" };
-
-/** One entry as readable lines (pure): [{label, text}] for the viewer. */
-function tripLogDescribe(e) {
-  const rods = (e.rods || []).map((r) => [r.name || r.rod || "Rod", r.rod, r.rig, (r.rigOptions || []).join("/"), (r.bait || []).join("/"), (r.baitOptions || []).join("/")].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(" · "));
-  const label = TRIP_LOG_TYPE_LABELS[e.type] || e.type;
-  const title = [label, e.type === "change" && e.changeField ? `(${e.changeField.replace(/_/g, " ").replace("+", " + ")})` : "", e.actionName, e.type === "catch" ? [e.species, e.size != null ? `${e.size} cm` : ""].filter(Boolean).join(" ") : ""].filter(Boolean).join(" — ");
-  const lines = [];
-  if (rods.length) lines.push(rods.join("  |  "));
-  const cond = [e.waterCondition, e.waterDepth != null ? `${e.waterDepth} m` : "", e.tideCondition, e.weatherCondition].filter(Boolean).join(", ");
-  if (cond) lines.push(cond);
-  return { title, lines };
-}
-
-/** Opens a read-only list of one run's log (chronological), with the Close button. `markId` finds the run through a Session/Catch mark. */
-async function showTripLog({ markId, runId }) {
-  const overlay = document.createElement("div");
-  overlay.className = "live-card-overlay";
-  overlay.setAttribute("role", "dialog");
-  overlay.setAttribute("aria-modal", "true");
-  overlay.innerHTML = `<div class="live-card"><div class="live-card-head"><h2 class="live-card-title">Trip log</h2><p class="live-card-prompt">Loading…</p></div></div>`;
-  document.body.appendChild(overlay);
-  document.body.classList.add("live-card-open");
-  const close = () => {
-    overlay.remove();
-    document.body.classList.remove("live-card-open");
-  };
-  let data = { entries: [] };
-  try {
-    const q = runId ? `runId=${encodeURIComponent(runId)}` : `markId=${encodeURIComponent(markId)}`;
-    const res = await fetch(`${USER_BACKEND_URL}/api/triplog?${q}`, { cache: "no-store", credentials: "include" });
-    if (res.ok) data = await res.json();
-  } catch {
-    // shown as empty below
-  }
-  const rows = (data.entries || [])
-    .map((e) => {
-      const d = tripLogDescribe(e);
-      return `<li class="trip-log-item"><strong>${escapeHtml(e.dateTime.slice(11, 16))}</strong> ${escapeHtml(d.title)}${d.lines.map((l) => `<div class="trip-log-line">${escapeHtml(l)}</div>`).join("")}</li>`;
-    })
-    .join("");
-  const first = (data.entries || [])[0];
-  overlay.innerHTML = `
-    <div class="live-card">
-      <div class="live-card-head">
-        <h2 class="live-card-title">Trip log</h2>
-        <p class="live-card-prompt">${first ? escapeHtml([first.tripName, first.dateTime.slice(0, 10)].filter(Boolean).join(" — ")) : "No log for this trip."}</p>
-      </div>
-      <ol class="trip-log-list">${rows}</ol>
-      <div class="live-card-nav live-card-nav-1"><button type="button" class="live-card-nav-btn live-card-next" data-tl-close>Close</button></div>
-    </div>`;
-  overlay.querySelector("[data-tl-close]").addEventListener("click", close);
 }

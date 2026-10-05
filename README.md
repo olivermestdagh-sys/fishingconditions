@@ -20,8 +20,9 @@ Live site: https://olivermestdagh-sys.github.io/fishingconditions/
  index.html   Week Ahead     ──►  Worker fishingconditions-users  ◄──  update.yml (every 3 h)
  conditions.html  Map (Live, Import)  (user-backend.js)                    runs scripts/fetch_conditions.py
  reports.html Reports               · Google sign-in + sessions           · WillyWeather + Open-Meteo data
- locations.html Settings            · D1 database (locations, marks,      · writes data/conditions.json
-                                      pick-lists, users, settings)          and config/locations.json
+ triplogs.html Trip Logs            · D1 database (locations, marks,      · writes data/conditions.json
+ locations.html Settings              pick-lists, trip logs, users,         and config/locations.json
+                                      settings)
                                     · /api/public/locations (live config) · commits them back to the repo
                               ──►  Worker fishingconditions-search
                                     (willyweather-search.js) — keeps the
