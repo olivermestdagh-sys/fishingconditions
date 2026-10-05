@@ -230,6 +230,16 @@ function applyMapBase(map, kind) {
     layer.addTo(map);
   }
   if (layer.bringToBack) layer.bringToBack();
+  // A style the installed MapLibre can't parse (or a blocked style host) would leave a blank map: go back to OSM.
+  if (kind === "seamap" && layer.getMaplibreMap) {
+    const gl = layer.getMaplibreMap();
+    if (gl) {
+      gl.on("error", (e) => {
+        const msg = (e && e.error && e.error.message) || "";
+        if (map._baseLayer === layer && !gl.isStyleLoaded() && /style|layers|source|Failed to fetch/i.test(msg)) applyMapBase(map, "osm");
+      });
+    }
+  }
   map._baseLayer = layer;
   map._baseKind = kind;
   const btn = document.getElementById("baseMapBtn");
