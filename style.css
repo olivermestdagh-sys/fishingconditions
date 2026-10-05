@@ -3018,6 +3018,10 @@ main.wide {
 /* Compact icon-button style shared by the Map toolbar's palette (Colour by) and funnel (Filters) buttons —
    the active-filter count follows the funnel as "(5)", empty/hidden when no filter is on) and its
    Import/Export button (see .device-tools-menu below). */
+.map-toolbar #baseMapBtn.active {
+  background: var(--navy, #0b2a4a);
+  color: #fff;
+}
 .map-toolbar .map-filter-btn {
   display: inline-flex;
   align-items: center;

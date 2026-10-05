@@ -94,4 +94,6 @@ node --test                      # unit tests (tide logic, worker security rules
 Forecast and tide data are from [WillyWeather](https://www.willyweather.com.au/)
 and Open-Meteo; WillyWeather's API terms require crediting them by name and logo
 wherever their data is shown (see the credit in the page header). Map tiles ©
-OpenStreetMap contributors.
+OpenStreetMap contributors; the optional sea-chart base map is
+[Open Waters: Seamap](https://openwaters.io/charts/seamap) (CC BY 4.0, derived from
+OpenStreetMap, VersaTiles, Seascape and Mapterhorn data — not for navigation).

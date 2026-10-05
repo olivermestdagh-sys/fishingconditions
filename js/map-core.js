@@ -181,6 +181,74 @@ function buildCurrentPositionDivIcon() {
 // preference, not two separate ones.
 const MAP_VIEW_STORAGE_KEY = "goodConditionsLocationMapView";
 
+// Base map: "osm" (default street map, raster tiles) or "seamap" (Open Waters
+// Seamap nautical chart, CC BY 4.0 — vector tiles, drawn through MapLibre GL via
+// the leaflet-maplibre-gl plugin). Per-device like the saved view, not synced.
+const MAP_BASE_STORAGE_KEY = "goodConditionsMapBase";
+const SEAMAP_STYLE_URL = "https://tiles.openwaters.io/seamap/style.json";
+const SEAMAP_ATTRIBUTION =
+  '&copy; <a href="https://openwaters.io/charts/seamap" target="_blank" rel="noopener">Open Waters: Seamap</a> (not for navigation) &middot; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+function seamapAvailable() {
+  if (typeof L === "undefined" || typeof L.maplibreGL !== "function" || typeof maplibregl === "undefined") return false;
+  try {
+    return maplibregl.supported ? maplibregl.supported() !== false : true;
+  } catch {
+    return false;
+  }
+}
+
+function savedMapBase() {
+  try {
+    return localStorage.getItem(MAP_BASE_STORAGE_KEY) === "seamap" && seamapAvailable() ? "seamap" : "osm";
+  } catch {
+    return "osm";
+  }
+}
+
+function makeBaseLayer(kind) {
+  if (kind === "seamap") {
+    return L.maplibreGL({ style: SEAMAP_STYLE_URL, attribution: SEAMAP_ATTRIBUTION });
+  }
+  return L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 18,
+  });
+}
+
+// Puts the chosen base layer on `map` (replacing the current one) and keeps it at
+// the back; if the chart can't load, falls back to the street map.
+function applyMapBase(map, kind) {
+  if (map._baseLayer) map.removeLayer(map._baseLayer);
+  let layer;
+  try {
+    layer = makeBaseLayer(kind);
+    layer.addTo(map);
+  } catch {
+    kind = "osm";
+    layer = makeBaseLayer("osm");
+    layer.addTo(map);
+  }
+  if (layer.bringToBack) layer.bringToBack();
+  map._baseLayer = layer;
+  map._baseKind = kind;
+  const btn = document.getElementById("baseMapBtn");
+  if (btn) {
+    btn.setAttribute("aria-pressed", kind === "seamap" ? "true" : "false");
+    btn.classList.toggle("active", kind === "seamap");
+  }
+  return kind;
+}
+
+function setMapBase(map, kind) {
+  kind = applyMapBase(map, kind);
+  try {
+    localStorage.setItem(MAP_BASE_STORAGE_KEY, kind);
+  } catch {
+    /* per-device convenience only */
+  }
+}
+
 // Tracks the live Leaflet map instance per container (keyed by containerId)
 // across repeated renderLeafletLocationMap calls. The Settings tab in
 // particular calls this on every renderRows() — initial load, adding a
@@ -318,10 +386,12 @@ function renderLeafletLocationMap(containerId, points, opts = {}) {
 
   const map = L.map(container, { scrollWheelZoom: true });
   leafletMapInstances[containerId] = map;
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    maxZoom: 18,
-  }).addTo(map);
+  applyMapBase(map, savedMapBase());
+  const baseBtn = document.getElementById("baseMapBtn");
+  if (baseBtn) {
+    baseBtn.style.display = seamapAvailable() ? "" : "none";
+    baseBtn.onclick = () => setMapBase(map, map._baseKind === "seamap" ? "osm" : "seamap");
+  }
 
   wireMapPopupZIndexToggle(map);
 
