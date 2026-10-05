@@ -151,6 +151,11 @@ const VALID_BEHAVES_LIKE = new Set(["Kayak", "Land based"]); // the only two
                                          // two as what it actually scores like
 
 export default {
+  // Hourly cron (wrangler.toml [triggers]): the trip log's weather / tide backfill (conditionsBackfill, "Trip log" section).
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(conditionsBackfill(env).catch((err) => console.error("Trip log conditions backfill failed:", err)));
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
 
@@ -4279,6 +4284,248 @@ async function handleControllerHistory(request, env, user) {
   if (!history.size) return jsonResponse({ error: "No valid events." }, 400, env);
   const r = await tlogBackfillDevice(env, user.id, deviceId, { history, maxRuns: 50 });
   return jsonResponse({ logged: r.rows, runs: r.runs, skipped: skippedEvents }, 200, env);
+}
+
+// --- Trip log: weather / tide backfill, on the Worker's hourly cron ---------------------------------------------------------------
+// A log row is written without weather or tide (the Worker can't know them at that moment: the hour isn't archived yet). `scheduled()`
+// (wrangler.toml [triggers]) fills them from what D1 already holds: the pipeline archive (`observations`: hourly temp / wind / pressure /
+// water temp per tracked location; `tide_events`: raw high/low events, the location's tide_offset applied on read) and, for the weather
+// CONDITION (Clear / Cloudy ...), which the archive doesn't hold, Open-Meteo's historical weather code. The browser's lookup
+// (js/mark-lookup.js lookupHistoricalMarkConditions) is the reference: the pure helpers below are twins of
+// classifyTideFromExtrema / rankExtremum (js/marks-core.js, js/chart-base.js), weatherCodeToCondition (js/mark-lookup.js) and
+// previewDegreesToCompass (js/weather-preview.js), pinned by tests/trip-log-conditions.test.mjs — change both together.
+// A row is only taken once its hour is archived (>= 3 h old) and is given up on after 3 days (older tide is the browser's billed
+// WillyWeather fallback, enrichTripLog); conditions_at is set only when the row got BOTH a tide and a weather condition.
+
+const TLOG_COND_MIN_AGE_MS = 3 * 3600000;
+const TLOG_COND_MAX_AGE_MS = 3 * 86400000;
+const TLOG_COND_BATCH = 10;
+const TLOG_COND_SUBREQUEST_BUDGET = 36; // the free plan allows ~50 subrequests (D1 queries included) per invocation
+const TLOG_TIDE_SLACK_MS = 10 * 60000;
+const TLOG_TIDE_RUN_ZONE_MS = 2 * 3600000;
+const TLOG_OPEN_METEO_ARCHIVE = "https://archive-api.open-meteo.com/v1/archive";
+
+/** "YYYY-MM-DD" of a naive-ms value — naiveDateOnlyStr (js/chart-base.js). */
+function tlogDateOnly(ms) {
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
+/** Open-Meteo's WMO weather code onto the site's 4 Weather Conditions — weatherCodeToCondition (js/mark-lookup.js). */
+function tlogWeatherCondition(code) {
+  if (code == null) return null;
+  if (code === 0 || code === 1) return "Clear";
+  if (code === 2) return "Cloudy";
+  if (code === 3 || code === 45 || code === 48) return "Overcast";
+  return "Rain";
+}
+
+/** The nearest of the 16 compass points to a bearing in degrees — previewDegreesToCompass (js/weather-preview.js). */
+function tlogCompass(deg) {
+  let closest = null;
+  let closestDiff = Infinity;
+  CTL_WIND_DIRECTIONS.forEach((name, i) => {
+    const at = i * 22.5;
+    const diff = Math.min(Math.abs(at - deg), 360 - Math.abs(at - deg));
+    if (diff < closestDiff) {
+      closestDiff = diff;
+      closest = name;
+    }
+  });
+  return closest;
+}
+
+/** HHW / LHW / HLW / LLW for one extremum — rankExtremum (js/chart-base.js). */
+function tlogRankExtremum(extrema, ex) {
+  const sameType = extrema.filter((e) => e.type === ex.type);
+  const day = tlogDateOnly(ex.t);
+  let peers = sameType.filter((e) => e !== ex && tlogDateOnly(e.t) === day);
+  if (peers.length === 0) {
+    const idx = sameType.indexOf(ex);
+    const neighbour = sameType[idx - 1] || sameType[idx + 1];
+    if (!neighbour) return null;
+    peers = [neighbour];
+  }
+  const isHigher = peers.every((p) => ex.height >= p.height);
+  if (ex.type === "high") return isHigher ? "HHW" : "LHW";
+  return isHigher ? "HLW" : "LLW";
+}
+
+/** {condition, extreme} of the tide at `targetMs` from sorted extrema [{t, height, type}], or null — classifyTideFromExtrema (js/marks-core.js). */
+function tlogClassifyTide(extrema, targetMs) {
+  let prev = null, next = null;
+  for (const ex of extrema) {
+    if (ex.t <= targetMs) prev = ex;
+    else {
+      next = ex;
+      break;
+    }
+  }
+  if (!prev || !next) return null;
+  const distToPrev = targetMs - prev.t;
+  const distToNext = next.t - targetMs;
+  const runningIn = prev.type === "low" && next.type === "high";
+  const runningOut = prev.type === "high" && next.type === "low";
+  const prevRank = tlogRankExtremum(extrema, prev);
+  const nextRank = tlogRankExtremum(extrema, next);
+  if (distToPrev <= TLOG_TIDE_SLACK_MS) return { condition: prev.type === "high" ? "Slack High" : "Slack Low", extreme: prevRank };
+  if (distToNext <= TLOG_TIDE_SLACK_MS) return { condition: next.type === "high" ? "Slack High" : "Slack Low", extreme: nextRank };
+  if (runningIn) {
+    if (distToPrev <= TLOG_TIDE_RUN_ZONE_MS) return { condition: "Start Run In", extreme: prevRank };
+    if (distToNext <= TLOG_TIDE_RUN_ZONE_MS) return { condition: "Last Run In", extreme: nextRank };
+    return { condition: "Running In", extreme: nextRank };
+  }
+  if (runningOut) {
+    if (distToPrev <= TLOG_TIDE_RUN_ZONE_MS) return { condition: "Start Run Out", extreme: prevRank };
+    if (distToNext <= TLOG_TIDE_RUN_ZONE_MS) return { condition: "Last Run Out", extreme: nextRank };
+    return { condition: "Running Out", extreme: nextRank };
+  }
+  return null;
+}
+
+/** The mark-style fields one archive `observations` row holds — markConditionsFromObservationRow (js/mark-lookup.js), on the table's column names. */
+function tlogFieldsFromObservation(row) {
+  const out = {};
+  if (!row) return out;
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  if (num(row.wind_kmh) != null) out.windSpeed = Math.round(row.wind_kmh);
+  if (CTL_WIND_DIRECTIONS.includes(row.wind_dir)) out.windDirection = row.wind_dir;
+  if (num(row.pressure_hpa) != null) out.barometer = Math.round(row.pressure_hpa * 10) / 10;
+  if (num(row.temp_c) != null) out.temperature = Math.round(row.temp_c * 10) / 10;
+  if (num(row.water_temp_c) != null) out.waterTemperature = Math.round(row.water_temp_c * 10) / 10;
+  return out;
+}
+
+/** What Open-Meteo's `hourly` block says for one hour ("YYYY-MM-DD HH"), in the same fields (the rounding of lookupHistoricalMarkConditions). */
+function tlogFieldsFromOpenMeteo(hourly, hourKey) {
+  const out = {};
+  if (!hourly || !Array.isArray(hourly.time)) return out;
+  const at = (values) => {
+    if (!Array.isArray(values)) return null;
+    const i = hourly.time.findIndex((t) => String(t).slice(0, 13).replace("T", " ") === hourKey);
+    return i >= 0 && values[i] != null ? values[i] : null;
+  };
+  const speed = at(hourly.windspeed_10m);
+  const dir = at(hourly.winddirection_10m);
+  const pressure = at(hourly.pressure_msl);
+  const code = at(hourly.weathercode);
+  const air = at(hourly.temperature_2m);
+  if (speed != null) out.windSpeed = Math.round(speed);
+  if (dir != null) out.windDirection = tlogCompass(dir);
+  if (pressure != null) out.barometer = Math.round(pressure * 10) / 10;
+  if (air != null) out.temperature = Math.round(air * 10) / 10;
+  const condition = tlogWeatherCondition(code);
+  if (condition) out.weatherCondition = condition;
+  return out;
+}
+
+const tlogDistanceM = (lat1, lng1, lat2, lng2) => {
+  const lat0 = ((lat1 + lat2) / 2) * (Math.PI / 180);
+  return Math.hypot((lng2 - lng1) * 111320 * Math.cos(lat0), (lat2 - lat1) * 110540);
+};
+
+/**
+ * Fills the weather / tide of up to TLOG_COND_BATCH waiting trip_log rows. Returns {rows, complete}. Shares one archive read per
+ * location + day and one Open-Meteo call per place + day, and stops early rather than run into the subrequest limit.
+ */
+async function conditionsBackfill(env, { now = Date.now(), limit = TLOG_COND_BATCH } = {}) {
+  let used = 0;
+  const query = (sql, ...args) => {
+    used++;
+    return env.DB.prepare(sql).bind(...args).all();
+  };
+  const { results: rows } = await query(
+    `SELECT * FROM (
+       SELECT t.id, t.user_id, t.ts, t.date_time,
+              COALESCE(t.lat, (SELECT t2.lat FROM trip_log t2 WHERE t2.user_id = t.user_id AND t2.run_id = t.run_id AND t2.lat IS NOT NULL ORDER BY ABS(t2.ts - t.ts) LIMIT 1)) AS lat,
+              COALESCE(t.lng, (SELECT t2.lng FROM trip_log t2 WHERE t2.user_id = t.user_id AND t2.run_id = t.run_id AND t2.lat IS NOT NULL ORDER BY ABS(t2.ts - t.ts) LIMIT 1)) AS lng
+       FROM trip_log t WHERE t.conditions_at IS NULL AND t.ts < ? AND t.ts > ? ORDER BY t.ts ASC LIMIT ?
+     ) WHERE lat IS NOT NULL`,
+    now - TLOG_COND_MIN_AGE_MS, now - TLOG_COND_MAX_AGE_MS, limit
+  );
+  if (!rows.length) return { rows: 0, complete: 0 };
+  const { results: locations } = await query("SELECT name, lat, lng, tide_offset, created_by_user_id FROM locations WHERE willyweather_id IS NOT NULL");
+
+  const obsCache = new Map();
+  const tideCache = new Map();
+  const weatherCache = new Map();
+  const stmts = [];
+  let complete = 0;
+  for (const r of rows) {
+    if (used >= TLOG_COND_SUBREQUEST_BUDGET) break;
+    // the nearest tracked location the row's user can see (Public's, or their own) — findNearestTrackedLocation
+    let loc = null;
+    let best = Infinity;
+    for (const l of locations) {
+      if (l.created_by_user_id && l.created_by_user_id !== PUBLIC_USER_ID && l.created_by_user_id !== r.user_id) continue;
+      const d = tlogDistanceM(r.lat, r.lng, l.lat, l.lng);
+      if (d < best) (best = d), (loc = l);
+    }
+    if (!loc) continue;
+    const targetMs = ctlParseNaive(r.date_time);
+    const day = r.date_time.slice(0, 10);
+    const found = {};
+
+    // the archive's observed hour
+    const obsKey = `${loc.name}|${day}`;
+    if (!obsCache.has(obsKey)) obsCache.set(obsKey, (await query("SELECT * FROM observations WHERE location_name = ? AND hour >= ? AND hour <= ?", loc.name, `${day} 00:00`, `${day} 23:00`)).results);
+    Object.assign(found, tlogFieldsFromObservation(obsCache.get(obsKey).find((o) => o.hour === `${r.date_time.slice(0, 13)}:00`)));
+
+    // the tide, from the archive's events (a day either side; used only when they bracket the time)
+    const tideKey = `${loc.name}|${day}`;
+    if (!tideCache.has(tideKey)) {
+      const dayStart = ctlParseNaive(`${day} 00:00:00`);
+      const lo = ctlNaiveFromEpoch(dayStart / 1000 - 86400, 0);
+      const hi = ctlNaiveFromEpoch(dayStart / 1000 + 2 * 86400, 0);
+      tideCache.set(tideKey, (await query("SELECT event_time, type, height_m FROM tide_events WHERE location_name = ? AND event_time >= ? AND event_time <= ? ORDER BY event_time ASC", loc.name, lo, hi)).results);
+    }
+    const offsetMs = (loc.tide_offset || 0) * 60000;
+    const extrema = tideCache.get(tideKey)
+      .map((e) => ({ t: ctlParseNaive(e.event_time) + offsetMs, height: e.height_m, type: e.type }))
+      .filter((e) => Number.isFinite(e.t))
+      .sort((a, b) => a.t - b.t);
+    if (extrema.length >= 2 && extrema[0].t <= targetMs && extrema[extrema.length - 1].t >= targetMs) {
+      const tide = tlogClassifyTide(extrema, targetMs);
+      if (tide) {
+        found.tideCondition = tide.condition;
+        if (tide.extreme) found.tideExtreme = tide.extreme;
+      }
+    }
+
+    // Open-Meteo: the weather condition (not archived) and whatever the archive lacked
+    const wKey = `${r.lat.toFixed(2)},${r.lng.toFixed(2)}|${day}`;
+    if (!weatherCache.has(wKey) && used < TLOG_COND_SUBREQUEST_BUDGET) {
+      used++;
+      let hourly = null;
+      try {
+        const res = await fetch(`${TLOG_OPEN_METEO_ARCHIVE}?latitude=${r.lat}&longitude=${r.lng}&start_date=${day}&end_date=${day}&hourly=windspeed_10m,winddirection_10m,pressure_msl,weathercode,temperature_2m&timezone=auto`);
+        if (res.ok) hourly = (await res.json()).hourly || null;
+      } catch (err) {
+        console.error("Open-Meteo historical fetch failed:", err);
+      }
+      weatherCache.set(wKey, hourly);
+    }
+    const fromMeteo = tlogFieldsFromOpenMeteo(weatherCache.get(wKey), r.date_time.slice(0, 13));
+    for (const [k, v] of Object.entries(fromMeteo)) if (found[k] === undefined) found[k] = v; // the archive's reading wins, as in the browser
+
+    const sets = [];
+    const binds = [];
+    for (const [key, [column]] of Object.entries(TLOG_CONDITION_COLUMNS)) {
+      if (found[key] === undefined) continue;
+      sets.push(`${column} = COALESCE(${column}, ?)`);
+      binds.push(found[key]);
+    }
+    const done = found.tideCondition !== undefined && found.weatherCondition !== undefined;
+    if (done) {
+      sets.push("conditions_at = ?");
+      binds.push(now);
+      complete++;
+    }
+    if (sets.length) stmts.push(env.DB.prepare(`UPDATE trip_log SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...binds, r.id, r.user_id));
+  }
+  if (stmts.length) await env.DB.batch(stmts);
+  return { rows: rows.length, complete };
 }
 
 // ---------------------------------------------------------------------

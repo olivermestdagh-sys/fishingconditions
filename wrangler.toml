@@ -7,6 +7,10 @@ preview_urls = false
 [observability]
 enabled = true
 
+# Hourly: fills the weather / tide of trip-log rows from the D1 archive (user-backend.js scheduled -> conditionsBackfill).
+[triggers]
+crons = ["20 * * * *"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "fishingconditions-users"
