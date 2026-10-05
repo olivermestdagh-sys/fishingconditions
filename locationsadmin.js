@@ -217,6 +217,7 @@ async function init() {
   document.getElementById("btnAddMarkColorFormat").addEventListener("click", () => onAddMarkSubFormat("Mark Colour Format", "newMarkColorFormatInput"));
   document.getElementById("btnRestoreMissingValues").addEventListener("click", onOpenRestorePanel);
   document.getElementById("btnAddController").addEventListener("click", onCreateControllerToken);
+  document.getElementById("btnBackfillTripLog").addEventListener("click", onBackfillTripLog);
   document.getElementById("btnAddTier").addEventListener("click", onAddTier);
   document.getElementById("btnSendMessage").addEventListener("click", onSendMessage);
   document.getElementById("contactMessageInput").addEventListener("input", (e) => {
@@ -394,6 +395,30 @@ async function onCreateControllerToken() {
   } catch (err) {
     console.error("Failed to create controller token:", err);
     setControllerStatus("Couldn't create the token: " + err.message, true);
+  }
+}
+
+/** Settings > Fishing Controller > "Build trip log from past trips": the Worker rebuilds the trip log of Controller runs that have none (POST /api/triplog/backfill), a few runs per request. */
+async function onBackfillTripLog() {
+  const btn = document.getElementById("btnBackfillTripLog");
+  btn.disabled = true;
+  setControllerStatus("Building the trip log…", false);
+  const total = { runs: 0, rows: 0 };
+  try {
+    for (let round = 0; round < 20; round++) {
+      const res = await fetch(`${USER_BACKEND_URL}/api/triplog/backfill`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `status ${res.status}`);
+      total.runs += body.runs;
+      total.rows += body.rows;
+      if (!body.remaining) break;
+    }
+    setControllerStatus(total.runs ? `Logged ${total.rows} entries from ${total.runs} past trip${total.runs === 1 ? "" : "s"}.` : "Nothing to add — every past trip is already in the trip log.", false);
+  } catch (err) {
+    console.error("Trip log backfill failed:", err);
+    setControllerStatus("Couldn't build the trip log: " + err.message, true);
+  } finally {
+    btn.disabled = false;
   }
 }
 

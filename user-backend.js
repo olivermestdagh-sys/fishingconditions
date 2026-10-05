@@ -245,6 +245,9 @@ export default {
       if (tripSetupMatch) {
         return handleTripSetupItem(request, url, env, tripSetupMatch[1]);
       }
+      if (url.pathname === "/api/triplog/backfill") {
+        return handleTripLogBackfill(request, url, env);
+      }
       if (url.pathname === "/api/triplog") {
         return handleTripLogCollection(request, url, env);
       }
@@ -3979,6 +3982,305 @@ async function handleTripLogItem(request, url, env, id) {
   return jsonResponse({ ok: true }, 200, env);
 }
 
+// --- Trip log backfill: trips made before the log existed, or whose exact times only the phone still has ---------------------------
+// Rebuilt from what D1 holds: the Controller-made marks of a run (exact time, place, water, depth and gear as TEXT), the
+// `controller_events` rows (type + when the Worker received it) and the GPS track. With `history` (the phone's own events list, exact ts /
+// position / water / depth and the Modify-defaults diffs) the rows are exact. Rows rebuilt without that are source 'Backfill' (ids
+// bf:<device>:<seq>:<kind>) and are replaced the next time; rows the Worker would have logged itself use the live ids (fc:...) and
+// 'Controller', so a replay never doubles a live row (INSERT OR IGNORE). Per-rod bait of a past trip can't be known (a mark joins the
+// baits of all its rods), so each rod row carries the mark's whole bait list; "time with bait X" (EXISTS over a row's rods) is unaffected.
+
+const TLOG_SITE_TZ = "Australia/Melbourne"; // the site's wall clock (siteWallClockNow, js/chart-base.js): marks' date_time is local to it
+const TLOG_MAX_RUNS_PER_REQUEST = 8;
+
+/** Minutes east of UTC that TLOG_SITE_TZ is at the UTC instant `ms`. */
+function tlogZoneOffsetMin(ms) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: TLOG_SITE_TZ, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(new Date(ms));
+  const g = (t) => Number(parts.find((p) => p.type === t).value);
+  return Math.round((Date.UTC(g("year"), g("month") - 1, g("day"), g("hour"), g("minute"), g("second")) - ms) / 60000);
+}
+
+/** A mark's naive local date_time as {tsMs (real UTC), tz (offset then)}; the offset is looked up twice so a daylight-saving change day resolves. */
+function tlogNaiveToTs(naive) {
+  const asUtc = ctlParseNaive(naive);
+  if (asUtc == null) return null;
+  let tz = tlogZoneOffsetMin(asUtc - 10 * 3600000);
+  let tsMs = asUtc - tz * 60000;
+  tz = tlogZoneOffsetMin(tsMs);
+  tsMs = asUtc - tz * 60000;
+  return { tsMs, tz };
+}
+
+const tlogSplit = (v) => (typeof v === "string" ? v.split(/,\s*/).map((s) => s.trim()).filter(Boolean) : []);
+
+/** The rod rows a Session Start / Catch mark's TEXT implies: one per rod name, matched to a Rod Setup by its rod (and rig) for the id / name; position from the Action's. */
+function tlogRodRowsFromMark(mark, rodSetups, action) {
+  const rods = tlogSplit(mark.rod);
+  const rigs = tlogSplit(mark.rig);
+  const slots = (action && action.rodSlots) || [];
+  const used = new Set();
+  let spare = 5;
+  return rods.map((name) => {
+    const options = rodSetups.filter((s) => s.rod === name && !used.has(s.id));
+    const s = options.find((c) => rigs.includes(c.rig)) || options[0] || null;
+    if (s) used.add(s.id);
+    const at = s ? slots.indexOf(s.id) : -1;
+    return {
+      slot: at >= 0 ? at + 1 : spare++, rodSetupId: s ? s.id : null, name: s ? s.name : null, rod: name,
+      rig: s && rigs.includes(s.rig) ? s.rig : rods.length === 1 && rigs.length === 1 ? rigs[0] : null,
+      rigOptions: tlogSplit(mark.rig_options), bait: tlogSplit(mark.bait), baitOptions: tlogSplit(mark.bait_options),
+    };
+  });
+}
+
+/** Marks of a device by event seq ({start, end, catch, runId}), from source_uuid fc:<device>:<seq>[:start|:end]. */
+function tlogMarksBySeq(markRows) {
+  const bySeq = new Map();
+  for (const m of markRows) {
+    const p = /^fc:[^:]+:(\d+)(?::(start|end))?$/.exec(m.source_uuid || "");
+    if (!p) continue;
+    const seq = Number(p[1]);
+    const entry = bySeq.get(seq) || { runId: null };
+    if (m.type === "Session Start" && p[2] === "start") entry.start = m;
+    else if (m.type === "Session End" && p[2] === "end") entry.end = m;
+    else if (m.type === "Catch" && !p[2]) entry.catch = m;
+    else continue;
+    if (m.trip_run_id) entry.runId = entry.runId || m.trip_run_id;
+    bySeq.set(seq, entry);
+  }
+  return bySeq;
+}
+
+/** A device's trips: from each trip_start to its trip_end, with the marks made in between; the run id comes from those marks (none: no run to log into). */
+function tlogSegments(events, marksBySeq) {
+  const segs = [];
+  let cur = null;
+  for (const ev of events) {
+    if (ev.type === "trip_start") {
+      cur = { events: [], marksBySeq: new Map(), runId: null };
+      segs.push(cur);
+    }
+    if (!cur) continue;
+    cur.events.push(ev);
+    const mm = marksBySeq.get(ev.seq);
+    if (mm) {
+      cur.marksBySeq.set(ev.seq, mm);
+      if (!cur.runId) cur.runId = mm.runId;
+    }
+    if (ev.type === "trip_end") cur = null;
+  }
+  return segs.filter((s) => s.runId);
+}
+
+/**
+ * One run's log entries, walking its events in order. ctx: {trips, actions, rodSetups, track: [{ts, lat, lng}] (UTC s), history: Map seq -> EventDto}.
+ * Returns [{kind, seq, exact, e, rods}]: `exact` = the time is the event's own (a mark's, or the phone's); not exact = when the Worker got it.
+ */
+function tlogBuildSegment(seg, ctx) {
+  const out = [];
+  const finite = (v) => typeof v === "number" && Number.isFinite(v);
+  const trackNear = (tsSec) => {
+    let best = null;
+    for (const p of ctx.track) if (Math.abs(p.ts - tsSec) <= 900 && (!best || Math.abs(p.ts - tsSec) < Math.abs(best.ts - tsSec))) best = p;
+    return best;
+  };
+  const firstMark = [...seg.marksBySeq.values()].map((m) => m.start || m.catch || m.end).find(Boolean) || {};
+  const tripName = firstMark.trip_name || null;
+  const trip = ctx.trips.find((t) => t.name === tripName) || null;
+  const tripId = trip ? trip.id : null;
+  const actionFor = (name) => (trip && name ? ctx.actions.find((a) => a.tripId === trip.id && a.name === name) || null : null);
+  let state = null; // the running action: its entry fields + rods
+  let last = { water: null, depth: null };
+
+  const when = (h, mark) => {
+    if (h) {
+      const tz = Number.isFinite(h.tzOffsetMin) ? h.tzOffsetMin : 0;
+      const hasPos = finite(h.lat) && finite(h.lng);
+      const fix = hasPos ? null : trackNear(h.ts);
+      return { tsMs: Math.round(h.ts * 1000), tz, dateTime: ctlNaiveFromEpoch(h.ts, tz), exact: true, lat: hasPos ? h.lat : fix ? fix.lat : null, lng: hasPos ? h.lng : fix ? fix.lng : null };
+    }
+    if (mark) {
+      const t = tlogNaiveToTs(mark.date_time);
+      if (t) return { tsMs: t.tsMs, tz: t.tz, dateTime: mark.date_time, exact: true, lat: mark.lat, lng: mark.lng };
+    }
+    return null;
+  };
+  const approx = (ev) => {
+    const tz = tlogZoneOffsetMin(ev.received_at);
+    const fix = trackNear(ev.received_at / 1000);
+    return { tsMs: ev.received_at, tz, dateTime: ctlNaiveFromEpoch(ev.received_at / 1000, tz), exact: false, lat: fix ? fix.lat : null, lng: fix ? fix.lng : null };
+  };
+  const push = (kind, seq, w, e, rods) => out.push({ kind, seq, exact: w.exact, e: { ...e, runId: seg.runId, tsMs: w.tsMs, dateTime: w.dateTime, tz: w.tz, lat: w.lat, lng: w.lng }, rods });
+  const stateFields = () => ({ actionId: state.actionId, actionName: state.actionName, sessionGroupId: state.sessionGroupId, berley: state.berley, fishingMethod: state.fishingMethod, targets: state.targets });
+
+  for (const ev of seg.events) {
+    const h = ctx.history.get(ev.seq) || null;
+    const marks = seg.marksBySeq.get(ev.seq) || {};
+    const evWater = h && typeof h.water === "string" && h.water ? h.water : null;
+    const evDepth = h && finite(h.depth) ? h.depth : null;
+
+    if (ev.type === "trip_start") {
+      push("trip_start", ev.seq, when(h, null) || approx(ev), { type: "trip_start", tripId, tripName, water: evWater, depth: evDepth });
+    } else if (ev.type === "action_start" && marks.start) {
+      const m = marks.start;
+      const action = actionFor(m.action_name);
+      state = {
+        actionId: action ? action.id : null, actionName: m.action_name || null, sessionGroupId: m.session_group_id || null, berley: m.berley || null,
+        fishingMethod: tlogSplit(m.fishing_method), targets: tlogSplit(m.species), rods: tlogRodRowsFromMark(m, ctx.rodSetups, action),
+      };
+      last = { water: m.water_condition || null, depth: m.water_depth ?? null };
+      push("action_start", ev.seq, when(h, m), { type: "action_start", tripId, tripName, ...stateFields(), water: last.water, depth: last.depth, markId: m.id }, state.rods);
+    } else if (ev.type === "action_end" && state) {
+      const m = marks.end;
+      push("action_end", ev.seq, when(h, m) || approx(ev), {
+        type: "action_end", tripId, tripName, actionId: state.actionId, actionName: state.actionName, sessionGroupId: state.sessionGroupId,
+        water: m ? m.water_condition || null : evWater, depth: m ? m.water_depth ?? null : evDepth,
+      });
+      state = null;
+    } else if (ev.type === "catch" && marks.catch) {
+      const m = marks.catch;
+      const action = actionFor(m.action_name);
+      const water = m.water_condition || null;
+      const depth = m.water_depth ?? null;
+      const w = when(h, m);
+      const rods = tlogRodRowsFromMark(m, ctx.rodSetups, action);
+      const common = { tripId, tripName, actionId: action ? action.id : null, actionName: m.action_name || null, sessionGroupId: state ? state.sessionGroupId : null };
+      const waterChanged = !!water && water !== last.water;
+      const depthChanged = depth != null && depth !== last.depth;
+      if (state && (waterChanged || depthChanged)) {
+        push("cond", ev.seq, w, { ...common, type: "change", changeField: waterChanged && depthChanged ? "water+depth" : waterChanged ? "water" : "depth", ...stateFields(), water, depth }, state.rods);
+      }
+      push("catch", ev.seq, w, { ...common, type: "catch", water, depth, markId: m.id, species: m.species, size: m.size ?? null, released: !!m.released, rodSetupId: rods.length ? rods[0].rodSetupId : null }, rods);
+      last = { water: water || last.water, depth: depth ?? last.depth };
+    } else if (ev.type === "trip_end") {
+      const m = marks.end;
+      push("trip_end", ev.seq, when(h, m) || approx(ev), {
+        type: "trip_end", tripId, tripName, actionId: state ? state.actionId : null, sessionGroupId: state ? state.sessionGroupId : null,
+        water: evWater || (m ? m.water_condition || null : last.water), depth: evDepth ?? (m ? m.water_depth ?? null : last.depth),
+      });
+      state = null;
+    } else if (h && state && ev.type === "action_update" && h.actionId === state.actionId) {
+      // the phone's own record of an edit made while this action ran: the diff applied to the state in force
+      if (h.berley !== undefined) state.berley = h.berley || null;
+      if (Array.isArray(h.fishingMethod)) state.fishingMethod = h.fishingMethod;
+      if (Array.isArray(h.targets)) state.targets = h.targets;
+      const ids = Array.isArray(h.rodSlots) ? h.rodSlots : Array.isArray(h.rodSetupIds) ? h.rodSetupIds : null;
+      if (ids) {
+        let spare = 5;
+        state.rods = ids.map((id, i) => ({ id, i })).filter((x) => x.id).map(({ id, i }) => {
+          const kept = state.rods.find((r) => r.rodSetupId === id);
+          const s = ctx.rodSetups.find((r) => r.id === id);
+          const base = kept || { rodSetupId: id, name: s ? s.name : null, rod: s ? s.rod : null, rig: s ? s.rig : null, rigOptions: s ? s.subListItems || [] : [], bait: s ? s.bait || [] : [], baitOptions: s ? s.baitOptions || [] : [] };
+          return { ...base, slot: Array.isArray(h.rodSlots) ? i + 1 : kept ? kept.slot : spare++ };
+        });
+      }
+      push("change", ev.seq, when(h, null), { type: "change", changeField: "action", tripId, tripName, ...stateFields(), water: last.water, depth: last.depth }, state.rods);
+    } else if (h && state && ev.type === "rodsetup_update") {
+      const row = state.rods.find((r) => r.rodSetupId === h.rodSetupId);
+      if (!row) continue;
+      if (h.rod !== undefined) row.rod = h.rod || null;
+      if (h.rig !== undefined) {
+        if ((h.rig || null) !== row.rig && h.subListItems === undefined) row.rigOptions = [];
+        row.rig = h.rig || null;
+      }
+      if (Array.isArray(h.subListItems)) row.rigOptions = h.subListItems;
+      if (Array.isArray(h.bait)) row.bait = h.bait;
+      if (Array.isArray(h.baitOptions)) row.baitOptions = h.baitOptions;
+      push("change", ev.seq, when(h, null), { type: "change", changeField: "rod_setups", tripId, tripName, ...stateFields(), water: last.water, depth: last.depth }, state.rods);
+    }
+  }
+  return out;
+}
+
+/**
+ * Rebuilds the log of every run of one device (or just `onlyRunId`) from D1 (+ `history`: Map seq -> EventDto, optional). Without history a run
+ * that already has live-logged rows is left alone; with it, exact rows are added (existing ids kept) and the run's old Backfill rows are
+ * replaced. Answers {runs, rows, skipped, remaining}.
+ */
+async function tlogBackfillDevice(env, uid, deviceId, { onlyRunId = null, history = new Map(), maxRuns = TLOG_MAX_RUNS_PER_REQUEST } = {}) {
+  const [events, markRows, existing, data] = await Promise.all([
+    env.DB.prepare("SELECT seq, type, received_at FROM controller_events WHERE user_id = ? AND device_id = ? ORDER BY seq ASC").bind(uid, deviceId).all(),
+    env.DB.prepare("SELECT * FROM marks WHERE user_id = ? AND source = 'Controller' AND source_uuid LIKE ? ORDER BY date_time ASC LIMIT 5000").bind(uid, `fc:${deviceId}:%`).all(),
+    env.DB.prepare("SELECT run_id, SUM(CASE WHEN source = 'Backfill' THEN 0 ELSE 1 END) AS live FROM trip_log WHERE user_id = ? GROUP BY run_id").bind(uid).all(),
+    ctlLoadTripData(env, uid),
+  ]);
+  const liveByRun = new Map(existing.results.map((r) => [r.run_id, r.live > 0]));
+  let segs = tlogSegments(events.results, tlogMarksBySeq(markRows.results));
+  if (onlyRunId) segs = segs.filter((s) => s.runId === onlyRunId);
+  const wanted = history.size ? segs : segs.filter((s) => !liveByRun.get(s.runId));
+  const skipped = segs.length - wanted.length;
+  const todo = wanted.slice(0, maxRuns);
+  if (!todo.length) return { runs: 0, rows: 0, skipped, remaining: 0 };
+
+  const marksTs = markRows.results.map((m) => (tlogNaiveToTs(m.date_time) || {}).tsMs).filter(Boolean);
+  const evTs = events.results.map((e) => e.received_at);
+  const lo = Math.min(...marksTs, ...evTs) / 1000 - 900;
+  const hi = Math.max(...marksTs, ...evTs) / 1000 + 900;
+  const track = (await env.DB.prepare("SELECT ts, lat, lng FROM controller_track WHERE user_id = ? AND device_id = ? AND ts BETWEEN ? AND ? ORDER BY ts ASC LIMIT 20000").bind(uid, deviceId, lo, hi).all()).results;
+
+  const stmts = [];
+  let rows = 0;
+  for (const seg of todo) {
+    const entries = tlogBuildSegment(seg, { trips: data.trips, actions: data.actions, rodSetups: data.rodSetups, track, history });
+    stmts.push(
+      env.DB.prepare("DELETE FROM trip_log_rods WHERE log_id IN (SELECT id FROM trip_log WHERE user_id = ? AND run_id = ? AND source = 'Backfill')").bind(uid, seg.runId),
+      env.DB.prepare("DELETE FROM trip_log WHERE user_id = ? AND run_id = ? AND source = 'Backfill'").bind(uid, seg.runId)
+    );
+    for (const en of entries) {
+      const exactRow = history.size ? en.exact : false; // only a replay's rows are the live ones; a plain backfill stays flagged
+      const source = exactRow ? "Controller" : "Backfill";
+      stmts.push(...tlogStatements(env, uid, { ...en.e, source, sourceUuid: `${exactRow ? "fc" : "bf"}:${deviceId}:${en.seq}:${en.kind}` }, en.rods));
+      rows++;
+    }
+  }
+  for (let i = 0; i < stmts.length; i += 40) await env.DB.batch(stmts.slice(i, i + 40));
+  return { runs: todo.length, rows, skipped, remaining: wanted.length - todo.length };
+}
+
+/** POST /api/triplog/backfill (signed in): {runId?} — rebuilds the log of past Controller runs that have none (or just that run). */
+async function handleTripLogBackfill(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  if (request.method !== "POST") return jsonResponse({ error: "Method not allowed." }, 405, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const body = await readJsonBody(request);
+  const onlyRunId = body && typeof body.runId === "string" && body.runId ? body.runId : null;
+  const { results } = await env.DB.prepare("SELECT DISTINCT substr(source_uuid, 4, instr(substr(source_uuid, 4), ':') - 1) AS device FROM marks WHERE user_id = ? AND source = 'Controller' AND source_uuid LIKE 'fc:%'").bind(resolved.id).all();
+  const total = { runs: 0, rows: 0, skipped: 0, remaining: 0 };
+  for (const { device } of results) {
+    if (!device) continue;
+    const r = await tlogBackfillDevice(env, resolved.id, device, { onlyRunId, maxRuns: TLOG_MAX_RUNS_PER_REQUEST - total.runs });
+    for (const k of Object.keys(total)) total[k] += r[k];
+    if (total.runs >= TLOG_MAX_RUNS_PER_REQUEST) break;
+  }
+  return jsonResponse(total, 200, env);
+}
+
+/**
+ * POST /api/controller/history (device token): {deviceId, events: [EventDto]} — the phone's own events list, replayed into the log only (no
+ * marks, no trip state, no controller_events). Events the Worker never processed are skipped (they will log when they are).
+ */
+async function handleControllerHistory(request, env, user) {
+  const body = await readJsonBody(request);
+  const deviceId = body && typeof body.deviceId === "string" ? body.deviceId.trim() : "";
+  const events = body && Array.isArray(body.events) ? body.events : null;
+  if (!deviceId || deviceId.length > 64) return jsonResponse({ error: "deviceId is required." }, 400, env);
+  if (!events || events.length === 0 || events.length > 500) return jsonResponse({ error: "events must be a list of 1 to 500." }, 400, env);
+  const history = new Map();
+  const skippedEvents = [];
+  for (const ev of events) {
+    const ok = ev && ev.deviceId === deviceId && Number.isInteger(ev.seq) && CTL_EVENT_TYPES.includes(ev.type) && typeof ev.ts === "number" && Number.isFinite(ev.ts) && ev.ts > 0;
+    if (!ok) skippedEvents.push({ seq: ev && ev.seq, reason: "not a valid event" });
+    else history.set(ev.seq, ev);
+  }
+  if (!history.size) return jsonResponse({ error: "No valid events." }, 400, env);
+  const r = await tlogBackfillDevice(env, user.id, deviceId, { history, maxRuns: 50 });
+  return jsonResponse({ logged: r.rows, runs: r.runs, skipped: skippedEvents }, 200, env);
+}
+
 // ---------------------------------------------------------------------
 // Fishing Controller API (/api/controller/*) — see docs/Fishing Controller Design Brief.md, adapted to this site.
 //
@@ -4952,6 +5254,7 @@ async function handleControllerApi(request, url, env) {
     const { results } = await env.DB.prepare("SELECT * FROM marks WHERE user_id = ? AND trip_run_id = ? ORDER BY date_time ASC, created_at ASC LIMIT 500").bind(user.id, runId).all();
     return jsonResponse({ runId, marks: results.map(rowToMark) }, 200, env);
   }
+  if (url.pathname === "/api/controller/history" && request.method === "POST") return handleControllerHistory(request, env, user);
   if (url.pathname === "/api/controller/events" && request.method === "POST") {
     const body = await readJsonBody(request);
     const events = body && Array.isArray(body.events) ? body.events : null;

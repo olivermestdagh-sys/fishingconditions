@@ -827,3 +827,123 @@ test("/api/triplog: the site posts entries (idempotent), reads a run by mark, an
   assert.equal((await site(env, "PATCH", `/api/triplog/${id}`, { tideCondition: "Falling" }, "s-u2")).status, 404);
   assert.equal((await (await site(env, "GET", "/api/triplog?needsConditions=1")).json()).some((r) => r.id === id), false);
 });
+
+// --- trip log backfill (past trips; the phone's events list) -------------------------------------------------------------
+
+const BF_DEV = "bf-dev";
+const BF_RUN = "run_1791066700234_abcde";
+/** A trip like a real one on the daylight-saving change day (Melbourne: UTC+10 until 02:00 on 2026-10-04, UTC+11 after): trip start, Drift
+ * (edited mid-way, one catch), Anchor, trip end, with the marks the Worker made and the events it got — some uploaded late. */
+async function bfSeeded() {
+  const base = await seeded();
+  const { sqlite } = base;
+  const mark = (id, type, local, seq, suffix, f) =>
+    sqlite
+      .prepare(
+        "INSERT INTO marks (id, user_id, lat, lng, name, type, date_time, source, source_uuid, species, bait, rig, rod, berley, size, released, fishing_method, water_condition, water_depth, trip_name, action_name, trip_run_id, session_group_id, created_at) VALUES (?, 'u1', -38.1, 145.2, ?, ?, ?, 'Controller', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Estuary', ?, ?, ?, 1)"
+      )
+      .run(id, id, type, local, `fc:${BF_DEV}:${seq}${suffix}`, f.species ?? null, f.bait ?? null, f.rig ?? null, f.rod ?? null, f.berley ?? null, f.size ?? null, f.released ?? null, f.method ?? null, f.water ?? null, f.depth ?? null, f.action, BF_RUN, f.group ?? null);
+  const drift = { action: "Drift", species: "Bream", bait: "Prawn, Squid", rig: "Paternoster, Jig Head", rod: "L Wilson, L Raider", berley: "Pilchard Mix", method: "Drifting", water: "Clear", depth: 4, group: "g1" };
+  mark("mS1", "Session Start", "2026-10-04 09:37:45", 2, ":start", drift);
+  mark("mC1", "Catch", "2026-10-04 10:54:05", 4, "", { action: "Drift", species: "Bream", size: 31, bait: "Squid", rig: "Paternoster", rod: "L Wilson", water: "Murky", depth: 3 });
+  mark("mE1", "Session End", "2026-10-04 11:30:00", 5, ":end", { ...drift, water: "Murky", depth: 3 });
+  mark("mS2", "Session Start", "2026-10-04 11:40:00", 6, ":start", { action: "Anchor", species: "Flathead", bait: "Prawn", rig: "Paternoster", rod: "L Wilson", water: "Murky", depth: 3, group: "g2" });
+  mark("mE2", "Session End", "2026-10-04 12:10:00", 7, ":end", { action: "Anchor", species: "Flathead", bait: "Prawn", rig: "Paternoster", rod: "L Wilson", water: "Murky", depth: 2, group: "g2" });
+  const event = (seq, type, receivedIso) => sqlite.prepare("INSERT INTO controller_events (user_id, device_id, seq, type, received_at) VALUES ('u1', ?, ?, ?, ?)").run(BF_DEV, seq, type, Date.parse(receivedIso));
+  event(1, "trip_start", "2026-10-03T22:31:40Z");
+  event(2, "action_start", "2026-10-03T22:50:38Z"); // uploaded 13 minutes after the 22:37:45Z mark
+  event(3, "action_update", "2026-10-03T23:27:13Z");
+  event(4, "catch", "2026-10-03T23:54:05Z");
+  event(5, "action_end", "2026-10-04T00:30:00Z");
+  event(6, "action_start", "2026-10-04T00:40:00Z");
+  event(7, "trip_end", "2026-10-04T01:10:00Z"); // closed the running Anchor session: that Session End is its mark
+  sqlite.prepare("INSERT INTO controller_track (user_id, device_id, ts, lat, lng, acc, trip_id) VALUES ('u1', ?, ?, -38.5, 145.9, 5, 't1')").run(BF_DEV, Date.parse("2026-10-03T22:31:00Z") / 1000);
+  return base;
+}
+const tlog = (sqlite) => sqlite.prepare("SELECT * FROM trip_log WHERE run_id = ? ORDER BY ts, rowid").all(BF_RUN);
+const tlogTypes = (rows) => rows.map((r) => r.event_type + (r.change_field ? `:${r.change_field}` : ""));
+
+test("trip log backfill: a past run is rebuilt from its marks and events, flagged, repeatable, and never over live rows", async () => {
+  const { sqlite, env } = await bfSeeded();
+  const res = await site(env, "POST", "/api/triplog/backfill", {});
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { runs: 1, rows: 7, skipped: 0, remaining: 0 });
+
+  const rows = tlog(sqlite);
+  assert.deepEqual(tlogTypes(rows), ["trip_start", "action_start", "change:water+depth", "catch", "action_end", "action_start", "trip_end"]);
+  assert.ok(rows.every((r) => r.source === "Backfill" && r.source_uuid.startsWith(`bf:${BF_DEV}:`)));
+
+  const start = rows[1];
+  assert.equal(start.ts, Date.UTC(2026, 9, 3, 22, 37, 45), "09:37:45 local on the daylight-saving change day is UTC+11");
+  assert.equal(start.tz_offset_min, 660);
+  assert.equal(start.date_time, "2026-10-04 09:37:45");
+  assert.equal(start.mark_id, "mS1");
+  assert.equal(start.action_id, "a1");
+  assert.equal(start.trip_id, "t1");
+  assert.equal(start.berley, "Pilchard Mix");
+  assert.deepEqual([start.water_condition, start.water_depth], ["Clear", 4]);
+  const rods = sqlite.prepare("SELECT * FROM trip_log_rods WHERE log_id = ? ORDER BY slot").all(start.id);
+  assert.deepEqual(rods.map((r) => [r.rod_setup_id, r.rod, r.rig]), [["r1", "L Wilson", "Paternoster"], ["r2", "L Raider", "Jig Head"]]);
+  assert.ok(rods.every((r) => r.bait === '["Prawn","Squid"]'), "each rod row carries the mark's whole bait list");
+
+  assert.equal(rows[0].ts, Date.parse("2026-10-03T22:31:40Z"), "no mark: when the Worker received it");
+  assert.deepEqual([rows[0].lat, rows[0].lng], [-38.5, 145.9], "position from the nearest track fix");
+  assert.deepEqual([rows[2].water_condition, rows[2].water_depth], ["Murky", 3], "the catch's water/depth differs from the Start's, as the live log would note");
+  assert.equal(rows[3].mark_id, "mC1");
+  assert.equal(rows[3].rod_setup_id, "r1");
+  assert.equal(rows[6].ts, Date.UTC(2026, 9, 4, 1, 10, 0), "its time is the Session End it made");
+  assert.equal(rows[6].date_time, "2026-10-04 12:10:00");
+
+  const again = await (await site(env, "POST", "/api/triplog/backfill", {})).json();
+  assert.equal(again.rows, 7);
+  assert.equal(tlog(sqlite).length, 7, "repeating replaces, never doubles");
+
+  sqlite.prepare("UPDATE trip_log SET source = 'Controller' WHERE id = ?").run(rows[0].id);
+  const skipped = await (await site(env, "POST", "/api/triplog/backfill", {})).json();
+  assert.deepEqual([skipped.runs, skipped.skipped], [0, 1], "a run the live log already has is left alone");
+  assert.equal((await site(env, "POST", "/api/triplog/backfill", {}, "s-u2").then((r) => r.json())).runs, 0, "not someone else's");
+});
+
+test("trip log history: the phone's events list gives exact times and the edit made mid-action; replaying is harmless", async () => {
+  const { sqlite, env, token } = await bfSeeded();
+  const T = (iso) => Date.parse(iso) / 1000;
+  const dto = (seq, type, iso, extra = {}) => ({ deviceId: BF_DEV, seq, type, ts: T(iso), tzOffsetMin: 660, lat: -38.2, lng: 145.3, ...extra });
+  const events = [
+    dto(1, "trip_start", "2026-10-03T22:30:10Z", { tripId: "t1", water: "Clear", depth: 4 }),
+    dto(2, "action_start", "2026-10-03T22:37:45Z", { actionId: "a1" }),
+    dto(3, "action_update", "2026-10-03T23:27:00Z", { actionId: "a1", berley: "Bread", rodSlots: ["r2", "r1", null, null] }),
+    dto(4, "catch", "2026-10-03T23:54:05Z", { actionId: "a1", species: "Bream" }),
+    dto(5, "action_end", "2026-10-04T00:30:00Z"),
+    dto(6, "action_start", "2026-10-04T00:40:00Z", { actionId: "a2" }),
+    dto(7, "trip_end", "2026-10-04T01:10:00Z"),
+    { deviceId: BF_DEV, seq: -1, type: "nope", ts: 1 },
+  ];
+  await site(env, "POST", "/api/triplog/backfill", {}); // the approximations first, as the user would have
+  const marksBefore = sqlite.prepare("SELECT COUNT(*) AS n FROM marks").get().n;
+  const stateBefore = sqlite.prepare("SELECT value FROM user_prefs WHERE user_id = 'u1' AND key = 'liveActiveTrip'").get();
+
+  const res = await api(env, token, "POST", "/api/controller/history", { deviceId: BF_DEV, events });
+  assert.equal(res.status, 200);
+  const out = await res.json();
+  assert.equal(out.runs, 1);
+  assert.deepEqual(out.skipped.map((s) => s.seq), [-1]);
+
+  const rows = tlog(sqlite);
+  assert.ok(rows.every((r) => r.source === "Controller" && r.source_uuid.startsWith(`fc:${BF_DEV}:`)), "the ids the live log uses; the approximations are gone");
+  assert.deepEqual(tlogTypes(rows), ["trip_start", "action_start", "change:action", "change:water+depth", "catch", "action_end", "action_start", "trip_end"]);
+  assert.equal(rows[0].ts, T("2026-10-03T22:30:10Z") * 1000, "the trip really started 90 s before the Worker heard of it");
+  assert.equal(rows[0].water_condition, "Clear");
+  const edit = rows[2];
+  assert.equal(edit.ts, T("2026-10-03T23:27:00Z") * 1000);
+  assert.equal(edit.berley, "Bread");
+  assert.deepEqual(sqlite.prepare("SELECT slot, rod_setup_id FROM trip_log_rods WHERE log_id = ? ORDER BY slot").all(edit.id).map((r) => [r.slot, r.rod_setup_id]), [[1, "r2"], [2, "r1"]], "the new rod positions");
+  assert.equal(rows[7].lat, -38.2, "the phone's position");
+
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM marks").get().n, marksBefore, "no marks");
+  assert.deepEqual(sqlite.prepare("SELECT value FROM user_prefs WHERE user_id = 'u1' AND key = 'liveActiveTrip'").get(), stateBefore, "no trip state change");
+  const n = rows.length;
+  await api(env, token, "POST", "/api/controller/history", { deviceId: BF_DEV, events });
+  assert.equal(tlog(sqlite).length, n, "a second upload changes nothing");
+  assert.equal((await api(env, token, "POST", "/api/controller/history", { deviceId: BF_DEV, events: [] })).status, 400);
+  assert.ok([401, 403].includes((await api(env, null, "POST", "/api/controller/history", { deviceId: BF_DEV, events })).status), "no token: refused");
+});
