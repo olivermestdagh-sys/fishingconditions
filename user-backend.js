@@ -1476,11 +1476,45 @@ function rowToTripAction(row) {
     bait: parseSubList(row.bait),
     baitOptions: parseSubList(row.bait_options),
     rodSetupIds: parseSubList(row.rod_setup_ids),
+    rodSlots: tripActionRodSlots(row),
     species: parseSubList(row.species),
   };
 }
 
-const validateTripActionInput = validateTripSetupInput; // same list/string rules for fishingMethod, rodSetupIds, species, berley
+const ROD_SLOT_COUNT = 4;
+
+/**
+ * The four rod positions of an Action (Trip Defaults' 2x2 grid): [id|null, id|null, id|null, id|null]. `rod_slots` holds the positions; it is
+ * only trusted while it names exactly the Rod Setups in `rod_setup_ids` (the list the controller and the mark builders read, which
+ * can be changed on its own), otherwise the list is laid out from the first position on.
+ */
+function tripActionRodSlots(row) {
+  const ids = [...new Set(parseSubList(row.rod_setup_ids))];
+  let slots = [];
+  try {
+    const parsed = JSON.parse(row.rod_slots || "null");
+    if (Array.isArray(parsed)) slots = parsed.slice(0, ROD_SLOT_COUNT).map((v) => (typeof v === "string" && v ? v : null));
+  } catch {
+    slots = [];
+  }
+  const inSlots = [...new Set(slots.filter(Boolean))];
+  const same = inSlots.length === ids.length && inSlots.every((id) => ids.includes(id));
+  const out = same ? slots : ids.slice(0, ROD_SLOT_COUNT);
+  while (out.length < ROD_SLOT_COUNT) out.push(null);
+  return out;
+}
+
+function validateTripActionInput(body) {
+  const error = validateTripSetupInput(body); // same list/string rules for fishingMethod, rodSetupIds, species, berley
+  if (error) return error;
+  if (body.rodSlots !== undefined && (!Array.isArray(body.rodSlots) || body.rodSlots.length > ROD_SLOT_COUNT || body.rodSlots.some((v) => v !== null && (typeof v !== "string" || !v.trim())))) {
+    return `rodSlots must be a list of up to ${ROD_SLOT_COUNT} rod setup ids or nulls.`;
+  }
+  return null;
+}
+
+/** The rod_setup_ids list that goes with a set of slots: each Rod Setup once, in slot order. */
+const rodIdsFromSlots = (slots) => [...new Set((slots || []).filter(Boolean))];
 
 async function handleTripActionsCollection(request, url, env) {
   const user = await requireUser(request, env);
@@ -1508,9 +1542,9 @@ async function handleTripActionsCollection(request, url, env) {
     const arr = (v) => (v && v.length ? JSON.stringify(v) : null);
     try {
       await env.DB.prepare(
-        "INSERT INTO user_trip_actions (id, user_id, trip_id, name, fishing_method, berley, bait, bait_options, rod_setup_ids, species, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO user_trip_actions (id, user_id, trip_id, name, fishing_method, berley, bait, bait_options, rod_setup_ids, rod_slots, species, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       )
-        .bind(id, uid, body.tripId, body.name, arr(body.fishingMethod), body.berley ?? null, arr(body.bait), arr(body.baitOptions), arr(body.rodSetupIds), arr(body.species), Date.now())
+        .bind(id, uid, body.tripId, body.name, arr(body.fishingMethod), body.berley ?? null, arr(body.bait), arr(body.baitOptions), arr(body.rodSlots ? rodIdsFromSlots(body.rodSlots) : body.rodSetupIds), body.rodSlots ? JSON.stringify(body.rodSlots) : null, arr(body.species), Date.now())
         .run();
     } catch (err) {
       return jsonResponse({ error: `This trip already has an action named "${body.name}".` }, 409, env);
@@ -1545,13 +1579,14 @@ async function handleTripActionItem(request, url, env, id) {
       berley: body.berley !== undefined ? body.berley : existing.berley,
       bait: body.bait !== undefined ? body.bait : parseSubList(existing.bait),
       baitOptions: body.baitOptions !== undefined ? body.baitOptions : parseSubList(existing.bait_options),
-      rodSetupIds: body.rodSetupIds !== undefined ? body.rodSetupIds : parseSubList(existing.rod_setup_ids),
+      rodSetupIds: body.rodSlots !== undefined ? rodIdsFromSlots(body.rodSlots) : body.rodSetupIds !== undefined ? body.rodSetupIds : parseSubList(existing.rod_setup_ids),
+      rodSlots: body.rodSlots !== undefined ? JSON.stringify(body.rodSlots) : existing.rod_slots ?? null, // the list alone (rodSetupIds) leaves the old positions, which tripActionRodSlots then distrusts
       species: body.species !== undefined ? body.species : parseSubList(existing.species),
     };
     const arr = (v) => (v && v.length ? JSON.stringify(v) : null);
     try {
-      await env.DB.prepare("UPDATE user_trip_actions SET name=?, fishing_method=?, berley=?, bait=?, bait_options=?, rod_setup_ids=?, species=? WHERE id = ? AND user_id = ?")
-        .bind(merged.name, arr(merged.fishingMethod), merged.berley ?? null, arr(merged.bait), arr(merged.baitOptions), arr(merged.rodSetupIds), arr(merged.species), id, uid)
+      await env.DB.prepare("UPDATE user_trip_actions SET name=?, fishing_method=?, berley=?, bait=?, bait_options=?, rod_setup_ids=?, rod_slots=?, species=? WHERE id = ? AND user_id = ?")
+        .bind(merged.name, arr(merged.fishingMethod), merged.berley ?? null, arr(merged.bait), arr(merged.baitOptions), arr(merged.rodSetupIds), merged.rodSlots, arr(merged.species), id, uid)
         .run();
     } catch (err) {
       return jsonResponse({ error: `This trip already has an action named "${merged.name}".` }, 409, env);

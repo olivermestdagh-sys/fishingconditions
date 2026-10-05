@@ -6,7 +6,7 @@ import fs from "node:fs";
 const src = fs.readFileSync(new URL("../js/trip-defaults.js", import.meta.url), "utf8");
 const limitsSrc = fs.readFileSync(new URL("../js/catch-limits.js", import.meta.url), "utf8"); // tripMarkName
 const pure = src.slice(0, src.indexOf("// --- Backend"));
-const fns = new Function(limitsSrc + "\n" + pure + "\nreturn { tdToggle, tdToggleSingle, tdRigSublist, tdActionsForTrip, tdLiveRodSetupIds, tdHasValue, buildSessionStartFromAction, tdOtherTargets, tdCatchFieldsFromAction };")();
+const fns = new Function(limitsSrc + "\n" + pure + "\nreturn { tdToggle, tdToggleSingle, tdRigSublist, tdActionsForTrip, tdLiveRodSetupIds, tdHasValue, buildSessionStartFromAction, tdOtherTargets, tdCatchFieldsFromAction, tdRodSlots, tdToggleRodSlot };")();
 
 test("tdToggle adds a missing value and removes a present one, without mutating", () => {
   const list = ["a"];
@@ -95,4 +95,15 @@ test("tdCatchFieldsFromAction takes gear from the Action and the chosen (or only
   assert.deepEqual(fns.tdCatchFieldsFromAction(action, setups, null), { berley: "Pilchard", fishingMethod: "Bait" });
   // one setup: used without being chosen
   assert.equal(fns.tdCatchFieldsFromAction({ rodSetupIds: ["a"] }, setups, null).rigOptions, "Vibe");
+});
+
+test("rod slots: a region is taken once, only its holder can give it back, and the list lays out from the first position", () => {
+  const setups = [{ id: "a" }, { id: "b" }];
+  assert.deepEqual(fns.tdRodSlots({ rodSetupIds: ["a", "b", "gone"] }, setups), ["a", "b", null, null], "an action saved without positions");
+  assert.deepEqual(fns.tdRodSlots({ rodSlots: [null, "b", "gone", "a"] }, setups), [null, "b", null, "a"], "deleted setups drop out");
+  const slots = [null, "a", null, null];
+  assert.deepEqual(fns.tdToggleRodSlot(slots, 0, "b"), ["b", "a", null, null], "a free region is taken");
+  assert.equal(fns.tdToggleRodSlot(slots, 1, "b"), slots, "another setup's region does nothing");
+  assert.deepEqual(fns.tdToggleRodSlot(slots, 1, "a"), [null, null, null, null], "your own region is given back");
+  assert.deepEqual(fns.tdToggleRodSlot(slots, 2, "a"), [null, "a", "a", null], "one setup may hold several regions");
 });

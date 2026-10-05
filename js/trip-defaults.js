@@ -123,6 +123,26 @@ function tdActionsForTrip(actions, tripId) {
   return (actions || []).filter((a) => a.tripId === tripId);
 }
 
+const TD_ROD_SLOTS = 4;
+
+/** The Action's four rod positions as [id|null x4] — the saved positions, else its Rod Setups laid out from the first one; deleted setups drop out. */
+function tdRodSlots(action, rodSetups) {
+  const known = new Set((rodSetups || []).map((r) => r.id));
+  const given = Array.isArray(action.rodSlots) ? action.rodSlots : [];
+  const slots = given.length ? given.slice(0, TD_ROD_SLOTS) : tdLiveRodSetupIds(action.rodSetupIds, rodSetups).slice(0, TD_ROD_SLOTS);
+  const out = slots.map((id) => (id && known.has(id) ? id : null));
+  while (out.length < TD_ROD_SLOTS) out.push(null);
+  return out;
+}
+
+/** Tapping region `index` of Rod Setup `id`'s pill: takes the position when it is free, gives it back when it is that setup's own; a position another setup holds does nothing. */
+function tdToggleRodSlot(slots, index, id) {
+  if (slots[index] && slots[index] !== id) return slots;
+  const next = [...slots];
+  next[index] = slots[index] === id ? null : id;
+  return next;
+}
+
 /** Rod Setup ids that still exist (a deleted Rod Setup silently drops out of an Action's list). */
 function tdLiveRodSetupIds(ids, rodSetups) {
   const known = new Set((rodSetups || []).map((r) => r.id));
@@ -285,9 +305,19 @@ async function showTripDefaults({ onClose, start } = {}) {
     };
   }
 
-  function rodSetupPill(r, selected) {
-    return `<div class="td-pill${selected ? " selected" : ""}">
-      <button type="button" class="td-pill-main" data-toggle-rodsetup="${esc(r.id)}" aria-pressed="${selected}">${esc(r.name)}</button>
+  // A pill with a 2x2 grid behind its name: each region is one of the Action's four rod positions. A region goes green when this setup
+  // holds it, and is greyed (not tappable) when another setup does.
+  function rodSetupPill(r, slots) {
+    const regions = slots
+      .map((holder, i) => {
+        const mine = holder === r.id;
+        const taken = !!holder && !mine;
+        return `<button type="button" class="td-slot${mine ? " mine" : ""}${taken ? " taken" : ""}" data-rod-slot="${i}" data-rodsetup="${esc(r.id)}" aria-pressed="${mine}" aria-label="${esc(r.name)} rod ${i + 1}"${taken ? " disabled" : ""}></button>`;
+      })
+      .join("");
+    return `<div class="td-pill td-pill-grid">
+      <div class="td-slots">${regions}</div>
+      <span class="td-pill-main td-pill-name">${esc(r.name)}</span>
       <button type="button" class="td-pill-gear" data-edit-rodsetup="${esc(r.id)}" aria-label="Edit ${esc(r.name)}" title="Edit rod setup">${TD_GEAR_SVG}</button>
     </div>`;
   }
@@ -311,8 +341,9 @@ async function showTripDefaults({ onClose, start } = {}) {
   function actionScreen() {
     const a = action();
     const o = data.options;
-    const ids = tdLiveRodSetupIds(a.rodSetupIds, data.rodSetups);
-    const pills = data.rodSetups.length ? data.rodSetups.map((r) => rodSetupPill(r, ids.includes(r.id))).join("") : `<p class="live-card-empty">No rod setups yet.</p>`;
+    const slots = tdRodSlots(a, data.rodSetups);
+    const ids = [...new Set(slots.filter(Boolean))];
+    const pills = data.rodSetups.length ? data.rodSetups.map((r) => rodSetupPill(r, slots)).join("") : `<p class="live-card-empty">No rod setups yet.</p>`;
     const sections = {
       method: section("Fishing method", o.fishingMethod.map((m) => choice(m, `data-method="${esc(m)}"`, a.fishingMethod.includes(m), o.thumbs.fishingMethod[m])).join("") || "", "method"),
       berley: section("Berley", o.berley.map((b) => choice(b, `data-berley="${esc(b)}"`, a.berley === b, o.thumbs.berley[b])).join("") || "", "berley"),
@@ -452,7 +483,7 @@ async function showTripDefaults({ onClose, start } = {}) {
     on("[data-method]", (el) => setAction({ fishingMethod: tdToggle(action().fishingMethod, el.dataset.method) }));
     on("[data-berley]", (el) => setAction({ berley: tdToggleSingle(action().berley, el.dataset.berley) }));
     on("[data-species]", (el) => setAction({ species: tdToggle(action().species, el.dataset.species) }));
-    on("[data-toggle-rodsetup]", (el) => setAction({ rodSetupIds: tdToggle(tdLiveRodSetupIds(action().rodSetupIds, data.rodSetups), el.dataset.toggleRodsetup) }));
+    on("[data-rod-slot]", (el) => setAction({ rodSlots: tdToggleRodSlot(tdRodSlots(action(), data.rodSetups), Number(el.dataset.rodSlot), el.dataset.rodsetup) }));
     on("[data-edit-rodsetup]", (el) => {
       status = "";
       view = { name: "rod", tripId: view.tripId, actionId: view.actionId, rodId: el.dataset.editRodsetup };
@@ -507,7 +538,10 @@ async function showTripDefaults({ onClose, start } = {}) {
           data.rodSetups.push(created);
           data.rodSetups.sort((x, y) => x.name.localeCompare(y.name));
           // A brand-new rod setup is switched on for this action and opened straight away for its rod/rig.
-          await put("/api/tripactions", data.actions, view.actionId, { rodSetupIds: [...tdLiveRodSetupIds(action().rodSetupIds, data.rodSetups), created.id] });
+          const slots = tdRodSlots(action(), data.rodSetups);
+          const free = slots.indexOf(null);
+          if (free >= 0) slots[free] = created.id;
+          await put("/api/tripactions", data.actions, view.actionId, { rodSlots: slots });
           view = { name: "rod", tripId: view.tripId, actionId: view.actionId, rodId: created.id };
           return;
         }

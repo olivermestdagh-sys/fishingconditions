@@ -325,6 +325,7 @@ CREATE TABLE IF NOT EXISTS user_trip_actions (
   bait TEXT, -- JSON array of Bait names (added later via ALTER TABLE)
   bait_options TEXT, -- JSON array of Bait Sub List items (added later via ALTER TABLE)
   rod_setup_ids TEXT,
+  rod_slots TEXT, -- JSON [id|null x4]: which of the 2x2 rod positions each Rod Setup holds (manual ALTER TABLE on an existing D1)
   species TEXT,
   created_at INTEGER NOT NULL,
   UNIQUE (trip_id, name)
