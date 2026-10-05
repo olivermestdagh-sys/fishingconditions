@@ -101,3 +101,76 @@ function tripLogTotals(runs) {
 function tripLogIsApprox(e) {
   return e.source === "Backfill" && !e.markId;
 }
+
+// --- Editing (the Trip Logs tab's line editor) -----------------------------------------------------------------------
+
+const TRIP_LOG_EVENT_TYPES = ["trip_start", "action_start", "change", "catch", "action_end", "trip_end"];
+const TRIP_LOG_CHANGE_FIELDS = ["rod_setups", "action", "water", "depth", "water+depth"];
+const TRIP_LOG_TIDE_EXTREMES = ["HHW", "LHW", "HLW", "LLW"];
+
+/** "" (blank) -> null, a number text -> the number, anything else -> undefined (invalid). */
+function tripLogParseNumber(text) {
+  const t = String(text == null ? "" : text).trim();
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * The PATCH / POST body for an edited line, from the editor's form values `f` (text for every input, lists for the chip groups):
+ * {body} or {error}. Blank text becomes null (which clears the field on the Worker); catch-only fields are cleared on any other event.
+ */
+function tripLogBuildPatch(f) {
+  const time = String(f.time || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(f.date || "").trim()) || !/^\d{2}:\d{2}(:\d{2})?$/.test(time)) return { error: "Give the line a date and time." };
+  const body = { manual: true, dateTime: `${f.date.trim()} ${time.length === 5 ? `${time}:00` : time}`, type: f.type };
+  const text = (v) => (String(v == null ? "" : v).trim() === "" ? null : String(v).trim());
+  for (const key of ["actionName", "waterCondition", "tideCondition", "tideExtreme", "weatherCondition", "windDirection", "berley"]) body[key] = text(f[key]);
+  body.changeField = f.type === "change" ? text(f.changeField) : null;
+  const numbers = { waterDepth: "Depth", windSpeed: "Wind speed", temperature: "Air temperature", barometer: "Pressure", waterTemperature: "Water temperature", lat: "Latitude", lng: "Longitude" };
+  for (const [key, label] of Object.entries(numbers)) {
+    const n = tripLogParseNumber(f[key]);
+    if (n === undefined) return { error: `${label} must be a number.` };
+    body[key] = n;
+  }
+  body.fishingMethod = f.fishingMethod || [];
+  body.targets = f.targets || [];
+  if (f.type === "catch") {
+    const size = tripLogParseNumber(f.size);
+    if (size === undefined) return { error: "Size must be a number." };
+    body.species = text(f.species);
+    body.size = size;
+    body.released = !!f.released;
+  } else {
+    body.species = null;
+    body.size = null;
+    body.released = null;
+  }
+  body.rods = (f.rods || []).map((r, i) => ({
+    slot: i + 1, rodSetupId: text(r.rodSetupId), name: text(r.name), rod: text(r.rod), rig: text(r.rig), rigOptions: r.rigOptions || [], bait: r.bait || [], baitOptions: r.baitOptions || [],
+  }));
+  return { body };
+}
+
+/** A new rod row's values, taken from one of the user's Rod Setups (or blank). */
+function tripLogRodFromSetup(setup) {
+  if (!setup) return { rodSetupId: "", name: "", rod: "", rig: "", rigOptions: [], bait: [], baitOptions: [] };
+  return {
+    rodSetupId: setup.id, name: setup.name || "", rod: setup.rod || "", rig: setup.rig || "",
+    rigOptions: [...(setup.subListItems || [])], bait: [...(setup.bait || [])], baitOptions: [...(setup.baitOptions || [])],
+  };
+}
+
+/** The options a Rig / Bait row offers under it: its own sub list, else the person's private one (`overrides`: Map rowId -> names) — tdRigSublist. */
+function tripLogSublist(listRow, overrides) {
+  if (!listRow) return [];
+  if (listRow.hasSublist) return Array.isArray(listRow.subList) ? listRow.subList : [];
+  return (overrides && overrides.get(listRow.id)) || [];
+}
+
+/** `values` plus `current` entries the list no longer has (an old log can name something since removed from the lists), without repeats. */
+function tripLogChoices(values, current) {
+  const out = [...new Set(values || [])];
+  for (const c of [].concat(current || [])) if (c && !out.includes(c)) out.push(c);
+  return out;
+}

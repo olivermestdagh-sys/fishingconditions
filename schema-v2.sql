@@ -443,6 +443,7 @@ CREATE TABLE IF NOT EXISTS trip_log (
   temperature REAL,
   water_temperature REAL,
   conditions_at INTEGER,             -- NULL = weather/tide still to backfill; set (UTC ms) once looked up (or given up on)
+  edited_at INTEGER,                 -- set (UTC ms) when a line was edited / added by hand in the Trip Logs tab: a run with any such line is never rebuilt by the automatic backfills. Manual ALTER TABLE on D1 (done 2026-10-05).
   source TEXT NOT NULL,              -- 'Site' | 'Controller'
   source_uuid TEXT NOT NULL,         -- idempotency: fc:<device>:<seq>[:kind] for the controller, a client uuid for the site
   created_at INTEGER NOT NULL,

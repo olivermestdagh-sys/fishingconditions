@@ -983,3 +983,102 @@ test("trip log headers (GET /api/triplog?list=1): one row per run with counts, t
   assert.equal((await (await site(env, "GET", "/api/triplog?list=1", undefined, "s-u2")).json()).length, 0, "not someone else's");
   assert.equal((await site(env, "GET", "/api/triplog?list=1", undefined, "nobody")).status, 401);
 });
+
+// --- editing the log by hand (the Trip Logs tab) ------------------------------------------------------------------------------
+
+test("trip log edit (PATCH /api/triplog/<id>): fields, the time, the rod rows; clearing; validation; only your own lines", async () => {
+  const { sqlite, env } = await bfSeeded();
+  await site(env, "POST", "/api/triplog/backfill", {});
+  const line = tlog(sqlite).find((r) => r.event_type === "action_start" && r.action_name === "Drift");
+  const patch = (id, body, session) => site(env, "PATCH", `/api/triplog/${id}`, { manual: true, ...body }, session);
+
+  const res = await patch(line.id, {
+    dateTime: "2026-10-04 09:40:00", type: "change", changeField: "rod_setups", actionName: "Drift 2", waterCondition: "Murky", waterDepth: 5.5, berley: "Bread",
+    fishingMethod: ["Drifting", "Anchored"], targets: ["Bream"], lat: -38.3, lng: 145.4, tideCondition: "Slack High", tideExtreme: "HHW", weatherCondition: "Rain",
+    windSpeed: 20, windDirection: "N", barometer: 1010.5, temperature: 11, waterTemperature: 14,
+    rods: [
+      { slot: 2, rodSetupId: "r1", name: "Light", rod: "L Wilson", rig: "Paternoster", rigOptions: ["Octopus 3/0"], bait: ["Squid"], baitOptions: ["Wing Strip"] },
+      { rod: "L Raider", rig: "Jig Head", bait: ["Prawn"] },
+    ],
+  });
+  assert.equal(res.status, 200);
+  const edited = sqlite.prepare("SELECT * FROM trip_log WHERE id = ?").get(line.id);
+  assert.deepEqual([edited.event_type, edited.change_field, edited.action_name, edited.water_condition, edited.water_depth, edited.berley], ["change", "rod_setups", "Drift 2", "Murky", 5.5, "Bread"]);
+  assert.deepEqual([JSON.parse(edited.fishing_method), JSON.parse(edited.targets)], [["Drifting", "Anchored"], ["Bream"]]);
+  assert.deepEqual([edited.lat, edited.lng, edited.tide_condition, edited.tide_extreme, edited.weather_condition, edited.wind_speed, edited.wind_direction, edited.barometer, edited.temperature, edited.water_temperature],
+    [-38.3, 145.4, "Slack High", "HHW", "Rain", 20, "N", 1010.5, 11, 14]);
+  assert.equal(edited.date_time, "2026-10-04 09:40:00");
+  assert.equal(edited.ts, Date.UTC(2026, 9, 3, 22, 40, 0), "09:40 local on the daylight-saving change day is UTC+11");
+  assert.equal(edited.tz_offset_min, 660);
+  assert.ok(edited.edited_at, "marked as edited by hand");
+  assert.ok(edited.conditions_at, "its conditions are now yours: the backfills leave them");
+  const rods = sqlite.prepare("SELECT * FROM trip_log_rods WHERE log_id = ? ORDER BY slot").all(line.id);
+  assert.deepEqual(rods.map((r) => [r.slot, r.rod_setup_id, r.rod, r.rig, r.rig_options, r.bait, r.bait_options]), [
+    [1, null, "L Raider", "Jig Head", null, '["Prawn"]', null],
+    [2, "r1", "L Wilson", "Paternoster", '["Octopus 3/0"]', '["Squid"]', '["Wing Strip"]'],
+  ], "the whole list replaces the old rows; a rod with no position takes the first free one");
+
+  // clearing, with the manual flag (the browser's weather backfill never clears)
+  await patch(line.id, { berley: "", waterDepth: null, tideCondition: null, targets: [], released: null, rods: [] });
+  const cleared = sqlite.prepare("SELECT * FROM trip_log WHERE id = ?").get(line.id);
+  assert.deepEqual([cleared.berley, cleared.water_depth, cleared.tide_condition, cleared.targets, cleared.water_condition], [null, null, null, null, "Murky"], "only what was named");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log_rods WHERE log_id = ?").get(line.id).n, 0);
+
+  // the weather/tide backfill's own use of PATCH is unchanged: no manual flag, blanks skipped, never marks a line as edited
+  const other = tlog(sqlite).find((r) => r.event_type === "catch");
+  await site(env, "PATCH", `/api/triplog/${other.id}`, { tideCondition: "Rising", windSpeed: 12, weatherCondition: "" });
+  const fromBackfill = sqlite.prepare("SELECT * FROM trip_log WHERE id = ?").get(other.id);
+  assert.deepEqual([fromBackfill.tide_condition, fromBackfill.wind_speed, fromBackfill.weather_condition], ["Rising", 12, null]);
+  assert.equal(fromBackfill.edited_at, null);
+  assert.ok(fromBackfill.conditions_at);
+
+  for (const bad of [{ dateTime: "yesterday" }, { type: "nope" }, { waterDepth: 5000 }, { waterDepth: "deep" }, { lat: 120 }, { targets: "Bream" }, { rods: "x" }, { rods: [{ bait: "Squid" }] }, { actionName: "x".repeat(500) }]) {
+    assert.equal((await patch(line.id, bad)).status, 400, JSON.stringify(bad));
+  }
+  assert.equal((await patch("tl_nope", { berley: "x" })).status, 404);
+  assert.equal((await patch(line.id, { berley: "x" }, "s-u2")).status, 404, "not someone else's line");
+  assert.equal(sqlite.prepare("SELECT berley FROM trip_log WHERE id = ?").get(line.id).berley, null);
+});
+
+test("trip log lines: add one by hand (POST /api/triplog/lines), delete one; a hand-edited run is never rebuilt over", async () => {
+  const { sqlite, env, token } = await bfSeeded();
+  await site(env, "POST", "/api/triplog/backfill", {});
+  const before = tlog(sqlite).length;
+
+  const add = await site(env, "POST", "/api/triplog/lines", {
+    runId: BF_RUN, type: "catch", dateTime: "2026-10-04T11:05", species: "Bream", size: 28, released: true, waterCondition: "Murky",
+    rods: [{ rodSetupId: "r1", name: "Light", rod: "L Wilson", rig: "Paternoster", bait: ["Squid"] }],
+  });
+  assert.equal(add.status, 201);
+  const { id } = await add.json();
+  const row = sqlite.prepare("SELECT * FROM trip_log WHERE id = ?").get(id);
+  assert.deepEqual([row.run_id, row.trip_name, row.event_type, row.species, row.size, row.released, row.source], [BF_RUN, "Estuary", "catch", "Bream", 28, 1, "Manual"]);
+  assert.equal(row.date_time, "2026-10-04 11:05:00");
+  assert.ok(row.edited_at);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log_rods WHERE log_id = ?").get(id).n, 1);
+  assert.equal(tlog(sqlite).length, before + 1);
+  const lines = await (await site(env, "GET", `/api/triplog?runId=${BF_RUN}`)).json();
+  const mine = lines.entries.find((e) => e.id === id);
+  assert.deepEqual([mine.species, mine.rods[0].bait, mine.editedAt > 0], ["Bream", ["Squid"], true]);
+  assert.equal(lines.entries.indexOf(mine) > 0 && lines.entries[lines.entries.indexOf(mine) - 1].ts <= mine.ts, true, "in time order");
+  assert.equal((await (await site(env, "GET", "/api/triplog?list=1")).json())[0].edited, true);
+
+  assert.equal((await site(env, "POST", "/api/triplog/lines", { runId: "nope", type: "catch", dateTime: "2026-10-04 11:05:00" })).status, 404);
+  assert.equal((await site(env, "POST", "/api/triplog/lines", { runId: BF_RUN, type: "catch" })).status, 400, "a time is required");
+  assert.equal((await site(env, "POST", "/api/triplog/lines", { runId: BF_RUN, type: "wrong", dateTime: "2026-10-04 11:05:00" })).status, 400);
+  assert.equal((await site(env, "POST", "/api/triplog/lines", { runId: BF_RUN, type: "catch", dateTime: "2026-10-04 11:05:00" }, "s-u2")).status, 404, "not someone else's trip");
+
+  // the automatic rebuilds leave an edited run alone: the Settings backfill, and the phone's history upload
+  const again = await (await site(env, "POST", "/api/triplog/backfill", {})).json();
+  assert.deepEqual([again.runs, again.skipped], [0, 1]);
+  assert.equal(tlog(sqlite).length, before + 1, "nothing was replaced");
+  const hist = await api(env, token, "POST", "/api/controller/history", { deviceId: BF_DEV, events: [{ deviceId: BF_DEV, seq: 1, type: "trip_start", ts: Date.parse("2026-10-03T22:30:10Z") / 1000, tzOffsetMin: 660, tripId: "t1" }] });
+  assert.equal((await hist.json()).runs, 0);
+  assert.equal(tlog(sqlite).length, before + 1);
+
+  // delete
+  assert.equal((await site(env, "DELETE", `/api/triplog/${id}`, undefined, "s-u2")).status, 404);
+  assert.equal((await site(env, "DELETE", `/api/triplog/${id}`)).status, 204);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log WHERE id = ?").get(id).n, 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log_rods WHERE log_id = ?").get(id).n, 0, "its rod rows go with it");
+});

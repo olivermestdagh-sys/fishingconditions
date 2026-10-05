@@ -37,8 +37,31 @@
   .tl-head h3 { margin: 0; }
   .tl-head span { font-size: 0.85rem; color: var(--grey-600, #666); }
   /* table cells ignore max-width, so these are widths: long text wraps inside them instead of pushing the right-hand columns off screen */
-  table.tl-lines td.tl-gear { width: 24rem; }
-  .tl-gear div { padding: 1px 0; }
+  /* each line's rod setups: a small table of their own, in separate columns, indented under the line */
+  table.tl-lines tr.gear td { border-bottom: 1px solid var(--grey-200, #e5e5e5); padding-top: 0; }
+  table.tl-lines tr.line:has(+ tr.gear) td { border-bottom: 0; }
+  table.tl-gear-table { width: 100%; table-layout: fixed; font-size: 0.8rem; border-collapse: collapse; } /* fixed: every line's gear columns line up with the ones above and below */
+  table.tl-gear-table th { background: none; color: var(--grey-500, #888); font-weight: 600; padding: 2px 8px; position: static; text-align: left; white-space: nowrap; }
+  table.tl-gear-table td { padding: 2px 8px; border-bottom: 0; white-space: normal; background: transparent; }
+  table.tl-gear-table tbody tr:nth-child(even) { background: transparent; }
+  .tl-btn { padding: 4px 10px; font-size: 0.82rem; }
+  table.tl-lines td.act { text-align: right; width: 1%; }
+  /* the line editor */
+  tr.editing > td { background: var(--blue-100, #eaf2fb); }
+  .tl-editor { padding: 6px 0 10px; }
+  .tl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 12px; margin-bottom: 10px; }
+  .tl-field span, .tl-field-wide > span { display: block; font-size: 0.75rem; font-weight: 600; color: var(--grey-700, #444); margin-bottom: 2px; }
+  .tl-field input[type="text"], .tl-field input[type="number"], .tl-field input[type="date"], .tl-field input[type="time"], .tl-field select { width: 100%; box-sizing: border-box; }
+  .tl-field-wide { margin-bottom: 10px; }
+  .tl-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .tl-chip { border: 1px solid var(--grey-300, #ccc); background: var(--white, #fff); color: var(--grey-700, #444); border-radius: 999px; padding: 2px 9px; font-size: 0.78rem; cursor: pointer; }
+  .tl-chip[aria-pressed="true"] { background: #16a34a; border-color: #16a34a; color: #fff; }
+  .tl-none { font-size: 0.78rem; color: var(--grey-500, #888); }
+  table.tl-rods-edit td { vertical-align: top; min-width: 7rem; }
+  table.tl-rods-edit select { max-width: 11rem; }
+  .tl-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+  .tl-danger { color: #dc2626; margin-left: auto; }
+  .tl-error { color: #dc2626; font-size: 0.85rem; }
   table.tl-lines td.cond { width: 13rem; }
   table.tl-lines td.pos { width: 7rem; font-size: 0.8rem; color: var(--grey-600, #666); }
   .tl-empty { font-size: 0.85rem; color: var(--grey-500, #888); padding: 12px 0; }

@@ -250,6 +250,9 @@ export default {
       if (tripSetupMatch) {
         return handleTripSetupItem(request, url, env, tripSetupMatch[1]);
       }
+      if (url.pathname === "/api/triplog/lines") {
+        return handleTripLogLines(request, url, env);
+      }
       if (url.pathname === "/api/triplog/backfill") {
         return handleTripLogBackfill(request, url, env);
       }
@@ -3879,7 +3882,7 @@ function rowToTripLog(row, rods) {
     markId: row.mark_id ?? null, species: row.species ?? null, size: row.size ?? null, released: row.released == null ? null : !!row.released, rodSetupId: row.rod_setup_id ?? null,
     tideCondition: row.tide_condition ?? null, tideExtreme: row.tide_extreme ?? null, weatherCondition: row.weather_condition ?? null, windSpeed: row.wind_speed ?? null,
     windDirection: row.wind_direction ?? null, barometer: row.barometer ?? null, temperature: row.temperature ?? null, waterTemperature: row.water_temperature ?? null,
-    conditionsAt: row.conditions_at ?? null, source: row.source,
+    conditionsAt: row.conditions_at ?? null, editedAt: row.edited_at ?? null, source: row.source,
     rods: (rods || []).map((r) => ({ slot: r.slot, rodSetupId: r.rod_setup_id ?? null, name: r.rod_setup_name ?? null, rod: r.rod ?? null, rig: r.rig ?? null, rigOptions: list(r.rig_options), bait: list(r.bait), baitOptions: list(r.bait_options) })),
   };
 }
@@ -3920,7 +3923,7 @@ async function tlogListRuns(env, uid, from, to) {
     env.DB.prepare(
       `SELECT run_id, MAX(trip_id) AS trip_id, MAX(trip_name) AS trip_name, MIN(ts) AS start_ts, MAX(ts) AS end_ts, MIN(date_time) AS start_dt, MAX(date_time) AS end_dt,
               COUNT(*) AS entries, SUM(event_type = 'action_start') AS actions, SUM(event_type = 'catch') AS catches, MAX(event_type = 'trip_end') AS has_end,
-              MAX(source = 'Backfill' AND mark_id IS NULL) AS approximate, MAX(conditions_at IS NULL) AS pending
+              MAX(source = 'Backfill' AND mark_id IS NULL) AS approximate, MAX(conditions_at IS NULL) AS pending, MAX(edited_at IS NOT NULL) AS edited
        FROM trip_log WHERE user_id = ? GROUP BY run_id HAVING MIN(date_time) >= ? AND MIN(date_time) <= ? ORDER BY MIN(ts) DESC LIMIT 500`
     ).bind(uid, lo, hi).all(),
     env.DB.prepare(
@@ -3933,7 +3936,7 @@ async function tlogListRuns(env, uid, from, to) {
   const fishedBy = new Map(fished.results.map((r) => [r.run_id, r.fished_ms || 0]));
   return headers.results.map((r) => ({
     runId: r.run_id, tripId: r.trip_id ?? null, tripName: r.trip_name ?? null, startTs: r.start_ts, endTs: r.end_ts, startDateTime: r.start_dt, endDateTime: r.end_dt,
-    entries: r.entries, actions: r.actions, catches: r.catches, hasTripEnd: !!r.has_end, approximate: !!r.approximate, pending: !!r.pending, fishedMs: fishedBy.get(r.run_id) || 0,
+    entries: r.entries, actions: r.actions, catches: r.catches, hasTripEnd: !!r.has_end, approximate: !!r.approximate, pending: !!r.pending, edited: !!r.edited, fishedMs: fishedBy.get(r.run_id) || 0,
   }));
 }
 
@@ -3996,26 +3999,182 @@ async function handleTripLogCollection(request, url, env) {
   return jsonResponse({ error: "Method not allowed." }, 405, env);
 }
 
-/** PATCH /api/triplog/<id>: the weather/tide backfill. Any subset of the condition fields; always notes conditions_at so a row isn't retried forever. */
+// Editing the log by hand (the Trip Logs tab): PATCH / DELETE /api/triplog/<id>, POST /api/triplog/lines.
+// A hand-edited line (or a hand-added one) gets `edited_at`; a run with any such line is left alone by the automatic rebuilds
+// (tlogBackfillDevice: the Settings backfill and the phone's history upload), so an edit is never overwritten.
+
+const TLOG_TEXT_FIELDS = {
+  changeField: ["change_field", 40], actionName: ["action_name", 120], waterCondition: ["water_condition", 60], berley: ["berley", 120], species: ["species", 80],
+  tideCondition: ["tide_condition", 40], tideExtreme: ["tide_extreme", 10], weatherCondition: ["weather_condition", 40], windDirection: ["wind_direction", 10],
+};
+const TLOG_NUMBER_FIELDS = {
+  waterDepth: ["water_depth", 0, 1000], size: ["size", 0, 1000], lat: ["lat", -90, 90], lng: ["lng", -180, 180], windSpeed: ["wind_speed", 0, 400],
+  barometer: ["barometer", 800, 1200], temperature: ["temperature", -50, 60], waterTemperature: ["water_temperature", -5, 50],
+};
+const TLOG_LIST_FIELDS = { fishingMethod: "fishing_method", targets: "targets" };
+const TLOG_CONDITION_KEYS = new Set(Object.keys(TLOG_CONDITION_COLUMNS));
+
+/**
+ * Validates an edit body and turns it into the pieces of the UPDATE: {sets, binds, rods} or {error}. With `manual` (the tab) a null / "" / []
+ * clears a field; without it (the browser's weather/tide backfill) those are skipped, as before. `rods` (a whole list) replaces the line's rod rows.
+ */
+function tlogParseEdit(body, now) {
+  const manual = body.manual === true;
+  const sets = [];
+  const binds = [];
+  const blank = (v) => v === null || v === "";
+  let touchedConditions = false;
+  for (const [key, [column, max]] of Object.entries(TLOG_TEXT_FIELDS)) {
+    if (body[key] === undefined) continue;
+    if (blank(body[key])) {
+      if (manual) (sets.push(`${column} = NULL`), TLOG_CONDITION_KEYS.has(key) && (touchedConditions = true));
+      continue;
+    }
+    if (typeof body[key] !== "string" || body[key].length > max) return { error: `${key} must be text up to ${max} characters.` };
+    sets.push(`${column} = ?`);
+    binds.push(body[key].trim());
+    if (TLOG_CONDITION_KEYS.has(key)) touchedConditions = true;
+  }
+  for (const [key, [column, lo, hi]] of Object.entries(TLOG_NUMBER_FIELDS)) {
+    if (body[key] === undefined) continue;
+    if (blank(body[key])) {
+      if (manual) (sets.push(`${column} = NULL`), TLOG_CONDITION_KEYS.has(key) && (touchedConditions = true));
+      continue;
+    }
+    if (typeof body[key] !== "number" || !Number.isFinite(body[key]) || body[key] < lo || body[key] > hi) return { error: `${key} must be a number from ${lo} to ${hi}.` };
+    sets.push(`${column} = ?`);
+    binds.push(body[key]);
+    if (TLOG_CONDITION_KEYS.has(key)) touchedConditions = true;
+  }
+  for (const [key, column] of Object.entries(TLOG_LIST_FIELDS)) {
+    if (body[key] === undefined) continue;
+    if (!Array.isArray(body[key]) || body[key].length > 20 || body[key].some((v) => typeof v !== "string" || !v.trim() || v.length > 80)) return { error: `${key} must be a list of names.` };
+    sets.push(`${column} = ?`);
+    binds.push(tlogJson(body[key].map((v) => v.trim())));
+  }
+  if (body.released !== undefined) {
+    if (blank(body.released)) manual && sets.push("released = NULL");
+    else if (typeof body.released !== "boolean") return { error: "released must be true or false." };
+    else (sets.push("released = ?"), binds.push(body.released ? 1 : 0));
+  }
+  if (body.type !== undefined) {
+    if (!TLOG_EVENT_TYPES.includes(body.type)) return { error: "type is not one of the log's event types." };
+    sets.push("event_type = ?");
+    binds.push(body.type);
+  }
+  if (body.dateTime !== undefined) {
+    const when = typeof body.dateTime === "string" && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/.test(body.dateTime) ? tlogNaiveToTs(body.dateTime.replace("T", " ").padEnd(19, ":00").slice(0, 19)) : null;
+    if (!when) return { error: "dateTime must be a local time like 2026-10-04 09:37:45." };
+    sets.push("ts = ?", "date_time = ?", "tz_offset_min = ?");
+    binds.push(when.tsMs, body.dateTime.replace("T", " ").padEnd(19, ":00").slice(0, 19), when.tz);
+  }
+  let rods;
+  if (body.rods !== undefined) {
+    if (!Array.isArray(body.rods) || body.rods.length > 8) return { error: "rods must be a list of up to 8 rod setups." };
+    const used = new Set();
+    rods = [];
+    for (const r of body.rods) {
+      if (!r || typeof r !== "object") return { error: "each rod must be an object." };
+      const text = (v) => (typeof v === "string" && v.trim() && v.length <= 120 ? v.trim() : v == null || v === "" ? null : undefined);
+      const names = (v) => (v == null ? [] : Array.isArray(v) && v.length <= 20 && v.every((x) => typeof x === "string" && x.trim() && x.length <= 80) ? v.map((x) => x.trim()) : undefined);
+      const row = { rodSetupId: text(r.rodSetupId), name: text(r.name), rod: text(r.rod), rig: text(r.rig), rigOptions: names(r.rigOptions), bait: names(r.bait), baitOptions: names(r.baitOptions) };
+      if (Object.values(row).some((v) => v === undefined)) return { error: "a rod has an invalid value." };
+      let slot = Number.isInteger(r.slot) && r.slot >= 1 && r.slot <= 12 ? r.slot : 0;
+      if (!slot || used.has(slot)) {
+        slot = 1;
+        while (used.has(slot)) slot++;
+      }
+      used.add(slot);
+      rods.push({ ...row, slot });
+    }
+  }
+  if (touchedConditions) {
+    sets.push("conditions_at = ?");
+    binds.push(now);
+  }
+  if (manual) {
+    sets.push("edited_at = ?");
+    binds.push(now);
+  } else if (!touchedConditions && !sets.length && rods === undefined) {
+    sets.push("conditions_at = ?"); // the browser's backfill with nothing found: still done, so it isn't asked again
+    binds.push(now);
+  }
+  return { sets, binds, rods };
+}
+
+/** The statements for one parsed edit of line `id` (UPDATE + replacing its rod rows). */
+function tlogEditStatements(env, uid, id, parsed) {
+  const stmts = [];
+  if (parsed.sets.length) stmts.push(env.DB.prepare(`UPDATE trip_log SET ${parsed.sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...parsed.binds, id, uid));
+  if (parsed.rods !== undefined) {
+    stmts.push(env.DB.prepare("DELETE FROM trip_log_rods WHERE log_id = ? AND user_id = ?").bind(id, uid));
+    if (parsed.rods.length) {
+      stmts.push(
+        env.DB.prepare(
+          `INSERT INTO trip_log_rods (log_id, slot, user_id, rod_setup_id, rod_setup_name, rod, rig, rig_options, bait, bait_options) VALUES ${parsed.rods.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ")}`
+        ).bind(...parsed.rods.flatMap((r) => [id, r.slot, uid, r.rodSetupId, r.name, r.rod, r.rig, tlogJson(r.rigOptions), tlogJson(r.bait), tlogJson(r.baitOptions)]))
+      );
+    }
+  }
+  return stmts;
+}
+
+/** PATCH /api/triplog/<id> (edit; the weather/tide backfill uses it too) and DELETE /api/triplog/<id> (remove a line and its rod rows). */
 async function handleTripLogItem(request, url, env, id) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
   const resolved = resolveEffectiveUserId(url, user);
   if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+  const row = await env.DB.prepare("SELECT id FROM trip_log WHERE id = ? AND user_id = ?").bind(id, uid).first();
+  if (!row) return jsonResponse({ error: "Not found." }, 404, env);
+
+  if (request.method === "DELETE") {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM trip_log_rods WHERE log_id = ? AND user_id = ?").bind(id, uid),
+      env.DB.prepare("DELETE FROM trip_log WHERE id = ? AND user_id = ?").bind(id, uid),
+    ]);
+    return new Response(null, { status: 204, headers: corsHeaders(env) });
+  }
   if (request.method !== "PATCH") return jsonResponse({ error: "Method not allowed." }, 405, env);
   const body = await readJsonBody(request);
   if (!body || typeof body !== "object") return jsonResponse({ error: "Request body must be a JSON object." }, 400, env);
-  const sets = [];
-  const binds = [];
-  for (const [key, [column, kind]] of Object.entries(TLOG_CONDITION_COLUMNS)) {
-    if (body[key] === undefined || body[key] === null || body[key] === "") continue;
-    if (kind === "number" ? typeof body[key] !== "number" || !Number.isFinite(body[key]) : typeof body[key] !== "string") return jsonResponse({ error: `${key} is not valid.` }, 400, env);
-    sets.push(`${column} = ?`);
-    binds.push(body[key]);
-  }
-  const res = await env.DB.prepare(`UPDATE trip_log SET ${[...sets, "conditions_at = ?"].join(", ")} WHERE id = ? AND user_id = ?`).bind(...binds, Date.now(), id, resolved.id).run();
-  if (!res.meta || !res.meta.changes) return jsonResponse({ error: "Not found." }, 404, env);
+  const parsed = tlogParseEdit(body, Date.now());
+  if (parsed.error) return jsonResponse({ error: parsed.error }, 400, env);
+  const stmts = tlogEditStatements(env, uid, id, parsed);
+  if (stmts.length) await env.DB.batch(stmts);
   return jsonResponse({ ok: true }, 200, env);
+}
+
+/**
+ * POST /api/triplog/lines: {runId, type, dateTime, ...any editable field, rods?} adds a line to a run by hand (source 'Manual'). The run must
+ * be yours; the line takes the run's trip. Answers the new line's id.
+ */
+async function handleTripLogLines(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  if (request.method !== "POST") return jsonResponse({ error: "Method not allowed." }, 405, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+  const body = await readJsonBody(request);
+  if (!body || typeof body !== "object" || typeof body.runId !== "string" || !body.runId) return jsonResponse({ error: "runId is required." }, 400, env);
+  const run = await env.DB.prepare("SELECT trip_id, trip_name, session_group_id FROM trip_log WHERE user_id = ? AND run_id = ? ORDER BY ts DESC LIMIT 1").bind(uid, body.runId).first();
+  if (!run) return jsonResponse({ error: "Trip not found." }, 404, env);
+  const parsed = tlogParseEdit({ ...body, manual: true }, Date.now());
+  if (parsed.error) return jsonResponse({ error: parsed.error }, 400, env);
+  if (!TLOG_EVENT_TYPES.includes(body.type)) return jsonResponse({ error: "type is required." }, 400, env);
+  const when = typeof body.dateTime === "string" ? tlogNaiveToTs(body.dateTime.replace("T", " ").padEnd(19, ":00").slice(0, 19)) : null;
+  if (!when) return jsonResponse({ error: "dateTime is required (a local time like 2026-10-04 09:37:45)." }, 400, env);
+  const uuid = `ui_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const id = `tl_${uid}_${uuid}`;
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO trip_log (id, user_id, run_id, trip_id, trip_name, event_type, ts, date_time, tz_offset_min, session_group_id, source, source_uuid, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Manual', ?, ?)"
+    ).bind(id, uid, body.runId, run.trip_id, run.trip_name, body.type, when.tsMs, body.dateTime.replace("T", " ").padEnd(19, ":00").slice(0, 19), when.tz, run.session_group_id, uuid, Date.now()),
+    ...tlogEditStatements(env, uid, id, parsed),
+  ]);
+  return jsonResponse({ id }, 201, env);
 }
 
 // --- Trip log backfill: trips made before the log existed, or whose exact times only the phone still has ---------------------------
@@ -4239,13 +4398,14 @@ async function tlogBackfillDevice(env, uid, deviceId, { onlyRunId = null, histor
   const [events, markRows, existing, data] = await Promise.all([
     env.DB.prepare("SELECT seq, type, received_at FROM controller_events WHERE user_id = ? AND device_id = ? ORDER BY seq ASC").bind(uid, deviceId).all(),
     env.DB.prepare("SELECT * FROM marks WHERE user_id = ? AND source = 'Controller' AND source_uuid LIKE ? ORDER BY date_time ASC LIMIT 5000").bind(uid, `fc:${deviceId}:%`).all(),
-    env.DB.prepare("SELECT run_id, SUM(CASE WHEN source = 'Backfill' THEN 0 ELSE 1 END) AS live FROM trip_log WHERE user_id = ? GROUP BY run_id").bind(uid).all(),
+    env.DB.prepare("SELECT run_id, SUM(CASE WHEN source = 'Backfill' THEN 0 ELSE 1 END) AS live, MAX(edited_at IS NOT NULL) AS edited FROM trip_log WHERE user_id = ? GROUP BY run_id").bind(uid).all(),
     ctlLoadTripData(env, uid),
   ]);
   const liveByRun = new Map(existing.results.map((r) => [r.run_id, r.live > 0]));
+  const editedRuns = new Set(existing.results.filter((r) => r.edited).map((r) => r.run_id)); // edited by hand: never rebuilt over
   let segs = tlogSegments(events.results, tlogMarksBySeq(markRows.results));
   if (onlyRunId) segs = segs.filter((s) => s.runId === onlyRunId);
-  const wanted = history.size ? segs : segs.filter((s) => !liveByRun.get(s.runId));
+  const wanted = (history.size ? segs : segs.filter((s) => !liveByRun.get(s.runId))).filter((s) => !editedRuns.has(s.runId));
   const skipped = segs.length - wanted.length;
   const todo = wanted.slice(0, maxRuns);
   if (!todo.length) return { runs: 0, rows: 0, skipped, remaining: 0 };

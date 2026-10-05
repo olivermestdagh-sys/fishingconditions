@@ -65,7 +65,7 @@ test("an Action's state: berley, methods, targets and every rod setup", () => {
 });
 
 // --- the Trip Logs tab's reading helpers (js/trip-log-view.js) ---------------------------------------------------------
-const view = new Function(read("../js/trip-log-view.js") + "\nreturn { tripLogEventLabel, tripLogGearLines, tripLogGearTitle, tripLogWaterText, tripLogConditionsText, tripLogCatchText, tripLogDurations, tripLogFormatDuration, tripLogElapsed, tripLogDateLabel, tripLogFlags, tripLogTotals, tripLogIsApprox };")();
+const view = new Function(read("../js/trip-log-view.js") + "\nreturn { tripLogEventLabel, tripLogGearLines, tripLogGearTitle, tripLogWaterText, tripLogConditionsText, tripLogCatchText, tripLogDurations, tripLogFormatDuration, tripLogElapsed, tripLogDateLabel, tripLogFlags, tripLogTotals, tripLogIsApprox, tripLogBuildPatch, tripLogParseNumber, tripLogRodFromSetup, tripLogSublist, tripLogChoices };")();
 
 test("labels, gear, water, conditions and catch text", () => {
   assert.equal(view.tripLogEventLabel({ type: "trip_start" }), "Trip started");
@@ -114,4 +114,41 @@ test("durations, elapsed time, dates, flags and totals", () => {
   assert.equal(view.tripLogIsApprox({ source: "Backfill", markId: null }), true);
   assert.equal(view.tripLogIsApprox({ source: "Backfill", markId: "m1" }), false, "a rebuilt entry taking its time from a mark is exact");
   assert.equal(view.tripLogIsApprox({ source: "Controller" }), false);
+});
+
+test("the line editor's form becomes the PATCH body: blanks clear, numbers parse, catch fields only on a catch", () => {
+  const form = {
+    date: "2026-10-04", time: "10:54", type: "catch", changeField: "water", actionName: "Channel", waterCondition: "Murky", waterDepth: "3.2", tideCondition: "", tideExtreme: "HLW",
+    weatherCondition: "Cloudy", windSpeed: "13", windDirection: "SSW", temperature: " 14.2 ", barometer: "", waterTemperature: "14.5", berley: "", fishingMethod: ["Drifting"], targets: [],
+    species: "Ray", size: "60", released: true, lat: "-38.3", lng: "145.5",
+    rods: [{ rodSetupId: "r1", name: "Penn", rod: "M Penn", rig: "Paternoster", rigOptions: ["Octopus 3/0"], bait: ["Squid"], baitOptions: ["Wing Strip"] }, { rodSetupId: "", name: "", rod: "", rig: "", rigOptions: [], bait: [], baitOptions: [] }],
+  };
+  const { body, error } = view.tripLogBuildPatch(form);
+  assert.equal(error, undefined);
+  assert.equal(body.manual, true);
+  assert.equal(body.dateTime, "2026-10-04 10:54:00", "seconds are added");
+  assert.deepEqual([body.waterDepth, body.windSpeed, body.temperature, body.barometer, body.lat], [3.2, 13, 14.2, null, -38.3]);
+  assert.deepEqual([body.tideCondition, body.berley, body.changeField], [null, null, null], "blank text clears; 'what changed' only belongs to a change");
+  assert.deepEqual([body.species, body.size, body.released], ["Ray", 60, true]);
+  assert.deepEqual(body.rods.map((r) => [r.slot, r.rodSetupId, r.rod, r.bait]), [[1, "r1", "M Penn", ["Squid"]], [2, null, null, []]]);
+
+  const change = view.tripLogBuildPatch({ ...form, type: "change", changeField: "rod_setups" }).body;
+  assert.deepEqual([change.changeField, change.species, change.size, change.released], ["rod_setups", null, null, null], "catch fields are cleared on any other event");
+
+  assert.match(view.tripLogBuildPatch({ ...form, date: "" }).error, /date and time/);
+  assert.match(view.tripLogBuildPatch({ ...form, time: "9am" }).error, /date and time/);
+  assert.match(view.tripLogBuildPatch({ ...form, waterDepth: "deep" }).error, /Depth must be a number/);
+  assert.match(view.tripLogBuildPatch({ ...form, size: "big" }).error, /Size must be a number/);
+});
+
+test("editor helpers: numbers, Rod Setup rows, sub lists and the choices a pick-list offers", () => {
+  assert.deepEqual(["", " 5 ", "x", "-1.5", null].map(view.tripLogParseNumber), [null, 5, undefined, -1.5, null]);
+  assert.deepEqual(view.tripLogRodFromSetup({ id: "r1", name: "Light", rod: "L Wilson", rig: "Paternoster", subListItems: ["A"], bait: ["Squid"], baitOptions: ["Half"] }),
+    { rodSetupId: "r1", name: "Light", rod: "L Wilson", rig: "Paternoster", rigOptions: ["A"], bait: ["Squid"], baitOptions: ["Half"] });
+  assert.deepEqual(view.tripLogRodFromSetup(null), { rodSetupId: "", name: "", rod: "", rig: "", rigOptions: [], bait: [], baitOptions: [] });
+  assert.deepEqual(view.tripLogSublist({ id: "x", hasSublist: true, subList: ["a", "b"] }), ["a", "b"]);
+  assert.deepEqual(view.tripLogSublist({ id: "x", hasSublist: false }, new Map([["x", ["mine"]]])), ["mine"], "your private list on a rig you don't own");
+  assert.deepEqual(view.tripLogSublist(null), []);
+  assert.deepEqual(view.tripLogChoices(["a", "b"], "z"), ["a", "b", "z"], "a value the list no longer has stays choosable");
+  assert.deepEqual(view.tripLogChoices(["a", "b"], ["b", "c", ""]), ["a", "b", "c"]);
 });
