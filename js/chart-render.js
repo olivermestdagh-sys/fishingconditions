@@ -192,6 +192,28 @@ function applyTideOffsetToRows(rows, offsetMinutes) {
 }
 
 /**
+ * The real High/Low events of a location's rows (rows whose "Tide Status" is High or Low carry the exact event time and
+ * height — the pipeline writes them off-grid), shifted by the location's tideOffset the same way applyTideOffsetToRows
+ * shifts the curve. These are the EXACT extremum times; findTideExtrema only estimates them from hourly samples (and
+ * bucketRowsHourly averages the event rows away, so this must run on the rows BEFORE bucketing). Same-type events less
+ * than 90 minutes apart (the pipeline can emit a near-duplicate) collapse to the first. Returns [{t, height, type}].
+ */
+function exactTideExtrema(rows, offsetMinutes) {
+  const offsetMs = (Number(offsetMinutes) || 0) * 60000;
+  const events = rows
+    .filter((r) => (r["Tide Status"] === "High" || r["Tide Status"] === "Low") && r["Tide Height (m)"] != null)
+    .map((r) => ({ t: r._t + offsetMs, height: r["Tide Height (m)"], type: r["Tide Status"] === "High" ? "high" : "low" }))
+    .sort((a, b) => a.t - b.t);
+  const out = [];
+  for (const e of events) {
+    const last = out[out.length - 1];
+    if (last && last.type === e.type && e.t - last.t < 90 * 60000) continue;
+    out.push(e);
+  }
+  return out;
+}
+
+/**
  * Tide-extremum widening (docs/lang-lang-trough-widening-spec V2.md): the synthetic tide curve rushes through a shallow
  * low faster than the real tide, so the "too low" / "high enough" crossings of minTideHeight come out too narrow.
  * `offsets` ({hhw, lhw, hlw, llw} minutes, by rankExtremum class) widen the feature around each extremum:
@@ -204,9 +226,9 @@ function applyTideOffsetToRows(rows, offsetMinutes) {
  * redrawn as one smooth monotone curve through (extremum, crossing, extremum), so the drawn curve, the extrema labels
  * and the crossing dots all agree.
  * Only moves crossings that already exist. Needs minTideHeight. Returns a new array (`rows` is never mutated); run it
- * AFTER applyTideOffsetToRows.
+ * AFTER applyTideOffsetToRows. `exact` = exactTideExtrema(...) of the same rows, when available.
  */
-function applyTroughWideningToRows(rows, offsets, minTideHeight) {
+function applyTroughWideningToRows(rows, offsets, minTideHeight, exact) {
   if (!offsets || minTideHeight == null || minTideHeight === "") return rows;
   const byClass = { HHW: Number(offsets.hhw) || 0, LHW: Number(offsets.lhw) || 0, HLW: Number(offsets.hlw) || 0, LLW: Number(offsets.llw) || 0 };
   if (!byClass.HHW && !byClass.LHW && !byClass.HLW && !byClass.LLW) return rows;
@@ -216,7 +238,9 @@ function applyTroughWideningToRows(rows, offsets, minTideHeight) {
     .sort((a, b) => a._t - b._t);
   if (tideRows.length < 3) return rows;
   const threshold = Number(minTideHeight);
-  const extrema = findTideExtrema(tideRows);
+  // Prefer the real event times (exactTideExtrema, already tideOffset-shifted) over the hourly-sampled estimate.
+  const inRange = (exact || []).filter((e) => e.t > tideRows[0]._t && e.t < tideRows[tideRows.length - 1]._t);
+  const extrema = inRange.length >= 2 ? inRange : findTideExtrema(tideRows);
   if (extrema.length < 2) return rows;
   const crossings = findTideThresholdCrossings(tideRows, threshold);
   const MIN_GAP = 60000;
@@ -345,14 +369,16 @@ function findTideExtrema(rows) {
   }
   // Same idea as in findTideThresholdCrossings: a widened curve's exact extremum time/height (the moved lows, and the
   // highs that stay put) replaces the hourly-sampled estimate, which a widened plateau/trough would otherwise skew.
-  const w = rows.widened;
-  if (w) {
-    for (const f of w.extrema) {
+  // Without widening, rows.exactExtrema (the real event times + tideOffset) corrects just the time; the height stays the
+  // sampled one so the dot sits on the drawn curve.
+  const forced = rows.widened ? rows.widened.extrema : rows.exactExtrema;
+  if (forced) {
+    for (const f of forced) {
       let best = null;
       for (const e of extrema) if (e.type === f.type && Math.abs(e.t - f.t) < 2 * 3600000 && (!best || Math.abs(e.t - f.t) < Math.abs(best.t - f.t))) best = e;
       if (best) {
         best.t = f.t;
-        best.height = f.height;
+        if (rows.widened) best.height = f.height;
       }
     }
   }
@@ -1414,6 +1440,7 @@ function buildSessionSpanPlugin(spans) {
 function renderConditionsChart({ canvas, rows, sunTimes, existingChart, locationName, tideMaxObserved, moonPhases, minTideHeight, stopFishingTime, compact, sessionSpan, computedSessionMarkers, dragPreviewState, showDayHeading = true, showSunTimes = true, xRange, disableBuiltinEvents = false, showFirstBoxIcons = false, tideOffsetMinutes, troughOffsets, hideValueAxes = false, overlayHeading = false, extraPlugins = [] }) {
   if (existingChart) existingChart.destroy();
   if (!rows || rows.length === 0) return null;
+  const exactExtrema = exactTideExtrema(rows, tideOffsetMinutes);
   rows = bucketRowsHourly(rows);
   // Applied here, once, centrally — every caller of this shared function
   // (every graph on the site) gets the shift automatically as a result,
@@ -1423,7 +1450,11 @@ function renderConditionsChart({ canvas, rows, sunTimes, existingChart, location
   // for all three at once. See applyTideOffsetToRows for what this
   // deliberately does NOT touch (Tide Status, Condition scores).
   rows = applyTideOffsetToRows(rows, tideOffsetMinutes);
-  rows = applyTroughWideningToRows(rows, troughOffsets, minTideHeight);
+  rows = applyTroughWideningToRows(rows, troughOffsets, minTideHeight, exactExtrema);
+  if (!rows.widened && exactExtrema.length) {
+    rows = rows.slice();
+    rows.exactExtrema = exactExtrema; // findTideExtrema reads this, so the labels show the real event times
+  }
 
   // On mobile, the full descriptive legend labels take up a lot of vertical space
   // under the chart (often wrapping to several lines) — shorten them there, since

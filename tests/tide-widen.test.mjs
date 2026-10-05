@@ -17,8 +17,9 @@ const fns = new Function(
     grab(/function findTideThresholdCrossings[\s\S]*?\r?\n}\r?\n/),
     grab(/function interpolatedTideHeightAt[\s\S]*?\r?\n}\r?\n/),
     grab(/function findTideExtrema[\s\S]*?\r?\n}\r?\n/),
+    grab(/function exactTideExtrema[\s\S]*?\r?\n}\r?\n/),
     grab(/function applyTroughWideningToRows[\s\S]*?\r?\n}\r?\n/),
-    "return { applyTroughWideningToRows, findTideExtrema, findTideThresholdCrossings };",
+    "return { applyTroughWideningToRows, findTideExtrema, findTideThresholdCrossings, exactTideExtrema };",
   ].join("\n")
 )();
 
@@ -145,4 +146,30 @@ test("the widened crossings are exactly on the threshold at the spec times", () 
   assert.equal(after.length, 2);
   assert.equal(after[0].t, before[0].t - 40 * 60000);
   assert.equal(after[1].t, before[1].t + 40 * 60000);
+});
+
+test("exactTideExtrema: real High/Low event rows + tideOffset, near-duplicates collapsed, others ignored", () => {
+  const ev = (min, status, h) => ({ _t: T0 + min * 60000, "Tide Status": status, "Tide Height (m)": h });
+  const out = fns.exactTideExtrema(
+    [ev(0, "Incoming", 1), ev(85, "Low", 0.9), ev(86, "Low", 0.9), ev(400, "High", 2.5), ev(500, "High", null), ev(600, "Outgoing", 2)],
+    30
+  );
+  assert.deepEqual(out.map((e) => [e.type, (e.t - T0) / 60000, e.height]), [["low", 115, 0.9], ["high", 430, 2.5]]);
+});
+
+test("labels use the exact event time: findTideExtrema honours rows.exactExtrema, and widening moves the exact low by exactly O", () => {
+  const exactLow = { t: T0 + 6 * H + 17 * 60000, height: 0.5, type: "low" }; // 06:17, not on the hourly grid
+  const plain = rows.slice();
+  plain.exactExtrema = [exactLow];
+  const low = fns.findTideExtrema(plain).filter((e) => e.type === "low")[0];
+  assert.equal(low.t, exactLow.t);
+  const ex = [
+    { t: T0, height: 2.0, type: "high" },
+    exactLow,
+    { t: T0 + 12 * H, height: 1.8, type: "high" },
+    { t: T0 + 18 * H + 9 * 60000, height: 0.2, type: "low" },
+    { t: T0 + 24 * H, height: 2.0, type: "high" },
+  ];
+  const out = fns.applyTroughWideningToRows(rows, { hlw: 40 }, THRESH, ex);
+  assert.equal(fns.findTideExtrema(out).filter((e) => e.type === "low")[0].t, exactLow.t + 40 * 60000);
 });
