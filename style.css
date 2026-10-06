@@ -4056,6 +4056,10 @@ body.live-card-open { overflow: hidden; }
 .trip-cond-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--grey-600, #666); }
 .trip-cond-value { font-size: 1.25rem; font-weight: 700; }
 .trip-rods { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+.trip-rod-wrap { position: relative; display: flex; }
+.trip-rod-wrap > .trip-rod { flex: 1; padding-bottom: 38px; }
+.trip-rod-gear { position: absolute; right: 6px; bottom: 6px; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 10px; background: rgba(255, 255, 255, 0.7); color: var(--grey-700, #444); cursor: pointer; }
+.trip-rod-gear svg { width: 22px; height: 22px; }
 .trip-rod { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px; min-height: 130px; padding: 12px; border: 3px solid var(--grey-300, #ccc); border-radius: 14px; background: var(--white, #fff); color: inherit; text-align: left; cursor: pointer; touch-action: manipulation; overflow: hidden; }
 .trip-rod.filled { background: rgba(22, 163, 74, 0.16); border-color: #16a34a; } /* the rods of the running action are green */
 .trip-rod.empty { border-style: dashed; align-items: center; justify-content: center; }

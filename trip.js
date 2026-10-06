@@ -168,9 +168,11 @@ function tripRenderRods(root, state, trip) {
   const cells = slots.map((id, i) => {
     const setup = id ? liveTripData.rodSetups.find((r) => r.id === id) : null;
     const cls = "trip-rod" + (setup ? " filled" : " empty") + (moving && moving.from === i ? " moving" : "");
-    if (!setup) return `<button type="button" class="${cls}" data-rod="${i}"${dis}><span class="trip-rod-empty">empty</span></button>`;
+    if (!setup) return `<div class="trip-rod-wrap"><button type="button" class="${cls}" data-rod="${i}"${dis}><span class="trip-rod-empty">empty</span></button></div>`;
     const c = tsRodCell(setup);
-    return `<button type="button" class="${cls}" data-rod="${i}"${dis}><span class="trip-rod-name">${escapeHtml(c.name)}</span><span class="trip-rod-bait">${escapeHtml(c.bait)}</span><span class="trip-rod-rig">${escapeHtml(c.rig)}</span></button>`;
+    // the gear is a sibling of the cell button (a button can't hold a button): bottom right, opens that rod setup's edit screen
+    return `<div class="trip-rod-wrap"><button type="button" class="${cls}" data-rod="${i}"${dis}><span class="trip-rod-name">${escapeHtml(c.name)}</span><span class="trip-rod-bait">${escapeHtml(c.bait)}</span><span class="trip-rod-rig">${escapeHtml(c.rig)}</span></button>` +
+      `<button type="button" class="trip-rod-gear" data-rod-edit="${escapeHtml(setup.id)}" aria-label="Edit ${escapeHtml(setup.name)}"${dis}>${TD_GEAR_SVG}</button></div>`;
   });
   const hint = moving ? (moving.from == null ? "Move: tap the rod to pick up." : "Tap a position to drop it there.") : "Tap a rod to log a catch on it; tap empty to fill it.";
   root.innerHTML = `
@@ -193,6 +195,7 @@ function tripRenderRods(root, state, trip) {
     <button type="button" class="trip-big trip-end-action" id="tripEndActionBtn"${dis}>${TRIP_STOP_ICON}<span>End action</span></button>
     <button type="button" class="trip-big trip-end" id="tripEndBtn"${dis}>${TRIP_STOP_ICON}<span>End trip</span></button>`;
   root.querySelectorAll("[data-rod]").forEach((btn) => btn.addEventListener("click", () => tripOnRod(Number(btn.dataset.rod), action, slots)));
+  root.querySelectorAll("[data-rod-edit]").forEach((btn) => btn.addEventListener("click", () => tripOpenDefaults({ tripId: state.tripId, actionId: action.id, rodId: btn.dataset.rodEdit })));
   document.getElementById("tripMoveBtn").addEventListener("click", () => { tripUi.move = tripUi.move ? null : { from: null }; tripRender(); });
   document.getElementById("tripCatchBtn").addEventListener("click", () => tripStartCatch());
   document.getElementById("tripEditActionBtn").addEventListener("click", () => tripOpenDefaults({ tripId: state.tripId, actionId: action.id }));

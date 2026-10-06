@@ -184,7 +184,10 @@ async function showTripDefaults({ onClose, start } = {}) {
   document.body.classList.add("live-card-open");
 
   // `start` ({tripId, actionId}) opens straight on that Action (the Live toolbar's gear); Back from it then closes the hub.
-  const direct = start && data.actions.some((a) => a.id === start.actionId) ? { name: "action", tripId: start.tripId, actionId: start.actionId } : null;
+  // With `rodId` too (the Trip tab's rod screen) it opens straight on that Rod Setup, and Back closes the hub.
+  const direct = start && data.actions.some((a) => a.id === start.actionId)
+    ? { name: start.rodId && data.rodSetups.some((r) => r.id === start.rodId) ? "rod" : "action", tripId: start.tripId, actionId: start.actionId, rodId: start.rodId }
+    : null;
   let view = direct || { name: "trips" }; // trips | trip {tripId} | action {tripId, actionId} | rod {tripId, actionId, rodId}
   let status = "";
   let actionCategory = null; // quick-edit only (see actionScreen): which category's options are open
@@ -393,7 +396,7 @@ async function showTripDefaults({ onClose, start } = {}) {
 
   function goBack() {
     status = "";
-    if (view.name === "action" && direct && view.actionId === direct.actionId) {
+    if (direct && view.name === direct.name && view.actionId === direct.actionId) {
       close();
       return;
     }
