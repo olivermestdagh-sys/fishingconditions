@@ -10,6 +10,7 @@ let tlEntries = []; // the selected trip's lines
 let tlRenaming = null; // runId whose Trip name is open for editing in the headers
 let tlEditing = null; // {id (null = a new line), form} while a line is open in the editor
 let tlLists = null; // pick-lists for the editor, loaded on first edit
+let tlDeleted = []; // trips / lines in the 30-day trash
 
 const TL_COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
 
@@ -131,6 +132,7 @@ Its catches stay on the map as marks. It is removed for good after 30 days.`)) r
           }
         }
         await tlLoadRuns();
+        tlLoadDeleted();
       } catch (err) {
         console.error("Could not delete the trip:", err);
         alert("Couldn't delete the trip: " + err.message);
@@ -471,6 +473,7 @@ async function tlDelete() {
   try {
     await tlSend("DELETE", `/api/triplog/${encodeURIComponent(tlEditing.id)}`);
     await tlReloadAfterChange();
+    tlLoadDeleted();
   } catch (err) {
     document.querySelector("[data-error]").textContent = `Couldn't delete: ${err.message}`;
   }
@@ -543,6 +546,47 @@ function tlWireDetail() {
   });
 }
 
+// --- The trash (deleted trips and lines, restorable for 30 days) --------------------------------------------------------
+
+async function tlLoadDeleted() {
+  try {
+    tlDeleted = await tlGet("deleted=1");
+  } catch (err) {
+    console.error("Could not load the deleted trips:", err);
+    tlDeleted = [];
+  }
+  tlRenderDeleted();
+}
+
+function tlRenderDeleted() {
+  const card = document.getElementById("tlDeletedCard");
+  const wrap = document.getElementById("tlDeleted");
+  card.style.display = tlDeleted.length ? "block" : "none";
+  if (!tlDeleted.length) return;
+  const day = (ms) => new Date(ms).toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  const rows = tlDeleted.map((d) => {
+    const whole = !d.keptLines;
+    const what = whole ? `${d.lines} line${d.lines === 1 ? "" : "s"}` : `${d.lines} deleted line${d.lines === 1 ? "" : "s"} (trip kept)`;
+    return `<tr><td>${tlEsc(d.tripName || "Trip")}</td><td>${tlEsc(tripLogDateLabel(d.startDateTime))}</td><td>${tlEsc(what)}</td><td>${tlEsc(day(d.deletedAt))}</td><td>${tlEsc(day(d.purgeAt))}</td><td class="act"><button type="button" class="btn-secondary tl-btn" data-restore="${tlEsc(d.runId)}">Restore</button></td></tr>`;
+  });
+  wrap.innerHTML = `<table class="tl-table tl-deleted"><thead><tr><th>Trip</th><th>Date</th><th>What</th><th>Deleted</th><th>Removed for good</th><th></th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  wrap.querySelectorAll("button[data-restore]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      try {
+        await tlSend("POST", "/api/triplog/restore", { runId: b.dataset.restore });
+        const runId = b.dataset.restore;
+        await Promise.all([tlLoadRuns(), tlLoadDeleted()]);
+        if (tlRuns.some((r) => r.runId === runId)) await tlSelectRun(runId);
+      } catch (err) {
+        console.error("Could not restore the trip:", err);
+        alert("Couldn't restore: " + err.message);
+        b.disabled = false;
+      }
+    })
+  );
+}
+
 // --- Page ------------------------------------------------------------------------------------------------------------
 
 /** #run=<id> or #mark=<id> from the address: the run to open (a mark is resolved to its run by the Worker, which also sends the lines). */
@@ -587,6 +631,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   tlWireDetail();
 
   await tlLoadRuns();
+  tlLoadDeleted(); // not awaited: the trash can fill in after the trips
   if (!(await tlOpenFromHash()) && tlVisibleRuns().length) await tlSelectRun(tlVisibleRuns()[0].runId);
 
   const refilter = async () => {

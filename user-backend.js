@@ -257,6 +257,9 @@ export default {
       if (url.pathname === "/api/triplog/run") {
         return handleTripLogRun(request, url, env);
       }
+      if (url.pathname === "/api/triplog/restore") {
+        return handleTripLogRestore(request, url, env);
+      }
       if (url.pathname === "/api/triplog/lines") {
         return handleTripLogLines(request, url, env);
       }
@@ -3993,6 +3996,18 @@ async function handleTripLogCollection(request, url, env) {
   }
 
   if (request.method === "GET") {
+    if (url.searchParams.get("deleted")) {
+      // the trash: trips (or lines of a trip) marked deleted and not yet purged, newest deletion first; keptLines = what is still live in that trip
+      const { results } = await env.DB.prepare(
+        `SELECT run_id, MAX(trip_name) AS trip_name, MIN(date_time) AS start_dt, COUNT(*) AS lines, MAX(deleted_at) AS deleted_at, MIN(deleted_at) AS first_deleted_at,
+                (SELECT COUNT(*) FROM trip_log t2 WHERE t2.user_id = trip_log.user_id AND t2.run_id = trip_log.run_id AND t2.deleted_at IS NULL) AS kept_lines
+         FROM trip_log WHERE user_id = ? AND deleted_at IS NOT NULL GROUP BY run_id ORDER BY MAX(deleted_at) DESC LIMIT 200`
+      ).bind(uid).all();
+      return jsonResponse(results.map((r) => ({
+        runId: r.run_id, tripName: r.trip_name, startDateTime: r.start_dt, lines: r.lines, keptLines: r.kept_lines, deletedAt: r.deleted_at,
+        purgeAt: r.first_deleted_at + TLOG_TRASH_DAYS * 86400000,
+      })), 200, env);
+    }
     if (url.searchParams.get("needsConditions")) {
       // rows whose weather/tide is still to look up, with a position (their own, else the nearest in the same run that has one)
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 10, 1), 25);
@@ -4152,6 +4167,25 @@ function tlogEditStatements(env, uid, id, parsed) {
     }
   }
   return stmts;
+}
+
+/**
+ * POST /api/triplog/restore {runId} — takes a trip (or the lines of it) out of the trash again, before the purge removes them. The run counts as hand-edited
+ * from then on, so the automatic backfills never rebuild over what was restored.
+ */
+async function handleTripLogRestore(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  if (request.method !== "POST") return jsonResponse({ error: "Method not allowed." }, 405, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+  const body = await readJsonBody(request);
+  if (!body || typeof body.runId !== "string" || !body.runId) return jsonResponse({ error: "runId is required." }, 400, env);
+  const exists = await env.DB.prepare("SELECT 1 AS ok FROM trip_log WHERE user_id = ? AND run_id = ? AND deleted_at IS NOT NULL LIMIT 1").bind(uid, body.runId).first();
+  if (!exists) return jsonResponse({ error: "Nothing to restore for that trip." }, 404, env);
+  const result = await env.DB.prepare("UPDATE trip_log SET deleted_at = NULL, edited_at = COALESCE(edited_at, ?) WHERE user_id = ? AND run_id = ? AND deleted_at IS NOT NULL").bind(Date.now(), uid, body.runId).run();
+  return jsonResponse({ ok: true, runId: body.runId, restored: result.meta ? result.meta.changes : undefined }, 200, env);
 }
 
 /** PATCH /api/triplog/<id> (edit; the weather/tide backfill uses it too) and DELETE /api/triplog/<id> (mark a line for deletion: it is hidden at once and removed with its rod rows after TLOG_TRASH_DAYS). */

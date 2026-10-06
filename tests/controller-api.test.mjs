@@ -1080,6 +1080,37 @@ async function runPurge(env, sqlite, id) {
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log_rods WHERE log_id = ?").get(id).n, 0, "with its rod rows");
 }
 
+test("the trash: deleted trips and lines are listed, restorable, and a restored trip is never rebuilt over", async () => {
+  const { sqlite, env } = await legacySeeded();
+  await site(env, "POST", "/api/triplog/backfill-legacy", {});
+  const live = sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log WHERE run_id = 'legacy:a1S'").get().n;
+  assert.deepEqual(await (await site(env, "GET", "/api/triplog?deleted=1")).json(), [], "nothing deleted yet");
+
+  // a single line of a trip
+  const line = sqlite.prepare("SELECT id FROM trip_log WHERE run_id = 'legacy:a1S' AND event_type = 'catch' LIMIT 1").get();
+  assert.equal((await site(env, "DELETE", `/api/triplog/${encodeURIComponent(line.id)}`)).status, 204);
+  let trash = await (await site(env, "GET", "/api/triplog?deleted=1")).json();
+  assert.equal(trash.length, 1);
+  assert.deepEqual([trash[0].runId, trash[0].lines, trash[0].keptLines], ["legacy:a1S", 1, live - 1], "a deleted line of a trip that is otherwise kept");
+  assert.ok(trash[0].purgeAt > Date.now() + 29 * 86400000 && trash[0].purgeAt < Date.now() + 31 * 86400000, "removed for good 30 days after deleting");
+  assert.equal((await (await site(env, "GET", "/api/triplog?deleted=1", undefined, "s-u2")).json()).length, 0, "only your own trash");
+
+  // the whole trip
+  assert.equal((await site(env, "DELETE", "/api/triplog/run?runId=legacy%3Aa1S")).status, 200);
+  trash = await (await site(env, "GET", "/api/triplog?deleted=1")).json();
+  assert.deepEqual([trash[0].lines, trash[0].keptLines], [live, 0], "the whole trip");
+
+  assert.equal((await site(env, "POST", "/api/triplog/restore", { runId: "nope" })).status, 404);
+  assert.equal((await site(env, "POST", "/api/triplog/restore", {})).status, 400);
+  assert.equal((await site(env, "POST", "/api/triplog/restore", { runId: "legacy:a1S" }, "s-u2")).status, 404, "not someone else's");
+  assert.equal((await site(env, "POST", "/api/triplog/restore", { runId: "legacy:a1S" })).status, 200);
+  assert.deepEqual(await (await site(env, "GET", "/api/triplog?deleted=1")).json(), []);
+  assert.equal((await (await site(env, "GET", "/api/triplog?runId=legacy%3Aa1S")).json()).entries.length, live, "all lines are back");
+  assert.ok((await (await site(env, "GET", "/api/triplog?list=1")).json()).some((r) => r.runId === "legacy:a1S"), "and the trip is in the list");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log WHERE run_id = 'legacy:a1S' AND edited_at IS NULL").get().n, 0, "marked edited so no backfill rebuilds it");
+  assert.equal((await site(env, "POST", "/api/triplog/restore", { runId: "legacy:a1S" })).status, 404, "nothing left to restore");
+});
+
 // --- Legacy sessions (made before trips existed) -> trip log -------------------------------------------------------------------------
 async function legacySeeded() {
   const base = await seeded();
