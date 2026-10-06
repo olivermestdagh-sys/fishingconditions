@@ -85,17 +85,53 @@ function tripMapPath(track, entries) {
   return { points: pick(entries), source: "log" };
 }
 
-const TRIP_MAP_PIN_TYPES = { trip_start: "S", trip_end: "E", action_start: "A", change: "C" };
+const TRIP_MAP_PIN_TYPES = { trip_start: "S", trip_end: "E", action_start: "A", change: "C", catch: "F" };
 
-/** The pins to draw for a trip's log lines: start, end, action starts and changes that carry a position. Catches are marks, not pins. */
+/** The pins to draw for a trip's log lines that carry a position: start, end, action starts, changes and catches (kind "F", drawn with the catch's own mark shape inside). A change keeps the line it changed from (`prev`: the last action start / change before it) so its hover can say what changed. */
 function tripMapPins(entries) {
   const pins = [];
+  let state = null;
   for (const e of entries || []) {
     const kind = TRIP_MAP_PIN_TYPES[e.type];
-    if (!kind || typeof e.lat !== "number" || typeof e.lng !== "number") continue;
-    pins.push({ kind, lat: e.lat, lng: e.lng, ts: e.ts, dateTime: e.dateTime, type: e.type, changeField: e.changeField || null, actionName: e.actionName || null });
+    if (kind && typeof e.lat === "number" && typeof e.lng === "number") pins.push({ kind, lat: e.lat, lng: e.lng, ts: e.ts, entry: e, prev: e.type === "change" ? state : null });
+    if (e.type === "action_start" || e.type === "change") state = e;
   }
   return pins;
+}
+
+/** What a Change line changed, one text line each, by comparing it with `prev` (the line whose state it replaced): "Water: Clear → Murky", "Depth: 2 → 3 m", "Rod setups: added X · removed Y", "Action: A → B". */
+function tripMapChangeLines(e, prev) {
+  const lines = [];
+  const p = prev || {};
+  const show = (v) => (v == null || v === "" ? "none" : v);
+  if (prev && (e.actionName || null) !== (p.actionName || null)) lines.push(`Action: ${show(p.actionName)} → ${show(e.actionName)}`);
+  if (prev && (e.waterCondition || null) !== (p.waterCondition || null)) lines.push(`Water: ${show(p.waterCondition)} → ${show(e.waterCondition)}`);
+  if (prev && (e.waterDepth ?? null) !== (p.waterDepth ?? null)) {
+    lines.push(`Depth: ${p.waterDepth != null ? p.waterDepth : "none"} → ${e.waterDepth != null ? `${e.waterDepth} m` : "none"}`);
+  }
+  const gear = (x) => (x.rods || []).map(tripLogGearLine);
+  const now = gear(e);
+  const was = gear(p);
+  const added = now.filter((g) => !was.includes(g));
+  const removed = was.filter((g) => !now.includes(g));
+  if (prev && (added.length || removed.length)) lines.push(`Rod setups: ${[added.length ? `added ${added.join("; ")}` : "", removed.length ? `removed ${removed.join("; ")}` : ""].filter(Boolean).join(" · ")}`);
+  if (!lines.length) {
+    // nothing earlier to compare with: say what it is now
+    const now2 = e.changeField === "water" ? e.waterCondition : e.changeField === "depth" ? (e.waterDepth != null ? `${e.waterDepth} m` : "") : e.changeField === "water+depth" ? tripLogWaterText(e) : e.changeField === "rod_setups" ? gear(e).join("; ") : e.changeField === "action" ? e.actionName : "";
+    lines.push(`${TRIP_LOG_CHANGE_LABELS[e.changeField] || e.changeField || "Settings"} changed${now2 ? ` to ${now2}` : ""}`);
+  }
+  return lines;
+}
+
+/** Inline SVG (16x16 box) of a mark shape name (circle, diamond, square, triangle, cross) — the catch pin's inner mark. */
+function tripMapShapeSvg(shape, fill) {
+  const body = {
+    diamond: `<polygon points="8,1.5 14.5,8 8,14.5 1.5,8"/>`,
+    square: `<rect x="2.5" y="2.5" width="11" height="11"/>`,
+    triangle: `<polygon points="8,2 14.5,13.5 1.5,13.5"/>`,
+    cross: `<path d="M6.3 1.5h3.4v4.8h4.8v3.4H9.7v4.8H6.3V9.7H1.5V6.3h4.8z"/>`,
+  }[shape] || `<circle cx="8" cy="8" r="5.5"/>`;
+  return `<svg viewBox="0 0 16 16" width="14" height="14" fill="${fill}" stroke="#fff" stroke-width="1.2" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 }
 
 /** Groups items [{x, y}] (screen pixels) that sit within eps px of a group's first item. Returns arrays of indexes; every item is in exactly one group. */
@@ -219,24 +255,45 @@ async function tripMapEnsureData(runId) {
   }
 }
 
-function tripMapPinIcon(kind, colour, count) {
-  const label = count > 1 ? "" : kind;
+/** The mark a catch pin shows inside its circle: the linked Catch mark when it is loaded, else a Catch of that species, styled and shaped as the Map would. */
+function tripMapCatchMark(entry) {
+  const st = typeof currentMarkLayerState === "object" ? currentMarkLayerState : null;
+  if (!st || !st.marksById) return { shape: "cross", fill: "#ffffff" };
+  const mark = (entry.markId && st.marksById.get(entry.markId)) || { type: "Catch", species: entry.species || "" };
+  return { shape: shapeNameForMark(mark, st.markLists), fill: markStyleFor(mark, st).fillColor };
+}
+
+function tripMapPinIcon(pin, colour) {
+  const size = pin.kind === "F" ? TRIP_MAP_PIN_PX + 4 : TRIP_MAP_PIN_PX;
+  let inner = pin.kind;
+  if (pin.kind === "F") {
+    const m = tripMapCatchMark(pin.entry);
+    inner = tripMapShapeSvg(m.shape, m.fill);
+  }
   return L.divIcon({
     className: "trip-pin-wrap",
-    html: `<span class="trip-pin trip-pin-${kind}" style="--trip-c:${colour}">${label}</span>`,
-    iconSize: [TRIP_MAP_PIN_PX, TRIP_MAP_PIN_PX],
-    iconAnchor: [TRIP_MAP_PIN_PX / 2, TRIP_MAP_PIN_PX / 2],
+    html: `<span class="trip-pin trip-pin-${pin.kind}" style="--trip-c:${colour};width:${size}px;height:${size}px">${inner}</span>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
   });
 }
 
-function tripMapPinPopup(run, pin) {
-  const label = tripLogEventLabel({ type: pin.type, changeField: pin.changeField });
-  const when = String(pin.dateTime || "").slice(11, 16);
-  return `<strong>${escapeHtml(run.tripName || "Trip")}</strong><br>${escapeHtml(tripLogDateLabel(run.startDateTime))} ${escapeHtml(when)} — ${escapeHtml(label)}` +
-    `${pin.actionName ? `<br>${escapeHtml(pin.actionName)}` : ""}<br><a href="triplogs.html#run=${encodeURIComponent(run.runId)}">Open trip log</a>`;
+/** Hover text: the event, its time and action; a Change says what changed, a Catch what was caught. */
+function tripMapPinTooltip(run, pin) {
+  const e = pin.entry;
+  const when = String(e.dateTime || "").slice(11, 16);
+  const head = `<strong>${escapeHtml(tripLogEventLabel(e))}</strong> ${escapeHtml(when)}`;
+  const extra = e.type === "change" ? tripMapChangeLines(e, pin.prev) : e.type === "catch" ? [tripLogCatchText(e)] : [];
+  const lines = [e.actionName ? escapeHtml(e.actionName) : "", ...extra.filter(Boolean).map(escapeHtml)].filter(Boolean);
+  return head + lines.map((l) => `<br>${l}`).join("");
 }
 
-/** Clears and redraws every ticked trip (also on zoom: the pin fan-out is in screen pixels). */
+function tripMapPinPopup(run, pin) {
+  return `<strong>${escapeHtml(run.tripName || "Trip")}</strong><br>${escapeHtml(tripLogDateLabel(run.startDateTime))}<br>${tripMapPinTooltip(run, pin)}` +
+    `<br><a href="triplogs.html#run=${encodeURIComponent(run.runId)}">Open trip log</a>`;
+}
+
+/** Clears and redraws every ticked trip (also on zoom: the pin fan-out is in screen pixels, and when the marks finish loading: a catch pin wears its mark). */
 function tripMapRedraw() {
   const s = tripMapState;
   if (!s.map || !s.layer) return;
@@ -263,7 +320,7 @@ function tripMapRedraw() {
       const pin = pins[idx];
       const at = group.length > 1 ? s.map.layerPointToLatLng(L.point(pts[group[0]].x + offsets[k][0], pts[group[0]].y + offsets[k][1])) : L.latLng(pin.lat, pin.lng);
       if (group.length > 1) L.polyline([[pin.lat, pin.lng], at], { color: "#6b7280", weight: 1, opacity: 0.8, interactive: false }).addTo(s.layer);
-      L.marker(at, { icon: tripMapPinIcon(pin.kind, pin.colour, 1), keyboard: false, zIndexOffset: 500 }).bindPopup(tripMapPinPopup(pin.run, pin)).addTo(s.layer);
+      L.marker(at, { icon: tripMapPinIcon(pin, pin.colour), keyboard: false, zIndexOffset: 500 }).bindTooltip(tripMapPinTooltip(pin.run, pin), { direction: "top", offset: [0, -10] }).bindPopup(tripMapPinPopup(pin.run, pin)).addTo(s.layer);
     });
   }
 }

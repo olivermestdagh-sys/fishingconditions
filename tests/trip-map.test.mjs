@@ -13,9 +13,9 @@ const h = new Function(
   [
     fn("distanceMetersBetween"),
     'const TRIP_MAP_MAX_LOCATION_M = 5000; const TRIP_MAP_OTHER = "Other"; const TRIP_MAP_COLOURS = ["a", "b", "c"];',
-    'const TRIP_MAP_PIN_TYPES = { trip_start: "S", trip_end: "E", action_start: "A", change: "C" };',
-    ...["tripMapNearestLocationName", "tripMapGroupRuns", "tripMapSimplify", "tripMapPath", "tripMapPins", "tripMapGroupByDistance", "tripMapRingOffsets", "tripMapColour"].map(fn),
-    "return { tripMapNearestLocationName, tripMapGroupRuns, tripMapSimplify, tripMapPath, tripMapPins, tripMapGroupByDistance, tripMapRingOffsets, tripMapColour };",
+    'const TRIP_MAP_PIN_TYPES = { trip_start: "S", trip_end: "E", action_start: "A", change: "C", catch: "F" }; const TRIP_LOG_CHANGE_LABELS = { rod_setups: "rod setups", water: "water", depth: "depth", action: "action", "water+depth": "water + depth" };',
+    ...["tripMapNearestLocationName", "tripMapGroupRuns", "tripMapSimplify", "tripMapPath", "tripMapPins", "tripMapChangeLines", "tripMapShapeSvg", "tripLogGearLine", "tripLogWaterText", "tripMapGroupByDistance", "tripMapRingOffsets", "tripMapColour"].map(fn),
+    "return { tripMapNearestLocationName, tripMapGroupRuns, tripMapSimplify, tripMapPath, tripMapPins, tripMapChangeLines, tripMapShapeSvg, tripMapGroupByDistance, tripMapRingOffsets, tripMapColour };",
   ].join("\n")
 )();
 
@@ -56,7 +56,7 @@ test("path prefers the GPS track, falling back to log positions", () => {
   assert.equal(fb.points.length, 2);
 });
 
-test("pins: start/end/action/change with a position; catches and unplaced lines are skipped", () => {
+test("pins: start/end/action/change/catch with a position; unplaced lines are skipped", () => {
   const entries = [
     { type: "trip_start", lat: 1, lng: 2, ts: 1 },
     { type: "catch", lat: 1, lng: 2, ts: 2 },
@@ -64,7 +64,7 @@ test("pins: start/end/action/change with a position; catches and unplaced lines 
     { type: "change", lat: 1, lng: 2, ts: 4, changeField: "water" },
     { type: "trip_end", lat: 1, lng: 2, ts: 5 },
   ];
-  assert.deepEqual(h.tripMapPins(entries).map((p) => p.kind), ["S", "C", "E"]);
+  assert.deepEqual(h.tripMapPins(entries).map((p) => p.kind), ["S", "F", "C", "E"]);
 });
 
 test("coincident pixels share a group, distant ones don't", () => {
@@ -81,4 +81,28 @@ test("ring offsets: one pin stays put, several are spread and clear of each othe
 
 test("a run keeps its colour", () => {
   assert.equal(h.tripMapColour("run-1"), h.tripMapColour("run-1"));
+});
+
+test("a change keeps the line it changed from", () => {
+  const a = { type: "action_start", lat: 1, lng: 2, ts: 1 };
+  const c = { type: "change", lat: 1, lng: 2, ts: 2 };
+  const pins = h.tripMapPins([a, c]);
+  assert.equal(pins[0].prev, null);
+  assert.equal(pins[1].prev, a);
+});
+
+test("change text says what changed", () => {
+  const prev = { actionName: "Bream", waterCondition: "Clear", waterDepth: 2, rods: [{ name: "Rod 1", bait: ["Squid"] }] };
+  const now = { type: "change", changeField: "water+depth", actionName: "Bream", waterCondition: "Murky", waterDepth: 3, rods: [{ name: "Rod 1", bait: ["Squid"] }] };
+  assert.deepEqual(h.tripMapChangeLines(now, prev), ["Water: Clear → Murky", "Depth: 2 → 3 m"]);
+  const gear = { ...prev, changeField: "rod_setups", rods: [{ name: "Rod 1", bait: ["Prawn"] }] };
+  assert.deepEqual(h.tripMapChangeLines(gear, prev), ["Rod setups: added Rod 1 — Prawn · removed Rod 1 — Squid"]);
+  assert.deepEqual(h.tripMapChangeLines({ ...prev, changeField: "action", actionName: "Flathead" }, prev), ["Action: Bream → Flathead"]);
+  assert.deepEqual(h.tripMapChangeLines({ changeField: "water", waterCondition: "Murky", rods: [] }, null), ["water changed to Murky"]);
+});
+
+test("shape svg: known shapes and a circle fallback", () => {
+  assert.match(h.tripMapShapeSvg("diamond", "#f00"), /<polygon/);
+  assert.match(h.tripMapShapeSvg("cross", "#f00"), /<path/);
+  assert.match(h.tripMapShapeSvg("nope", "#f00"), /<circle/);
 });

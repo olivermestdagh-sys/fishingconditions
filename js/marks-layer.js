@@ -648,6 +648,7 @@ async function loadAndRenderMarks(map, state) {
 
   initMarkControls(map, state);
   initMarkSelectionBoxDrag(map, state);
+  if (typeof globalThis.tripMapRedraw === "function") globalThis.tripMapRedraw(); // trip catch pins wear their mark's shape/colour, known only now (js/trip-map.js)
 }
 
 /**

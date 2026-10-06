@@ -4027,5 +4027,6 @@ body.live-card-open { overflow: hidden; }
 .trip-pin-wrap { background: none; border: 0; }
 .trip-pin { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--trip-c, #2563eb); color: #fff; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); font: 700 10px/1 system-ui, sans-serif; box-sizing: border-box; }
 .trip-pin-C { transform: scale(0.75); opacity: 0.9; }
+.trip-pin-F { border-width: 2px; }
 .trip-pin-E { border-radius: 4px; }
 .map-toolbar #tripMapBtn[aria-pressed="true"] { background: var(--navy, #0b2a4a); color: #fff; }
