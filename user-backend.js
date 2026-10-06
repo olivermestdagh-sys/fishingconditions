@@ -253,6 +253,9 @@ export default {
       if (url.pathname === "/api/triplog/lines") {
         return handleTripLogLines(request, url, env);
       }
+      if (url.pathname === "/api/triplog/backfill-legacy") {
+        return handleTripLogBackfillLegacy(request, url, env);
+      }
       if (url.pathname === "/api/triplog/backfill") {
         return handleTripLogBackfill(request, url, env);
       }
@@ -4463,6 +4466,175 @@ async function handleTripLogBackfill(request, url, env) {
     if (total.runs >= TLOG_MAX_RUNS_PER_REQUEST) break;
   }
   return jsonResponse(total, 200, env);
+}
+
+// --- Trip log backfill of LEGACY sessions: Session Start / End + Catch marks made before trips existed -------------------------------
+// Those marks have no controller events, no run id and no Rod Setup ids, so tlogBackfillDevice can't see them. A "run" here is a chain of
+// sessions (a Start/End pair sharing session_group_id; an orphan half is a session of its own) whose gaps are <= 8 h (CATCH_RUN_GAP_MS,
+// js/catch-limits.js). A Catch belongs to the first session whose window holds it (start <= catch <= end — ribbonBuildSessions,
+// js/session-ribbon.js; an orphan Start reaches to its last Catch within 12 h, an orphan End back to its first); a Catch in no window is left alone.
+// Rows: a synthesized trip_start / trip_end at the first / last session mark (no mark, so the list flags them "approx. times"), action_start /
+// action_end from the Start / End marks, a catch (+ a water/depth `change` row) per Catch. Gear is the marks' text (as tlogRodRowsFromMark).
+// Source 'Backfill', ids `bf:legacy:<markId>:<kind>`, run id `legacy:<first mark id>`. A mark that already has a trip_log row (mark_id) is
+// never touched, and neither is the rest of its session, so a run is written once and a hand-edited or live-logged one is never rebuilt.
+
+const TLOG_LEGACY_GAP_MS = 8 * 3600000;
+const TLOG_LEGACY_REACH_MS = 12 * 3600000;
+const TLOG_LEGACY_STATEMENT_BUDGET = 40; // stop adding runs to one request past this many statements (free plan: ~50 queries per request)
+
+/** Pure: marks (rows of the marks table: Session Start / End / Catch) -> {runs: [{key, sessions: [{start, end, startT, endT, catches}]}], unassigned: number}. */
+function tlogLegacyRuns(marks) {
+  const sessions = [];
+  const byGroup = new Map();
+  const catches = [];
+  for (const m of marks) {
+    const t = tlogNaiveToTs(m.date_time);
+    if (!t) continue;
+    const x = { m, t };
+    if (m.type === "Catch") {
+      catches.push(x);
+      continue;
+    }
+    const role = m.type === "Session Start" ? "start" : m.type === "Session End" ? "end" : null;
+    if (!role) continue;
+    let s = m.session_group_id ? byGroup.get(m.session_group_id) : null;
+    if (!s || s[role]) {
+      s = {};
+      sessions.push(s);
+      if (m.session_group_id && !byGroup.has(m.session_group_id)) byGroup.set(m.session_group_id, s);
+    }
+    s[role] = x;
+  }
+  catches.sort((a, b) => a.t.tsMs - b.t.tsMs);
+  for (const s of sessions) {
+    s.startT = (s.start || s.end).t.tsMs;
+    s.endT = Math.max(s.startT, (s.end || s.start).t.tsMs);
+    s.catches = [];
+    if (!s.end) {
+      const within = catches.filter((c) => c.t.tsMs > s.startT && c.t.tsMs <= s.startT + TLOG_LEGACY_REACH_MS);
+      if (within.length) s.endT = within[within.length - 1].t.tsMs;
+    } else if (!s.start) {
+      const within = catches.filter((c) => c.t.tsMs < s.endT && c.t.tsMs >= s.endT - TLOG_LEGACY_REACH_MS);
+      if (within.length) s.startT = within[0].t.tsMs;
+    }
+  }
+  sessions.sort((a, b) => a.startT - b.startT || a.endT - b.endT);
+  let unassigned = 0;
+  for (const c of catches) {
+    const s = sessions.find((x) => x.startT <= c.t.tsMs && c.t.tsMs <= x.endT);
+    if (s) s.catches.push(c);
+    else unassigned++;
+  }
+  const runs = [];
+  let cur = null;
+  let curEnd = 0;
+  for (const s of sessions) {
+    if (!cur || s.startT - curEnd > TLOG_LEGACY_GAP_MS) {
+      cur = { key: (s.start || s.end).m.id, sessions: [] };
+      runs.push(cur);
+      curEnd = 0;
+    }
+    cur.sessions.push(s);
+    curEnd = Math.max(curEnd, s.endT);
+  }
+  return { runs, unassigned };
+}
+
+const TLOG_LEGACY_RANK = { trip_start: 0, action_start: 1, cond: 2, catch: 3, action_end: 4, trip_end: 5 };
+
+/** Pure: one legacy run -> [{kind, sourceUuid, e, rods}] for tlogStatements, in time order. ctx: {trips, actions}. */
+function tlogBuildLegacyRun(run, ctx) {
+  const out = [];
+  const runId = `legacy:${run.key}`;
+  const firstMark = (run.sessions[0].start || run.sessions[0].end).m;
+  const tripName = firstMark.trip_name || null;
+  const trip = ctx.trips.find((t) => t.name === tripName) || null;
+  const tripId = trip ? trip.id : null;
+  const actionFor = (name) => (trip && name ? ctx.actions.find((a) => a.tripId === trip.id && a.name === name) || null : null);
+  const push = (kind, id, x, e, rods) =>
+    out.push({ kind, sourceUuid: `bf:legacy:${id}:${kind}`, e: { ...e, runId, tripId, tripName, tsMs: x.t.tsMs, tz: x.t.tz, dateTime: x.m.date_time, lat: x.m.lat, lng: x.m.lng }, rods });
+  const water = (m) => m.water_condition || null;
+  const depth = (m) => m.water_depth ?? null;
+
+  // the first / last mark of the run (an orphan session's Catches count: its other half never existed)
+  const marksOf = (s) => [s.start, s.end, ...s.catches].filter(Boolean);
+  const head = marksOf(run.sessions[0]).reduce((a, b) => (b.t.tsMs < a.t.tsMs ? b : a));
+  push("trip_start", run.key, head, { type: "trip_start", water: water(head.m), depth: depth(head.m) }, []);
+  for (const s of run.sessions) {
+    let state = null;
+    let last = { water: null, depth: null };
+    const stateFields = () => ({ actionId: state.actionId, actionName: state.actionName, sessionGroupId: state.sessionGroupId, berley: state.berley, fishingMethod: state.fishingMethod, targets: state.targets });
+    if (s.start) {
+      const m = s.start.m;
+      const action = actionFor(m.action_name);
+      state = {
+        actionId: action ? action.id : null, actionName: m.action_name || null, sessionGroupId: m.session_group_id || null, berley: m.berley || null,
+        fishingMethod: tlogSplit(m.fishing_method), targets: tlogSplit(m.species), rods: tlogRodRowsFromMark(m, [], action),
+      };
+      last = { water: water(m), depth: depth(m) };
+      push("action_start", m.id, s.start, { type: "action_start", ...stateFields(), water: last.water, depth: last.depth, markId: m.id }, state.rods);
+    }
+    for (const c of s.catches) {
+      const m = c.m;
+      const w = water(m);
+      const d = depth(m);
+      const rods = tlogRodRowsFromMark(m, [], null);
+      const common = { actionId: state ? state.actionId : null, actionName: m.action_name || (state ? state.actionName : null), sessionGroupId: state ? state.sessionGroupId : null };
+      const waterChanged = !!w && w !== last.water;
+      const depthChanged = d != null && d !== last.depth;
+      if (state && (waterChanged || depthChanged)) {
+        push("cond", m.id, c, { type: "change", changeField: waterChanged && depthChanged ? "water+depth" : waterChanged ? "water" : "depth", ...stateFields(), water: w, depth: d }, state.rods);
+      }
+      push("catch", m.id, c, { ...common, type: "catch", water: w, depth: d, markId: m.id, species: m.species, size: m.size ?? null, released: !!m.released, rodSetupId: null }, rods);
+      last = { water: w || last.water, depth: d ?? last.depth };
+    }
+    if (s.end) {
+      const m = s.end.m;
+      push("action_end", m.id, s.end, {
+        type: "action_end", actionId: state ? state.actionId : null, actionName: state ? state.actionName : m.action_name || null,
+        sessionGroupId: m.session_group_id || null, water: water(m), depth: depth(m), markId: m.id,
+      }, []);
+    }
+  }
+  const tail = run.sessions.reduce((best, s) => (s.endT >= best.endT ? s : best), run.sessions[0]);
+  const tailX = marksOf(tail).reduce((a, b) => (b.t.tsMs >= a.t.tsMs ? b : a));
+  push("trip_end", run.key, tailX, { type: "trip_end", water: water(tailX.m), depth: depth(tailX.m) }, []);
+  return out
+    .map((o, i) => ({ o, i }))
+    .sort((a, b) => a.o.e.tsMs - b.o.e.tsMs || TLOG_LEGACY_RANK[a.o.kind] - TLOG_LEGACY_RANK[b.o.kind] || a.i - b.i)
+    .map((x) => x.o);
+}
+
+/** POST /api/triplog/backfill-legacy (signed in): logs the next few legacy runs; {runs, rows, unassignedCatches, remaining} — call again while remaining > 0. */
+async function handleTripLogBackfillLegacy(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  if (request.method !== "POST") return jsonResponse({ error: "Method not allowed." }, 405, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+  const [markRows, linked, data] = await Promise.all([
+    env.DB.prepare("SELECT * FROM marks WHERE user_id = ? AND type IN ('Session Start', 'Session End', 'Catch') AND COALESCE(source, '') != 'Controller' ORDER BY date_time ASC LIMIT 5000").bind(uid).all(),
+    env.DB.prepare("SELECT DISTINCT mark_id FROM trip_log WHERE user_id = ? AND mark_id IS NOT NULL").bind(uid).all(),
+    ctlLoadTripData(env, uid),
+  ]);
+  const linkedIds = new Set(linked.results.map((r) => r.mark_id));
+  const doneGroups = new Set(markRows.results.filter((m) => linkedIds.has(m.id) && m.session_group_id).map((m) => m.session_group_id));
+  const fresh = markRows.results.filter((m) => !linkedIds.has(m.id) && !(m.session_group_id && doneGroups.has(m.session_group_id)));
+  const { runs, unassigned } = tlogLegacyRuns(fresh);
+  const stmts = [];
+  let done = 0;
+  let rows = 0;
+  for (const run of runs) {
+    if (done > 0 && stmts.length >= TLOG_LEGACY_STATEMENT_BUDGET) break;
+    for (const en of tlogBuildLegacyRun(run, { trips: data.trips, actions: data.actions })) {
+      stmts.push(...tlogStatements(env, uid, { ...en.e, source: "Backfill", sourceUuid: en.sourceUuid }, en.rods));
+      rows++;
+    }
+    done++;
+  }
+  for (let i = 0; i < stmts.length; i += 40) await env.DB.batch(stmts.slice(i, i + 40));
+  return jsonResponse({ runs: done, rows, unassignedCatches: unassigned, remaining: runs.length - done }, 200, env);
 }
 
 /**

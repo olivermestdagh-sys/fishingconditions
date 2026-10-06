@@ -1087,3 +1087,82 @@ test("trip log lines: add one by hand (POST /api/triplog/lines), delete one; a h
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log WHERE id = ?").get(id).n, 0);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log_rods WHERE log_id = ?").get(id).n, 0, "its rod rows go with it");
 });
+
+// --- Legacy sessions (made before trips existed) -> trip log -------------------------------------------------------------------------
+async function legacySeeded() {
+  const base = await seeded();
+  const { sqlite } = base;
+  const mark = (id, type, local, f = {}) =>
+    sqlite
+      .prepare(
+        "INSERT INTO marks (id, user_id, lat, lng, name, type, date_time, source, species, bait, rig, rod, berley, size, released, fishing_method, water_condition, water_depth, session_group_id, created_at) VALUES (?, 'u1', ?, 145.2, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)"
+      )
+      .run(id, f.lat ?? -38.1, id, type, local, f.source ?? "Manual", f.species ?? null, f.bait ?? null, f.rig ?? null, f.rod ?? null, f.berley ?? null, f.size ?? null, f.released ?? null, f.method ?? null, f.water ?? null, f.depth ?? null, f.group ?? null);
+  // trip 1 (2026-03-07): two sessions an hour apart (one trip), a catch in each, a catch after the day's last End (left alone)
+  mark("a1S", "Session Start", "2026-03-07 07:00:00", { group: "ga", species: "Bream", bait: "Prawn", rod: "L Wilson", rig: "Paternoster", water: "Clear", depth: 3 });
+  mark("a1C", "Catch", "2026-03-07 07:40:00", { species: "Bream", size: 30, bait: "Prawn", rod: "L Wilson", water: "Murky", depth: 3 });
+  mark("a1E", "Session End", "2026-03-07 08:30:00", { group: "ga", water: "Murky", depth: 3 });
+  mark("a2S", "Session Start", "2026-03-07 09:30:00", { group: "gb", species: "Flathead", bait: "Squid", rod: "L Wilson", water: "Murky", depth: 3, source: "trail-import" });
+  mark("a2C", "Catch", "2026-03-07 10:00:00", { species: "Flathead", size: 41, released: 1, water: "Murky", depth: 3 });
+  mark("a2E", "Session End", "2026-03-07 11:00:00", { group: "gb", water: "Murky", depth: 3, source: "trail-import" });
+  mark("zC", "Catch", "2026-03-07 20:00:00", { species: "Bream", size: 25 });
+  // trip 2 (next day): an orphan Start whose catch falls within 12 h of it
+  mark("b1S", "Session Start", "2026-03-08 07:00:00", { group: "gc", species: "Bream" });
+  mark("b1C", "Catch", "2026-03-08 09:00:00", { species: "Bream", size: 28 });
+  // a Controller-made session is not legacy
+  mark("cS", "Session Start", "2026-03-09 07:00:00", { group: "gd", source: "Controller" });
+  return base;
+}
+const legacyRows = (sqlite, runId) => sqlite.prepare("SELECT * FROM trip_log WHERE run_id = ? ORDER BY ts, rowid").all(runId);
+
+test("legacy backfill: sessions chain into trips, catches join the session holding them, rows are flagged, repeatable", async () => {
+  const { sqlite, env } = await legacySeeded();
+  const res = await site(env, "POST", "/api/triplog/backfill-legacy", {});
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual({ runs: body.runs, remaining: body.remaining, unassignedCatches: body.unassignedCatches }, { runs: 2, remaining: 0, unassignedCatches: 1 });
+
+  const t1 = legacyRows(sqlite, "legacy:a1S");
+  assert.deepEqual(t1.map((r) => r.event_type + (r.change_field ? ":" + r.change_field : "")), [
+    "trip_start", "action_start", "change:water", "catch", "action_end", "action_start", "catch", "action_end", "trip_end",
+  ]);
+  assert.ok(t1.every((r) => r.source === "Backfill" && r.source_uuid.startsWith("bf:legacy:")));
+  assert.equal(t1[0].mark_id, null); // synthesized: flagged approximate
+  assert.equal(t1[1].mark_id, "a1S");
+  assert.equal(t1[1].date_time, "2026-03-07 07:00:00");
+  assert.equal(t1[1].tz_offset_min, 660); // Melbourne daylight saving in March
+  assert.equal(t1[3].mark_id, "a1C");
+  assert.equal(t1[3].species, "Bream");
+  assert.equal(t1[6].released, 1);
+  assert.equal(t1[8].date_time, "2026-03-07 11:00:00");
+  const rods = sqlite.prepare("SELECT rod, rig, bait FROM trip_log_rods WHERE log_id = ?").all(t1[1].id);
+  assert.deepEqual(rods.map((r) => [r.rod, r.rig, JSON.parse(r.bait)]), [["L Wilson", "Paternoster", ["Prawn"]]]);
+
+  const t2 = legacyRows(sqlite, "legacy:b1S");
+  assert.deepEqual(t2.map((r) => r.event_type), ["trip_start", "action_start", "catch", "trip_end"]);
+  assert.equal(t2[3].date_time, "2026-03-08 09:00:00"); // an orphan Start has no End mark: the trip ends at its last Catch
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log WHERE run_id LIKE 'legacy:c%'").get().n, 0); // Controller session untouched
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log WHERE mark_id = 'zC'").get().n, 0);
+
+  const again = await (await site(env, "POST", "/api/triplog/backfill-legacy", {})).json();
+  assert.equal(again.runs, 0);
+  assert.equal(again.rows, 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log").get().n, t1.length + t2.length);
+});
+
+test("legacy backfill: marks that already have a log row (and their session) are left alone", async () => {
+  const { sqlite, env } = await legacySeeded();
+  sqlite
+    .prepare("INSERT INTO trip_log (id, user_id, run_id, event_type, ts, date_time, mark_id, source, source_uuid, created_at) VALUES ('tl_x', 'u1', 'live-1', 'action_start', 1, '2026-03-07 07:00:00', 'a1S', 'Site', 'x1', 1)")
+    .run();
+  const body = await (await site(env, "POST", "/api/triplog/backfill-legacy", {})).json();
+  assert.equal(body.runs, 2); // session ga is skipped whole (its Start has a row); gb and gc still become trips
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log WHERE mark_id IN ('a1S', 'a1E', 'a1C')").get().n, 1);
+});
+
+test("legacy backfill: signed-out is refused and another user's marks are not touched", async () => {
+  const { sqlite, env } = await legacySeeded();
+  const res = await api(env, null, "POST", "/api/triplog/backfill-legacy", {}, { Origin: SITE });
+  assert.equal(res.status, 401);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log").get().n, 0);
+});

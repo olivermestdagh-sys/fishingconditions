@@ -218,6 +218,7 @@ async function init() {
   document.getElementById("btnRestoreMissingValues").addEventListener("click", onOpenRestorePanel);
   document.getElementById("btnAddController").addEventListener("click", onCreateControllerToken);
   document.getElementById("btnBackfillTripLog").addEventListener("click", onBackfillTripLog);
+  document.getElementById("btnBackfillLegacyTripLog").addEventListener("click", onBackfillLegacyTripLog);
   document.getElementById("btnAddTier").addEventListener("click", onAddTier);
   document.getElementById("btnSendMessage").addEventListener("click", onSendMessage);
   document.getElementById("contactMessageInput").addEventListener("input", (e) => {
@@ -416,6 +417,33 @@ async function onBackfillTripLog() {
     setControllerStatus(total.runs ? `Logged ${total.rows} entries from ${total.runs} past trip${total.runs === 1 ? "" : "s"}.` : "Nothing to add — every past trip is already in the trip log.", false);
   } catch (err) {
     console.error("Trip log backfill failed:", err);
+    setControllerStatus("Couldn't build the trip log: " + err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/** Settings > Fishing Controller > "Build trip log from old sessions": Session Start/End + Catch marks made before trips existed become trip-log entries (POST /api/triplog/backfill-legacy), a few trips per request. */
+async function onBackfillLegacyTripLog() {
+  const btn = document.getElementById("btnBackfillLegacyTripLog");
+  btn.disabled = true;
+  setControllerStatus("Building the trip log from old sessions…", false);
+  const total = { runs: 0, rows: 0, unassignedCatches: 0 };
+  try {
+    for (let round = 0; round < 200; round++) {
+      const res = await fetch(`${USER_BACKEND_URL}/api/triplog/backfill-legacy`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `status ${res.status}`);
+      total.runs += body.runs;
+      total.rows += body.rows;
+      total.unassignedCatches = body.unassignedCatches;
+      if (!body.remaining) break;
+      setControllerStatus(`Building the trip log from old sessions… ${total.runs} trips so far`, false);
+    }
+    const left = total.unassignedCatches ? ` ${total.unassignedCatches} catch${total.unassignedCatches === 1 ? "" : "es"} outside any session were left alone.` : "";
+    setControllerStatus((total.runs ? `Logged ${total.rows} entries from ${total.runs} old trip${total.runs === 1 ? "" : "s"}.` : "Nothing to add — every old session is already in the trip log.") + left, false);
+  } catch (err) {
+    console.error("Legacy trip log backfill failed:", err);
     setControllerStatus("Couldn't build the trip log: " + err.message, true);
   } finally {
     btn.disabled = false;
