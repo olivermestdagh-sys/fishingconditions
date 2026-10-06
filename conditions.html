@@ -140,6 +140,11 @@
     </aside>
   </div>
 
+  <div id="tripMapPanel" class="trip-map-panel" style="display:none;">
+    <div class="trip-map-panel-head"><strong>Trips</strong><button type="button" class="trip-map-panel-close" aria-label="Close" onclick="tripMapTogglePanel()">&times;</button></div>
+    <div id="tripMapPanelBody"></div>
+  </div>
+
   <!-- Active-filter chips over the map; shown only while at least one filter is on (see initMarkControls). -->
   <div id="markControlsBar" class="mark-controls-bar" style="display:none;">
     <div id="markActiveFilterChips" class="mark-active-filter-chips"></div>
@@ -157,6 +162,7 @@
         <div id="hoverPanelSessions" class="loc-tile-sessions"></div>
         <div id="hoverPanelScheduleButtons" class="weeknew-add-buttons-row"></div>
         <div id="hoverPanelComputedSessions" class="loc-tile-sessions"></div>
+        <div id="hoverPanelTrips" class="trip-map-hover" style="display:none;"></div>
         <div id="hoverPanelHint" class="graph-gesture-hint" aria-hidden="true">
           <div>Double-tap to expand</div>
           <div>Hold for 2s to toggle data point</div>
@@ -260,8 +266,10 @@
 <script src="js/live-cards.js"></script>
 <script src="js/trip-defaults.js"></script>
 <script src="js/trip-log.js"></script>
+<script src="js/trip-log-view.js"></script>
 <script src="js/weather-preview.js"></script>
 <script src="js/mark-lookup.js"></script>
+<script src="js/trip-map.js"></script>
 <script src="js/chart-render.js"></script>
 <script src="js/week-tools.js"></script>
 <script src="js/location-editor.js"></script>

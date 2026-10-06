@@ -215,6 +215,7 @@ function teardownMode() {
   document.getElementById("markFilterBtn").style.display = "none";
   document.getElementById("markColourBtn").style.display = "none";
   document.getElementById("markSessionsBtn").style.display = "none";
+  tripMapTeardown();
   document.getElementById("exportStatus").textContent = "";
 }
 
@@ -456,6 +457,7 @@ function renderLocationMap() {
   // somewhere to read marksById/markersById/markLists from once this
   // finishes loading them, without a second callback.
   loadAndRenderMarks(map, markLayerState);
+  initTripMap(map); // trips from the trip log, in their own layer (js/trip-map.js)
 }
 
 // Normal mode's find-my-location button (the same #btnRefreshLiveGps Live mode uses to refresh its fix). Nothing in
@@ -860,6 +862,7 @@ function renderLocation(key) {
     : "";
   if (loc && locationPill) locationPill.setPhoto(loc.type);
   renderLocationTypePills(loc);
+  if (typeof tripMapFocusLocation === "function") tripMapFocusLocation(loc ? loc.name : null); // that location's trips (js/trip-map.js)
   // Admin: the gear after the name edits this location (js/location-editor.js); after each save the live config is
   // merged back in and this same graph redrawn, so the change shows straight away.
   // Anyone signed in: the location's owner or Admin edit the location; anyone else edits their own times for it.

@@ -4010,3 +4010,22 @@ body.live-card-open { overflow: hidden; }
 .map-toolbar .live-trip-action:disabled { opacity: 0.55; }
 .map-toolbar #btnLiveWater, .map-toolbar #btnLiveDepth { font-weight: 600; }
 .mark-edit-sublabel { font-size: 0.75rem; font-weight: 600; margin: 8px 0 3px; opacity: 0.85; }
+
+/* Trips on the Map (js/trip-map.js) */
+.trip-map-panel { position: fixed; top: 120px; left: 12px; z-index: 1000; width: min(340px, calc(100vw - 24px)); max-height: 60vh; overflow: auto; background: var(--white, #fff); border: 1px solid var(--grey-200, #e5e7eb); border-radius: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); padding: 8px 10px; }
+.trip-map-panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.trip-map-panel-close { background: none; border: 0; font-size: 1.4rem; line-height: 1; cursor: pointer; color: inherit; }
+.trip-map-group summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.trip-map-count { font-weight: 400; opacity: 0.7; }
+.trip-map-group-actions { display: flex; gap: 6px; margin: 2px 0 4px; }
+.trip-map-group-actions button { padding: 2px 8px; font-size: 0.75rem; }
+.trip-map-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 0.85rem; cursor: pointer; }
+.trip-map-row-text { flex: 1; min-width: 0; }
+.trip-map-swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.trip-map-log-link { font-size: 0.75rem; }
+.trip-map-hover { margin: 6px 0; }
+.trip-pin-wrap { background: none; border: 0; }
+.trip-pin { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--trip-c, #2563eb); color: #fff; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); font: 700 10px/1 system-ui, sans-serif; box-sizing: border-box; }
+.trip-pin-C { transform: scale(0.75); opacity: 0.9; }
+.trip-pin-E { border-radius: 4px; }
+.map-toolbar #tripMapBtn[aria-pressed="true"] { background: var(--navy, #0b2a4a); color: #fff; }

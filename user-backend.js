@@ -3930,7 +3930,9 @@ async function tlogListRuns(env, uid, from, to) {
     env.DB.prepare(
       `SELECT run_id, MAX(trip_id) AS trip_id, MAX(trip_name) AS trip_name, MIN(ts) AS start_ts, MAX(ts) AS end_ts, MIN(date_time) AS start_dt, MAX(date_time) AS end_dt,
               COUNT(*) AS entries, SUM(event_type = 'action_start') AS actions, SUM(event_type = 'catch') AS catches, MAX(event_type = 'trip_end') AS has_end,
-              MAX(source = 'Backfill' AND mark_id IS NULL) AS approximate, MAX(conditions_at IS NULL) AS pending, MAX(edited_at IS NOT NULL) AS edited
+              MAX(source = 'Backfill' AND mark_id IS NULL) AS approximate, MAX(conditions_at IS NULL) AS pending, MAX(edited_at IS NOT NULL) AS edited,
+              (SELECT t2.lat FROM trip_log t2 WHERE t2.user_id = trip_log.user_id AND t2.run_id = trip_log.run_id AND t2.lat IS NOT NULL AND t2.lng IS NOT NULL ORDER BY t2.ts LIMIT 1) AS start_lat,
+              (SELECT t2.lng FROM trip_log t2 WHERE t2.user_id = trip_log.user_id AND t2.run_id = trip_log.run_id AND t2.lat IS NOT NULL AND t2.lng IS NOT NULL ORDER BY t2.ts LIMIT 1) AS start_lng
        FROM trip_log WHERE user_id = ? GROUP BY run_id HAVING MIN(date_time) >= ? AND MIN(date_time) <= ? ORDER BY MIN(ts) DESC LIMIT 500`
     ).bind(uid, lo, hi).all(),
     env.DB.prepare(
@@ -3944,6 +3946,7 @@ async function tlogListRuns(env, uid, from, to) {
   return headers.results.map((r) => ({
     runId: r.run_id, tripId: r.trip_id ?? null, tripName: r.trip_name ?? null, startTs: r.start_ts, endTs: r.end_ts, startDateTime: r.start_dt, endDateTime: r.end_dt,
     entries: r.entries, actions: r.actions, catches: r.catches, hasTripEnd: !!r.has_end, approximate: !!r.approximate, pending: !!r.pending, edited: !!r.edited, fishedMs: fishedBy.get(r.run_id) || 0,
+    startLat: r.start_lat ?? null, startLng: r.start_lng ?? null, // the run's first logged position, for filing it under a location (js/trip-map.js)
   }));
 }
 
