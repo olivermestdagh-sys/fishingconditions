@@ -1988,15 +1988,6 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
           }
           options.state.marksById.delete(pairedMark.id);
         }
-        // A deleted Session mark's own connecting line (renderSessionLines,
-        // just above) would otherwise still point at it — recomputed from
-        // whatever's left in marksById now that this one's gone, rather
-        // than tracked incrementally; cheap enough at real mark counts and
-        // correct regardless of which half of a pair got deleted. Runs
-        // unconditionally (not just for a Session type) since a stray
-        // mismatch there is exactly the kind of thing worth being
-        // defensive about rather than trusting the type check alone.
-        if (options.map) renderSessionLines(options.map, options.state, Array.from(options.state.marksById.values()));
       }
     });
   }
@@ -2092,12 +2083,9 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
 
         // An edit (not a brand-new mark, which would otherwise vanish the moment it's saved if the current filters
         // don't cover it) re-applies the map filters, same as bulk edit — see refreshAfterEdit's calls below. A
-        // moved mark's own connecting Session line (renderSessionLines — see the same call in the Delete handler's
-        // own comment) needs the same recompute, or it would keep pointing at the old position until reload.
         const wasEdit = !options.isNew;
         const refreshAfterEdit = () => {
           if (wasEdit && options.state && options.state.refreshMarkControls) options.state.refreshMarkControls();
-          if (gpsChanged && options.map && options.state) renderSessionLines(options.map, options.state, Array.from(options.state.marksById.values()));
         };
         if (options.isNew && options.state) {
           options.state.marksById.set(mark.id, mark);

@@ -92,7 +92,7 @@ function tlRenderRuns() {
           <td>${tlEsc(tlClock(r.startDateTime))} – ${r.hasTripEnd || r.endTs > r.startTs ? tlEsc(tlClock(r.endDateTime)) : "…"}</td>
           <td class="num">${tlEsc(tripLogFormatDuration(r.endTs - r.startTs))}</td><td class="num">${tlEsc(tripLogFormatDuration(r.fishedMs))}</td>
           <td class="num">${r.actions}</td><td class="num">${r.catches}</td><td>${flags}</td>
-          <td class="act">${tlRenaming === r.runId ? `<button type="button" class="btn-primary tl-btn" data-rename-save>Save</button> <button type="button" class="btn-secondary tl-btn" data-rename-cancel>Cancel</button>` : `<button type="button" class="btn-secondary tl-btn" data-rename="${tlEsc(r.runId)}">${r.tripName ? "Rename" : "Name"}</button>`}</td></tr>`;
+          <td class="act">${tlRenaming === r.runId ? `<button type="button" class="btn-primary tl-btn" data-rename-save>Save</button> <button type="button" class="btn-secondary tl-btn" data-rename-cancel>Cancel</button>` : `<button type="button" class="btn-secondary tl-btn" data-rename="${tlEsc(r.runId)}">${r.tripName ? "Rename" : "Name"}</button> <button type="button" class="btn-secondary tl-btn tl-danger-btn" data-delete-run="${tlEsc(r.runId)}">Delete</button>`}</td></tr>`;
       })
       .join("")}</tbody></table><datalist id="tlTripNames">${[...new Set(tlRuns.map((r) => r.tripName).filter(Boolean))].sort((a, b) => a.localeCompare(b)).map((n) => `<option value="${tlEsc(n)}">`).join("")}</datalist>`;
   wrap.querySelectorAll("button[data-rename]").forEach((b) =>
@@ -104,6 +104,37 @@ function tlRenderRuns() {
       if (input) {
         input.focus();
         input.select();
+      }
+    })
+  );
+  wrap.querySelectorAll("button[data-delete-run]").forEach((b) =>
+    b.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const run = tlRuns.find((r) => r.runId === b.dataset.deleteRun);
+      if (!run) return;
+      const what = `${run.tripName || "this trip"} (${tripLogDateLabel(run.startDateTime)}, ${run.entries} line${run.entries === 1 ? "" : "s"})`;
+      if (!confirm(`Delete ${what} from the trip log?
+
+Its catches stay on the map as marks. This can't be undone.`)) return;
+      b.disabled = true;
+      try {
+        await tlSend("DELETE", `/api/triplog/run?runId=${encodeURIComponent(run.runId)}`);
+        if (tlSelectedRunId === run.runId) {
+          tlSelectedRunId = null;
+          tlEntries = [];
+          tlEditing = null;
+          document.getElementById("tlDetailCard").style.display = "none";
+          try {
+            history.replaceState(null, "", location.pathname);
+          } catch {
+            // an address bar that can't change is fine
+          }
+        }
+        await tlLoadRuns();
+      } catch (err) {
+        console.error("Could not delete the trip:", err);
+        alert("Couldn't delete the trip: " + err.message);
+        b.disabled = false;
       }
     })
   );

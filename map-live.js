@@ -801,7 +801,6 @@ async function liveSyncFromAccount() {
       const fresh = (await res.json()).filter((m) => m && m.id && !state.marksById.has(m.id));
       if (state === liveMarkState && !state._discarded) {
         for (const mark of fresh) addCatchToLiveMap(mark);
-        if (fresh.some((m) => isSessionType(m.type))) renderSessionLines(liveMap, state, Array.from(state.marksById.values()));
       }
       liveMarksPulledMs = Date.now();
       if (fresh.length && typeof enrichControllerMarks === "function") enrichControllerMarks(fresh);

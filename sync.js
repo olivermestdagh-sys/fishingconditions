@@ -1337,6 +1337,35 @@ function collectCheckedSessionMarks() {
   return marks;
 }
 
+/**
+ * Turns the import's Session Start / End candidates (and the catches saved with them) into trip-log entries: POST /api/triplog/import, one request
+ * per run of sessions (a gap of more than 8 hours starts a new one), so a request stays small. Answers {runs, rows} or {runs, error}.
+ */
+async function syncLogImportedSessions(sessionMarks, catchMarks) {
+  const all = [...sessionMarks, ...catchMarks].sort((a, b) => String(a.dateTime).localeCompare(String(b.dateTime)));
+  const chunks = [];
+  let last = null;
+  for (const m of all) {
+    const t = parseNaive(m.dateTime);
+    if (!chunks.length || (last != null && t - last > 8 * 3600000)) chunks.push([]);
+    chunks[chunks.length - 1].push(m);
+    last = Math.max(last == null ? t : last, t);
+  }
+  let runs = 0;
+  for (const marks of chunks) {
+    try {
+      const res = await fetch(`${USER_BACKEND_URL}/api/triplog/import`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ marks }) });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) return { runs, error: body.error || `status ${res.status}` };
+      runs += body.runs || 0;
+    } catch (err) {
+      console.error("Could not log the imported sessions:", err);
+      return { runs, error: err.message };
+    }
+  }
+  return { runs };
+}
+
 async function handleImportClick() {
   const statusEl = document.getElementById("importStatus");
   const toImport = candidates.filter((c) => c.selected);
@@ -1396,15 +1425,23 @@ async function handleImportClick() {
     return mark;
   });
 
-  const result = await saveMarksBatchToD1([...newMarks, ...sessionMarks]);
+  // Catches are marks; the sessions are trip-log entries (no Session marks any more): the catches are saved first so the log can link them.
+  const result = newMarks.length ? await saveMarksBatchToD1(newMarks) : { success: true, added: 0 };
+  let logged = { runs: 0 };
+  if (result.success && sessionMarks.length) logged = await syncLogImportedSessions(sessionMarks, newMarks.filter((m) => m.type === "Catch"));
   if (result.success) {
-    statusEl.textContent = `Imported ${result.added} mark${result.added === 1 ? "" : "s"} into the marks database.`;
+    const parts = [];
+    if (result.added) parts.push(`${result.added} mark${result.added === 1 ? "" : "s"} into the marks database`);
+    if (logged.runs) parts.push(`${logged.runs} trip${logged.runs === 1 ? "" : "s"} into the trip log`);
+    if (logged.error) parts.push(`(the trip log couldn't be updated: ${logged.error})`);
+    statusEl.textContent = `Imported ${parts.join(" and ") || "nothing"}.`;
     statusEl.style.color = "#16a34a";
     // Keep the local working copy in sync so a second import in the same
     // session (or hitting Export) reflects what was just written, without
     // needing a re-fetch — same reasoning as wireMarkPopupButtons doing the
     // equivalent for a single-mark save (charts.js).
-    existingMarks.push(...newMarks, ...sessionMarks);
+    existingMarks.push(...newMarks);
+    if (sessionMarks.length) await syncLoadLogSessions(); // the sessions just logged count as saved
     candidates = candidates.filter((c) => !c.selected);
     // Uncheck (not remove — the tree still shows the whole trail for
     // context) every session candidate that was just saved, so clicking
@@ -1428,7 +1465,7 @@ async function handleImportClick() {
     // the normal map (which reloads marks, now including the new ones).
     // Otherwise more can still be picked, and "Done" ends the review.
     if (reviewableCandidates().length === 0 && collectCheckedSessionMarks().length === 0) {
-      await finishImportReview(`Imported ${result.added} mark${result.added === 1 ? "" : "s"}.`);
+      await finishImportReview(statusEl.textContent);
     }
   } else {
     statusEl.textContent = "Import failed: " + result.error;

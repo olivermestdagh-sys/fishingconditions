@@ -250,6 +250,9 @@ export default {
       if (tripSetupMatch) {
         return handleTripSetupItem(request, url, env, tripSetupMatch[1]);
       }
+      if (url.pathname === "/api/triplog/import") {
+        return handleTripLogImport(request, url, env);
+      }
       if (url.pathname === "/api/triplog/run") {
         return handleTripLogRun(request, url, env);
       }
@@ -4177,17 +4180,75 @@ async function handleTripLogItem(request, url, env, id) {
   return jsonResponse({ ok: true }, 200, env);
 }
 
+/** A mark object as the browser holds it (camelCase) -> the marks-table row shape tlogLegacyRuns / tlogBuildLegacyRun read. */
+function tlogRowFromMarkObject(m) {
+  return {
+    id: m.id, type: m.type, lat: m.lat, lng: m.lng, date_time: m.dateTime, session_group_id: m.sessionGroupId || null, name: m.name || null,
+    species: m.species || null, bait: m.bait || null, rig: m.rig || null, rod: m.rod || null, berley: m.berley || null, rig_options: m.rigOptions || null,
+    bait_options: m.baitOptions || null, fishing_method: m.fishingMethod || null, water_condition: m.waterCondition || null, water_depth: m.waterDepth ?? null,
+    size: m.size ?? null, released: m.released ? 1 : 0, trip_name: m.tripName || null, action_name: m.actionName || null,
+  };
+}
+
+/**
+ * POST /api/triplog/import (signed in): {marks: [Session Start / Session End / Catch mark objects]} — a trail import's sessions, and the catches saved
+ * with them, become trip-log entries the way the legacy backfill makes them (tlogLegacyRuns / tlogBuildLegacyRun), but the Session marks are NOT
+ * saved as marks, so their rows carry no mark_id; a Catch that is already a saved mark is linked. Idempotent (INSERT OR IGNORE on bf:legacy ids).
+ * Answers {runs, rows, unassignedCatches}.
+ */
+async function handleTripLogImport(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  if (request.method !== "POST") return jsonResponse({ error: "Method not allowed." }, 405, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+  const body = await readJsonBody(request);
+  const list = body && Array.isArray(body.marks) ? body.marks : null;
+  if (!list || list.length === 0 || list.length > 300) return jsonResponse({ error: "marks must be a list of 1 to 300." }, 400, env);
+  for (const m of list) {
+    const ok = m && typeof m === "object" && typeof m.id === "string" && m.id && ["Session Start", "Session End", "Catch"].includes(m.type) && typeof m.dateTime === "string" &&
+      typeof m.lat === "number" && Math.abs(m.lat) <= 90 && typeof m.lng === "number" && Math.abs(m.lng) <= 180;
+    if (!ok) return jsonResponse({ error: "Each mark needs an id, a type (Session Start, Session End or Catch), dateTime, lat and lng." }, 400, env);
+  }
+  const { runs, unassigned } = tlogLegacyRuns(list.map(tlogRowFromMarkObject));
+  const data = await ctlLoadTripData(env, uid);
+  const stmts = [];
+  let rows = 0;
+  for (const run of runs) {
+    for (const en of tlogBuildLegacyRun(run, { trips: data.trips, actions: data.actions, linkSessions: false })) {
+      stmts.push(...tlogStatements(env, uid, { ...en.e, source: "Backfill", sourceUuid: en.sourceUuid }, en.rods));
+      rows++;
+    }
+  }
+  for (let i = 0; i < stmts.length; i += 40) await env.DB.batch(stmts.slice(i, i + 40));
+  return jsonResponse({ runs: runs.length, rows, unassignedCatches: unassigned }, 200, env);
+}
+
 /**
  * PATCH /api/triplog/run: {runId, tripName} — names (or renames, or with a blank name un-names) a whole trip: every line of the run takes the text
  * and is marked edited, so the automatic rebuilds leave the run alone. Marks keep their own tripName snapshots.
+ * DELETE /api/triplog/run?runId=<id> — deletes the whole trip from the log (its lines and rod rows). The marks (catches) stay; a trip that was
+ * deleted can be rebuilt by a backfill if its marks / events still exist.
  */
 async function handleTripLogRun(request, url, env) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
-  if (request.method !== "PATCH") return jsonResponse({ error: "Method not allowed." }, 405, env);
+  if (request.method !== "PATCH" && request.method !== "DELETE") return jsonResponse({ error: "Method not allowed." }, 405, env);
   const resolved = resolveEffectiveUserId(url, user);
   if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
   const uid = resolved.id;
+  if (request.method === "DELETE") {
+    const runId = url.searchParams.get("runId");
+    if (!runId) return jsonResponse({ error: "runId is required." }, 400, env);
+    const exists = await env.DB.prepare("SELECT 1 AS ok FROM trip_log WHERE user_id = ? AND run_id = ? LIMIT 1").bind(uid, runId).first();
+    if (!exists) return jsonResponse({ error: "Trip not found." }, 404, env);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM trip_log_rods WHERE user_id = ? AND log_id IN (SELECT id FROM trip_log WHERE user_id = ? AND run_id = ?)").bind(uid, uid, runId),
+      env.DB.prepare("DELETE FROM trip_log WHERE user_id = ? AND run_id = ?").bind(uid, runId),
+    ]);
+    return jsonResponse({ ok: true }, 200, env);
+  }
   const body = await readJsonBody(request);
   if (!body || typeof body.runId !== "string" || !body.runId) return jsonResponse({ error: "runId is required." }, 400, env);
   if (body.tripName != null && typeof body.tripName !== "string") return jsonResponse({ error: "tripName must be text." }, 400, env);
@@ -4582,7 +4643,7 @@ function tlogLegacyRuns(marks) {
 
 const TLOG_LEGACY_RANK = { trip_start: 0, action_start: 1, cond: 2, catch: 3, action_end: 4, trip_end: 5 };
 
-/** Pure: one legacy run -> [{kind, sourceUuid, e, rods}] for tlogStatements, in time order. ctx: {trips, actions}. */
+/** Pure: one legacy run -> [{kind, sourceUuid, e, rods}] for tlogStatements, in time order. ctx: {trips, actions, linkSessions?} (false: the Start / End marks are not saved marks, so their rows carry no mark_id). */
 function tlogBuildLegacyRun(run, ctx) {
   const out = [];
   const runId = `legacy:${run.key}`;
@@ -4612,7 +4673,7 @@ function tlogBuildLegacyRun(run, ctx) {
         fishingMethod: tlogSplit(m.fishing_method), targets: tlogSplit(m.species), rods: tlogRodRowsFromMark(m, [], action),
       };
       last = { water: water(m), depth: depth(m) };
-      push("action_start", m.id, s.start, { type: "action_start", ...stateFields(), water: last.water, depth: last.depth, markId: m.id }, state.rods);
+      push("action_start", m.id, s.start, { type: "action_start", ...stateFields(), water: last.water, depth: last.depth, markId: ctx.linkSessions === false ? null : m.id }, state.rods);
     }
     for (const c of s.catches) {
       const m = c.m;
@@ -4632,7 +4693,7 @@ function tlogBuildLegacyRun(run, ctx) {
       const m = s.end.m;
       push("action_end", m.id, s.end, {
         type: "action_end", actionId: state ? state.actionId : null, actionName: state ? state.actionName : m.action_name || null,
-        sessionGroupId: m.session_group_id || null, water: water(m), depth: depth(m), markId: m.id,
+        sessionGroupId: m.session_group_id || null, water: water(m), depth: depth(m), markId: ctx.linkSessions === false ? null : m.id,
       }, []);
     }
   }

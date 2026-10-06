@@ -214,7 +214,6 @@ function teardownMode() {
   cancelPinMove();
   document.getElementById("markFilterBtn").style.display = "none";
   document.getElementById("markColourBtn").style.display = "none";
-  document.getElementById("markSessionsBtn").style.display = "none";
   tripMapTeardown();
   document.getElementById("exportStatus").textContent = "";
 }

@@ -1174,3 +1174,45 @@ test("reports read: GET /api/triplog?report=1 gives only your catch / action / t
   assert.deepEqual(entries.map((e) => e.ts), [...entries.map((e) => e.ts)].sort((a, b) => a - b));
   assert.equal((await api(env, null, "GET", "/api/triplog?report=1", undefined, { Origin: SITE })).status, 401);
 });
+
+test("trail import: the sessions and the catches saved with them become trip-log entries (no Session marks), idempotently", async () => {
+  const { sqlite, env } = await seeded();
+  const ins = sqlite.prepare("INSERT INTO marks (id, user_id, lat, lng, name, type, date_time, source, species, size, created_at) VALUES (?, 'u1', -38.1, 145.2, 'x', 'Catch', ?, 'trail-import', 'Bream', 30, 1)");
+  ins.run("c1", "2026-09-12 10:00:00");
+  const mk = (id, type, dateTime, extra = {}) => ({ id, type, dateTime, lat: -38.1, lng: 145.2, sessionGroupId: "g1", ...extra });
+  const marks = [
+    mk("s1", "Session Start", "2026-09-12 09:30:00", { species: "Bream", bait: "Prawn", rod: "L Wilson" }),
+    { id: "c1", type: "Catch", dateTime: "2026-09-12 10:00:00", lat: -38.1, lng: 145.2, species: "Bream", size: 30 },
+    mk("e1", "Session End", "2026-09-12 11:00:00"),
+    mk("s2", "Session Start", "2026-09-13 09:30:00", { sessionGroupId: "g2" }),
+  ];
+  const res = await site(env, "POST", "/api/triplog/import", { marks });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.runs, 2);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM marks WHERE type IN ('Session Start', 'Session End')").get().n, 0, "no Session marks are saved");
+  const rows = sqlite.prepare("SELECT event_type, mark_id, date_time FROM trip_log WHERE run_id = 'legacy:s1' ORDER BY ts, rowid").all();
+  assert.deepEqual(rows.map((r) => r.event_type), ["trip_start", "action_start", "catch", "action_end", "trip_end"]);
+  assert.deepEqual(rows.map((r) => r.mark_id), [null, null, "c1", null, null], "only the saved catch is linked");
+  const again = await (await site(env, "POST", "/api/triplog/import", { marks })).json();
+  assert.equal(again.runs, 2);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log WHERE run_id = 'legacy:s1'").get().n, 5);
+  assert.equal((await site(env, "POST", "/api/triplog/import", { marks: [{ id: "x", type: "POI", dateTime: "d", lat: 0, lng: 0 }] })).status, 400);
+  assert.equal((await api(env, null, "POST", "/api/triplog/import", { marks }, { Origin: SITE })).status, 401);
+});
+
+test("deleting a trip: its lines and rod rows go, the catches stay, only your own trips", async () => {
+  const { sqlite, env } = await legacySeeded();
+  await site(env, "POST", "/api/triplog/backfill-legacy", {});
+  const before = sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log").get().n;
+  const n = legacyRows(sqlite, "legacy:a1S").length;
+  assert.ok(n > 3);
+  assert.equal((await site(env, "DELETE", "/api/triplog/run?runId=legacy%3Aa1S", undefined, "s-u2")).status, 404, "not someone else's");
+  assert.equal((await site(env, "DELETE", "/api/triplog/run")).status, 400);
+  assert.equal((await site(env, "DELETE", "/api/triplog/run?runId=legacy%3Aa1S")).status, 200);
+  assert.equal(legacyRows(sqlite, "legacy:a1S").length, 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log").get().n, before - n);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log_rods WHERE log_id LIKE '%a1S%' OR log_id LIKE '%a1C%'").get().n, 0, "its rod rows went too");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM marks WHERE id = 'a1C'").get().n, 1, "the catch mark stays");
+  assert.equal((await site(env, "DELETE", "/api/triplog/run?runId=legacy%3Aa1S")).status, 404);
+});
