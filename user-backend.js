@@ -4970,7 +4970,6 @@ async function conditionsBackfill(env, { now = Date.now(), limit = TLOG_COND_BAT
 
 const CONTROLLER_TOKEN_PREFIX = "fc_";
 const LIVE_TRIP_PREF = "liveActiveTrip"; // same key as js/prefs.js / map-live.js
-const CTL_RUN_GAP_MS = 8 * 3600000; // js/catch-limits.js CATCH_RUN_GAP_MS
 const CTL_MAX_BATCH = 100;
 // The free Cloudflare plan allows only 50 D1 queries per request, and one event takes up to ~12. So an events request stops taking new
 // events once it has used this many and answers the rest "deferred" — the app simply leaves those pending and sends them next time.
@@ -4995,59 +4994,11 @@ function ctlLiveRodSetupIds(ids, rodSetups) {
   return (ids || []).filter((id) => known.has(id));
 }
 
-/** Default Session Start/End name on a trip — tripMarkName (js/catch-limits.js). */
-function ctlTripMarkName(tripName, actionName, number, role) {
-  const parts = [tripName, actionName].map((s) => String(s == null ? "" : s).trim()).filter(Boolean);
-  return `${parts.length ? parts.join(" ") : "Session"} ${number} ${role}`;
-}
-
 /** Default Catch name on a trip — tripCatchName (js/catch-limits.js). */
 function ctlTripCatchName(species, tripName, actionName, number) {
   const parts = [tripName, actionName].map((s) => String(s == null ? "" : s).trim()).filter(Boolean);
   if (!parts.length) return species;
   return [species, ...parts, ...(Number.isFinite(number) ? [number] : [])].join(" ");
-}
-
-/** The Session Start mark for a trip Action — buildSessionStartFromAction (js/trip-defaults.js), minus tide. */
-function ctlBuildSessionStart(action, rodSetups, ctx) {
-  const setups = (action.rodSetupIds || []).map((rid) => (rodSetups || []).find((r) => r.id === rid)).filter(Boolean);
-  const mark = {
-    id: ctx.id, lat: ctx.lat, lng: ctx.lng, name: ctlTripMarkName(ctx.tripName, action.name, ctx.sessionNumber, "Start"), type: "Session Start",
-    dateTime: ctx.dateTime, createdAt: ctx.createdAt, source: ctx.source || "Manual", sessionRole: "start", sessionGroupId: ctx.sessionGroupId,
-  };
-  const set = (key, list) => {
-    if (list.length) mark[key] = list.join(", ");
-  };
-  if (ctx.tripName) mark.tripName = ctx.tripName;
-  if (action.name) mark.actionName = action.name;
-  set("species", ctlUniq(action.species));
-  set("fishingMethod", ctlUniq(action.fishingMethod));
-  if (action.berley) mark.berley = action.berley;
-  set("bait", ctlUniq(setups.flatMap((s) => s.bait || [])));
-  set("rod", ctlUniq(setups.map((s) => s.rod)));
-  set("rig", ctlUniq(setups.map((s) => s.rig)));
-  set("rigOptions", ctlUniq(setups.flatMap((s) => s.subListItems || [])));
-  set("baitOptions", ctlUniq(setups.flatMap((s) => s.baitOptions || [])));
-  if (ctx.water) mark.waterCondition = ctx.water;
-  if (ctx.waterDepth != null) mark.waterDepth = ctx.waterDepth;
-  return mark;
-}
-
-const CTL_SESSION_END_CARRIED_FIELDS = ["species", "waterCondition", "berley", "fishingMethod", "waterDepth", "rod", "rig", "bait", "rigOptions", "baitOptions", "tideCondition", "tideExtreme", "tripName", "actionName"];
-
-/** The Session End that closes `startMark` — buildSessionEndFromStart (js/live-cards.js). */
-function ctlBuildSessionEnd(startMark, { id, lat, lng, dateTime, createdAt, source, water, waterDepth }, sessionNumber) {
-  const mark = {
-    id, lat, lng, name: ctlTripMarkName(startMark.tripName, startMark.actionName, sessionNumber, "End"), type: "Session End", dateTime, createdAt,
-    source: source || "Manual", sessionRole: "end", sessionGroupId: startMark.sessionGroupId,
-  };
-  for (const key of CTL_SESSION_END_CARRIED_FIELDS) {
-    if (startMark[key] != null && startMark[key] !== "") mark[key] = startMark[key];
-  }
-  // the conditions when it ended (the controller's current Water / Depth) win over the ones the session started with
-  if (water) mark.waterCondition = water;
-  if (waterDepth != null) mark.waterDepth = waterDepth;
-  return mark;
 }
 
 /** The gear a Catch takes from a trip Action — tdCatchFieldsFromAction (js/trip-defaults.js). */
@@ -5100,34 +5051,6 @@ function ctlBuildCatch(c, action, rodSetups) {
     else delete mark.baitOptions;
   }
   return mark;
-}
-
-/** The number in "Session 3 Start"/"Session 3 End", or null — sessionNumberFromName (js/catch-limits.js). */
-function ctlSessionNumberFromName(name) {
-  const m = /(?:^|\s)(\d+) (?:Start|End)$/i.exec(String(name || "").trim());
-  return m ? Number(m[1]) : null;
-}
-
-function ctlCatchChain(timesMs, anchorMs, gapMs = CTL_RUN_GAP_MS) {
-  const real = timesMs.filter(Number.isFinite).sort((a, b) => a - b);
-  const all = [...real, anchorMs].sort((a, b) => a - b);
-  const i = all.indexOf(anchorMs);
-  let a = i;
-  while (a > 0 && all[a] - all[a - 1] <= gapMs) a--;
-  let b = i;
-  while (b < all.length - 1 && all[b + 1] - all[b] <= gapMs) b++;
-  const chain = all.slice(a, b + 1);
-  if (!real.includes(anchorMs)) chain.splice(chain.indexOf(anchorMs), 1);
-  return chain.length ? { start: chain[0], end: chain[chain.length - 1] } : null;
-}
-
-/** The next "Session N" number — nextSessionNumber (js/catch-limits.js). `starts`: [{tMs, number}]. */
-function ctlNextSessionNumber(starts, anchorMs, gapMs = CTL_RUN_GAP_MS) {
-  const valid = (starts || []).filter((s) => s && Number.isFinite(s.tMs) && Number.isFinite(s.number));
-  const chain = ctlCatchChain(valid.map((s) => s.tMs), anchorMs, gapMs);
-  if (!chain) return 1;
-  const inChain = valid.filter((s) => s.tMs <= anchorMs && s.tMs >= chain.start && s.tMs <= chain.end);
-  return inChain.reduce((max, s) => Math.max(max, s.number), 0) + 1;
 }
 
 /** The site's naive local time string for UTC epoch seconds seen on a clock `tzOffsetMin` minutes east of UTC. */
@@ -5604,30 +5527,6 @@ function ctlNewId(prefix = "m") {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`; // same shape as makeMarkId (js/backend.js)
 }
 
-/** The running session: the user's latest Session Start with no Session End sharing its group id (liveActiveSession, map-live.js). */
-async function ctlActiveSession(env, uid) {
-  const row = await env.DB.prepare("SELECT * FROM marks WHERE user_id = ? AND type = 'Session Start' ORDER BY date_time DESC LIMIT 1").bind(uid).first();
-  if (!row || !row.session_group_id) return null;
-  const ended = await env.DB.prepare("SELECT 1 AS ok FROM marks WHERE user_id = ? AND type = 'Session End' AND session_group_id = ? LIMIT 1").bind(uid, row.session_group_id).first();
-  if (ended) return null;
-  const mark = rowToMark(row);
-  const number = ctlSessionNumberFromName(mark.name);
-  return number == null ? null : { mark, number };
-}
-
-/** The numbers of Session Starts in the last week, for naming the next one. */
-async function ctlRecentStarts(env, uid, anchorNaive) {
-  const { results } = await env.DB.prepare("SELECT name, date_time FROM marks WHERE user_id = ? AND type = 'Session Start' AND date_time >= ? ORDER BY date_time ASC")
-    .bind(uid, ctlNaiveFromEpoch(ctlParseNaive(anchorNaive) / 1000 - 7 * 86400, 0)).all();
-  const out = [];
-  for (const r of results) {
-    const number = ctlSessionNumberFromName(r.name);
-    const tMs = ctlParseNaive(r.date_time);
-    if (number != null && Number.isFinite(tMs)) out.push({ tMs, number });
-  }
-  return out;
-}
-
 /**
  * Applies ONE event: returns {status, markIds, error?}. Everything it changes (marks, the running-trip setting and the
  * "this event was processed" record) goes in one batch, so a retry after a failure can't half-apply it.
@@ -5662,18 +5561,9 @@ async function ctlProcessEvent(env, user, ev) {
   const tripRunId = state.runId || (state.tripId ? ctlNewId("run") : null);
   const position = { lat: ev.lat, lng: ev.lng };
 
-  // Ends whatever session is running, at this event's time and place.
-  // the water condition / depth the controller currently has set: on Session Start, Session End and Catch marks
+  // the water condition / depth the controller currently has set: on trip-log entries and Catch marks
   const evWater = typeof ev.water === "string" ? ev.water : "";
   const evDepth = typeof ev.depth === "number" && Number.isFinite(ev.depth) && ev.depth >= 0 && ev.depth <= 1000 ? ev.depth : null;
-  const closeRunning = async () => {
-    const active = await ctlActiveSession(env, uid);
-    if (!active) return null;
-    if (!havePosition) return { error: "a position is needed to end the running session" };
-    addMark(ctlBuildSessionEnd(active.mark, { id: ctlNewId(), ...position, dateTime, createdAt: dateTime, source, water: evWater, waterDepth: evDepth }, active.number), ":end");
-    return { ended: true };
-  };
-
   // Trip log entries this event makes (written in the same batch, see tlogStatements). A state-changing entry carries the full state.
   const logs = [];
   const addLog = (kind, e, rods) => logs.push({ kind, e, rods });
@@ -5696,14 +5586,6 @@ async function ctlProcessEvent(env, user, ev) {
     addLog("trip_start", { type: "trip_start", runId: nextState.runId, tripId: trip.id, tripName: trip.name, water: evWater, depth: evDepth });
   } else if (ev.type === "trip_end") {
     if (state.tripId) addLog("trip_end", { type: "trip_end", tripId: state.tripId, ...(await namesOf(state.tripId, state.actionId)), actionId: state.actionId, sessionGroupId: state.sessionGroupId, water: evWater, depth: evDepth });
-    // Like the site's End Trip: closes the session this trip's action started (if still running), then clears the trip.
-    if (state.sessionGroupId) {
-      const active = await ctlActiveSession(env, uid);
-      if (active && active.mark.sessionGroupId === state.sessionGroupId) {
-        const closed = await closeRunning();
-        if (closed && closed.error) return bad(closed.error);
-      }
-    }
     nextState = { tripId: null };
   } else if (ev.type === "action_start") {
     if (!havePosition) return bad("lat/lng are required");
@@ -5711,24 +5593,16 @@ async function ctlProcessEvent(env, user, ev) {
     if (!row) return bad("action not found");
     const action = rowToTripAction(row);
     const rodSetups = await ctlLoadRodSetups(env, uid);
-    const closed = await closeRunning(); // starting an action ends the running one first, like tapping another action pill
-    if (closed && closed.error) return bad(closed.error);
-    const anchorMs = ctlParseNaive(dateTime);
-    const sessionNumber = ctlNextSessionNumber(await ctlRecentStarts(env, uid, dateTime), anchorMs);
+    // starting an action ends the running one (no row of its own: the log's reporting rule); the actions of a trip run are numbered from 1
     const sessionGroupId = ctlNewId();
-    addMark(ctlBuildSessionStart(action, rodSetups, {
-      id: ctlNewId(), ...position, dateTime, createdAt: dateTime, sessionGroupId, sessionNumber, source,
-      water: evWater, waterDepth: evDepth, tripName: row.trip_name || "",
-    }), ":start");
-    nextState = { tripId: action.tripId, actionId: action.id, sessionGroupId, runId: tripRunId };
+    const sessionNumber = (Number.isFinite(state.sessionNumber) ? state.sessionNumber : 0) + 1;
+    nextState = { tripId: action.tripId, actionId: action.id, sessionGroupId, runId: tripRunId, sessionNumber };
     addLog("action_start", {
       type: "action_start", runId: tripRunId, tripId: action.tripId, tripName: row.trip_name, actionId: action.id, actionName: action.name, sessionGroupId, water: evWater, depth: evDepth,
-      markId: markIds[markIds.length - 1], ...actionState(action),
+      ...actionState(action),
     }, tlogRodRows(action, rodSetups));
   } else if (ev.type === "action_end") {
-    const closed = await closeRunning();
-    if (closed && closed.error) return bad(closed.error);
-    nextState = { tripId: state.tripId, ...(state.runId ? { runId: state.runId } : {}) };
+    nextState = { tripId: state.tripId, ...(state.runId ? { runId: state.runId } : {}), ...(Number.isFinite(state.sessionNumber) ? { sessionNumber: state.sessionNumber } : {}) };
     if (state.tripId && state.actionId) addLog("action_end", { type: "action_end", tripId: state.tripId, ...(await namesOf(state.tripId, state.actionId)), actionId: state.actionId, sessionGroupId: state.sessionGroupId, water: evWater, depth: evDepth });
   } else if (ev.type === "catch") {
     if (!havePosition) return bad("lat/lng are required");
@@ -5749,13 +5623,13 @@ async function ctlProcessEvent(env, user, ev) {
         rodSetups = await ctlLoadRodSetups(env, uid);
       }
     }
-    // the running session's number goes into the catch's default name ("[Species] [Trip] [Action] [Number]")
-    const runningSession = action ? await ctlActiveSession(env, uid) : null;
+    // the running action's number goes into the catch's default name ("[Species] [Trip] [Action] [Number]")
+    const runningNumber = action && state.actionId && state.sessionGroupId && Number.isFinite(state.sessionNumber) ? state.sessionNumber : null;
     addMark(
       ctlBuildCatch(
         {
           id: ctlNewId(), ...position, dateTime, species: ev.species.trim(), size: ev.size ?? null, released: ev.fate === "release", tooSmall: !!ev.tooSmall,
-          water: typeof ev.water === "string" ? ev.water : "", waterDepth: ev.depth ?? null, setupId: typeof ev.rodSetupId === "string" ? ev.rodSetupId : null, source, tripName, sessionNumber: runningSession ? runningSession.number : null,
+          water: typeof ev.water === "string" ? ev.water : "", waterDepth: ev.depth ?? null, setupId: typeof ev.rodSetupId === "string" ? ev.rodSetupId : null, source, tripName, sessionNumber: runningNumber,
           bait: catchBait ? catchBait.join(", ") : undefined,
         },
         action,

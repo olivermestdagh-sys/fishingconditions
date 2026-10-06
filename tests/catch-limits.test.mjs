@@ -6,7 +6,7 @@ import fs from "node:fs";
 
 const src = fs.readFileSync(new URL("../js/catch-limits.js", import.meta.url), "utf8");
 const f = new Function(
-  src + "\nreturn { limitsFromMarkLists, catchesFromMarks, catchChain, runCatches, sessionNumberFromName, nextSessionNumber, speciesGroupNames, keptCounts, sizeVerdict, recommendFate, stepperStartSize, speciesLimitLines, speciesCounts, catchLimitWarnings, CATCH_RUN_GAP_MS };"
+  src + "\nreturn { limitsFromMarkLists, catchesFromMarks, catchChain, runCatches, speciesGroupNames, keptCounts, sizeVerdict, recommendFate, stepperStartSize, speciesLimitLines, speciesCounts, catchLimitWarnings, CATCH_RUN_GAP_MS };"
 )();
 
 const H = 3600000;
@@ -65,36 +65,6 @@ test("runCatches keeps the run's catches and drops earlier trips", () => {
   const all = [c("Snapper", -30), c("Snapper", 0), c("Flathead", 3), c("Snapper", 9)];
   assert.deepEqual(f.runCatches(all, at(10)).map((x) => x.tMs), [at(0), at(3), at(9)]);
   assert.deepEqual(f.runCatches(all, at(40)), []);
-});
-
-test("sessionNumberFromName reads a session's own number; null for anything else", () => {
-  assert.equal(f.sessionNumberFromName("Session 3 Start"), 3);
-  assert.equal(f.sessionNumberFromName("Session 12 End"), 12);
-  assert.equal(f.sessionNumberFromName("session 3 start"), 3, "case-insensitive");
-  assert.equal(f.sessionNumberFromName("Session 3"), null);
-  assert.equal(f.sessionNumberFromName("Bream"), null);
-  assert.equal(f.sessionNumberFromName(""), null);
-  assert.equal(f.sessionNumberFromName(undefined), null);
-});
-
-test("nextSessionNumber: 1 for a new fishing day, otherwise one more than the HIGHEST number already used in the current chain, following the same 8h chaining as catch counts", () => {
-  assert.equal(f.nextSessionNumber([], at(0)), 1, "no earlier sessions at all");
-  const first = [{ tMs: at(0), number: 1 }]; // one existing Session Start, at hour 0, "Session 1"
-  assert.equal(f.nextSessionNumber(first, at(7.99)), 2, "a second start within 8h: same fishing day");
-  assert.equal(f.nextSessionNumber(first, at(8)), 2, "exactly 8 hours still chains");
-  assert.equal(f.nextSessionNumber(first, at(8) + 60000), 1, "a minute more than 8 hours: a new fishing day");
-  const two = [{ tMs: at(0), number: 1 }, { tMs: at(3), number: 2 }];
-  assert.equal(f.nextSessionNumber(two, at(6)), 3, "third session of the same chained day");
-  assert.equal(f.nextSessionNumber(two, at(20)), 1, "well over 8h since the last one: resets");
-  // The bug this guards: sessions 1, 2, 3 all created (chained, 3h apart); session 2's pair is then deleted,
-  // leaving 1 and 3 still on the map. The next one must be 4 (one more than the highest survivor, 3) — counting
-  // the two SURVIVING sessions and adding one (giving 3 again, colliding with the session still on the map) was
-  // the actual bug reported.
-  const afterDeletingTwo = [{ tMs: at(0), number: 1 }, { tMs: at(6), number: 3 }];
-  assert.equal(f.nextSessionNumber(afterDeletingTwo, at(9)), 4, "resumes from the highest surviving number, not a recount");
-  // Entries with an unreadable number (a hand-renamed mark) are ignored rather than breaking the chain/max.
-  const withUnreadable = [{ tMs: at(0), number: 1 }, { tMs: at(2), number: NaN }];
-  assert.equal(f.nextSessionNumber(withUnreadable, at(4)), 2);
 });
 
 test("kept counts leave out released fish and add up the shared-limit group", () => {
@@ -196,13 +166,9 @@ test("editing an existing catch doesn't count it twice", () => {
   assert.deepEqual(atLimit, [], "20 kept of 20 is at the limit, not over");
 });
 
-test("trip mark names: '[Trip] [Action] [Number] Start/End' and '[Species] [Trip] [Action] [Number]'; the number still parses back", () => {
-  const g = new Function(src + "\nreturn { tripMarkName, tripCatchName, sessionNumberFromName };")();
-  assert.equal(g.tripMarkName("Weekend", "Drift", 3, "Start"), "Weekend Drift 3 Start");
-  assert.equal(g.tripMarkName("", "", 2, "End"), "Session 2 End", "no trip/action name: the plain session name");
-  assert.equal(g.tripMarkName("Weekend", "", 1, "End"), "Weekend 1 End");
+test("trip catch names: '[Species] [Trip] [Action] [Number]'", () => {
+  const g = new Function(src + "\nreturn { tripCatchName };")();
   assert.equal(g.tripCatchName("Bream", "Weekend", "Drift", 3), "Bream Weekend Drift 3");
   assert.equal(g.tripCatchName("Bream", "Weekend", "Drift", null), "Bream Weekend Drift");
   assert.equal(g.tripCatchName("Bream", "", "", 3), "Bream");
-  assert.equal(g.sessionNumberFromName(g.tripMarkName("Weekend 2", "Drift", 12, "End")), 12);
 });

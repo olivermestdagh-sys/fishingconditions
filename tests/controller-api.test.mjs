@@ -188,7 +188,7 @@ test("state: set the running trip, clear it, and refuse a trip that isn't yours"
   assert.deepEqual(stateOf(sqlite), { tripId: null }, "a value, not a removal, so other devices can't resurrect the old trip");
 });
 
-test("events: a whole trip — start, action, catch, another action, end — becomes the marks the Live page would make", async () => {
+test("events: a whole trip — start, action, catch, another action, end — makes the catches the Live page would make, and the trip log; no Session marks", async () => {
   const { sqlite, env, token } = await seeded();
   // Three requests: one request only takes a limited number of events (see the query budget test below; the trip log adds a few queries each).
   const results = [
@@ -200,23 +200,13 @@ test("events: a whole trip — start, action, catch, another action, end — bec
 
   const all = marks(sqlite);
   const byName = Object.fromEntries(all.map((m) => [m.name, m]));
-  assert.deepEqual(Object.keys(byName).sort(), ["Bream Estuary Drift 1", "Estuary Anchor 2 End", "Estuary Anchor 2 Start", "Estuary Drift 1 End", "Estuary Drift 1 Start", "Flathead Estuary Drift 1"]);
-
-  const start1 = byName["Estuary Drift 1 Start"];
-  assert.equal(start1.type, "Session Start");
-  assert.equal(start1.date_time, "2026-10-02 10:02:00", "UTC+10 clock, converted to the site's local time");
-  assert.equal(start1.source, "Controller");
-  assert.equal(start1.source_uuid, "fc:fishctl-01:2:start");
-  assert.equal(start1.user_id, "u1");
-  assert.equal(start1.species, "Bream");
-  assert.equal(start1.fishing_method, "Drifting");
-  assert.equal(start1.berley, "Pilchard Mix");
-  assert.equal(start1.bait, "Prawn");
-  assert.equal(start1.rod, "L Wilson, L Raider");
-  assert.equal(start1.rig_options, "Vibe");
+  assert.deepEqual(Object.keys(byName).sort(), ["Bream Estuary Drift 1", "Flathead Estuary Drift 1"], "only the catches are marks: Session Start / End are not made any more");
 
   const bream = byName["Bream Estuary Drift 1"];
   assert.equal(bream.type, "Catch");
+  assert.equal(bream.date_time, "2026-10-02 10:03:00", "UTC+10 clock, converted to the site's local time");
+  assert.equal(bream.source, "Controller");
+  assert.equal(bream.user_id, "u1");
   assert.equal(bream.size, 31);
   assert.equal(bream.released, 0);
   assert.equal(bream.water_depth, 4);
@@ -227,60 +217,49 @@ test("events: a whole trip — start, action, catch, another action, end — bec
   assert.equal(byName["Flathead Estuary Drift 1"].released, 1);
   assert.equal(byName["Flathead Estuary Drift 1"].rod, null, "two rod setups and none chosen: no rod guessed");
 
-  // Starting the second action closed the first session at that moment and place; ending the trip closed the second.
-  const end1 = byName["Estuary Drift 1 End"];
-  assert.equal(end1.session_group_id, start1.session_group_id);
-  assert.equal(end1.date_time, "2026-10-02 10:05:00");
-  assert.equal(end1.lat, -38.15);
-  assert.equal(end1.source_uuid, "fc:fishctl-01:5:end");
-  assert.equal(byName["Estuary Anchor 2 Start"].session_group_id, byName["Estuary Anchor 2 End"].session_group_id);
-  assert.notEqual(byName["Estuary Anchor 2 Start"].session_group_id, start1.session_group_id);
+  // what the actions did is in the trip log: the second action started where the controller was, and ending the trip logged its end
+  const log = sqlite.prepare("SELECT event_type, action_name, date_time, lat FROM trip_log ORDER BY ts, rowid").all();
+  assert.deepEqual(log.map((r) => [r.event_type, r.action_name]), [
+    ["trip_start", null], ["action_start", "Drift"], ["change", "Drift"], ["catch", "Drift"], ["change", "Drift"], ["catch", "Drift"], ["action_start", "Anchor"], ["trip_end", "Anchor"],
+  ]);
+  assert.equal(log[1].date_time, "2026-10-02 10:02:00");
+  assert.equal(log[6].lat, -38.15);
   assert.deepEqual(stateOf(sqlite), { tripId: null });
 });
 
-test("events: the running trip/action is what the Live page reads — action_start sets it, action_end keeps just the trip", async () => {
+test("events: the running trip/action is what the Live page reads — action_start sets it (and numbers it), action_end keeps just the trip and the count", async () => {
   const { sqlite, env, token } = await seeded();
   await send(env, token, [ev(1, "trip_start", { tripId: "t1" })]);
   const runId = stateOf(sqlite).runId;
   assert.match(runId, /^run_/);
   assert.deepEqual(stateOf(sqlite), { tripId: "t1", runId });
   await send(env, token, [ev(2, "action_start", { actionId: "a1" })]);
-  const group = marks(sqlite, "type = 'Session Start'")[0].session_group_id;
-  assert.deepEqual(stateOf(sqlite), { tripId: "t1", actionId: "a1", sessionGroupId: group, runId });
+  const group = sqlite.prepare("SELECT session_group_id FROM trip_log WHERE event_type = 'action_start'").get().session_group_id;
+  assert.ok(group);
+  assert.deepEqual(stateOf(sqlite), { tripId: "t1", actionId: "a1", sessionGroupId: group, runId, sessionNumber: 1 });
   await send(env, token, [ev(3, "action_end")]);
-  assert.deepEqual(stateOf(sqlite), { tripId: "t1", runId });
-  assert.equal(marks(sqlite, "type = 'Session End'").length, 1);
+  assert.deepEqual(stateOf(sqlite), { tripId: "t1", runId, sessionNumber: 1 });
   assert.equal((await send(env, token, [ev(4, "action_end")]))[0].status, "created", "ending with nothing running is harmless");
-  assert.equal(marks(sqlite, "type = 'Session End'").length, 1);
+  await send(env, token, [ev(5, "action_start", { actionId: "a2" })]);
+  assert.equal(stateOf(sqlite).sessionNumber, 2, "the trip's actions are numbered from 1");
+  assert.equal(marks(sqlite, "type IN ('Session Start', 'Session End')").length, 0);
 });
 
-test("events: Session Start, Session End and Catch all take the water condition and depth the controller has set", async () => {
+test("events: the action_start log entry takes the water condition and depth the controller has set; a catch's own are on the catch", async () => {
   const { sqlite, env, token } = await seeded();
   await send(env, token, [ev(1, "trip_start", { tripId: "t1" })]);
   await send(env, token, [ev(2, "action_start", { actionId: "a1", water: "Clear", depth: 2 })]);
   await send(env, token, [ev(3, "catch", { actionId: "a1", species: "Bream", size: 30, fate: "keep", water: "Dirty", depth: 3 })]);
-  // switching action: both the End of the first and the Start of the second get the values in force at that moment
   await send(env, token, [ev(4, "action_start", { actionId: "a2", water: "Dirty", depth: 3 })]);
   await send(env, token, [ev(5, "trip_end", { water: "Muddy", depth: 5 })]);
-  const by = Object.fromEntries(marks(sqlite).map((m) => [m.name, m]));
-  assert.equal(by["Estuary Drift 1 Start"].water_condition, "Clear");
-  assert.equal(by["Estuary Drift 1 Start"].water_depth, 2);
-  assert.equal(by["Bream Estuary Drift 1"].water_condition, "Dirty");
-  assert.equal(by["Bream Estuary Drift 1"].water_depth, 3);
-  assert.equal(by["Estuary Drift 1 End"].water_condition, "Dirty", "the End records the conditions when it ended, not the Start's");
-  assert.equal(by["Estuary Drift 1 End"].water_depth, 3);
-  assert.equal(by["Estuary Anchor 2 Start"].water_depth, 3);
-  assert.equal(by["Estuary Anchor 2 End"].water_condition, "Muddy");
-  assert.equal(by["Estuary Anchor 2 End"].water_depth, 5);
-});
-
-test("events: a Session End with no water/depth in the event keeps the Start's values", async () => {
-  const { sqlite, env, token } = await seeded();
-  await send(env, token, [ev(1, "action_start", { actionId: "a1", water: "Clear", depth: 2 })]);
-  await send(env, token, [ev(2, "action_end")]);
-  const end = marks(sqlite, "type = 'Session End'")[0];
-  assert.equal(end.water_condition, "Clear");
-  assert.equal(end.water_depth, 2);
+  const log = sqlite.prepare("SELECT event_type, action_name, water_condition, water_depth FROM trip_log ORDER BY ts, rowid").all();
+  const pick = (type, action) => log.find((r) => r.event_type === type && (action === undefined || r.action_name === action));
+  assert.deepEqual([pick("action_start", "Drift").water_condition, pick("action_start", "Drift").water_depth], ["Clear", 2]);
+  assert.deepEqual([pick("catch").water_condition, pick("catch").water_depth], ["Dirty", 3]);
+  assert.equal(pick("action_start", "Anchor").water_depth, 3);
+  assert.deepEqual([pick("trip_end").water_condition, pick("trip_end").water_depth], ["Muddy", 5]);
+  const bream = marks(sqlite, "type = 'Catch'")[0];
+  assert.deepEqual([bream.water_condition, bream.water_depth], ["Dirty", 3]);
 });
 
 test("events: a Too small catch has no size, is released and carries the Too small note — like the Live +Catch", async () => {
@@ -371,7 +350,7 @@ test("events: bad events are rejected one by one without stopping the rest, and 
   assert.equal((await api(env, token, "POST", "/api/controller/events", { nope: true })).status, 400);
 });
 
-test("events: a catch with no running action is just what the controller sent; session numbers follow the day's chain", async () => {
+test("events: a catch with no running action is just what the controller sent; a trip's actions are numbered from 1", async () => {
   const { sqlite, env, token } = await seeded();
   await send(env, token, [ev(1, "catch", { species: "Squid", size: 18, fate: "keep", depth: 6 })]);
   const squid = marks(sqlite, "name = 'Squid'")[0];
@@ -379,7 +358,10 @@ test("events: a catch with no running action is just what the controller sent; s
   assert.equal(squid.berley, null);
   assert.equal(squid.water_depth, 6);
   await send(env, token, [ev(2, "action_start", { actionId: "a1" }), ev(3, "action_start", { actionId: "a2" }), ev(4, "action_start", { actionId: "a1" })]);
-  assert.deepEqual(marks(sqlite, "type = 'Session Start'").map((m) => m.name), ["Estuary Drift 1 Start", "Estuary Anchor 2 Start", "Estuary Drift 3 Start"]);
+  assert.equal(stateOf(sqlite).sessionNumber, 3);
+  await send(env, token, [ev(5, "catch", { actionId: "a1", species: "Bream", size: 30, fate: "keep" })]);
+  assert.ok(marks(sqlite, "name = 'Bream Estuary Drift 3'").length, "the running action's number is in the catch's default name");
+  assert.equal(marks(sqlite, "type IN ('Session Start', 'Session End')").length, 0);
 });
 
 test("events: one user's token can't touch another user's trips or actions", async () => {
@@ -419,14 +401,6 @@ test("events: a long backlog is taken in slices — the rest come back 'deferred
   }
   assert.equal(left.length, 0);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM marks").get().n, 14);
-});
-
-test("events: an action started with a water condition and depth carries them on its Session Start", async () => {
-  const { sqlite, env, token } = await seeded();
-  await send(env, token, [ev(1, "action_start", { actionId: "a1", water: "Murky", depth: 3.5 })]);
-  const start = marks(sqlite, "type = 'Session Start'")[0];
-  assert.equal(start.water_condition, "Murky");
-  assert.equal(start.water_depth, 3.5);
 });
 
 const trackPoint = (n, extra = {}) => ({ ts: T0 + n * 20, lat: -38.1 + n * 0.0001, lng: 145.2, acc: 8, ...extra });
@@ -595,16 +569,16 @@ test("trip log: marks of a trip run are listed for the controller, and mark_upda
   await send(env, token, [ev(1, "trip_start", { tripId: "t1" }), ev(2, "action_start", { actionId: "a1" }), ev(3, "catch", { actionId: "a1", species: "Bream", size: 31, fate: "keep" })]);
   const runId = stateOf(sqlite).runId;
   assert.ok(runId, "the trip has a run id");
-  assert.equal(marks(sqlite, `trip_run_id = '${runId}'`).length, 2, "Session Start and the Catch carry it");
+  assert.equal(marks(sqlite, `trip_run_id = '${runId}'`).length, 1, "the Catch carries it");
 
   // other trips' marks and other users' don't list
   sqlite.prepare("INSERT INTO marks (id, user_id, lat, lng, type, date_time, source, created_at, trip_run_id) VALUES ('old', 'u1', 0, 0, 'Catch', '2026-01-01 10:00:00', 'Controller', 1, 'run_other')").run();
   const listed = await (await api(env, token, "GET", "/api/controller/marks")).json();
   assert.equal(listed.runId, runId);
-  assert.deepEqual(listed.marks.map((m) => m.type), ["Session Start", "Catch"]);
+  assert.deepEqual(listed.marks.map((m) => m.type), ["Catch"]);
   assert.equal((await api(env, null, "GET", "/api/controller/marks")).status, 401);
 
-  const catchId = listed.marks[1].id;
+  const catchId = listed.marks[0].id;
   let r = await update(env, token, "mark_update", 10, { markId: catchId, changes: { species: "Flathead", size: 42, released: true, weatherCondition: "Overcast", windDirection: "NE", notes: "  nice  " } });
   assert.equal(r[0].status, "created");
   const row = sqlite.prepare("SELECT * FROM marks WHERE id = ?").get(catchId);
@@ -635,7 +609,6 @@ test("trip log: marks of a trip run are listed for the controller, and mark_upda
     { markId: catchId, changes: { rigOptions: ["Vibe"] } }, // not Paternoster's
     { markId: catchId, changes: {} },
     { markId: "old2", changes: { size: 3 } },
-    { markId: listed.marks[0].id, changes: { size: 3 } }, // a Session has no size
   ];
   const out = [];
   for (const [i, extra] of bad.entries()) out.push((await update(env, token, "mark_update", 20 + i, extra))[0]);
@@ -652,21 +625,21 @@ test("trip log: the run id survives actions starting and ending, and a trip star
   const runId = stateOf(sqlite).runId;
   await send(env, token, [ev(2, "action_start", { actionId: "a1" }), ev(3, "action_end"), ev(4, "action_start", { actionId: "a2" })]);
   assert.equal(stateOf(sqlite).runId, runId);
-  assert.equal(marks(sqlite, `trip_run_id = '${runId}'`).length, 3, "Start, End, Start");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log WHERE run_id = ?").get(runId).n, 4, "trip start, action start, action end, action start");
 
   sqlite.prepare("UPDATE user_prefs SET value = '{\"tripId\":\"t1\"}' WHERE user_id = 'u1' AND key = 'liveActiveTrip'").run();
   await send(env, token, [ev(5, "action_start", { actionId: "a1" })]);
   assert.ok(stateOf(sqlite).runId && stateOf(sqlite).runId !== runId);
 });
 
-test("trip and action names: stamped on Session Start / End and Catch, editable from the controller from existing names only", async () => {
+test("trip and action names: stamped on Catch marks, editable from the controller from existing names only", async () => {
   const { sqlite, env, token } = await seeded();
   await send(env, token, [ev(1, "trip_start", { tripId: "t1" }), ev(2, "action_start", { actionId: "a1" }), ev(3, "catch", { actionId: "a1", species: "Bream", size: 31, fate: "keep" }), ev(4, "action_end")]);
   for (const m of marks(sqlite)) {
     assert.equal(m.trip_name, "Estuary", m.type);
     assert.equal(m.action_name, "Drift", m.type);
   }
-  assert.equal(marks(sqlite).length, 3);
+  assert.equal(marks(sqlite).length, 1, "the catch is the only mark");
   // the catch with no running action carries neither
   await send(env, token, [ev(5, "catch", { species: "Bream", size: 30, fate: "keep" })]);
   const loose = sqlite.prepare("SELECT * FROM marks ORDER BY created_at DESC, rowid DESC LIMIT 1").get();
@@ -693,8 +666,8 @@ test("trip and action names: stamped on Session Start / End and Catch, editable 
 
 test("mark_update: the date and time can be edited (and a bad one is refused)", async () => {
   const { sqlite, env, token } = await seeded();
-  await send(env, token, [ev(1, "trip_start", { tripId: "t1" }), ev(2, "action_start", { actionId: "a1" })]);
-  const id = sqlite.prepare("SELECT id FROM marks WHERE type = 'Session Start'").get().id;
+  await send(env, token, [ev(1, "trip_start", { tripId: "t1" }), ev(2, "action_start", { actionId: "a1" }), ev(3, "catch", { actionId: "a1", species: "Bream", size: 30, fate: "keep" })]);
+  const id = sqlite.prepare("SELECT id FROM marks WHERE type = 'Catch'").get().id;
   assert.equal((await update(env, token, "mark_update", 10, { markId: id, changes: { dateTime: "2026-10-02 10:25:00" } }))[0].status, "created");
   assert.equal(sqlite.prepare("SELECT date_time FROM marks WHERE id = ?").get(id).date_time, "2026-10-02 10:25:00");
   assert.equal((await update(env, token, "mark_update", 11, { markId: id, changes: { dateTime: "yesterday" } }))[0].status, "rejected");
@@ -745,7 +718,7 @@ test("trip log: a controller trip is logged with full states, and the data answe
   assert.equal(rows[1].water_depth, 3);
   assert.equal(rows[1].berley, "Pilchard Mix");
   assert.deepEqual(JSON.parse(rows[1].targets), ["Bream"]);
-  assert.ok(rows[1].mark_id, "the Session Start mark");
+  assert.equal(rows[1].mark_id, null, "an action has no mark of its own");
   assert.equal(rows[1].conditions_at, null, "weather/tide are backfilled later");
   assert.equal(rows[2].water_condition, "Murky");
   const catchRow = rows[3];
@@ -791,8 +764,8 @@ test("trip log: a trip started on the site (no run id) gets one at its first log
 
 test("/api/triplog: the site posts entries (idempotent), reads a run by mark, and backfills conditions", async () => {
   const { sqlite, env, token } = await seeded();
-  await send(env, token, [ev(1, "trip_start", { tripId: "t1" }), ev(2, "action_start", { actionId: "a1" })]);
-  const startMark = sqlite.prepare("SELECT id FROM marks WHERE type = 'Session Start'").get().id;
+  await send(env, token, [ev(1, "trip_start", { tripId: "t1" }), ev(2, "action_start", { actionId: "a1" }), ev(3, "catch", { actionId: "a1", species: "Bream", size: 31, fate: "keep" })]);
+  const startMark = sqlite.prepare("SELECT id FROM marks WHERE type = 'Catch'").get().id;
   const run = logRows(sqlite)[0].run_id;
 
   const entry = {
@@ -810,7 +783,7 @@ test("/api/triplog: the site posts entries (idempotent), reads a run by mark, an
 
   const read = await (await site(env, "GET", `/api/triplog?markId=${startMark}`)).json();
   assert.equal(read.runId, run);
-  assert.deepEqual(read.entries.map((e) => e.type), ["trip_start", "action_start", "change"]);
+  assert.deepEqual(read.entries.map((e) => e.type), ["trip_start", "action_start", "catch", "change"]);
   assert.equal(read.entries.find((e) => e.type === "change").rods[0].bait[0], "Prawn");
   assert.equal((await (await site(env, "GET", `/api/triplog?markId=${startMark}`, undefined, "s-u2")).json()).runId, null, "not someone else's");
 

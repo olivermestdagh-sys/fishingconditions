@@ -15,7 +15,7 @@ const workerSrc = read("../user-backend.js");
 const tripPure = tripSrc.slice(0, tripSrc.indexOf("// --- Backend"));
 const livePure = liveSrc.slice(0, liveSrc.indexOf("// --- DOM:"));
 const browser = new Function(
-  `${limitsSrc}\n${tripPure}\n${livePure}\nreturn { buildSessionStartFromAction, buildSessionEndFromStart, buildCatchFromCards, tdCatchFieldsFromAction, nextSessionNumber, sessionNumberFromName, tripCatchName };`
+  `${limitsSrc}\n${tripPure}\n${livePure}\nreturn { buildCatchFromCards, tdCatchFieldsFromAction, tripCatchName };`
 )();
 
 // Worker side: the ctl* helpers and constants, pulled out of the Worker file.
@@ -26,22 +26,14 @@ const grab = (re) => {
 };
 const worker = new Function(
   [
-    grab(/const CTL_RUN_GAP_MS[^\n]*\n/),
-    grab(/function ctlTripMarkName[\s\S]*?\n}\n/),
     grab(/function ctlTripCatchName[\s\S]*?\n}\n/),
     grab(/function ctlUniq[\s\S]*?\n}\n/),
     grab(/function ctlLiveRodSetupIds[\s\S]*?\n}\n/),
-    grab(/function ctlBuildSessionStart[\s\S]*?\n}\n/),
-    grab(/const CTL_SESSION_END_CARRIED_FIELDS[^\n]*\n/),
-    grab(/function ctlBuildSessionEnd[\s\S]*?\n}\n/),
     grab(/function ctlCatchFieldsFromAction[\s\S]*?\n}\n/),
     grab(/function ctlBuildCatch[\s\S]*?\n}\n/),
-    grab(/function ctlSessionNumberFromName[\s\S]*?\n}\n/),
-    grab(/function ctlCatchChain[\s\S]*?\n}\n/),
-    grab(/function ctlNextSessionNumber[\s\S]*?\n}\n/),
     grab(/function ctlNaiveFromEpoch[\s\S]*?\n}\n/),
     grab(/function ctlSpeciesOrder[\s\S]*?\n}\n/),
-    "return { ctlBuildSessionStart, ctlBuildSessionEnd, ctlBuildCatch, ctlNextSessionNumber, ctlSessionNumberFromName, ctlNaiveFromEpoch, ctlSpeciesOrder };",
+    "return { ctlBuildCatch, ctlNaiveFromEpoch, ctlSpeciesOrder };",
   ].join("\n")
 )();
 
@@ -57,22 +49,6 @@ const actions = {
   empty: { id: "a3", tripId: "t1", name: "Move", species: [], fishingMethod: [], berley: null, bait: [], rodSetupIds: [] },
 };
 const at = { lat: -38.1, lng: 145.2, dateTime: "2026-10-02 10:15:30", createdAt: "2026-10-02 10:15:30" };
-
-test("Session Start from an action: same mark as the browser's", () => {
-  for (const [name, action] of Object.entries(actions)) {
-    for (const extra of [{}, { water: "Murky", waterDepth: 4.2 }, { waterDepth: 0 }]) {
-      const ctx = { id: "m1", ...at, sessionGroupId: "g1", sessionNumber: 3, tripName: "Weekend", ...extra };
-      assert.deepEqual(worker.ctlBuildSessionStart(action, rodSetups, ctx), browser.buildSessionStartFromAction(action, rodSetups, ctx, undefined), `${name} ${JSON.stringify(extra)}`);
-    }
-  }
-});
-
-test("Session End closing a start: same mark as the browser's", () => {
-  const start = browser.buildSessionStartFromAction(actions.full, rodSetups, { id: "m1", ...at, sessionGroupId: "g1", sessionNumber: 2, tripName: "Weekend", water: "Clear", waterDepth: 3 }, { tideCondition: "Running In", tideExtreme: "HHW" });
-  const end = { id: "m2", lat: -38.2, lng: 145.3, dateTime: "2026-10-02 12:00:00", createdAt: "2026-10-02 12:00:00" };
-  assert.deepEqual(worker.ctlBuildSessionEnd(start, end, 2), browser.buildSessionEndFromStart(start, end, 2));
-  assert.equal(worker.ctlBuildSessionEnd(start, end, 2).tideCondition, "Running In", "tide is carried over from the start");
-});
 
 test("Catch on a running action: same mark as the Live +Catch flow saves", () => {
   const cases = [
@@ -114,25 +90,6 @@ test("Catch with a Bait answer: the answer is the mark's bait, as the Live +Catc
 test("a catch with no running action has only what the controller sent", () => {
   const m = worker.ctlBuildCatch({ id: "m1", ...at, species: "Squid", size: 18, released: false, waterDepth: 6, source: "Controller" }, null, rodSetups);
   assert.deepEqual(m, { id: "m1", lat: at.lat, lng: at.lng, name: "Squid", type: "Catch", dateTime: at.dateTime, createdAt: at.dateTime, source: "Controller", species: "Squid", size: 18, waterDepth: 6 });
-});
-
-test("the next session number follows the browser's rule", () => {
-  const H = 3600000;
-  const base = Date.UTC(2026, 9, 2, 6, 0, 0);
-  const scenarios = [
-    { starts: [], anchor: base },
-    { starts: [{ tMs: base - 2 * H, number: 1 }], anchor: base },
-    { starts: [{ tMs: base - 3 * H, number: 1 }, { tMs: base - 2 * H, number: 2 }, { tMs: base - H, number: 4 }], anchor: base },
-    { starts: [{ tMs: base - 20 * H, number: 5 }], anchor: base },
-    { starts: [{ tMs: base - 2 * H, number: NaN }, { tMs: NaN, number: 3 }], anchor: base },
-  ];
-  for (const s of scenarios) {
-    assert.equal(worker.ctlNextSessionNumber(s.starts, s.anchor), browser.nextSessionNumber(s.starts, s.anchor), JSON.stringify(s));
-  }
-  assert.equal(worker.ctlNextSessionNumber(scenarios[2].starts, base), 5, "highest number in the run plus one");
-  for (const n of ["Session 3 Start", "Session 12 End", "session 7 start", "Session x Start", "Weekend Drift 4 Start", "Weekend Drift 11 End", "Bream", "", null]) {
-    assert.equal(worker.ctlSessionNumberFromName(n), browser.sessionNumberFromName(n), String(n));
-  }
 });
 
 test("UTC epoch seconds become the site's naive local time", () => {

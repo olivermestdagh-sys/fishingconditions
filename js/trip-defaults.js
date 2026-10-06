@@ -26,40 +26,6 @@ function tdRigSublist(rigRow, overrides) {
   return (overrides && overrides.get(rigRow.id)) || [];
 }
 
-/**
- * The Session Start mark for a trip Action (Live mode): named "Session N Start" (the number nextSessionNumber gives), with
- * the Action's species / fishing method / berley, and rod / rig / rigOptions / bait / baitOptions gathered from its Rod Setups
- * (unique names, comma-joined; rigOptions = the rigs' sub-list items). `ctx` supplies what only the caller knows: id, lat,
- * lng, dateTime, createdAt, sessionGroupId, sessionNumber, tripName (the running trip's name; the mark also records the action's own name), water (Water Condition default) and waterDepth (the Depth default, or the last mark's). `tide` is
- * {tideCondition, tideExtreme} worked out for the time.
- */
-function buildSessionStartFromAction(action, rodSetups, ctx, tide) {
-  const uniq = (list) => [...new Set((list || []).filter((v) => v != null && String(v).trim() !== "").map((v) => String(v).trim()))];
-  const setups = (action.rodSetupIds || []).map((rid) => (rodSetups || []).find((r) => r.id === rid)).filter(Boolean);
-  const mark = {
-    id: ctx.id, lat: ctx.lat, lng: ctx.lng, name: tripMarkName(ctx.tripName, action.name, ctx.sessionNumber, "Start"), type: "Session Start",
-    dateTime: ctx.dateTime, createdAt: ctx.createdAt, source: "Manual", sessionRole: "start", sessionGroupId: ctx.sessionGroupId,
-  };
-  const set = (key, list) => {
-    if (list.length) mark[key] = list.join(", ");
-  };
-  if (ctx.tripName) mark.tripName = ctx.tripName;
-  if (action.name) mark.actionName = action.name;
-  set("species", uniq(action.species));
-  set("fishingMethod", uniq(action.fishingMethod));
-  if (action.berley) mark.berley = action.berley;
-  set("bait", uniq(setups.flatMap((s) => s.bait || [])));
-  set("rod", uniq(setups.map((s) => s.rod)));
-  set("rig", uniq(setups.map((s) => s.rig)));
-  set("rigOptions", uniq(setups.flatMap((s) => s.subListItems || [])));
-  set("baitOptions", uniq(setups.flatMap((s) => s.baitOptions || [])));
-  if (ctx.water) mark.waterCondition = ctx.water;
-  if (ctx.waterDepth != null) mark.waterDepth = ctx.waterDepth;
-  if (tide && tide.tideCondition) mark.tideCondition = tide.tideCondition;
-  if (tide && tide.tideExtreme) mark.tideExtreme = tide.tideExtreme;
-  return mark;
-}
-
 /** Species targeted by the trip's OTHER actions (not `action` itself), in order, without duplicates. */
 function tdOtherTargets(actions, action) {
   const seen = new Set(action.species || []);

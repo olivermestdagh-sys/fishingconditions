@@ -502,29 +502,6 @@ function buildSessionStartFromCards({ id, lat, lng, dateTime, createdAt, session
   return mark;
 }
 
-/** Fields carried from a Session Start into the Session End that closes it out (the "+ Session" auto-close and the
- * "End Session/Move" button both use this) — "the same values as the previous Session Start". Everything about
- * WHERE/WHEN the End record itself is (id/lat/lng/dateTime/createdAt) is the caller's own: ending a session
- * happens at a different time/place than starting it. */
-const SESSION_END_CARRIED_FIELDS = ["species", "waterCondition", "berley", "fishingMethod", "waterDepth", "rod", "rig", "bait", "rigOptions", "baitOptions", "tideCondition", "tideExtreme", "tripName", "actionName"];
-
-/**
- * The Session End mark that closes out `startMark` (a loaded Session Start mark): named "Session N End"
- * (`sessionNumber` — the number `startMark` itself was given), linked to it by sessionGroupId, at the caller's own
- * (id, lat, lng, dateTime, createdAt) — every other field is copied straight from startMark, left off when
- * startMark doesn't have it either.
- */
-function buildSessionEndFromStart(startMark, { id, lat, lng, dateTime, createdAt }, sessionNumber) {
-  const mark = {
-    id, lat, lng, name: tripMarkName(startMark.tripName, startMark.actionName, sessionNumber, "End"), type: "Session End", dateTime, createdAt,
-    source: "Manual", sessionRole: "end", sessionGroupId: startMark.sessionGroupId,
-  };
-  for (const key of SESSION_END_CARRIED_FIELDS) {
-    if (startMark[key] != null && startMark[key] !== "") mark[key] = startMark[key];
-  }
-  return mark;
-}
-
 // --- DOM: the full-screen card stack ------------------------------------------------------------
 
 /**

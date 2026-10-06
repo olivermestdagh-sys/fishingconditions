@@ -434,11 +434,10 @@ function addCatchToLiveMap(mark) {
   state.markersById.set(mark.id, marker);
 }
 
-// The running trip Action (see "Live trips" below), or null when no Action's session is active.
+// The running trip Action (see "Live trips" below), or null when no Action is running.
 function liveActiveTripAction() {
   const state = getLiveTripState();
-  const active = liveActiveSession();
-  if (!state || !state.actionId || !liveTripData || !active || active.mark.sessionGroupId !== state.sessionGroupId) return null;
+  if (!state || !liveActiveSession() || !liveTripData) return null;
   return liveTripData.actions.find((a) => a.id === state.actionId) || null;
 }
 
@@ -586,64 +585,21 @@ async function startLiveCatch() {
   });
 }
 
-// The Session Start/End marks currently on the Live map: {starts: [Session Start marks], endedGroupIds: Set of
-// every Session End's sessionGroupId}. Null until the marks have loaded — same null-until-loaded convention as
-// liveCatchContext's `run`.
-function liveSessionMarks() {
-  const state = liveMarkState;
-  if (!state || !state.markerLayer) return null;
-  const starts = [];
-  const endedGroupIds = new Set();
-  for (const m of state.marksById.values()) {
-    if (!m) continue;
-    if (m.type === "Session Start" && m.dateTime) starts.push(m);
-    else if (m.type === "Session End" && m.sessionGroupId) endedGroupIds.add(m.sessionGroupId);
-  }
-  return { starts, endedGroupIds };
-}
-
-// The existing Session Start marks' own times AND numbers — [{tMs, number}], the shape js/catch-limits.js's
-// nextSessionNumber needs to find the HIGHEST number already used in a chain rather than just count how many
-// exist (a session deleted from the middle of a chain must not let a later survivor's number get reused — see
-// nextSessionNumber's own comment). `number` comes straight from each mark's own name (sessionNumberFromName);
-// a mark whose name doesn't parse is left out, same as one with no usable time. Null until the marks have loaded.
-function liveSessionStarts() {
-  const sm = liveSessionMarks();
-  if (!sm) return null;
-  const out = [];
-  for (const m of sm.starts) {
-    const tMs = parseNaive(m.dateTime);
-    const number = sessionNumberFromName(m.name);
-    if (Number.isFinite(tMs) && number != null) out.push({ tMs, number, mark: m });
-  }
-  return out;
-}
-
-// The currently active session — the most recently started one that has no Session End sharing its sessionGroupId
-// yet: {mark, number}, or null when there isn't one (or the marks haven't loaded, or its name doesn't parse — play
-// safe rather than show a guessed number). `number` is read straight from the mark's own name, not recomputed.
+// The running session is the running trip's Action: the account's liveActiveTrip state (see "Live trips" below) holds
+// {actionId, sessionGroupId, sessionNumber} while an Action runs. {actionId, sessionGroupId, number}, or null when no Action is
+// running. `number` (1, 2, 3 ... per trip run) goes into the catch's default name; null when the state predates numbering.
+// There are no Session Start / End marks any more: the trip log records the actions (js/trip-log.js).
 function liveActiveSession() {
-  const sm = liveSessionMarks();
-  if (!sm || !sm.starts.length) return null;
-  const sorted = [...sm.starts].sort((a, b) => parseNaive(a.dateTime) - parseNaive(b.dateTime));
-  const latest = sorted[sorted.length - 1];
-  if (!latest.sessionGroupId || sm.endedGroupIds.has(latest.sessionGroupId)) return null;
-  const number = sessionNumberFromName(latest.name);
-  return number != null ? { mark: latest, number } : null;
+  const state = getLiveTripState();
+  if (!state || !state.actionId || !state.sessionGroupId) return null;
+  return { actionId: state.actionId, sessionGroupId: state.sessionGroupId, number: Number.isFinite(state.sessionNumber) ? state.sessionNumber : null };
 }
 
-// Keeps "+ Session"/"End Session…/Move"/"+ Catch" in step with whatever's actually on the map: the next number to
-// show on + Session, and End Session's/+Catch's own visibility (+ End Session's label) from the currently active
-// session — +Catch only makes sense once a session's actually underway to log the catch against, same as End
-// Session. Nothing but + Session's base text shown at all until the marks have loaded — never guess "Session 1"
-// or show +Catch before there's actually a session known to be active, same reasoning as the bag counts staying
-// blank until a run is known. Called once loadAndRenderMarks resolves, and after every save that can change
-// session state (saveLiveSession, saveLiveEndSession).
+// Keeps the trip's action buttons and +Catch in step with the running trip: +Catch only makes sense while an Action is running
+// to log the catch against. Called once loadAndRenderMarks resolves, after an account sync, and after every Action start / end.
 function updateLiveSessionButtons() {
   if (!liveMap || !liveMarkState) return; // not in Live mode (or it's been left) — applyModeChrome already hid it
   renderLiveTripUI(); // the trip's action buttons show active only while their session is
-  // +Catch only makes sense once a session's actually underway to log the catch against; liveActiveSession() is null
-  // until the marks have loaded, so it stays hidden until then rather than guessing.
   document.getElementById("btnLiveCatch").style.display = liveActiveSession() && cachedIsSignedIn ? "" : "none";
 }
 
@@ -774,10 +730,9 @@ function openLiveDepth() {
 }
 
 // --- Live trips (js/trip-defaults.js): Start Trip -> the trip's Actions as toolbar buttons -----------------
-// Tapping an Action starts a session from it (Session Start mark) and shows it active; tapping it again ends the session;
-// tapping another ends the active one first and starts the new one. Which Action is active is never stored as a flag: the
-// stored {actionId, sessionGroupId} only counts while liveActiveSession() really is that session, so ending it any other
-// way (End Session/Move, "+ Session") un-actives the button by itself.
+// Tapping an Action starts it (a trip-log entry, no mark) and shows it active; tapping it again ends it; tapping another ends
+// the active one first and starts the new one. Which Action is running is the trip state itself: {actionId, sessionGroupId,
+// sessionNumber} in liveActiveTrip (it is cleared by an action end, kept by the next start).
 const LIVE_TRIP_KEY = "liveActiveTrip";
 let liveTripData = null; // {trips, actions, rodSetups}, loaded lazily
 let liveTripBusy = false;
@@ -902,8 +857,7 @@ function renderLiveTripUI() {
     setLiveTripButton(btn, false);
     return;
   }
-  const active = liveActiveSession();
-  const activeGroup = active && state.sessionGroupId && active.mark.sessionGroupId === state.sessionGroupId ? state.actionId : null;
+  const activeGroup = liveActiveSession() ? state.actionId : null;
   box.innerHTML = tdActionsForTrip(liveTripData.actions, trip.id)
     .map((a) => {
       const on = a.id === activeGroup ? " active" : "";
@@ -913,20 +867,6 @@ function renderLiveTripUI() {
         `<button type="button" class="btn-secondary live-quick-btn live-trip-action live-trip-gear${on}" data-trip-action-edit="${escapeHtml(a.id)}" aria-label="Edit ${escapeHtml(a.name)}" title="Edit action"${off}>${TD_GEAR_SVG}</button></span>`;
     })
     .join("") || `<span class="map-toolbar-status">No actions in ${escapeHtml(trip.name)} yet — add some in Trip Defaults.</span>`;
-}
-
-// Ends `active` (a liveActiveSession()) at `position`: the Session End mark, saved and drawn. Null (with a toast) on failure.
-async function liveCloseActiveSession(active, position) {
-  const mark = buildSessionEndFromStart(active.mark, {
-    id: makeMarkId(), lat: position.lat, lng: position.lng, dateTime: nowAsNaiveString(), createdAt: nowAsNaiveString(),
-  }, active.number);
-  const result = await saveMarkToD1(mark, true);
-  if (!result.success) {
-    showLiveToast(`Couldn't end Session ${active.number}: ` + result.error, true);
-    return null;
-  }
-  addCatchToLiveMap(mark);
-  return mark;
 }
 
 // Tap Start Trip: pick one trip (one card). While a trip is running the same button is End Trip.
@@ -964,20 +904,17 @@ async function onStartTripClick() {
   });
 }
 
-// End Trip: closes the session this trip's Action started (if it is still running), then clears the trip.
+// End Trip: logs the end of the running Action (if any) with the trip, then clears the trip.
 async function endLiveTrip(state) {
   liveTripBusy = true;
   try {
-    const active = liveActiveSession();
     let position = liveTripPosition();
-    if (active && state.sessionGroupId && active.mark.sessionGroupId === state.sessionGroupId) {
-      position = await getFreshGpsPosition();
+    if (liveActiveSession()) {
+      position = await getFreshGpsPosition(); // an Action is running: the trip ends where you are
       if (!position) {
         showLiveToast("Couldn't get your location — trip not ended.", true);
         return;
       }
-      const ended = await liveCloseActiveSession(active, position);
-      if (!ended) return;
     }
     const runState = liveTripRunState() || state;
     const d = getLiveMarkDefaults();
@@ -1008,57 +945,32 @@ async function onTripActionTap(actionId) {
       showLiveToast("Couldn't get your location — nothing saved.", true);
       return;
     }
-    const active = liveActiveSession();
-    const wasThisAction = !!active && state.actionId === actionId && state.sessionGroupId === active.mark.sessionGroupId;
-    let ended = null;
-    if (active) {
-      // Whichever session is running is closed first (same as "+ Session"); stop here if that fails so nothing is left half done.
-      ended = await liveCloseActiveSession(active, position);
-      if (!ended) return;
-    }
+    const wasThisAction = !!liveActiveSession() && state.actionId === actionId;
     const runState = liveTripRunState() || state;
     const runId = runState.runId;
     const logD = getLiveMarkDefaults();
     if (wasThisAction) {
-      setLiveTripState({ tripId: state.tripId, runId });
+      setLiveTripState({ tripId: state.tripId, runId, sessionNumber: state.sessionNumber });
       // an Action ending just marks the end of doing something one way: time and place (and the conditions it ended in)
       logTripEvent({ ...runState, runId }, {
         type: "action_end", tripId: state.tripId, tripName: liveTripNameOf(state.tripId), actionId: action.id, actionName: action.name, sessionGroupId: state.sessionGroupId || null,
         water: logD.water || null, depth: logD.depth, lat: position.lat, lng: position.lng,
       });
       updateLiveSessionButtons();
-      showLiveToast(`${ended.name} saved`);
+      showLiveToast(`${action.name} ended`);
       return;
     }
-    let tide = {};
-    try {
-      tide = computeQuickMarkDefaults(getRowsForCurrentLoc());
-    } catch {
-      tide = {}; // no tide data for this spot: the save fills what it can from looked-up data
-    }
-    const now = nowAsNaiveString();
-    const mark = buildSessionStartFromAction(action, liveTripData.rodSetups, {
-      id: makeMarkId(), lat: position.lat, lng: position.lng, dateTime: now, createdAt: now, sessionGroupId: makeMarkId(),
-      sessionNumber: nextSessionNumber(liveSessionStarts() || [], parseNaive(now)),
-      tripName: ((liveTripData.trips || []).find((t) => t.id === action.tripId) || {}).name || "",
-      water: getLiveMarkDefaults().water || "", waterDepth: getLiveMarkDefaults().depth ?? getLastMarkFieldValues().waterDepth ?? null,
-    }, tide);
-    const result = await saveMarkToD1(mark, true);
-    if (!result.success) {
-      showLiveToast("Session not saved: " + result.error, true);
-      if (ended) setLiveTripState({ tripId: state.tripId, runId }); // the old one is closed, the new one never started
-      return;
-    }
-    saveLastMarkFieldValues(mark);
-    addCatchToLiveMap(mark);
-    setLiveTripState({ tripId: state.tripId, actionId, sessionGroupId: mark.sessionGroupId, runId });
-    // starting an Action logs its whole state (rod setups, water, depth); it also ends the previous Action, which needs no row of its own
+    // Starting an Action ends the running one (it needs no row of its own: see the trip log's reporting rule) and logs the whole new state.
+    // The numbers count the trip's Actions from 1 and go into the catches' default names.
+    const sessionGroupId = makeMarkId(); // a linking id for this Action's lines in the log
+    const sessionNumber = (Number.isFinite(state.sessionNumber) ? state.sessionNumber : 0) + 1;
+    setLiveTripState({ tripId: state.tripId, actionId, sessionGroupId, runId, sessionNumber });
     logTripEvent({ ...runState, runId }, {
-      type: "action_start", tripId: state.tripId, tripName: liveTripNameOf(state.tripId), sessionGroupId: mark.sessionGroupId, markId: mark.id,
-      water: mark.waterCondition || null, depth: mark.waterDepth ?? null, lat: position.lat, lng: position.lng, ...tripLogActionState(action, liveTripData.rodSetups),
+      type: "action_start", tripId: state.tripId, tripName: liveTripNameOf(state.tripId), sessionGroupId,
+      water: logD.water || null, depth: logD.depth ?? getLastMarkFieldValues().waterDepth ?? null, lat: position.lat, lng: position.lng, ...tripLogActionState(action, liveTripData.rodSetups),
     });
     updateLiveSessionButtons();
-    showLiveToast(ended ? `${ended.name} saved; ${mark.name} saved` : `${mark.name} saved`);
+    showLiveToast(`${action.name} started`);
   } finally {
     liveTripBusy = false;
     renderLiveTripUI();
