@@ -14,10 +14,11 @@ const grab = (text, re) => {
 };
 const fn = (text, name) => grab(text, new RegExp(`function ${name}\\b[\\s\\S]*?\\r?\\n}\\r?\\n`));
 
-const make = (existing) =>
+const make = (existing, logSessions = []) =>
   new Function(
     "existingMarks",
     "trackData",
+    "existingLogSessions",
     [
       grab(sync, /const SYNC_MATCH_RADIUS_M[^\n]*\r?\n/),
       grab(sync, /const SYNC_GRID_DEG[^\n]*\r?\n/),
@@ -34,7 +35,7 @@ const make = (existing) =>
       fn(sync, "refreshSavedSessionFlags"),
       "return { collapseRawWaypoints, matchAgainstExisting, sessionCandidateAlreadySaved, refreshSavedSessionFlags };",
     ].join("\n")
-  )(existing, []);
+  )(existing, [], logSessions);
 
 const ms = (naive) => Date.UTC(+naive.slice(0, 4), +naive.slice(5, 7) - 1, +naive.slice(8, 10), +naive.slice(11, 13) || 0, +naive.slice(14, 16) || 0);
 const raw = (name, naive, lat = -38.4, lng = 145.1) => ({ lat, lng, rawName: name, notes: "", createdAtMs: ms(naive), uuid: null });
@@ -92,6 +93,7 @@ test("saved session candidates are taken out of the import", () => {
   const refresh = new Function(
     "existingMarks",
     "trackData",
+    "existingLogSessions",
     [
       grab(sync, /const SYNC_MATCH_RADIUS_M[^\n]*\r?\n/),
       fn(sync, "syncDateKey"),
@@ -100,10 +102,19 @@ test("saved session candidates are taken out of the import", () => {
       fn(sync, "refreshSavedSessionFlags"),
       "return refreshSavedSessionFlags;",
     ].join("\n")
-  )(existing, trackData);
+  )(existing, trackData, []);
   refresh();
   assert.equal(cands[0].saved, true);
   assert.equal(cands[0].importChecked, false);
   assert.equal(cands[1].saved, false);
   assert.equal(cands[1].importChecked, true);
+});
+
+test("a session already in the trip log counts as saved even with no Session mark", () => {
+  const logged = [{ type: "Session Start", lat: -38.4, lng: 145.1, dateTime: "2026-09-11 11:14:25" }];
+  const { sessionCandidateAlreadySaved } = make([], logged);
+  const point = { lat: -38.4, lon: 145.1, timeNaive: "2026-09-11 11:14:25" };
+  assert.equal(sessionCandidateAlreadySaved(point, "start"), true);
+  assert.equal(sessionCandidateAlreadySaved(point, "end"), false);
+  assert.equal(make([], []).sessionCandidateAlreadySaved(point, "start"), false);
 });

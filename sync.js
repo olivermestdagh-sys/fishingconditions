@@ -34,6 +34,7 @@ let existingMarks = []; // loaded once from the marks database — used both to
                          // import) kept in sync locally so a second import
                          // in the same session matches against what was
                          // just added too, without a re-fetch.
+let existingLogSessions = []; // the trip log's actions as Session Start / End look-alikes (tripLogToReportMarks): a session already in the log counts as saved
 let markLists = []; // config/mark_lists.json rows — species pick-list options
 let knownSpecies = [];
 let candidates = []; // the current file's parsed+deduped candidate marks —
@@ -1257,7 +1258,7 @@ function onToggleAllTracks(field) {
  */
 function sessionCandidateAlreadySaved(point, kind) {
   const date = syncDateKey(point.timeNaive);
-  return existingMarks.some(
+  return [...existingMarks, ...existingLogSessions].some(
     (m) =>
       m.type === (kind === "start" ? "Session Start" : "Session End") &&
       syncDateKey(m.dateTime) === date &&
@@ -1498,6 +1499,17 @@ function buildTrackData(gpxText) {
     .filter((t) => t.dayGroups.length > 0);
 }
 
+/** Loads the trip log's actions as Session Start / End look-alikes (existingLogSessions); empty when it can't be read. */
+async function syncLoadLogSessions() {
+  try {
+    const res = await fetch(`${USER_BACKEND_URL}/api/triplog?report=1&_=${Date.now()}`, { cache: "no-store", credentials: "include" });
+    existingLogSessions = res.ok ? tripLogToReportMarks((await res.json()).entries || []).filter((m) => isSessionType(m.type)) : [];
+  } catch (err) {
+    console.error("Could not read the trip log for matching:", err);
+    existingLogSessions = [];
+  }
+}
+
 /** Re-reads every saved mark (cache-busted), which matching against the file
  * depends on. Returns false — leaving the previous copy in place — if that fails. */
 async function syncRefreshExistingMarks() {
@@ -1507,6 +1519,7 @@ async function syncRefreshExistingMarks() {
     const list = await res.json(); // bare array — see handlePublicMarks, user-backend.js
     if (!Array.isArray(list)) return false;
     existingMarks = list;
+    await syncLoadLogSessions();
     return true;
   } catch (err) {
     console.error("Could not reload the saved marks:", err);
@@ -2582,6 +2595,7 @@ async function syncInit() {
     console.error("Could not reach the marks endpoint:", err);
   }
   existingMarks = existingMarksRes.ok ? await existingMarksRes.json() : []; // bare array — see handlePublicMarks, user-backend.js
+  await syncLoadLogSessions();
   // fetchUnionedMarkLists merges in the signed-in Admin's own personal
   // marklist rows too, not just Public's.
   try {

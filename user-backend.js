@@ -2928,7 +2928,8 @@ async function handleArchiveLookups(request, env) {
 /**
  * Retention: rows older than `keepDays` (30) are deleted unless they lie within
  * `windowHours` (12) of a Session mark (any session's start or end, any
- * location) — the window the Session Ribbon shows. mode "dry" only counts what
+ * location) or of any trip-log row (the trip log replaces the Session marks, which are being retired) — the window the Session
+ * Ribbon showed. mode "dry" only counts what
  * would go; "run" deletes. Called once per pipeline run, after the writes.
  */
 async function handlePipelineObservationsPrune(request, env) {
@@ -2951,8 +2952,12 @@ async function handlePipelineObservationsPrune(request, env) {
        AND NOT EXISTS (
          SELECT 1 FROM marks m
          WHERE m.type IN ('Session Start', 'Session End') AND datetime(m.date_time) BETWEEN datetime(${table}.${timeCol}, ?) AND datetime(${table}.${timeCol}, ?)
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM trip_log t
+         WHERE datetime(t.date_time) BETWEEN datetime(${table}.${timeCol}, ?) AND datetime(${table}.${timeCol}, ?)
        )`;
-  const args = [body.asOf, cutoffMod, before, after];
+  const args = [body.asOf, cutoffMod, before, after, before, after];
 
   const obsCount = await env.DB.prepare(`SELECT COUNT(*) AS n ${doomed("observations", "hour")}`).bind(...args).first();
   const tideCount = await env.DB.prepare(`SELECT COUNT(*) AS n ${doomed("tide_events", "event_time")}`).bind(...args).first();
