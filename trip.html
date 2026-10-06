@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Olie's Kayak and Surf Fishing Conditions – Trip</title>
+<meta name="description" content="Record a fishing trip: start a trip, switch actions, log catches, set water and depth." />
+<meta name="theme-color" content="#0b2a4a" />
+<link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+<link rel="apple-touch-icon" href="images/apple-touch-icon.png" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="stylesheet" href="style.css" />
+<script src="js/install-app.js"></script>
+</head>
+<body class="trip-page">
+
+<div class="sitebar"><header class="topbar">
+  <h1>Olie's Kayak and Surf Fishing Conditions</h1>
+  <div id="status" class="updated">Trip</div>
+  <button type="button" id="installAppBtn" class="install-btn" hidden>Install app</button>
+</header>
+
+<nav class="tabnav">
+  <a href="index.html">Week Ahead</a>
+  <a href="conditions.html">Map</a>
+  <a href="trip.html" class="active" aria-current="page">Trip</a>
+  <a href="reports.html">Reports</a>
+  <a href="triplogs.html">Trip Logs</a>
+  <a href="locations.html">Settings</a>
+</nav></div>
+
+<main class="trip-main">
+  <section id="tripNotConnected" class="summary-card" style="display:none;">
+    <div class="summary-title" style="margin-bottom:6px;">Not signed in</div>
+    <p class="footnote" style="margin:0;text-align:left;">
+      Recording a trip needs you to be signed in — see the Settings tab to sign in.
+    </p>
+  </section>
+
+  <section id="tripApp" style="display:none;"></section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js" integrity="sha384-DhxhYObIMeMNGyAG7iK11OHzBIKyEIeRL0ad1iFPAOwZB8iirUlTT0O/WJJUk8+o" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.2.0/chartjs-plugin-zoom.min.js" integrity="sha512-FRGbE3pigbYamZnw4+uT4t63+QJOfg4MXSgzPn2t8AWg9ofmFvZ/0Z37ZpCawjfXLBSVX2p2CncsmUH2hzsgJg==" crossorigin="anonymous"></script>
+<script src="js/chart-base.js"></script>
+<script src="js/catch-limits.js"></script>
+<script src="js/marks-core.js"></script>
+<script src="js/marks-layer.js"></script>
+<script src="js/marks-tools.js"></script>
+<script src="js/backend.js"></script>
+<script src="js/prefs.js"></script>
+<script src="js/species-image.js"></script>
+<script src="js/live-cards.js"></script>
+<script src="js/weather-preview.js"></script>
+<script src="js/mark-lookup.js"></script>
+<script src="js/chart-render.js"></script>
+<script src="js/week-tools.js"></script>
+<script src="js/trip-defaults.js"></script>
+<script src="js/trip-log.js"></script>
+<script src="js/trip-session.js"></script>
+<script src="trip.js"></script>
+</body>
+</html>

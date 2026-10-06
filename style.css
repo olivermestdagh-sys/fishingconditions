@@ -4026,3 +4026,32 @@ body.live-card-open { overflow: hidden; }
 .trip-pin-F { border-width: 2px; }
 .trip-pin-E { border-radius: 4px; }
 .map-toolbar #tripMapBtn[aria-pressed="true"] { background: var(--navy, #0b2a4a); color: #fff; }
+
+/* ---- Trip tab (trip.html, trip.js): phone-first trip recording, tap-only ---- */
+.trip-main { max-width: 640px; margin: 0 auto; padding: 12px 16px calc(24px + env(safe-area-inset-bottom)); box-sizing: border-box; }
+.trip-card { background: var(--white, #fff); border: 1px solid var(--grey-200, #e5e5e5); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+.trip-title { margin: 0 0 10px; font-size: 1.05rem; }
+.trip-muted { color: var(--grey-600, #666); font-size: 0.9rem; margin: 6px 0 0; }
+.trip-hint { margin-top: 10px; }
+.trip-list { display: grid; gap: 10px; margin-bottom: 8px; }
+.trip-big { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 64px; padding: 12px 16px; border: 0; border-radius: 14px; font-size: 1.15rem; font-weight: 700; color: #fff; cursor: pointer; touch-action: manipulation; box-sizing: border-box; }
+.trip-big:disabled { opacity: 0.45; cursor: default; }
+.trip-go { background: #16a34a; }
+.trip-catch { background: #1d5fa8; min-height: 88px; font-size: 1.4rem; margin-bottom: 12px; }
+.trip-end { background: #dc2626; margin-top: 4px; }
+.trip-link { background: none; border: 0; color: var(--blue-600, #1d5fa8); font-size: 0.95rem; padding: 10px 4px; cursor: pointer; min-height: 44px; }
+.trip-status { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.trip-status-name { font-weight: 700; font-size: 1.1rem; }
+.trip-status-time { font-variant-numeric: tabular-nums; font-size: 1.4rem; font-weight: 700; color: #16a34a; }
+.trip-actions { display: grid; gap: 10px; }
+.trip-pill { display: flex; border: 2px solid var(--grey-300, #ccc); border-radius: 14px; overflow: hidden; background: var(--white, #fff); }
+.trip-pill.active { border-color: #16a34a; background: #16a34a; }
+.trip-pill-main { flex: 1; min-height: 60px; padding: 8px 14px; border: 0; background: transparent; font-size: 1.1rem; font-weight: 600; text-align: left; color: inherit; cursor: pointer; touch-action: manipulation; }
+.trip-pill.active .trip-pill-main, .trip-pill.active .trip-pill-gear { color: #fff; }
+.trip-pill-gear { width: 56px; border: 0; border-left: 1px solid rgba(0, 0, 0, 0.12); background: transparent; color: var(--grey-600, #666); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.trip-pill-gear svg { width: 22px; height: 22px; }
+.trip-pill button:disabled { opacity: 0.6; }
+.trip-conditions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.trip-cond { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 68px; padding: 10px 14px; border: 2px solid var(--grey-300, #ccc); border-radius: 14px; background: var(--white, #fff); color: inherit; cursor: pointer; text-align: left; touch-action: manipulation; }
+.trip-cond-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--grey-600, #666); }
+.trip-cond-value { font-size: 1.25rem; font-weight: 700; }
