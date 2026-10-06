@@ -129,15 +129,14 @@ async function init() {
     }
   );
 
-  liveInitOnce();
-  wireMapToolbar();
+  wireLocateButton();
   wireDeviceToolsMenu();
   initHomesToolbar(); // the house-with-+ button (js/homes.js)
   // A review that was loaded but never finished or cancelled (Import mode,
   // see map-sync.js/sync.js) survives leaving this tab: it's restored here,
   // and the map stays in Import mode until the person imports or cancels.
   const hasSavedReview = cachedIsAdmin ? await syncInit() : false;
-  await setMode(hasSavedReview ? "import" : baseModeFromPrefs());
+  await setMode(hasSavedReview ? "import" : "normal");
 }
 
 // In the installed app (Android), 100dvh can be taller than the window you can actually see — measured on a
@@ -169,31 +168,16 @@ function syncAppHeight() {
 
 // ---------------------------------------------------------------------------
 // Map modes: "normal" (tracked locations + marks, the old Location tab),
-// "live" (GPS, nearest location, quick mark entry — the old Live tab) and
-// "import" (a device export under review — the old Sync tab). Every mode
+// and "import" (a device export under review — the old Sync tab). Every mode
 // draws onto the ONE #locationMap; changing mode tears the old map down and
 // builds a fresh one, so nothing from the previous mode's layers or click
 // handlers can leak into the next.
 // ---------------------------------------------------------------------------
-const LIVE_MODE_STORAGE_KEY = "mapLiveMode"; // per device on purpose (not synced): Live is a phone-in-the-field thing
-
 let mapMode = null;
 let modeToken = 0; // bumped on every mode change, so a slow GPS lookup can tell it's been superseded
-// The marks layer state of whichever map is showing (Normal or Live) — read by
+// The marks layer state of whichever map is showing (Normal or Import) — read by
 // the export button (getVisibleMarks) so it exports exactly what the filters leave visible.
 let currentMarkLayerState = null;
-
-function liveModePreferred() {
-  try {
-    return localStorage.getItem(LIVE_MODE_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function baseModeFromPrefs() {
-  return liveModePreferred() ? "live" : "normal";
-}
 
 // Undoes whatever the current mode put on screen. Never touches saved
 // preferences (hideLocationHoverPanel clears the remembered location, so it
@@ -207,7 +191,6 @@ function teardownMode() {
     state.chart.destroy();
     state.chart = null;
   }
-  if (mapMode === "live") liveExit();
   if (mapMode === "import") syncDetachMap();
   document.getElementById("markControlsBar").style.display = "none";
   detachHomes();
@@ -228,11 +211,6 @@ async function setMode(next) {
     buildImportMap();
     return;
   }
-  if (next === "live") {
-    const built = await liveEnter(() => token !== modeToken);
-    if (built) currentMarkLayerState = built.markLayerState;
-    return;
-  }
   renderLocationMap();
   restoreSavedLocation();
 }
@@ -240,56 +218,16 @@ async function setMode(next) {
 // Which toolbar controls and panels each mode shows.
 function applyModeChrome() {
   const isImport = mapMode === "import";
-  const isLive = mapMode === "live";
-  const liveToggle = document.getElementById("liveModeToggle");
-  liveToggle.checked = isLive || (isImport && liveModePreferred());
-  liveToggle.disabled = isImport;
   const deviceTools = document.getElementById("mapDeviceTools");
   deviceTools.style.display = cachedIsAdmin && mapMode === "normal" ? "flex" : "none";
   if (deviceTools.style.display === "none") {
     const deviceToolsMenu = deviceTools.querySelector(".device-tools-menu");
     if (deviceToolsMenu) deviceToolsMenu.classList.remove("open");
   }
-  const tripDefaultsBtn = document.getElementById("btnTripDefaults");
-  tripDefaultsBtn.style.display = (mapMode === "normal" || isLive) && cachedIsSignedIn ? "" : "none";
-  // Blue only in Live mode; in Normal mode it's the plain grey of the other toolbar buttons.
-  tripDefaultsBtn.classList.toggle("btn-primary", isLive);
-  tripDefaultsBtn.classList.toggle("btn-secondary", !isLive);
-  const addHomeBtn = document.getElementById("btnAddHome");
-  if (isLive) {
-    if (addHomeBtn) addHomeBtn.style.display = "none"; // no adding homes in Live mode
-    if (typeof setHomeAddArmed === "function") setHomeAddArmed(false);
-  }
-  if (isLive) renderLiveGraphModeUI(); // the Nearest / Current Location toggle lives in the Live graph header
-  const liveTripShown = isLive && cachedIsSignedIn;
-  document.getElementById("btnStartTrip").style.display = liveTripShown ? "" : "none";
-  document.getElementById("liveTripActions").style.display = liveTripShown ? "" : "none";
-  document.getElementById("btnLiveWater").style.display = liveTripShown ? "" : "none";
-  document.getElementById("btnLiveDepth").style.display = liveTripShown ? "" : "none";
-  if (liveTripShown && typeof renderLiveDefaultsUI === "function") renderLiveDefaultsUI();
-  if (liveTripShown && typeof renderLiveTripUI === "function") renderLiveTripUI(); // Start/End Trip label + the trip's action buttons
-  document.getElementById("btnRefreshLiveGps").style.display = isLive || mapMode === "normal" ? "" : "none"; // Normal mode: the find-my-location button
-  // +Catch is never shown just because Live mode is on — only updateLiveSessionButtons (map-live.js) reveals it, once
-  // the marks have actually loaded and confirm there's an active session (a catch only makes sense once a session's
-  // actually underway to log it against).
-  document.getElementById("btnLiveCatch").style.display = "none";
+  document.getElementById("btnRefreshLiveGps").style.display = mapMode === "normal" ? "" : "none"; // the find-my-location button
   document.getElementById("importReviewPanel").style.display = isImport ? "flex" : "none";
   document.getElementById("markDetailPanel").style.display = "none";
-  if (!isLive) document.getElementById("liveGpsStatus").style.display = "none";
-  if (isLive) document.getElementById("parseStatus").textContent = "";
   document.body.classList.toggle("import-mode", isImport);
-}
-
-function wireMapToolbar() {
-  document.getElementById("liveModeToggle").addEventListener("change", (e) => {
-    const on = e.target.checked;
-    try {
-      localStorage.setItem(LIVE_MODE_STORAGE_KEY, on ? "1" : "0");
-    } catch {
-      /* storage blocked — the toggle still works for this visit */
-    }
-    setMode(on ? "live" : "normal");
-  });
 }
 
 // The Import/Export button in the Map toolbar: a single icon button that
@@ -336,7 +274,7 @@ function buildImportMap() {
 
 // Called by sync.js when the review is finished or cancelled.
 function leaveImportMode() {
-  return setMode(baseModeFromPrefs());
+  return setMode("normal");
 }
 
 // Restores and shows whichever location was last viewed, rather than
@@ -459,9 +397,32 @@ function renderLocationMap() {
   initTripMap(map); // trips from the trip log, in their own layer (js/trip-map.js)
 }
 
-// Normal mode's find-my-location button (the same #btnRefreshLiveGps Live mode uses to refresh its fix). Nothing in
-// Normal mode asks for the device's position on its own — only a press does: one fresh GPS fix, a "You are here"
-// dot (display only; unlike Live's, tapping it doesn't start a mark) and the map centred on it.
+// One fresh, high-accuracy GPS fix: {lat, lng}, or null if it is unavailable, denied or times out.
+function getFreshGpsPosition() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) { resolve(null); return; }
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  });
+}
+
+function showMapToast(text, isError) {
+  const el = document.createElement("div");
+  el.className = "live-card-toast" + (isError ? " error" : "");
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), isError ? 6000 : 2500);
+}
+
+function wireLocateButton() {
+  document.getElementById("btnRefreshLiveGps").addEventListener("click", () => locateMeOnNormalMap());
+}
+
+// Normal mode's find-my-location button (#btnRefreshLiveGps). Nothing on the map asks for the device's position on its own —
+// only a press does: one fresh GPS fix, a "You are here" dot (display only) and the map centred on it.
 let normalGpsMarker = null;
 let normalLocateInFlight = false;
 async function locateMeOnNormalMap() {
@@ -469,10 +430,10 @@ async function locateMeOnNormalMap() {
   if (mapMode !== "normal" || !map || normalLocateInFlight) return;
   normalLocateInFlight = true;
   try {
-    const fresh = await getFreshGpsPosition(); // map-live.js
+    const fresh = await getFreshGpsPosition();
     if (mapMode !== "normal" || leafletMapInstances["locationMap"] !== map) return; // the map was left/rebuilt meanwhile
     if (!fresh) {
-      showLiveToast("Couldn't get your location — check location permission.", true);
+      showMapToast("Couldn't get your location — check location permission.", true);
       return;
     }
     if (normalGpsMarker && normalGpsMarker._map === map) {

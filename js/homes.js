@@ -45,7 +45,7 @@ async function renderHomeMarkers(map) {
   homesLayer = L.layerGroup().addTo(map);
   setHomeAddArmed(false);
   const btn = document.getElementById("btnAddHome");
-  if (btn) btn.style.display = cachedIsSignedIn && !(typeof mapMode !== "undefined" && mapMode === "live") ? "" : "none"; // not in Live mode
+  if (btn) btn.style.display = cachedIsSignedIn ? "" : "none";
   await loadMyHomes();
   if (homesMap !== map) return; // the map was rebuilt meanwhile
   for (const home of myHomes) addHomeMarker(home);

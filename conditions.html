@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Olie's Kayak and Surf Fishing Conditions – Map</title>
-<meta name="description" content="Map of tracked kayak and surf fishing locations with tide, wind and weather conditions, plus live GPS mode and import/export of marks." />
+<meta name="description" content="Map of tracked kayak and surf fishing locations with tide, wind and weather conditions, plus import/export of marks." />
 <meta name="theme-color" content="#0b2a4a" />
 <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
 <link rel="apple-touch-icon" href="images/apple-touch-icon.png" />
@@ -34,11 +34,6 @@
   <a href="locations.html">Settings</a>
 </nav></div>
 <div class="map-toolbar">
-  <label class="live-toggle" title="Live mode: find your GPS position, the nearest spot and its 48-hour graph; tap the map to log a catch">
-    <input type="checkbox" id="liveModeToggle" />
-    <span class="live-toggle-track" aria-hidden="true"></span>
-    <span>Live</span>
-  </label>
   <button type="button" id="baseMapBtn" class="btn-secondary map-filter-btn" style="display:none;" title="Base map: street map or sea chart" aria-label="Switch base map" aria-pressed="false">
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/></svg>
   </button>
@@ -51,14 +46,7 @@
   <button type="button" id="btnAddHome" class="btn-secondary map-home-btn" style="display:none;" title="Add a home — then tap the map where it is" aria-label="Add a home" aria-pressed="false"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M10 3 L18 10 L15.5 10 L15.5 18 L4.5 18 L4.5 10 L2 10 Z" fill="currentColor"/><rect x="8.3" y="12.5" width="3.4" height="5.5" fill="var(--white, #fff)"/><circle cx="18.5" cy="17.5" r="5" fill="var(--white, #fff)"/><path d="M18.5 14.6 V20.4 M15.6 17.5 H21.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
   <span id="homeAddHint" class="map-toolbar-status" style="display:none;">Tap the map where your home is</span>
   <span id="pinMoveHint" class="map-toolbar-status pin-move-hint" style="display:none;"></span>
-  <button type="button" id="btnTripDefaults" class="btn-primary live-quick-btn" style="display:none;" title="Trip Defaults" aria-label="Trip Defaults"><svg class="btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4M12 16h4M8 11h.01M8 16h.01"/></svg></button>
-  <button type="button" id="btnStartTrip" class="btn-primary live-quick-btn trip-start" style="display:none;" title="Start Trip" aria-label="Start Trip"></button>
-  <button type="button" id="btnLiveWater" class="btn-secondary live-quick-btn" style="display:none;" title="Default water condition for new marks — tap to cycle">Water: —</button>
-  <button type="button" id="btnLiveDepth" class="btn-secondary live-quick-btn" style="display:none;" title="Default water depth for new marks">Depth: —</button>
-  <span id="liveTripActions"class="live-trip-actions" style="display:none;"></span>
-  <button type="button" id="btnLiveCatch" class="btn-primary live-quick-btn" style="display:none;">+ Catch</button>
   <button type="button" id="btnRefreshLiveGps" class="btn-secondary live-quick-btn" style="display:none;" title="Find my location" aria-label="Find my location"><svg class="btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="2" x2="5" y1="12" y2="12"/><line x1="19" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="5"/><line x1="12" x2="12" y1="19" y2="22"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg></button>
-  <span id="liveGpsStatus" class="live-gps-status" style="display:none;">Finding your location…</span>
   <div id="mapDeviceTools" class="map-device-tools" style="display:none;">
     <div class="device-tools-menu">
       <button type="button" id="btnDeviceToolsToggle" class="btn-secondary map-filter-btn" title="Import / Export marks" aria-label="Import / Export marks" aria-haspopup="true" aria-expanded="false">
@@ -192,54 +180,6 @@
     </section>
   </div>
 
-  <!-- Live mode's bottom-sheet panel: nearest spot, its 48-hour graph and the Home By timing. -->
-  <div id="liveHoverPanel" class="location-hover-panel" style="display:none;">
-    <button id="btnCloseLiveHoverPanel" class="location-hover-panel-close" aria-label="Close">&times;</button>
-
-    <section class="chart-section location-hover-panel-chart">
-      <button type="button" id="liveHoverPanelBanner" class="live-hover-banner" aria-expanded="false">
-        <div>
-          <h2 id="liveHoverPanelLocationName">&nbsp;</h2>
-          <!-- A span, not a <button>: it sits inside the banner button (which expands the panel); its click doesn't bubble. -->
-          <span id="btnLiveGraphMode" class="live-graph-mode" role="switch" tabindex="0" aria-checked="false">Nearest location</span>
-          <p id="liveHoverPanelDistance" class="summary-sub" style="margin:0;"></p>
-        </div>
-        <span id="liveHoverPanelChevron" class="live-hover-chevron" aria-hidden="true">▾</span>
-      </button>
-
-      <div id="liveHoverPanelExpanded" style="display:none;">
-        <div class="location-hover-panel-heading-row live-heading-row" style="padding-right:0;margin-top:10px;">
-          <div id="liveSummaryCard" class="live-inline-stats" style="display:none;"></div>
-          <div class="live-inline-timings">
-            <label for="homeByTime">Home By</label>
-            <input type="time" id="homeByTime" />
-            <button id="btnUpdateTimings" class="btn-primary">Update</button>
-          </div>
-          <div class="graph-gesture-hint" aria-hidden="true">
-            <div>Double-tap toggles full screen</div>
-            <div>Hold for 2s to toggle data point</div>
-          </div>
-        </div>
-        <p id="timingsStatus" class="footnote" style="margin:0 0 10px;text-align:left;"></p>
-
-        <div id="liveScheduleButtons" class="weeknew-add-buttons-row"></div>
-        <div id="liveComputedSessions" class="loc-tile-sessions"></div>
-
-        <section id="typePickerSection" style="display:none;margin:0 0 12px;">
-          <div id="typePicker" class="type-photo-row"></div>
-        </section>
-
-        <div id="liveChartFrame" class="live-chart-frame" style="margin-top:6px;">
-          <div id="liveChartScroll" class="live-chart-scroll">
-            <div id="liveChartWideInner" class="live-chart-wide-inner">
-              <canvas id="liveChart" role="img" aria-label="Chart of tide height, wind, pressure and fishing condition ratings for the nearest location"></canvas>
-            </div>
-          </div>
-        </div>
-        <p id="liveHoverPanelEmptyState" class="empty-state" style="display:none;">No data yet for this location.</p>
-      </div>
-    </section>
-  </div>
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js" integrity="sha384-DhxhYObIMeMNGyAG7iK11OHzBIKyEIeRL0ad1iFPAOwZB8iirUlTT0O/WJJUk8+o" crossorigin="anonymous"></script>
@@ -261,9 +201,6 @@
 <script src="js/prefs.js"></script>
 <script src="js/catch-limits.js"></script>
 <script src="js/species-image.js"></script>
-<script src="js/live-cards.js"></script>
-<script src="js/trip-defaults.js"></script>
-<script src="js/trip-log.js"></script>
 <script src="js/trip-log-view.js"></script>
 <script src="js/weather-preview.js"></script>
 <script src="js/mark-lookup.js"></script>
@@ -274,7 +211,6 @@
 <script src="js/location-move.js"></script>
 <script src="js/gpx-import.js"></script>
 <script src="sync.js"></script>
-<script src="map-live.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

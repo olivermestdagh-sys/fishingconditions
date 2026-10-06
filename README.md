@@ -32,12 +32,12 @@ Live site: https://olivermestdagh-sys.github.io/fishingconditions/
 - **Frontend**: plain HTML/CSS/JS, no build step. The shared code lives in `js/*.js`
   (formerly one 9,600-line `charts.js`; older code comments that say `charts.js` mean
   these files): chart drawing, maps, marks, tide logic, backend helpers. Each page
-  loads only the shared files it needs, then its own script (`app.js`, `map-live.js`, `sync.js`,
+  loads only the shared files it needs, then its own script (`app.js`, `sync.js`,
   `week.js`, ...). `npm run check-pages` (also run in CI) proves every page loads
   everything it uses.
-  The Map tab (`conditions.html`) has three modes on one map: Normal (tracked spots and
-  marks), Live (GPS, nearest spot, tap to log a catch; `map-live.js`) and Import (a Garmin/
-  Lowrance export under review; `sync.js`). `live.html` and `sync.html` only redirect here.
+  The Map tab (`conditions.html`) has two modes on one map: Normal (tracked spots and
+  marks), Import (a Garmin/
+  Lowrance export under review; `sync.js`). `sync.html` only redirects here (Live mode was removed; trips are recorded on the Trip tab).
   Export writes just the marks the current filters leave visible.
 - **Data job**: `scripts/fetch_conditions.py` reads the tracked locations from
   the worker, fetches forecasts (locations in parallel), scores them and writes

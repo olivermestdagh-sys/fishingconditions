@@ -1,8 +1,7 @@
-// Trip recording without the map (trip.html). The same running-trip state, trip log entries and Catch marks the Map's Live mode makes
-// (map-live.js "Live trips"), ported without any Leaflet dependency so a phone can record a whole trip from the Trip tab.
-// Until the Map's own trip UI is retired the two are twins: a change to what a trip event logs belongs in both.
-// The names shared with map-live.js (getLiveTripState, getLiveMarkDefaults, liveTripRunState, liveTripPosition, showLiveToast ...) are what
-// js/trip-defaults.js and js/trip-log.js look for, so they keep their names; the two files are never loaded on the same page.
+// Trip recording without the map (trip.html): the running-trip state, trip log entries and Catch marks of a trip. Ported from the old
+// Map Live mode (map-live.js, removed 2026-10-07), with no Leaflet dependency.
+// The names shared with js/trip-defaults.js and js/trip-log.js (getLiveTripState, getLiveMarkDefaults, liveTripRunState, liveTripPosition,
+// showLiveToast ...) are what those files look for, so they keep their names.
 // Everything above "// --- Effects" is pure (unit-tested: tests/trip-session.test.mjs).
 
 const LIVE_TRIP_KEY = "liveActiveTrip";
