@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 
 const src = readFileSync(new URL("../js/trip-session.js", import.meta.url), "utf8");
 const lib = new Function(
-  `${src}; return { nextCycleValue, tsStartTripState, tsStartActionState, tsEndActionState, tsActiveSession, tsCatchDefaultsForAction, tsElapsedText, tsSwapRodSlots, tsRodCell };`
+  `${src}; return { nextCycleValue, tsStartTripState, tsStartActionState, tsEndActionState, tsActiveSession, tsCatchDefaultsForAction, tsElapsedText, tsSwapRodSlots, tsRodCell, tsQuickEditKind, tsToggleOrdered };`
 )();
 globalThis.tdLiveRodSetupIds = (ids) => ids || [];
 globalThis.tdOtherTargets = () => ["Bream"];
@@ -71,4 +71,15 @@ test("a catch from a rod position defaults from that rod setup only and skips th
   assert.equal(d.forcedRod.id, "r2");
   assert.equal(d.skipRod, true);
   assert.deepEqual(d.bait, ["Prawn"]);
+});
+
+test("tapping a rod edits its bait when it has bait, else its rig option, else nothing", () => {
+  assert.equal(lib.tsQuickEditKind({ bait: ["Squid"] }, ["8lb"]), "bait");
+  assert.equal(lib.tsQuickEditKind({ bait: [] }, ["8lb"]), "sublist");
+  assert.equal(lib.tsQuickEditKind({}, []), null);
+});
+
+test("tsToggleOrdered keeps list order", () => {
+  assert.deepEqual(lib.tsToggleOrdered(["b"], "a", ["a", "b", "c"]), ["a", "b"]);
+  assert.deepEqual(lib.tsToggleOrdered(["a", "b"], "a", ["a", "b", "c"]), ["b"]);
 });

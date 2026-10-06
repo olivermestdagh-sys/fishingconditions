@@ -57,6 +57,41 @@ function tsRodCell(setup) {
   return { name: setup.name, bait, rig };
 }
 
+/** What tapping a rod position edits (the controller's quickEditRod): its bait (then each bait's options) when it has bait, else its rig option, else nothing. */
+function tsQuickEditKind(setup, rigOptions) {
+  if ((setup.bait || []).length) return "bait";
+  if ((rigOptions || []).length) return "sublist";
+  return null;
+}
+
+/** `list` with `value` toggled, keeping the order of `order` (so baits stay in list order). */
+function tsToggleOrdered(list, value, order) {
+  const next = list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+  return order.filter((v) => next.includes(v));
+}
+
+/**
+ * The picture a rod position shows (as the controller's rodCell): the first picture among its bait options, then its baits, then its rig options.
+ * `td` is tdLoadAll()'s data (the pictures live on the Mark Lists). {id, version} or null.
+ */
+function tsRodImage(setup, td) {
+  if (!td) return null;
+  for (const o of setup.baitOptions || []) {
+    for (const b of setup.bait || []) {
+      const t = tdBaitOptionsFor([b], td.baitRows, td.overrides, td.overrideImages).thumbs[o];
+      if (t) return t;
+    }
+  }
+  for (const b of setup.bait || []) {
+    const t = td.options.thumbs.baits[b];
+    if (t) return t;
+  }
+  const rigRow = td.rigRows.find((r) => r.value === setup.rig);
+  const thumbs = rigOptionThumbs(rigRow, td.overrideImages);
+  for (const o of setup.subListItems || []) if (thumbs[o]) return thumbs[o];
+  return null;
+}
+
 /**
  * Catch-card defaults from a trip Action (twin of map-live.js liveCatchDefaultsForAction; `data` = {trips, actions, rodSetups}).
  * `rodId`: a catch started from a rod position uses just that rod setup (the Rod question is skipped, everything defaults from it).
@@ -257,6 +292,15 @@ async function tsSetRodSlots(actionId, slots) {
   const i = liveTripData.actions.findIndex((a) => a.id === actionId);
   if (i >= 0) liveTripData.actions[i] = saved;
   tripLogNoteDefaultsEdit("/api/tripactions", actionId, liveTripData, liveTripRunState(), liveTripPosition());
+}
+
+/** Saves a Rod Setup change (bait / baitOptions / subListItems) and logs it as a change while an Action using it runs. */
+async function tsSaveRodSetup(id, patch) {
+  const saved = await tdApi(`/api/rodsetups/${id}`, "PUT", patch);
+  const i = liveTripData.rodSetups.findIndex((r) => r.id === id);
+  if (i >= 0) liveTripData.rodSetups[i] = saved;
+  tripLogNoteDefaultsEdit("/api/rodsetups", id, liveTripData, liveTripRunState(), liveTripPosition());
+  return saved;
 }
 
 /** Water button: the next Water Condition from `options` (then none), logged as a change while an Action runs. */

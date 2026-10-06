@@ -2,7 +2,16 @@
 // + Catch -> Water / Depth always on screen -> End trip. Tap-only (no rotary dial). The logic is js/trip-session.js; the catch question
 // cards are js/live-cards.js (showCardFlow); editing an Action / Rod Setup is Trip Defaults (js/trip-defaults.js).
 
-const tripUi = { busy: false, overlayOpen: false, waterOptions: null, catches: [], catchesLoaded: false, lastKey: "", rodView: false, move: null };
+const tripUi = { busy: false, overlayOpen: false, waterOptions: null, catches: [], catchesLoaded: false, lastKey: "", rodView: false, move: null, td: null };
+
+// Trip Defaults' data (mark lists with their pictures, private sub lists), for the rod pictures and the quick bait / rig-option edit.
+async function tripLoadTd() {
+  try {
+    tripUi.td = await tdLoadAll();
+  } catch (err) {
+    console.error("Could not load the lists for the rod screen:", err);
+  }
+}
 
 function tripApp() {
   return document.getElementById("tripApp");
@@ -170,11 +179,15 @@ function tripRenderRods(root, state, trip) {
     const cls = "trip-rod" + (setup ? " filled" : " empty") + (moving && moving.from === i ? " moving" : "");
     if (!setup) return `<div class="trip-rod-wrap"><button type="button" class="${cls}" data-rod="${i}"${dis}><span class="trip-rod-empty">empty</span></button></div>`;
     const c = tsRodCell(setup);
-    // the gear is a sibling of the cell button (a button can't hold a button): bottom right, opens that rod setup's edit screen
-    return `<div class="trip-rod-wrap"><button type="button" class="${cls}" data-rod="${i}"${dis}><span class="trip-rod-name">${escapeHtml(c.name)}</span><span class="trip-rod-bait">${escapeHtml(c.bait)}</span><span class="trip-rod-rig">${escapeHtml(c.rig)}</span></button>` +
+    const image = tsRodImage(setup, tripUi.td); // the first picture of its bait option / bait / rig option, fitted under a dark veil
+    const picture = image ? `<img class="trip-rod-img" src="${escapeHtml(speciesImageUrl(image))}" alt="" loading="lazy" />` : "";
+    // the catch and gear buttons are siblings of the cell button (a button can't hold a button): bottom left logs a catch on this rod,
+    // bottom right opens that rod setup's whole edit screen; tapping the box itself changes its bait / rig option
+    return `<div class="trip-rod-wrap"><button type="button" class="${cls}${image ? " has-img" : ""}" data-rod="${i}"${dis}>${picture}<span class="trip-rod-name">${escapeHtml(c.name)}</span><span class="trip-rod-bait">${escapeHtml(c.bait)}</span><span class="trip-rod-rig">${escapeHtml(c.rig)}</span></button>` +
+      `<button type="button" class="trip-rod-catch" data-rod-catch="${escapeHtml(setup.id)}" aria-label="Catch on ${escapeHtml(setup.name)}"${dis}>${TRIP_FISH_ICON}</button>` +
       `<button type="button" class="trip-rod-gear" data-rod-edit="${escapeHtml(setup.id)}" aria-label="Edit ${escapeHtml(setup.name)}"${dis}>${TD_GEAR_SVG}</button></div>`;
   });
-  const hint = moving ? (moving.from == null ? "Move: tap the rod to pick up." : "Tap a position to drop it there.") : "Tap a rod to log a catch on it; tap empty to fill it.";
+  const hint = moving ? (moving.from == null ? "Move: tap the rod to pick up." : "Tap a position to drop it there.") : "Tap a rod to change its bait or rig option; the fish logs a catch on it; tap empty to fill it.";
   root.innerHTML = `
     <div class="trip-card trip-status">
       <div><div class="trip-status-name">${escapeHtml(trip.name)}</div><div class="trip-muted trip-status-action">${escapeHtml(action.name)}</div></div>
@@ -195,6 +208,7 @@ function tripRenderRods(root, state, trip) {
     <button type="button" class="trip-big trip-end-action" id="tripEndActionBtn"${dis}>${TRIP_STOP_ICON}<span>End action</span></button>
     <button type="button" class="trip-big trip-end" id="tripEndBtn"${dis}>${TRIP_STOP_ICON}<span>End trip</span></button>`;
   root.querySelectorAll("[data-rod]").forEach((btn) => btn.addEventListener("click", () => tripOnRod(Number(btn.dataset.rod), action, slots)));
+  root.querySelectorAll("[data-rod-catch]").forEach((btn) => btn.addEventListener("click", () => { if (!tripUi.busy && !tripUi.overlayOpen && !tripUi.move) tripStartCatch(btn.dataset.rodCatch); }));
   root.querySelectorAll("[data-rod-edit]").forEach((btn) => btn.addEventListener("click", () => tripOpenDefaults({ tripId: state.tripId, actionId: action.id, rodId: btn.dataset.rodEdit })));
   document.getElementById("tripMoveBtn").addEventListener("click", () => { tripUi.move = tripUi.move ? null : { from: null }; tripRender(); });
   document.getElementById("tripCatchBtn").addEventListener("click", () => tripStartCatch());
@@ -223,8 +237,90 @@ function tripOnRod(index, action, slots) {
     tripGuard(() => tsSetRodSlots(action.id, tsSwapRodSlots(slots, from, index)));
     return;
   }
-  if (slots[index]) tripStartCatch(slots[index]); // a catch on this rod, everything defaulting from its rod setup
+  if (slots[index]) tripQuickEditRod(liveTripData.rodSetups.find((r) => r.id === slots[index]));
   else tripFillRod(index, action, slots);
+}
+
+// Tap a filled rod position: change what is on the rod without opening the whole setup (the controller's quickEditRod). With bait on the
+// rod setup that is its bait, then each chosen bait's options; with no bait it is the sub option of its rig.
+async function tripQuickEditRod(setup) {
+  if (!setup) return;
+  if (!tripUi.td) await tripLoadTd();
+  const td = tripUi.td;
+  if (!td) { showLiveToast("Couldn't load your lists.", true); return; }
+  const rigRow = td.rigRows.find((r) => r.value === setup.rig);
+  const rigOptions = tdRigSublist(rigRow, td.overrides);
+  const kind = tsQuickEditKind(setup, rigOptions);
+  if (!kind) {
+    showLiveToast("Nothing to change here — the gear opens the rod setup", true);
+    return;
+  }
+  tripUi.overlayOpen = true;
+  let flow = null;
+  const done = async (patch) => {
+    flow.close();
+    tripUi.overlayOpen = false;
+    if (!patch) { tripRender(); return; }
+    tripUi.busy = true;
+    tripRender();
+    try {
+      await tsSaveRodSetup(setup.id, patch);
+      tripLoadTd(); // its pictures follow the new bait / option
+    } catch (err) {
+      showLiveToast("Not saved: " + err.message, true);
+    } finally {
+      tripUi.busy = false;
+      tripRender();
+    }
+  };
+  const onClose = () => { tripUi.overlayOpen = false; tripRender(); };
+
+  if (kind === "sublist") {
+    const NONE = "None";
+    let chosen = (setup.subListItems || [])[0] || NONE;
+    const thumbs = rigOptionThumbs(rigRow, td.overrideImages);
+    flow = showCardFlow({
+      getSteps: () => [{ id: "sub", title: `${setup.rig} options`, prompt: `${setup.name}: which option?`, multi: false, options: [NONE, ...rigOptions], selected: [chosen], thumbs }],
+      onChoose: (step, value) => { chosen = value; },
+      onDone: () => {
+        const next = chosen === NONE ? [] : [chosen];
+        done(JSON.stringify(next) === JSON.stringify(setup.subListItems || []) ? null : { subListItems: next });
+      },
+      onClose,
+      doneLabel: "Save",
+    });
+    return;
+  }
+
+  // Bait (any number), then one card of options per chosen bait that has some.
+  const allBaits = td.options.baits;
+  let baits = allBaits.filter((b) => (setup.bait || []).includes(b));
+  const ownOf = (b) => tdBaitOptionsFor([b], td.baitRows, td.overrides, td.overrideImages);
+  const picked = {}; // bait -> its options picked
+  for (const b of setup.bait || []) picked[b] = ownOf(b).options.filter((o) => (setup.baitOptions || []).includes(o));
+  flow = showCardFlow({
+    getSteps: () => [
+      { id: "bait", title: "Bait", prompt: `${setup.name}: what bait?`, multi: true, options: allBaits, selected: baits, ...stepThumbs(td.options, "baits") },
+      ...baits.filter((b) => ownOf(b).options.length).map((b) => ({
+        id: `opt:${b}`, title: `${b} options`, prompt: `${b}: how is it prepared?`, multi: true, options: ownOf(b).options, selected: picked[b] || [], thumbs: ownOf(b).thumbs,
+      })),
+    ],
+    onChoose: (step, value) => {
+      if (step.id === "bait") baits = tsToggleOrdered(baits, value, allBaits);
+      else {
+        const b = step.id.slice(4);
+        picked[b] = tsToggleOrdered(picked[b] || [], value, ownOf(b).options);
+      }
+    },
+    onDone: () => {
+      const order = tdBaitOptionsFor(baits, td.baitRows, td.overrides).options;
+      const options = order.filter((o) => baits.some((b) => (picked[b] || []).includes(o)));
+      const same = JSON.stringify(baits) === JSON.stringify(setup.bait || []) && JSON.stringify(options) === JSON.stringify(setup.baitOptions || []);
+      done(same ? null : { bait: baits, baitOptions: options });
+    },
+    onClose,
+    doneLabel: "Save",
+  });
 }
 
 // An empty position: fill it with any rod setup the action doesn't already use.
@@ -312,6 +408,7 @@ async function tripOpenDefaults(start) {
     onClose: () => {
       tripUi.overlayOpen = false;
       tripLoadData().then(tripRender); // its trips / actions / rod setups may just have been edited
+      tripLoadTd().then(tripRender);
     },
   });
 }
@@ -468,6 +565,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   tripRender();
   flushTripLog();
   tripLoadRecentCatches();
+  tripLoadTd().then(tripRender); // the rod pictures come in once the lists have loaded
   setInterval(tripTickElapsed, 1000);
   setInterval(tripSync, 30000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) tripSync(); });
