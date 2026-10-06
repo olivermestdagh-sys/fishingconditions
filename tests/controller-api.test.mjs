@@ -1166,3 +1166,21 @@ test("legacy backfill: signed-out is refused and another user's marks are not to
   assert.equal(res.status, 401);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log").get().n, 0);
 });
+
+test("naming a trip: every line of the run takes the name and is marked edited; blank clears; only your own trips", async () => {
+  const { sqlite, env } = await legacySeeded();
+  await site(env, "POST", "/api/triplog/backfill-legacy", {});
+  const res = await site(env, "PATCH", "/api/triplog/run", { runId: "legacy:a1S", tripName: "  Lang Lang flathead day  " });
+  assert.equal(res.status, 200);
+  const rows = legacyRows(sqlite, "legacy:a1S");
+  assert.ok(rows.length > 3);
+  assert.ok(rows.every((r) => r.trip_name === "Lang Lang flathead day" && r.edited_at));
+  assert.equal(legacyRows(sqlite, "legacy:b1S").some((r) => r.trip_name), false); // another run untouched
+  const list = await (await site(env, "GET", "/api/triplog?list=1")).json();
+  assert.equal(list.find((r) => r.runId === "legacy:a1S").tripName, "Lang Lang flathead day");
+  assert.equal((await site(env, "PATCH", "/api/triplog/run", { runId: "legacy:a1S", tripName: "" })).status, 200);
+  assert.ok(legacyRows(sqlite, "legacy:a1S").every((r) => r.trip_name === null));
+  assert.equal((await site(env, "PATCH", "/api/triplog/run", { runId: "nope", tripName: "x" })).status, 404);
+  assert.equal((await site(env, "PATCH", "/api/triplog/run", { runId: "legacy:a1S", tripName: "x".repeat(81) })).status, 400);
+  assert.equal((await site(env, "PATCH", "/api/triplog/run", { runId: "legacy:a1S", tripName: "Mine" }, "s-u2")).status, 404);
+});

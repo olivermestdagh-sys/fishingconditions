@@ -7,6 +7,7 @@ let tlRuns = []; // every header the filters let through, newest first
 let tlSelectedRunId = null;
 let tlLoadToken = 0; // a slow answer for a trip that is no longer selected is dropped
 let tlEntries = []; // the selected trip's lines
+let tlRenaming = null; // runId whose Trip name is open for editing in the headers
 let tlEditing = null; // {id (null = a new line), form} while a line is open in the editor
 let tlLists = null; // pick-lists for the editor, loaded on first edit
 
@@ -82,17 +83,66 @@ function tlRenderRuns() {
     return;
   }
   wrap.innerHTML = `<table class="tl-table tl-runs">
-    <thead><tr><th>Date</th><th>Trip</th><th>Start – end</th><th class="num">Duration</th><th class="num">Fished</th><th class="num">Actions</th><th class="num">Catches</th><th></th></tr></thead>
+    <thead><tr><th>Date</th><th>Trip</th><th>Start – end</th><th class="num">Duration</th><th class="num">Fished</th><th class="num">Actions</th><th class="num">Catches</th><th></th><th></th></tr></thead>
     <tbody>${runs
       .map((r) => {
         const flags = tripLogFlags(r).map((f) => `<span class="tl-flag">${tlEsc(f)}</span>`).join("");
         return `<tr tabindex="0" data-run="${tlEsc(r.runId)}" class="${r.runId === tlSelectedRunId ? "selected" : ""}" aria-selected="${r.runId === tlSelectedRunId}">
-          <td>${tlEsc(tripLogDateLabel(r.startDateTime))}</td><td>${tlEsc(r.tripName || "—")}</td>
+          <td>${tlEsc(tripLogDateLabel(r.startDateTime))}</td><td>${tlRenaming === r.runId ? `<input type="text" class="tl-rename-input" list="tlTripNames" maxlength="80" value="${tlEsc(r.tripName || "")}" placeholder="Trip name" aria-label="Trip name">` : tlEsc(r.tripName || "—")}</td>
           <td>${tlEsc(tlClock(r.startDateTime))} – ${r.hasTripEnd || r.endTs > r.startTs ? tlEsc(tlClock(r.endDateTime)) : "…"}</td>
           <td class="num">${tlEsc(tripLogFormatDuration(r.endTs - r.startTs))}</td><td class="num">${tlEsc(tripLogFormatDuration(r.fishedMs))}</td>
-          <td class="num">${r.actions}</td><td class="num">${r.catches}</td><td>${flags}</td></tr>`;
+          <td class="num">${r.actions}</td><td class="num">${r.catches}</td><td>${flags}</td>
+          <td class="act">${tlRenaming === r.runId ? `<button type="button" class="btn-primary tl-btn" data-rename-save>Save</button> <button type="button" class="btn-secondary tl-btn" data-rename-cancel>Cancel</button>` : `<button type="button" class="btn-secondary tl-btn" data-rename="${tlEsc(r.runId)}">${r.tripName ? "Rename" : "Name"}</button>`}</td></tr>`;
       })
-      .join("")}</tbody></table>`;
+      .join("")}</tbody></table><datalist id="tlTripNames">${[...new Set(tlRuns.map((r) => r.tripName).filter(Boolean))].sort((a, b) => a.localeCompare(b)).map((n) => `<option value="${tlEsc(n)}">`).join("")}</datalist>`;
+  wrap.querySelectorAll("button[data-rename]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      tlRenaming = b.dataset.rename;
+      tlRenderRuns();
+      const input = wrap.querySelector(".tl-rename-input");
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    })
+  );
+  const renameRow = tlRenaming ? wrap.querySelector(`tr[data-run="${CSS.escape(tlRenaming)}"]`) : null;
+  if (renameRow) {
+    const input = renameRow.querySelector(".tl-rename-input");
+    const cancel = () => {
+      tlRenaming = null;
+      tlRenderRuns();
+    };
+    const save = async () => {
+      const runId = tlRenaming;
+      renameRow.querySelectorAll("button").forEach((b) => (b.disabled = true));
+      try {
+        await tlSend("PATCH", "/api/triplog/run", { runId, tripName: input.value });
+        tlRenaming = null;
+        await tlLoadRuns();
+        if (runId === tlSelectedRunId) tlRenderDetail();
+      } catch (err) {
+        console.error("Could not rename the trip:", err);
+        alert("Couldn't save the trip name: " + err.message);
+        renameRow.querySelectorAll("button").forEach((b) => (b.disabled = false));
+      }
+    };
+    renameRow.querySelector("[data-rename-save]").addEventListener("click", (e) => {
+      e.stopPropagation();
+      save();
+    });
+    renameRow.querySelector("[data-rename-cancel]").addEventListener("click", (e) => {
+      e.stopPropagation();
+      cancel();
+    });
+    input.addEventListener("click", (e) => e.stopPropagation());
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") save();
+      else if (e.key === "Escape") cancel();
+    });
+  }
   wrap.querySelectorAll("tr[data-run]").forEach((tr) => {
     const open = () => tlSelectRun(tr.dataset.run);
     tr.addEventListener("click", open);

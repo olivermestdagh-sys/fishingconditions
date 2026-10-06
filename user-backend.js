@@ -250,6 +250,9 @@ export default {
       if (tripSetupMatch) {
         return handleTripSetupItem(request, url, env, tripSetupMatch[1]);
       }
+      if (url.pathname === "/api/triplog/run") {
+        return handleTripLogRun(request, url, env);
+      }
       if (url.pathname === "/api/triplog/lines") {
         return handleTripLogLines(request, url, env);
       }
@@ -4157,6 +4160,28 @@ async function handleTripLogItem(request, url, env, id) {
   const stmts = tlogEditStatements(env, uid, id, parsed);
   if (stmts.length) await env.DB.batch(stmts);
   return jsonResponse({ ok: true }, 200, env);
+}
+
+/**
+ * PATCH /api/triplog/run: {runId, tripName} — names (or renames, or with a blank name un-names) a whole trip: every line of the run takes the text
+ * and is marked edited, so the automatic rebuilds leave the run alone. Marks keep their own tripName snapshots.
+ */
+async function handleTripLogRun(request, url, env) {
+  const user = await requireUser(request, env);
+  if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
+  if (request.method !== "PATCH") return jsonResponse({ error: "Method not allowed." }, 405, env);
+  const resolved = resolveEffectiveUserId(url, user);
+  if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
+  const uid = resolved.id;
+  const body = await readJsonBody(request);
+  if (!body || typeof body.runId !== "string" || !body.runId) return jsonResponse({ error: "runId is required." }, 400, env);
+  if (body.tripName != null && typeof body.tripName !== "string") return jsonResponse({ error: "tripName must be text." }, 400, env);
+  const name = typeof body.tripName === "string" ? body.tripName.trim() : "";
+  if (name.length > 80) return jsonResponse({ error: "A trip name is at most 80 characters." }, 400, env);
+  const run = await env.DB.prepare("SELECT 1 AS ok FROM trip_log WHERE user_id = ? AND run_id = ? LIMIT 1").bind(uid, body.runId).first();
+  if (!run) return jsonResponse({ error: "Trip not found." }, 404, env);
+  await env.DB.prepare("UPDATE trip_log SET trip_name = ?, edited_at = COALESCE(edited_at, ?) WHERE user_id = ? AND run_id = ?").bind(name || null, Date.now(), uid, body.runId).run();
+  return jsonResponse({ ok: true, tripName: name || null }, 200, env);
 }
 
 /**
