@@ -154,6 +154,7 @@ export default {
   // Hourly cron (wrangler.toml [triggers]): the trip log's weather / tide backfill (conditionsBackfill, "Trip log" section).
   async scheduled(event, env, ctx) {
     ctx.waitUntil(conditionsBackfill(env).catch((err) => console.error("Trip log conditions backfill failed:", err)));
+    ctx.waitUntil(tlogPurgeDeleted(env).catch((err) => console.error("Trip log purge failed:", err)));
   },
 
   async fetch(request, env) {
@@ -2958,7 +2959,7 @@ async function handlePipelineObservationsPrune(request, env) {
        )
        AND NOT EXISTS (
          SELECT 1 FROM trip_log t
-         WHERE datetime(t.date_time) BETWEEN datetime(${table}.${timeCol}, ?) AND datetime(${table}.${timeCol}, ?)
+         WHERE t.deleted_at IS NULL AND datetime(t.date_time) BETWEEN datetime(${table}.${timeCol}, ?) AND datetime(${table}.${timeCol}, ?)
        )`;
   const args = [body.asOf, cutoffMod, before, after, before, after];
 
@@ -3945,14 +3946,14 @@ async function tlogListRuns(env, uid, from, to) {
       `SELECT run_id, MAX(trip_id) AS trip_id, MAX(trip_name) AS trip_name, MIN(ts) AS start_ts, MAX(ts) AS end_ts, MIN(date_time) AS start_dt, MAX(date_time) AS end_dt,
               COUNT(*) AS entries, SUM(event_type = 'action_start') AS actions, SUM(event_type = 'catch') AS catches, MAX(event_type = 'trip_end') AS has_end,
               MAX(source = 'Backfill' AND mark_id IS NULL) AS approximate, MAX(conditions_at IS NULL) AS pending, MAX(edited_at IS NOT NULL) AS edited,
-              (SELECT t2.lat FROM trip_log t2 WHERE t2.user_id = trip_log.user_id AND t2.run_id = trip_log.run_id AND t2.lat IS NOT NULL AND t2.lng IS NOT NULL ORDER BY t2.ts LIMIT 1) AS start_lat,
-              (SELECT t2.lng FROM trip_log t2 WHERE t2.user_id = trip_log.user_id AND t2.run_id = trip_log.run_id AND t2.lat IS NOT NULL AND t2.lng IS NOT NULL ORDER BY t2.ts LIMIT 1) AS start_lng
-       FROM trip_log WHERE user_id = ? GROUP BY run_id HAVING MIN(date_time) >= ? AND MIN(date_time) <= ? ORDER BY MIN(ts) DESC LIMIT 500`
+              (SELECT t2.lat FROM trip_log t2 WHERE t2.user_id = trip_log.user_id AND t2.run_id = trip_log.run_id AND t2.deleted_at IS NULL AND t2.lat IS NOT NULL AND t2.lng IS NOT NULL ORDER BY t2.ts LIMIT 1) AS start_lat,
+              (SELECT t2.lng FROM trip_log t2 WHERE t2.user_id = trip_log.user_id AND t2.run_id = trip_log.run_id AND t2.deleted_at IS NULL AND t2.lat IS NOT NULL AND t2.lng IS NOT NULL ORDER BY t2.ts LIMIT 1) AS start_lng
+       FROM trip_log WHERE user_id = ? AND deleted_at IS NULL GROUP BY run_id HAVING MIN(date_time) >= ? AND MIN(date_time) <= ? ORDER BY MIN(ts) DESC LIMIT 500`
     ).bind(uid, lo, hi).all(),
     env.DB.prepare(
       `SELECT run_id, SUM(CASE WHEN event_type = 'action_start' AND next_ts IS NOT NULL THEN next_ts - ts ELSE 0 END) AS fished_ms FROM (
          SELECT run_id, event_type, ts, LEAD(ts) OVER (PARTITION BY run_id ORDER BY ts, rowid) AS next_ts
-         FROM trip_log WHERE user_id = ? AND event_type IN ('action_start', 'action_end', 'trip_end')
+         FROM trip_log WHERE user_id = ? AND deleted_at IS NULL AND event_type IN ('action_start', 'action_end', 'trip_end')
        ) GROUP BY run_id`
     ).bind(uid).all(),
   ]);
@@ -3998,9 +3999,9 @@ async function handleTripLogCollection(request, url, env) {
       const { results } = await env.DB.prepare(
         `SELECT * FROM (
            SELECT t.id, t.date_time, t.ts,
-                  COALESCE(t.lat, (SELECT t2.lat FROM trip_log t2 WHERE t2.user_id = t.user_id AND t2.run_id = t.run_id AND t2.lat IS NOT NULL ORDER BY ABS(t2.ts - t.ts) LIMIT 1)) AS lat,
-                  COALESCE(t.lng, (SELECT t2.lng FROM trip_log t2 WHERE t2.user_id = t.user_id AND t2.run_id = t.run_id AND t2.lat IS NOT NULL ORDER BY ABS(t2.ts - t.ts) LIMIT 1)) AS lng
-           FROM trip_log t WHERE t.user_id = ? AND t.conditions_at IS NULL AND t.ts < ? ORDER BY t.ts DESC LIMIT ?
+                  COALESCE(t.lat, (SELECT t2.lat FROM trip_log t2 WHERE t2.user_id = t.user_id AND t2.run_id = t.run_id AND t2.deleted_at IS NULL AND t2.lat IS NOT NULL ORDER BY ABS(t2.ts - t.ts) LIMIT 1)) AS lat,
+                  COALESCE(t.lng, (SELECT t2.lng FROM trip_log t2 WHERE t2.user_id = t.user_id AND t2.run_id = t.run_id AND t2.deleted_at IS NULL AND t2.lat IS NOT NULL ORDER BY ABS(t2.ts - t.ts) LIMIT 1)) AS lng
+           FROM trip_log t WHERE t.user_id = ? AND t.deleted_at IS NULL AND t.conditions_at IS NULL AND t.ts < ? ORDER BY t.ts DESC LIMIT ?
          ) WHERE lat IS NOT NULL`
       ).bind(uid, Date.now() - 20 * 60000, limit).all();
       return jsonResponse(results.map((r) => ({ id: r.id, dateTime: r.date_time, lat: r.lat, lng: r.lng })), 200, env);
@@ -4008,9 +4009,9 @@ async function handleTripLogCollection(request, url, env) {
     if (url.searchParams.get("report")) {
       // the Reports tab's source: every catch, action start / end and trip end of the user (catches carry their rod rows), oldest first
       const { results } = await env.DB.prepare(
-        "SELECT * FROM trip_log WHERE user_id = ? AND event_type IN ('catch', 'action_start', 'action_end', 'trip_end') ORDER BY ts ASC, rowid ASC LIMIT 20000"
+        "SELECT * FROM trip_log WHERE user_id = ? AND deleted_at IS NULL AND event_type IN ('catch', 'action_start', 'action_end', 'trip_end') ORDER BY ts ASC, rowid ASC LIMIT 20000"
       ).bind(uid).all();
-      const rodRows = (await env.DB.prepare("SELECT r.* FROM trip_log_rods r JOIN trip_log t ON t.id = r.log_id WHERE t.user_id = ? AND t.event_type = 'catch' ORDER BY r.log_id, r.slot").bind(uid).all()).results;
+      const rodRows = (await env.DB.prepare("SELECT r.* FROM trip_log_rods r JOIN trip_log t ON t.id = r.log_id WHERE t.user_id = ? AND t.deleted_at IS NULL AND t.event_type = 'catch' ORDER BY r.log_id, r.slot").bind(uid).all()).results;
       const byLog = new Map();
       for (const r of rodRows) (byLog.get(r.log_id) || byLog.set(r.log_id, []).get(r.log_id)).push(r);
       return jsonResponse({ entries: results.map((r) => rowToTripLog(r, byLog.get(r.id))) }, 200, env);
@@ -4019,12 +4020,12 @@ async function handleTripLogCollection(request, url, env) {
     let runId = url.searchParams.get("runId");
     const markId = url.searchParams.get("markId");
     if (!runId && markId) {
-      const hit = await env.DB.prepare("SELECT run_id FROM trip_log WHERE user_id = ? AND mark_id = ? LIMIT 1").bind(uid, markId).first();
+      const hit = await env.DB.prepare("SELECT run_id FROM trip_log WHERE user_id = ? AND mark_id = ? AND deleted_at IS NULL LIMIT 1").bind(uid, markId).first();
       runId = hit ? hit.run_id : null;
     }
     if (!runId) return jsonResponse({ runId: null, entries: [] }, 200, env);
-    const { results } = await env.DB.prepare("SELECT * FROM trip_log WHERE user_id = ? AND run_id = ? ORDER BY ts ASC, rowid ASC LIMIT 1000").bind(uid, runId).all();
-    const rodRows = (await env.DB.prepare("SELECT r.* FROM trip_log_rods r JOIN trip_log t ON t.id = r.log_id WHERE t.user_id = ? AND t.run_id = ? ORDER BY r.log_id, r.slot").bind(uid, runId).all()).results;
+    const { results } = await env.DB.prepare("SELECT * FROM trip_log WHERE user_id = ? AND run_id = ? AND deleted_at IS NULL ORDER BY ts ASC, rowid ASC LIMIT 1000").bind(uid, runId).all();
+    const rodRows = (await env.DB.prepare("SELECT r.* FROM trip_log_rods r JOIN trip_log t ON t.id = r.log_id WHERE t.user_id = ? AND t.run_id = ? AND t.deleted_at IS NULL ORDER BY r.log_id, r.slot").bind(uid, runId).all()).results;
     const byLog = new Map();
     for (const r of rodRows) (byLog.get(r.log_id) || byLog.set(r.log_id, []).get(r.log_id)).push(r);
     return jsonResponse({ runId, entries: results.map((r) => rowToTripLog(r, byLog.get(r.id))) }, 200, env);
@@ -4153,21 +4154,18 @@ function tlogEditStatements(env, uid, id, parsed) {
   return stmts;
 }
 
-/** PATCH /api/triplog/<id> (edit; the weather/tide backfill uses it too) and DELETE /api/triplog/<id> (remove a line and its rod rows). */
+/** PATCH /api/triplog/<id> (edit; the weather/tide backfill uses it too) and DELETE /api/triplog/<id> (mark a line for deletion: it is hidden at once and removed with its rod rows after TLOG_TRASH_DAYS). */
 async function handleTripLogItem(request, url, env, id) {
   const user = await requireUser(request, env);
   if (!user) return jsonResponse({ error: "Not signed in." }, 401, env);
   const resolved = resolveEffectiveUserId(url, user);
   if (resolved.error) return jsonResponse({ error: resolved.error }, 403, env);
   const uid = resolved.id;
-  const row = await env.DB.prepare("SELECT id FROM trip_log WHERE id = ? AND user_id = ?").bind(id, uid).first();
+  const row = await env.DB.prepare("SELECT id FROM trip_log WHERE id = ? AND user_id = ? AND deleted_at IS NULL").bind(id, uid).first();
   if (!row) return jsonResponse({ error: "Not found." }, 404, env);
 
   if (request.method === "DELETE") {
-    await env.DB.batch([
-      env.DB.prepare("DELETE FROM trip_log_rods WHERE log_id = ? AND user_id = ?").bind(id, uid),
-      env.DB.prepare("DELETE FROM trip_log WHERE id = ? AND user_id = ?").bind(id, uid),
-    ]);
+    await env.DB.prepare("UPDATE trip_log SET deleted_at = ? WHERE id = ? AND user_id = ?").bind(Date.now(), id, uid).run();
     return new Response(null, { status: 204, headers: corsHeaders(env) });
   }
   if (request.method !== "PATCH") return jsonResponse({ error: "Method not allowed." }, 405, env);
@@ -4241,22 +4239,20 @@ async function handleTripLogRun(request, url, env) {
   if (request.method === "DELETE") {
     const runId = url.searchParams.get("runId");
     if (!runId) return jsonResponse({ error: "runId is required." }, 400, env);
-    const exists = await env.DB.prepare("SELECT 1 AS ok FROM trip_log WHERE user_id = ? AND run_id = ? LIMIT 1").bind(uid, runId).first();
+    const exists = await env.DB.prepare("SELECT 1 AS ok FROM trip_log WHERE user_id = ? AND run_id = ? AND deleted_at IS NULL LIMIT 1").bind(uid, runId).first();
     if (!exists) return jsonResponse({ error: "Trip not found." }, 404, env);
-    await env.DB.batch([
-      env.DB.prepare("DELETE FROM trip_log_rods WHERE user_id = ? AND log_id IN (SELECT id FROM trip_log WHERE user_id = ? AND run_id = ?)").bind(uid, uid, runId),
-      env.DB.prepare("DELETE FROM trip_log WHERE user_id = ? AND run_id = ?").bind(uid, runId),
-    ]);
-    return jsonResponse({ ok: true }, 200, env);
+    // marked for deletion, not removed: it is hidden everywhere at once and purged after TLOG_TRASH_DAYS (tlogPurgeDeleted)
+    await env.DB.prepare("UPDATE trip_log SET deleted_at = ? WHERE user_id = ? AND run_id = ? AND deleted_at IS NULL").bind(Date.now(), uid, runId).run();
+    return jsonResponse({ ok: true, purgeAfterDays: TLOG_TRASH_DAYS }, 200, env);
   }
   const body = await readJsonBody(request);
   if (!body || typeof body.runId !== "string" || !body.runId) return jsonResponse({ error: "runId is required." }, 400, env);
   if (body.tripName != null && typeof body.tripName !== "string") return jsonResponse({ error: "tripName must be text." }, 400, env);
   const name = typeof body.tripName === "string" ? body.tripName.trim() : "";
   if (name.length > 80) return jsonResponse({ error: "A trip name is at most 80 characters." }, 400, env);
-  const run = await env.DB.prepare("SELECT 1 AS ok FROM trip_log WHERE user_id = ? AND run_id = ? LIMIT 1").bind(uid, body.runId).first();
+  const run = await env.DB.prepare("SELECT 1 AS ok FROM trip_log WHERE user_id = ? AND run_id = ? AND deleted_at IS NULL LIMIT 1").bind(uid, body.runId).first();
   if (!run) return jsonResponse({ error: "Trip not found." }, 404, env);
-  await env.DB.prepare("UPDATE trip_log SET trip_name = ?, edited_at = COALESCE(edited_at, ?) WHERE user_id = ? AND run_id = ?").bind(name || null, Date.now(), uid, body.runId).run();
+  await env.DB.prepare("UPDATE trip_log SET trip_name = ?, edited_at = COALESCE(edited_at, ?) WHERE user_id = ? AND run_id = ? AND deleted_at IS NULL").bind(name || null, Date.now(), uid, body.runId).run();
   return jsonResponse({ ok: true, tripName: name || null }, 200, env);
 }
 
@@ -4273,7 +4269,7 @@ async function handleTripLogLines(request, url, env) {
   const uid = resolved.id;
   const body = await readJsonBody(request);
   if (!body || typeof body !== "object" || typeof body.runId !== "string" || !body.runId) return jsonResponse({ error: "runId is required." }, 400, env);
-  const run = await env.DB.prepare("SELECT trip_id, trip_name, session_group_id FROM trip_log WHERE user_id = ? AND run_id = ? ORDER BY ts DESC LIMIT 1").bind(uid, body.runId).first();
+  const run = await env.DB.prepare("SELECT trip_id, trip_name, session_group_id FROM trip_log WHERE user_id = ? AND run_id = ? AND deleted_at IS NULL ORDER BY ts DESC LIMIT 1").bind(uid, body.runId).first();
   if (!run) return jsonResponse({ error: "Trip not found." }, 404, env);
   const parsed = tlogParseEdit({ ...body, manual: true }, Date.now());
   if (parsed.error) return jsonResponse({ error: parsed.error }, 400, env);
@@ -4512,7 +4508,7 @@ async function tlogBackfillDevice(env, uid, deviceId, { onlyRunId = null, histor
   const [events, markRows, existing, data] = await Promise.all([
     env.DB.prepare("SELECT seq, type, received_at FROM controller_events WHERE user_id = ? AND device_id = ? ORDER BY seq ASC").bind(uid, deviceId).all(),
     env.DB.prepare("SELECT * FROM marks WHERE user_id = ? AND source = 'Controller' AND source_uuid LIKE ? ORDER BY date_time ASC LIMIT 5000").bind(uid, `fc:${deviceId}:%`).all(),
-    env.DB.prepare("SELECT run_id, SUM(CASE WHEN source = 'Backfill' THEN 0 ELSE 1 END) AS live, MAX(edited_at IS NOT NULL) AS edited FROM trip_log WHERE user_id = ? GROUP BY run_id").bind(uid).all(),
+    env.DB.prepare("SELECT run_id, SUM(CASE WHEN source = 'Backfill' THEN 0 ELSE 1 END) AS live, MAX(edited_at IS NOT NULL OR deleted_at IS NOT NULL) AS edited FROM trip_log WHERE user_id = ? GROUP BY run_id").bind(uid).all(),
     ctlLoadTripData(env, uid),
   ]);
   const liveByRun = new Map(existing.results.map((r) => [r.run_id, r.live > 0]));
@@ -4761,6 +4757,16 @@ async function handleControllerHistory(request, env, user) {
 }
 
 // --- Weather / tide backfill (trip-log rows AND Controller marks), on the Worker's hourly cron ---------------------------------------------------------------
+/** Deleting trip log lines only marks them (trip_log.deleted_at); this removes them for good, with their rod rows, once they have been marked this long. Run by the hourly cron. */
+const TLOG_TRASH_DAYS = 30;
+async function tlogPurgeDeleted(env) {
+  const cutoff = Date.now() - TLOG_TRASH_DAYS * 86400000;
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM trip_log_rods WHERE log_id IN (SELECT id FROM trip_log WHERE deleted_at IS NOT NULL AND deleted_at < ?)").bind(cutoff),
+    env.DB.prepare("DELETE FROM trip_log WHERE deleted_at IS NOT NULL AND deleted_at < ?").bind(cutoff),
+  ]);
+}
+
 // A log row or Controller mark is written without weather or tide (the Worker can't know them at that moment: the hour isn't archived yet). `scheduled()`
 // (wrangler.toml [triggers]) fills them from what D1 already holds: the pipeline archive (`observations`: hourly temp / wind / pressure /
 // water temp per tracked location; `tide_events`: raw high/low events, the location's tide_offset applied on read) and, for the weather
@@ -4915,9 +4921,9 @@ async function conditionsBackfill(env, { now = Date.now(), limit = TLOG_COND_BAT
   const { results: rows } = await query(
     `SELECT * FROM (
        SELECT t.id, t.user_id, t.ts, t.date_time,
-              COALESCE(t.lat, (SELECT t2.lat FROM trip_log t2 WHERE t2.user_id = t.user_id AND t2.run_id = t.run_id AND t2.lat IS NOT NULL ORDER BY ABS(t2.ts - t.ts) LIMIT 1)) AS lat,
-              COALESCE(t.lng, (SELECT t2.lng FROM trip_log t2 WHERE t2.user_id = t.user_id AND t2.run_id = t.run_id AND t2.lat IS NOT NULL ORDER BY ABS(t2.ts - t.ts) LIMIT 1)) AS lng
-       FROM trip_log t WHERE t.conditions_at IS NULL AND t.ts < ? AND t.ts > ? ORDER BY t.ts DESC LIMIT ?
+              COALESCE(t.lat, (SELECT t2.lat FROM trip_log t2 WHERE t2.user_id = t.user_id AND t2.run_id = t.run_id AND t2.deleted_at IS NULL AND t2.lat IS NOT NULL ORDER BY ABS(t2.ts - t.ts) LIMIT 1)) AS lat,
+              COALESCE(t.lng, (SELECT t2.lng FROM trip_log t2 WHERE t2.user_id = t.user_id AND t2.run_id = t.run_id AND t2.deleted_at IS NULL AND t2.lat IS NOT NULL ORDER BY ABS(t2.ts - t.ts) LIMIT 1)) AS lng
+       FROM trip_log t WHERE t.deleted_at IS NULL AND t.conditions_at IS NULL AND t.ts < ? AND t.ts > ? ORDER BY t.ts DESC LIMIT ?
      ) WHERE lat IS NOT NULL`,
     now - TLOG_COND_MIN_AGE_MS, now - TLOG_COND_MAX_AGE_MS, limit
   );
@@ -5634,7 +5640,7 @@ async function ctlProcessEvent(env, user, ev) {
   };
   // the water / depth last logged on this run (the state in force), for entries that don't carry their own
   const lastCond = async () => {
-    const r = tripRunId ? await env.DB.prepare("SELECT water_condition, water_depth FROM trip_log WHERE user_id = ? AND run_id = ? AND (water_condition IS NOT NULL OR water_depth IS NOT NULL) ORDER BY ts DESC, rowid DESC LIMIT 1").bind(uid, tripRunId).first() : null;
+    const r = tripRunId ? await env.DB.prepare("SELECT water_condition, water_depth FROM trip_log WHERE user_id = ? AND run_id = ? AND deleted_at IS NULL AND (water_condition IS NOT NULL OR water_depth IS NOT NULL) ORDER BY ts DESC, rowid DESC LIMIT 1").bind(uid, tripRunId).first() : null;
     return { water: r ? r.water_condition : null, depth: r ? r.water_depth : null };
   };
   const actionState = (action) => ({ berley: action.berley, fishingMethod: action.fishingMethod, targets: action.species });

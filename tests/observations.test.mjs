@@ -18,7 +18,7 @@ const archiveTables = schema.slice(schema.indexOf("CREATE TABLE IF NOT EXISTS ob
 /** A fresh in-memory database with the archive tables and a minimal marks table. */
 function makeDb() {
   const sqlite = new DatabaseSync(":memory:");
-  sqlite.exec("CREATE TABLE marks (id TEXT PRIMARY KEY, type TEXT, date_time TEXT); CREATE TABLE trip_log (id TEXT PRIMARY KEY, event_type TEXT, date_time TEXT);");
+  sqlite.exec("CREATE TABLE marks (id TEXT PRIMARY KEY, type TEXT, date_time TEXT); CREATE TABLE trip_log (id TEXT PRIMARY KEY, event_type TEXT, date_time TEXT, deleted_at INTEGER);");
   sqlite.exec(archiveTables);
   const d1 = {
     prepare(sql) {
@@ -294,10 +294,10 @@ test("saved lookups are readable through the public archive, never overwrite, an
   assert.equal(again.observationsWritten + again.tideEventsWritten, 0);
 });
 
-test("prune also keeps the 12 hours around any trip-log row, so the archive survives the Session marks being deleted", async () => {
+test("prune also keeps the 12 hours around any trip-log row, so the archive survives the Session marks being deleted (a line marked for deletion does not count)", async () => {
   const { env, sqlite } = makeDb();
   seedHistory(sqlite);
-  sqlite.prepare("INSERT INTO trip_log VALUES ('a', 'action_start', '2026-08-10 09:00:00'), ('b', 'catch', '2026-08-10 10:00:00'), ('c', 'trip_end', '2026-08-10 11:00:00')").run();
+  sqlite.prepare("INSERT INTO trip_log (id, event_type, date_time, deleted_at) VALUES ('a', 'action_start', '2026-08-10 09:00:00', NULL), ('b', 'catch', '2026-08-10 10:00:00', NULL), ('c', 'trip_end', '2026-08-10 11:00:00', NULL), ('d', 'catch', '2026-08-14 09:00:00', 1)").run();
   await prune(env, { mode: "run" });
   const oldKept = sqlite.prepare("SELECT hour FROM observations WHERE hour < '2026-08-22' ORDER BY hour").all().map((r) => r.hour);
   assert.deepEqual(oldKept, ["2026-08-10 00:00", "2026-08-10 06:00", "2026-08-10 12:00", "2026-08-10 18:00"]);

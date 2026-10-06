@@ -1057,9 +1057,28 @@ test("trip log lines: add one by hand (POST /api/triplog/lines), delete one; a h
   // delete
   assert.equal((await site(env, "DELETE", `/api/triplog/${id}`, undefined, "s-u2")).status, 404);
   assert.equal((await site(env, "DELETE", `/api/triplog/${id}`)).status, 204);
-  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log WHERE id = ?").get(id).n, 0);
-  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log_rods WHERE log_id = ?").get(id).n, 0, "its rod rows go with it");
+  // deleting only marks the line: it is hidden at once but kept (with its rod rows) until it is 30 days old
+  assert.ok(sqlite.prepare("SELECT deleted_at FROM trip_log WHERE id = ?").get(id).deleted_at > 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log_rods WHERE log_id = ?").get(id).n, 1, "its rod rows stay until the purge");
+  const after = await (await site(env, "GET", `/api/triplog?runId=${BF_RUN}`)).json();
+  assert.equal(after.entries.some((e) => e.id === id), false, "hidden from the trip");
+  assert.equal((await site(env, "DELETE", `/api/triplog/${id}`)).status, 404, "already deleted");
+  assert.equal((await site(env, "PATCH", `/api/triplog/${id}`, { species: "Bass", manual: true })).status, 404, "and not editable");
+  await runPurge(env, sqlite, id);
 });
+
+/** The hourly cron: a line deleted less than 30 days ago stays, one deleted longer ago goes with its rod rows. */
+async function runPurge(env, sqlite, id) {
+  await worker.scheduled({}, env, { waitUntil: () => {} });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log WHERE id = ?").get(id).n, 1, "just deleted: still there");
+  sqlite.prepare("UPDATE trip_log SET deleted_at = ? WHERE id = ?").run(Date.now() - 31 * 86400000, id);
+  const pending = [];
+  await worker.scheduled({}, env, { waitUntil: (p) => pending.push(p) });
+  await Promise.all(pending);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log WHERE id = ?").get(id).n, 0, "removed once 30 days old");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log_rods WHERE log_id = ?").get(id).n, 0, "with its rod rows");
+}
 
 // --- Legacy sessions (made before trips existed) -> trip log -------------------------------------------------------------------------
 async function legacySeeded() {
@@ -1210,8 +1229,20 @@ test("deleting a trip: its lines and rod rows go, the catches stay, only your ow
   assert.equal((await site(env, "DELETE", "/api/triplog/run?runId=legacy%3Aa1S", undefined, "s-u2")).status, 404, "not someone else's");
   assert.equal((await site(env, "DELETE", "/api/triplog/run")).status, 400);
   assert.equal((await site(env, "DELETE", "/api/triplog/run?runId=legacy%3Aa1S")).status, 200);
+  assert.equal((await (await site(env, "GET", "/api/triplog?list=1")).json()).some((r) => r.runId === "legacy:a1S"), false, "hidden from the trips list");
+  assert.equal((await (await site(env, "GET", "/api/triplog?runId=legacy%3Aa1S")).json()).entries.length, 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log WHERE run_id = 'legacy:a1S' AND deleted_at IS NOT NULL").get().n, n, "kept, marked for deletion");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log").get().n, before, "nothing removed yet");
+  // the Settings backfill does not bring it back
+  await site(env, "POST", "/api/triplog/backfill-legacy", {});
+  assert.equal(legacyRows(sqlite, "legacy:a1S").filter((r) => r.deleted_at == null).length, 0, "still deleted after a rebuild");
+  // after 30 days the cron removes the lines and their rod rows for good
+  sqlite.prepare("UPDATE trip_log SET deleted_at = ? WHERE run_id = 'legacy:a1S'").run(Date.now() - 31 * 86400000);
+  const pending = [];
+  await worker.scheduled({}, env, { waitUntil: (p) => pending.push(p) });
+  await Promise.all(pending);
   assert.equal(legacyRows(sqlite, "legacy:a1S").length, 0);
-  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log").get().n, before - n);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log WHERE run_id = 'legacy:a1S'").get().n, 0);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM trip_log_rods WHERE log_id LIKE '%a1S%' OR log_id LIKE '%a1C%'").get().n, 0, "its rod rows went too");
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM marks WHERE id = 'a1C'").get().n, 1, "the catch mark stays");
   assert.equal((await site(env, "DELETE", "/api/triplog/run?runId=legacy%3Aa1S")).status, 404);

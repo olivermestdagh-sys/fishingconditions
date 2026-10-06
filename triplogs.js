@@ -115,7 +115,7 @@ function tlRenderRuns() {
       const what = `${run.tripName || "this trip"} (${tripLogDateLabel(run.startDateTime)}, ${run.entries} line${run.entries === 1 ? "" : "s"})`;
       if (!confirm(`Delete ${what} from the trip log?
 
-Its catches stay on the map as marks. This can't be undone.`)) return;
+Its catches stay on the map as marks. It is removed for good after 30 days.`)) return;
       b.disabled = true;
       try {
         await tlSend("DELETE", `/api/triplog/run?runId=${encodeURIComponent(run.runId)}`);
@@ -467,7 +467,7 @@ async function tlSave() {
 }
 
 async function tlDelete() {
-  if (!tlEditing || !tlEditing.id || !confirm("Delete this line from the trip log? This can't be undone.")) return;
+  if (!tlEditing || !tlEditing.id || !confirm("Delete this line from the trip log? It is removed for good after 30 days.")) return;
   try {
     await tlSend("DELETE", `/api/triplog/${encodeURIComponent(tlEditing.id)}`);
     await tlReloadAfterChange();
