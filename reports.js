@@ -772,8 +772,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   gateEl.style.display = "none";
   mainEl.style.display = "block";
 
-  const [marksRes] = await Promise.all([fetch(`${MARKS_FILE_PATH}?_=${Date.now()}`, { cache: "no-store", credentials: "include" })]);
-  reportsAllMarks = marksRes.ok ? await marksRes.json() : [];
+  // The source is the signed-in person's own trip log (not the marks): see tripLogToReportMarks, js/trip-log-view.js.
+  try {
+    const logRes = await fetch(`${USER_BACKEND_URL}/api/triplog?report=1&_=${Date.now()}`, { cache: "no-store", credentials: "include" });
+    reportsAllMarks = logRes.ok ? tripLogToReportMarks((await logRes.json()).entries || []) : [];
+  } catch (err) {
+    console.error("Could not load the trip log for the reports:", err);
+    reportsAllMarks = [];
+  }
   reportsTrackedLocations = await loadTrackedLocationsForLookup();
 
   resetReportsFilters();

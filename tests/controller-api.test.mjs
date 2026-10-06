@@ -1184,3 +1184,20 @@ test("naming a trip: every line of the run takes the name and is marked edited; 
   assert.equal((await site(env, "PATCH", "/api/triplog/run", { runId: "legacy:a1S", tripName: "x".repeat(81) })).status, 400);
   assert.equal((await site(env, "PATCH", "/api/triplog/run", { runId: "legacy:a1S", tripName: "Mine" }, "s-u2")).status, 404);
 });
+
+test("reports read: GET /api/triplog?report=1 gives only your catch / action / trip-end rows, catches with their rods", async () => {
+  const { sqlite, env } = await legacySeeded();
+  await site(env, "POST", "/api/triplog/backfill-legacy", {});
+  sqlite.prepare("INSERT INTO trip_log (id, user_id, run_id, event_type, ts, date_time, source, source_uuid, created_at) VALUES ('tl_other', 'u2', 'x', 'catch', 1, '2026-03-07 07:00:00', 'Site', 'o1', 1)").run();
+  const res = await site(env, "GET", "/api/triplog?report=1");
+  assert.equal(res.status, 200);
+  const { entries } = await res.json();
+  assert.ok(entries.length > 0);
+  assert.ok(entries.every((e) => ["catch", "action_start", "action_end", "trip_end"].includes(e.type)));
+  assert.ok(entries.every((e) => e.id !== "tl_other"));
+  const c = entries.find((e) => e.markId === "a1C");
+  assert.equal(c.species, "Bream");
+  assert.deepEqual(c.rods.map((r) => r.rod), ["L Wilson"]);
+  assert.deepEqual(entries.map((e) => e.ts), [...entries.map((e) => e.ts)].sort((a, b) => a - b));
+  assert.equal((await api(env, null, "GET", "/api/triplog?report=1", undefined, { Origin: SITE })).status, 401);
+});

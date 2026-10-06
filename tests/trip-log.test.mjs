@@ -65,7 +65,7 @@ test("an Action's state: berley, methods, targets and every rod setup", () => {
 });
 
 // --- the Trip Logs tab's reading helpers (js/trip-log-view.js) ---------------------------------------------------------
-const view = new Function(read("../js/trip-log-view.js") + "\nreturn { tripLogEventLabel, tripLogGearLines, tripLogGearTitle, tripLogWaterText, tripLogConditionsText, tripLogCatchText, tripLogDurations, tripLogFormatDuration, tripLogElapsed, tripLogDateLabel, tripLogFlags, tripLogTotals, tripLogIsApprox, tripLogBuildPatch, tripLogParseNumber, tripLogRodFromSetup, tripLogSublist, tripLogChoices };")();
+const view = new Function(read("../js/trip-log-view.js") + "\nreturn { tripLogEventLabel, tripLogGearLines, tripLogGearTitle, tripLogWaterText, tripLogConditionsText, tripLogCatchText, tripLogDurations, tripLogFormatDuration, tripLogElapsed, tripLogDateLabel, tripLogFlags, tripLogTotals, tripLogIsApprox, tripLogBuildPatch, tripLogParseNumber, tripLogRodFromSetup, tripLogSublist, tripLogChoices, tripLogToReportMarks };")();
 
 test("labels, gear, water, conditions and catch text", () => {
   assert.equal(view.tripLogEventLabel({ type: "trip_start" }), "Trip started");
@@ -151,4 +151,40 @@ test("editor helpers: numbers, Rod Setup rows, sub lists and the choices a pick-
   assert.deepEqual(view.tripLogSublist(null), []);
   assert.deepEqual(view.tripLogChoices(["a", "b"], "z"), ["a", "b", "z"], "a value the list no longer has stays choosable");
   assert.deepEqual(view.tripLogChoices(["a", "b"], ["b", "c", ""]), ["a", "b", "c"]);
+});
+
+// --- Reports source: log rows -> mark-like objects ---------------------------------------------------------------------------------
+
+const reportEntries = [
+  { id: "t1", runId: "r1", type: "action_start", ts: 1, dateTime: "2026-03-07 07:00:00", lat: -38.1, lng: 145.2, actionName: "Drift", tripName: "Day", tideCondition: "Running In" },
+  { id: "t2", runId: "r1", type: "catch", ts: 2, dateTime: "2026-03-07 07:40:00", lat: -38.1, lng: 145.2, markId: "m9", species: "Bream", size: 30, released: false, fishingMethod: ["Drifting", "Bottom"], waterCondition: "Murky", waterDepth: 3, tideCondition: "Running In", tideExtreme: "HHW", temperature: 21.5, berley: "Pilchard",
+    rods: [{ rod: "L Wilson", rig: "Paternoster", bait: ["Prawn", "Squid"] }, { rod: "L Raider", rig: "Paternoster", bait: ["Prawn"] }] },
+  { id: "t3", runId: "r1", type: "action_start", ts: 3, dateTime: "2026-03-07 09:00:00", lat: -38.2, lng: 145.3, actionName: "Anchor" },
+  { id: "t4", runId: "r1", type: "trip_end", ts: 4, dateTime: "2026-03-07 10:00:00", lat: -38.3, lng: 145.4 },
+  { id: "t5", runId: "r2", type: "catch", ts: 5, dateTime: "2026-03-08 08:00:00", lat: -38, lng: 145, species: "Flathead", rods: [] },
+  { id: "t6", runId: "r3", type: "action_start", ts: 6, dateTime: "2026-03-09 08:00:00", lat: -38, lng: 145, tripName: "Open" },
+];
+
+test("reports adapter: a catch row becomes a Catch mark with its gear joined as text", () => {
+  const marks = view.tripLogToReportMarks(reportEntries);
+  const c = marks.find((m) => m.type === "Catch" && m.species === "Bream");
+  assert.equal(c.id, "m9");
+  assert.equal(c.rod, "L Wilson, L Raider");
+  assert.equal(c.rig, "Paternoster");
+  assert.equal(c.bait, "Prawn, Squid");
+  assert.equal(c.fishingMethod, "Drifting, Bottom");
+  assert.deepEqual([c.tideCondition, c.tideExtreme, c.temperature, c.waterCondition, c.waterDepth, c.size], ["Running In", "HHW", 21.5, "Murky", 3, 30]);
+  assert.equal(marks.find((m) => m.species === "Flathead").id, "t5"); // no mark: the log row's id
+});
+
+test("reports adapter: an action runs to the next action start / trip end; a running one has no End", () => {
+  const marks = view.tripLogToReportMarks(reportEntries).filter((m) => m.type !== "Catch");
+  assert.deepEqual(marks.map((m) => [m.type, m.sessionGroupId, m.dateTime.slice(11, 16), m.name]), [
+    ["Session Start", "r1:0", "07:00", "Drift"],
+    ["Session End", "r1:0", "09:00", "Drift"],
+    ["Session Start", "r1:1", "09:00", "Anchor"],
+    ["Session End", "r1:1", "10:00", "Anchor"],
+    ["Session Start", "r3:0", "08:00", "Open"],
+  ]);
+  assert.equal(marks[0].tideCondition, "Running In"); // the start carries its conditions for the ribbon
 });

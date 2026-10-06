@@ -174,3 +174,55 @@ function tripLogChoices(values, current) {
   for (const c of [].concat(current || [])) if (c && !out.includes(c)) out.push(c);
   return out;
 }
+
+// --- The Reports tab's source ---------------------------------------------------------------------------------------------------------
+// Reports (reports.js, session-ribbon.js, tide-clock.js) work on mark-shaped objects. GET /api/triplog?report=1 returns the log's catch,
+// action_start, action_end and trip_end rows; this turns them into that shape so the report code doesn't care where they came from.
+
+const TRIP_LOG_REPORT_CONDITION_FIELDS = ["tideCondition", "tideExtreme", "weatherCondition", "windSpeed", "windDirection", "barometer", "temperature", "waterTemperature"];
+
+/**
+ * Log rows -> mark-like objects: every catch row is a "Catch" (its rods' rod / rig / bait joined with commas, as a mark holds them); every
+ * action is a "Session Start" + "Session End" pair sharing a sessionGroupId (<runId>:<n>) — an action runs from its action_start to the
+ * next action_start / action_end / trip_end of its run (the rule of tripLogDurations); one still running has no End. Rows come in time order.
+ */
+function tripLogToReportMarks(entries) {
+  const out = [];
+  const byRun = new Map();
+  for (const e of entries || []) {
+    if (!byRun.has(e.runId)) byRun.set(e.runId, []);
+    byRun.get(e.runId).push(e);
+  }
+  const joined = (list) => [...new Set(list.filter(Boolean))].join(", ");
+  const conditions = (e) => {
+    const o = {};
+    for (const f of TRIP_LOG_REPORT_CONDITION_FIELDS) if (e[f] != null && e[f] !== "") o[f] = e[f];
+    return o;
+  };
+  for (const [runId, rows] of byRun) {
+    let n = 0;
+    let open = null;
+    const close = (e) => {
+      if (!open) return;
+      out.push({ id: `${open.groupId}:end`, type: "Session End", name: open.name, sessionGroupId: open.groupId, dateTime: e.dateTime, lat: e.lat, lng: e.lng });
+      open = null;
+    };
+    for (const e of rows) {
+      if (e.type === "catch") {
+        const rods = e.rods || [];
+        out.push({
+          id: e.markId || e.id, type: "Catch", name: e.species || "Catch", dateTime: e.dateTime, lat: e.lat, lng: e.lng, species: e.species || "", size: e.size, released: e.released,
+          waterCondition: e.waterCondition, waterDepth: e.waterDepth, berley: e.berley || "", fishingMethod: (e.fishingMethod || []).join(", "),
+          rod: joined(rods.map((r) => r.rod)), rig: joined(rods.map((r) => r.rig)), bait: joined(rods.flatMap((r) => r.bait || [])), ...conditions(e),
+        });
+      } else if (e.type === "action_start") {
+        close(e);
+        open = { groupId: `${runId}:${n++}`, name: e.actionName || e.tripName || "Session" };
+        out.push({ id: `${open.groupId}:start`, type: "Session Start", name: open.name, sessionGroupId: open.groupId, dateTime: e.dateTime, lat: e.lat, lng: e.lng, ...conditions(e) });
+      } else if (e.type === "action_end" || e.type === "trip_end") {
+        close(e);
+      }
+    }
+  }
+  return out;
+}

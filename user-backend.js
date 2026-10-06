@@ -3997,6 +3997,16 @@ async function handleTripLogCollection(request, url, env) {
       ).bind(uid, Date.now() - 20 * 60000, limit).all();
       return jsonResponse(results.map((r) => ({ id: r.id, dateTime: r.date_time, lat: r.lat, lng: r.lng })), 200, env);
     }
+    if (url.searchParams.get("report")) {
+      // the Reports tab's source: every catch, action start / end and trip end of the user (catches carry their rod rows), oldest first
+      const { results } = await env.DB.prepare(
+        "SELECT * FROM trip_log WHERE user_id = ? AND event_type IN ('catch', 'action_start', 'action_end', 'trip_end') ORDER BY ts ASC, rowid ASC LIMIT 20000"
+      ).bind(uid).all();
+      const rodRows = (await env.DB.prepare("SELECT r.* FROM trip_log_rods r JOIN trip_log t ON t.id = r.log_id WHERE t.user_id = ? AND t.event_type = 'catch' ORDER BY r.log_id, r.slot").bind(uid).all()).results;
+      const byLog = new Map();
+      for (const r of rodRows) (byLog.get(r.log_id) || byLog.set(r.log_id, []).get(r.log_id)).push(r);
+      return jsonResponse({ entries: results.map((r) => rowToTripLog(r, byLog.get(r.id))) }, 200, env);
+    }
     if (url.searchParams.get("list")) return jsonResponse(await tlogListRuns(env, uid, url.searchParams.get("from"), url.searchParams.get("to")), 200, env);
     let runId = url.searchParams.get("runId");
     const markId = url.searchParams.get("markId");

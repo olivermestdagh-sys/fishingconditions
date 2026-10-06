@@ -2,6 +2,7 @@
 // tide curve, dot layout, wind cells, calculated light times).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { readSharedScripts } from "./helpers.mjs";
 
 const src = readSharedScripts();
@@ -220,4 +221,25 @@ test("live Open-Meteo arrays become archive rows for just the hours of the windo
   assert.deepEqual(fns.ribbonLookupRows(null, null, from, to), []);
   // an hour Open-Meteo has no values for yet (it lags about 2 days) isn't worth a row
   assert.deepEqual(fns.ribbonLookupRows({ time: ["2026-09-11T06:00"], windspeed_10m: [null], winddirection_10m: [null], temperature_2m: [null], pressure_msl: [null] }, null, from, to), []);
+});
+
+test("sessions built from trip-log rows (the Reports source) group their catches by time window", () => {
+  const src = fs.readFileSync(new URL("../js/trip-log-view.js", import.meta.url), "utf8");
+  const adapt = new Function(src + "\nreturn tripLogToReportMarks;")();
+  
+  const reportEntries = [
+    { id: "t1", runId: "r1", type: "action_start", ts: 1, dateTime: "2026-03-07 07:00:00", lat: -38.1, lng: 145.2, actionName: "Drift", tripName: "Day", tideCondition: "Running In" },
+    { id: "t2", runId: "r1", type: "catch", ts: 2, dateTime: "2026-03-07 07:40:00", lat: -38.1, lng: 145.2, markId: "m9", species: "Bream", size: 30, released: false, fishingMethod: ["Drifting", "Bottom"], waterCondition: "Murky", waterDepth: 3, tideCondition: "Running In", tideExtreme: "HHW", temperature: 21.5, berley: "Pilchard",
+      rods: [{ rod: "L Wilson", rig: "Paternoster", bait: ["Prawn", "Squid"] }, { rod: "L Raider", rig: "Paternoster", bait: ["Prawn"] }] },
+    { id: "t3", runId: "r1", type: "action_start", ts: 3, dateTime: "2026-03-07 09:00:00", lat: -38.2, lng: 145.3, actionName: "Anchor" },
+    { id: "t4", runId: "r1", type: "trip_end", ts: 4, dateTime: "2026-03-07 10:00:00", lat: -38.3, lng: 145.4 },
+    { id: "t5", runId: "r2", type: "catch", ts: 5, dateTime: "2026-03-08 08:00:00", lat: -38, lng: 145, species: "Flathead", rods: [] },
+    { id: "t6", runId: "r3", type: "action_start", ts: 6, dateTime: "2026-03-09 08:00:00", lat: -38, lng: 145, tripName: "Open" },
+  ];
+  
+  const sessions = fns.ribbonBuildSessions(adapt(reportEntries));
+  const drift = sessions.find((x) => x.groupId === "r1:0");
+  assert.equal(drift.catches.length, 1);
+  assert.equal(drift.missingEnd, false);
+  assert.equal(sessions.find((x) => x.groupId === "r1:1").catches.length, 0);
 });
