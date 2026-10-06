@@ -4055,3 +4055,17 @@ body.live-card-open { overflow: hidden; }
 .trip-cond { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 68px; padding: 10px 14px; border: 2px solid var(--grey-300, #ccc); border-radius: 14px; background: var(--white, #fff); color: inherit; cursor: pointer; text-align: left; touch-action: manipulation; }
 .trip-cond-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--grey-600, #666); }
 .trip-cond-value { font-size: 1.25rem; font-weight: 700; }
+.trip-rods { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+.trip-rod { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px; min-height: 130px; padding: 12px; border: 3px solid var(--grey-300, #ccc); border-radius: 14px; background: var(--white, #fff); color: inherit; text-align: left; cursor: pointer; touch-action: manipulation; overflow: hidden; }
+.trip-rod.filled { background: rgba(22, 163, 74, 0.16); border-color: #16a34a; } /* the rods of the running action are green */
+.trip-rod.empty { border-style: dashed; align-items: center; justify-content: center; }
+.trip-rod.moving { border-color: #f59e0b; background: rgba(245, 158, 11, 0.18); }
+.trip-rod-name { font-size: 1.05rem; font-weight: 700; overflow-wrap: anywhere; }
+.trip-rod-bait { font-size: 0.9rem; color: #1d5fa8; overflow-wrap: anywhere; }
+.trip-rod-rig { font-size: 0.85rem; color: var(--grey-600, #666); overflow-wrap: anywhere; }
+.trip-rod-empty { color: var(--grey-500, #888); font-size: 1rem; }
+.trip-status-action { margin: 2px 0 0; }
+.trip-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.trip-small { min-height: 48px; padding: 8px 10px; border: 2px solid var(--grey-300, #ccc); border-radius: 12px; background: var(--white, #fff); color: inherit; font-size: 0.95rem; font-weight: 600; cursor: pointer; touch-action: manipulation; }
+.trip-small.on { border-color: #f59e0b; background: rgba(245, 158, 11, 0.18); }
+.trip-end-action { background: #6b7280; margin-bottom: 8px; min-height: 56px; font-size: 1.05rem; }

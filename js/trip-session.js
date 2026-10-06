@@ -40,10 +40,33 @@ function tsActiveSession(state) {
   return { actionId: state.actionId, sessionGroupId: state.sessionGroupId, number: Number.isFinite(state.sessionNumber) ? state.sessionNumber : null };
 }
 
-/** Catch-card defaults from a trip Action (twin of map-live.js liveCatchDefaultsForAction; `data` = {trips, actions, rodSetups}). */
-function tsCatchDefaultsForAction(data, action, water) {
-  const setups = tdLiveRodSetupIds(action.rodSetupIds, data.rodSetups).map((id) => data.rodSetups.find((r) => r.id === id));
+/** Moves / swaps two rod positions of the 2x2 grid: an empty target just takes the setup, a taken one swaps (as the controller's rod screen). */
+function tsSwapRodSlots(slots, from, to) {
+  const next = slots.slice();
+  if (from === to || from < 0 || to < 0 || from >= next.length || to >= next.length) return next;
+  const moved = next[from];
+  next[from] = next[to];
+  next[to] = moved;
+  return next;
+}
+
+/** What a rod position shows: the setup's name, its bait (with options) and its rig options (else the rig) — the controller's rodCell. */
+function tsRodCell(setup) {
+  const bait = !(setup.bait || []).length ? "no bait" : setup.bait.join(", ") + ((setup.baitOptions || []).length ? ` (${setup.baitOptions.join(", ")})` : "");
+  const rig = (setup.subListItems || []).length ? setup.subListItems.join(", ") : setup.rig || "";
+  return { name: setup.name, bait, rig };
+}
+
+/**
+ * Catch-card defaults from a trip Action (twin of map-live.js liveCatchDefaultsForAction; `data` = {trips, actions, rodSetups}).
+ * `rodId`: a catch started from a rod position uses just that rod setup (the Rod question is skipped, everything defaults from it).
+ */
+function tsCatchDefaultsForAction(data, action, water, rodId = null) {
+  let setups = tdLiveRodSetupIds(action.rodSetupIds, data.rodSetups).map((id) => data.rodSetups.find((r) => r.id === id));
+  const forced = rodId ? data.rodSetups.find((r) => r.id === rodId) : null;
+  if (forced) setups = [forced];
   return {
+    forcedRod: forced || null,
     species: action.species || [],
     bait: [...new Set(setups.flatMap((s) => (s && s.bait) || []))],
     baitOptionsFor: (rodName) => {
@@ -228,6 +251,14 @@ async function tsEndTrip() {
   setLiveTripState(null);
 }
 
+/** Saves an Action's four rod positions (like Trip Defaults' rod grid) and logs it as a change while that Action runs. */
+async function tsSetRodSlots(actionId, slots) {
+  const saved = await tdApi(`/api/tripactions/${actionId}`, "PUT", { rodSlots: slots });
+  const i = liveTripData.actions.findIndex((a) => a.id === actionId);
+  if (i >= 0) liveTripData.actions[i] = saved;
+  tripLogNoteDefaultsEdit("/api/tripactions", actionId, liveTripData, liveTripRunState(), liveTripPosition());
+}
+
 /** Water button: the next Water Condition from `options` (then none), logged as a change while an Action runs. */
 function tsCycleWater(options) {
   const d = getLiveMarkDefaults();
@@ -254,7 +285,7 @@ async function tsSaveCatch(options, answers, defaults, gpsPromise, ctx) {
     species: st.species, size: st.tooSmall ? null : st.size, rod: "", bait: st.bait, baitOptions: st.baitOptions, tooSmall: st.tooSmall, released: st.released,
   }, { ...defaults, water }, {}, st.depth);
   const action = defaults.tripAction;
-  const chosen = defaults.tripRodSetups.find((s) => s.name === st.rod);
+  const chosen = defaults.forcedRod || defaults.tripRodSetups.find((s) => s.name === st.rod);
   const trip = liveTripData.trips.find((t) => t.id === action.tripId);
   Object.assign(mark, tdCatchFieldsFromAction(action, liveTripData.rodSetups, chosen ? chosen.id : null, trip ? trip.name : ""));
   const running = liveActiveSession();

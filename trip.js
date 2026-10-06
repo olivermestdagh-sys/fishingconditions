@@ -2,7 +2,7 @@
 // + Catch -> Water / Depth always on screen -> End trip. Tap-only (no rotary dial). The logic is js/trip-session.js; the catch question
 // cards are js/live-cards.js (showCardFlow); editing an Action / Rod Setup is Trip Defaults (js/trip-defaults.js).
 
-const tripUi = { busy: false, overlayOpen: false, waterOptions: null, catches: [], catchesLoaded: false, lastKey: "" };
+const tripUi = { busy: false, overlayOpen: false, waterOptions: null, catches: [], catchesLoaded: false, lastKey: "", rodView: false, move: null };
 
 function tripApp() {
   return document.getElementById("tripApp");
@@ -106,6 +106,11 @@ function tripRenderRunning(root, state) {
   }
   const session = tsActiveSession(state);
   const running = session ? state.actionId : null;
+  if (!session) { tripUi.rodView = false; tripUi.move = null; }
+  if (tripUi.rodView) {
+    tripRenderRods(root, state, trip);
+    return;
+  }
   const d = getLiveMarkDefaults();
   const actions = tdActionsForTrip(liveTripData.actions, trip.id);
   const dis = tripUi.busy ? " disabled" : "";
@@ -131,9 +136,12 @@ function tripRenderRunning(root, state) {
       <button type="button" class="trip-cond" id="tripDepthBtn"><span class="trip-cond-label">Depth</span><span class="trip-cond-value">${d.depth != null ? escapeHtml(d.depth.toFixed(1)) + " m" : "—"}</span></button>
     </div>
     <button type="button" class="trip-big trip-end" id="tripEndBtn"${dis}>${TRIP_STOP_ICON}<span>End trip</span></button>`;
-  root.querySelectorAll("[data-action]").forEach((btn) => btn.addEventListener("click", () => tripOnAction(btn.dataset.action)));
+  root.querySelectorAll("[data-action]").forEach((btn) => btn.addEventListener("click", () => {
+    if (btn.dataset.action === running) { tripUi.rodView = true; tripRender(); } // the running action: its rod screen (End action is there)
+    else tripOnAction(btn.dataset.action);
+  }));
   root.querySelectorAll("[data-action-edit]").forEach((btn) => btn.addEventListener("click", () => tripOpenDefaults({ tripId: state.tripId, actionId: btn.dataset.actionEdit })));
-  document.getElementById("tripCatchBtn").addEventListener("click", tripStartCatch);
+  document.getElementById("tripCatchBtn").addEventListener("click", () => tripStartCatch());
   document.getElementById("tripWaterBtn").addEventListener("click", tripOnWater);
   document.getElementById("tripDepthBtn").addEventListener("click", tripOpenDepth);
   document.getElementById("tripEndBtn").addEventListener("click", tripOnEnd);
@@ -146,6 +154,100 @@ function tripTickElapsed() {
   const state = getLiveTripState();
   const start = state ? tripRunStartMs(state.runId) : null;
   el.textContent = start ? tsElapsedText(start, Date.now()) : "";
+}
+
+// --- The rod screen: the running action's four rod positions as a 2x2 grid (the controller's rod screen) ----------------------
+
+function tripRenderRods(root, state, trip) {
+  const action = tsRunningAction();
+  if (!action) { tripUi.rodView = false; tripRender(); return; }
+  const slots = tdRodSlots(action, liveTripData.rodSetups);
+  const d = getLiveMarkDefaults();
+  const dis = tripUi.busy ? " disabled" : "";
+  const moving = tripUi.move;
+  const cells = slots.map((id, i) => {
+    const setup = id ? liveTripData.rodSetups.find((r) => r.id === id) : null;
+    const cls = "trip-rod" + (setup ? " filled" : " empty") + (moving && moving.from === i ? " moving" : "");
+    if (!setup) return `<button type="button" class="${cls}" data-rod="${i}"${dis}><span class="trip-rod-empty">empty</span></button>`;
+    const c = tsRodCell(setup);
+    return `<button type="button" class="${cls}" data-rod="${i}"${dis}><span class="trip-rod-name">${escapeHtml(c.name)}</span><span class="trip-rod-bait">${escapeHtml(c.bait)}</span><span class="trip-rod-rig">${escapeHtml(c.rig)}</span></button>`;
+  });
+  const hint = moving ? (moving.from == null ? "Move: tap the rod to pick up." : "Tap a position to drop it there.") : "Tap a rod to log a catch on it; tap empty to fill it.";
+  root.innerHTML = `
+    <div class="trip-card trip-status">
+      <div><div class="trip-status-name">${escapeHtml(trip.name)}</div><div class="trip-muted trip-status-action">${escapeHtml(action.name)}</div></div>
+      <div class="trip-status-time" id="tripElapsed" aria-label="Time on this trip"></div>
+    </div>
+    <div class="trip-rods">${cells.join("")}</div>
+    <p class="trip-muted trip-hint">${hint}</p>
+    <div class="trip-conditions">
+      <button type="button" class="trip-cond" id="tripWaterBtn"><span class="trip-cond-label">Water</span><span class="trip-cond-value">${escapeHtml(d.water || "—")}</span></button>
+      <button type="button" class="trip-cond" id="tripDepthBtn"><span class="trip-cond-label">Depth</span><span class="trip-cond-value">${d.depth != null ? escapeHtml(d.depth.toFixed(1)) + " m" : "—"}</span></button>
+    </div>
+    <div class="trip-row">
+      <button type="button" class="trip-small${moving ? " on" : ""}" id="tripMoveBtn"${dis}>${moving ? "Cancel move" : "Move rods"}</button>
+      <button type="button" class="trip-small" id="tripCatchBtn"${dis}>+ Catch (any rod)</button>
+      <button type="button" class="trip-small" id="tripEditActionBtn"${dis}>Edit action</button>
+      <button type="button" class="trip-small" id="tripListBtn">All actions</button>
+    </div>
+    <button type="button" class="trip-big trip-end-action" id="tripEndActionBtn"${dis}>${TRIP_STOP_ICON}<span>End action</span></button>
+    <button type="button" class="trip-big trip-end" id="tripEndBtn"${dis}>${TRIP_STOP_ICON}<span>End trip</span></button>`;
+  root.querySelectorAll("[data-rod]").forEach((btn) => btn.addEventListener("click", () => tripOnRod(Number(btn.dataset.rod), action, slots)));
+  document.getElementById("tripMoveBtn").addEventListener("click", () => { tripUi.move = tripUi.move ? null : { from: null }; tripRender(); });
+  document.getElementById("tripCatchBtn").addEventListener("click", () => tripStartCatch());
+  document.getElementById("tripEditActionBtn").addEventListener("click", () => tripOpenDefaults({ tripId: state.tripId, actionId: action.id }));
+  document.getElementById("tripListBtn").addEventListener("click", () => { tripUi.rodView = false; tripUi.move = null; tripRender(); });
+  document.getElementById("tripEndActionBtn").addEventListener("click", () => tripOnAction(action.id));
+  document.getElementById("tripWaterBtn").addEventListener("click", tripOnWater);
+  document.getElementById("tripDepthBtn").addEventListener("click", tripOpenDepth);
+  document.getElementById("tripEndBtn").addEventListener("click", tripOnEnd);
+  tripTickElapsed();
+}
+
+function tripOnRod(index, action, slots) {
+  if (tripUi.busy || tripUi.overlayOpen) return;
+  const move = tripUi.move;
+  if (move) {
+    if (move.from == null) {
+      if (!slots[index]) return; // nothing there to pick up
+      tripUi.move = { from: index };
+      tripRender();
+      return;
+    }
+    const from = move.from;
+    tripUi.move = null;
+    if (from === index) { tripRender(); return; }
+    tripGuard(() => tsSetRodSlots(action.id, tsSwapRodSlots(slots, from, index)));
+    return;
+  }
+  if (slots[index]) tripStartCatch(slots[index]); // a catch on this rod, everything defaulting from its rod setup
+  else tripFillRod(index, action, slots);
+}
+
+// An empty position: fill it with any rod setup the action doesn't already use.
+function tripFillRod(index, action, slots) {
+  const free = liveTripData.rodSetups.filter((r) => !slots.includes(r.id));
+  if (!free.length) {
+    showLiveToast("No other rod setups — add some in Trip Defaults", true);
+    return;
+  }
+  tripUi.overlayOpen = true;
+  let chosen = null;
+  let flow = null;
+  flow = showCardFlow({
+    getSteps: () => [{ id: "rod", title: "Fill position", prompt: "Which rod setup?", multi: false, options: free.map((r) => r.name), selected: chosen ? [chosen.name] : [] }],
+    onChoose: (step, value) => { chosen = free.find((r) => r.name === value) || null; },
+    onDone: () => {
+      flow.close();
+      tripUi.overlayOpen = false;
+      if (!chosen) { tripRender(); return; }
+      const next = slots.slice();
+      next[index] = chosen.id;
+      tripGuard(() => tsSetRodSlots(action.id, next));
+    },
+    onClose: () => { tripUi.overlayOpen = false; tripRender(); },
+    doneLabel: "Fill",
+  });
 }
 
 // --- Actions ---------------------------------------------------------------------------------------------------
@@ -177,6 +279,8 @@ function tripOnStart(tripId) {
 function tripOnAction(actionId) {
   tripGuard(async () => {
     const result = await tsTapAction(actionId);
+    tripUi.rodView = result.kind === "started"; // starting an action opens its rod screen, as on the controller
+    tripUi.move = null;
     showLiveToast(`${result.action.name} ${result.kind}`);
   });
 }
@@ -269,7 +373,7 @@ function tripOpenDepth() {
 
 // --- Catch: the same cards as the Map's Live +Catch (map-live.js startLiveCatch) -----------------------------------
 
-async function tripStartCatch() {
+async function tripStartCatch(rodId = null) {
   if (tripUi.busy || tripUi.overlayOpen) return;
   const action = tsRunningAction();
   if (!action) return;
@@ -277,7 +381,7 @@ async function tripStartCatch() {
   const gpsPromise = getFreshGpsPosition(); // that is where the fish was, so the fix starts straight away
   const options = await tripLoadCardOptions();
   if (!tripUi.catchesLoaded) await tripLoadRecentCatches();
-  const defaults = tsCatchDefaultsForAction(liveTripData, action, getLiveMarkDefaults().water);
+  const defaults = tsCatchDefaultsForAction(liveTripData, action, getLiveMarkDefaults().water, rodId);
   const answers = {};
   const ctx = { ...tripCatchContext(), depthDefault: getLiveMarkDefaults().depth ?? getLastMarkFieldValues().waterDepth ?? null };
   let flow = null;

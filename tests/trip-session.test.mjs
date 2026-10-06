@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 
 const src = readFileSync(new URL("../js/trip-session.js", import.meta.url), "utf8");
 const lib = new Function(
-  `${src}; return { nextCycleValue, tsStartTripState, tsStartActionState, tsEndActionState, tsActiveSession, tsCatchDefaultsForAction, tsElapsedText };`
+  `${src}; return { nextCycleValue, tsStartTripState, tsStartActionState, tsEndActionState, tsActiveSession, tsCatchDefaultsForAction, tsElapsedText, tsSwapRodSlots, tsRodCell };`
 )();
 globalThis.tdLiveRodSetupIds = (ids) => ids || [];
 globalThis.tdOtherTargets = () => ["Bream"];
@@ -51,4 +51,24 @@ test("elapsed text", () => {
   assert.equal(lib.tsElapsedText(0, 42 * 60000 + 10000), "42:10");
   assert.equal(lib.tsElapsedText(0, 3725000), "1:02:05");
   assert.equal(lib.tsElapsedText(5000, 1000), "0:00");
+});
+
+test("rod positions: an empty target takes the setup, a taken one swaps, bad indexes change nothing", () => {
+  assert.deepEqual(lib.tsSwapRodSlots(["a", null, "b", null], 0, 1), [null, "a", "b", null]);
+  assert.deepEqual(lib.tsSwapRodSlots(["a", "c", "b", null], 0, 2), ["b", "c", "a", null]);
+  assert.deepEqual(lib.tsSwapRodSlots(["a", null, null, null], 0, 0), ["a", null, null, null]);
+  assert.deepEqual(lib.tsSwapRodSlots(["a", null, null, null], 0, 9), ["a", null, null, null]);
+});
+
+test("a rod position shows name, bait with options, and rig options else the rig", () => {
+  assert.deepEqual(lib.tsRodCell({ name: "R1", bait: ["Squid", "Prawn"], baitOptions: ["Fresh"], subListItems: ["8lb"], rig: "Paternoster" }), { name: "R1", bait: "Squid, Prawn (Fresh)", rig: "8lb" });
+  assert.deepEqual(lib.tsRodCell({ name: "R2", rig: "Running sinker" }), { name: "R2", bait: "no bait", rig: "Running sinker" });
+});
+
+test("a catch from a rod position defaults from that rod setup only and skips the rod question", () => {
+  const data = { actions: [], rodSetups: [{ id: "r1", name: "A", bait: ["Squid"], baitOptions: ["Fresh"] }, { id: "r2", name: "B", bait: ["Prawn"] }] };
+  const d = lib.tsCatchDefaultsForAction(data, { rodSetupIds: ["r1", "r2"] }, "", "r2");
+  assert.equal(d.forcedRod.id, "r2");
+  assert.equal(d.skipRod, true);
+  assert.deepEqual(d.bait, ["Prawn"]);
 });
