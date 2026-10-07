@@ -35,7 +35,7 @@ HEAP_WATCH_MB = 90.0
 HEAP_CEILING_MB = 115.0
 # The wasm linear memory only grows, so a warm isolate's figure is the high-water mark of everything it has replayed. Each entry therefore also records
 # whether the isolate was cold (first replay since the Worker started) and how much the figure grew during this replay.
-_ISOLATE = {"id": os.urandom(3).hex(), "replays": 0}
+_ISOLATE = {"id": None, "replays": 0}   # the id is made on first use: a Worker may not ask for entropy while its module is being imported
 KEEP_RECORDINGS_DAYS = 4
 
 
@@ -159,6 +159,8 @@ async def process_recording(cfg, rec_store, out_store, db, now, rec_key, *, prob
     rec_id = rec_key.rsplit("/", 1)[-1].removesuffix(".json")
     entry = {"id": rec_id, "processedAt": now.isoformat(), "clean": False, "reasons": [], "deployedScriptHash": script_hash.SCRIPT_HASH}
     summary, compare, leaked, bundle = {}, None, False, None
+    if _ISOLATE["id"] is None:
+        _ISOLATE["id"] = os.urandom(3).hex()
     cold, heap_before = _ISOLATE["replays"] == 0, (probe() if probe else None)
     _ISOLATE["replays"] += 1
     try:

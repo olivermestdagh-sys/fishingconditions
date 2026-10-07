@@ -478,3 +478,18 @@ class MemoryIsJudgedApartFromOutput(unittest.TestCase):
     def test_the_memory_changes_do_not_touch_the_script_hash(self):
         import script_hash
         self.assertEqual(script_hash.SCRIPT_HASH, script_hash.script_hash(os.path.join(os.path.dirname(__file__), "..", "..", "scripts")))
+
+
+class WorkerImportRules(unittest.TestCase):
+    def test_no_module_asks_for_entropy_while_it_is_imported(self):
+        """Cloudflare rejects a deploy whose modules call os.urandom / random at import time (TOP_LEVEL_ENTROPY_ERROR)."""
+        import importlib
+        from unittest import mock
+
+        def boom(*a, **k):
+            raise OSError("entropy at import time")
+        names = ["shadow", "shadow_measure", "service", "publish", "plan", "runner", "net", "locking", "alerts", "script_hash"]  # store.py and entry.py need Pyodide's js module
+        with mock.patch("os.urandom", boom), mock.patch("random.random", boom), mock.patch("random.seed", boom):
+            for n in names:
+                importlib.reload(__import__(n))
+        shadow._ISOLATE["replays"] = 0
