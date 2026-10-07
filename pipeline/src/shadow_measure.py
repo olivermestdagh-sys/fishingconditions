@@ -3,6 +3,8 @@
 Question it answers: does the Python heap of a warm isolate keep growing from replay to replay, or does it plateau, and what is retained in between?
 
 It is asked for by putting a request object in the PRIVATE shadow bucket:   recordings/_measure.json   =   {"id": "<recording id>", "repeats": 5}
+and, with "normal": true, it drives the REAL shadow.process_recording (the code a normal fire runs, including the memory release after each replay) against a
+scratch prefix (shadow-measure/ in the same private bucket), so nothing under shadow/ is touched and the figures describe the real path.
 The next scheduled fire (any cron) then replays that one recording `repeats` times back to back IN THE SAME ISOLATE and writes shadow/measure-result.json
 (and deletes the request, so it runs once). It writes NOTHING else that matters: no index entry, no compare report, no streak effect. The replay is the
 normal service.run_pipeline replay (same lock, NullNet, shadow/ view of the bucket), so what it measures is what a real replay costs.
@@ -55,6 +57,8 @@ async def run_request(cfg, rec_store, out_store, db, now, probe, log=print):
     result = {"schema": 1, "TEMPORARY": "heap measurement; see shadow_measure.py", "recording": rec_id, "repeats": repeats, "startedAt": now.isoformat(), "runs": []}
     # delete the request first: a crash must not make every following fire repeat a multi-minute measurement
     await rec_store.delete_key(REQUEST_KEY)
+    if req.get("normal"):
+        return await _normal(cfg, rec_store, db, now, probe, result, rec_id, repeats, log)
     bundle_text = await rec_store.get_text(f"recordings/{rec_id}.json")
     gc.collect()
     result["before"] = {**_snap(probe), **_module_state()}
@@ -87,4 +91,23 @@ async def run_request(cfg, rec_store, out_store, db, now, probe, log=print):
     result["typeGrowthFirstToLast"] = [{"type": k, "delta": d} for d, k in growth if d]
     result["finishedAt"] = now.isoformat()
     await out_store.put_text(RESULT_KEY, publish.dumps(result), "application/json")
+    return result
+
+
+async def _normal(cfg, rec_store, db, now, probe, result, rec_id, repeats, log):
+    """The real path, repeated: shadow.process_recording on a scratch view. Reports each entry's own heap fields (peak, before, growth, cold/warm)."""
+    import shadow
+    scratch = rec_store.view("shadow-measure/")
+    result["mode"] = "normal (shadow.process_recording on shadow-measure/)"
+    gc.collect()
+    result["before"] = {**_snap(probe), **_module_state()}
+    for n in range(1, repeats + 1):
+        e = await shadow.process_recording(cfg, rec_store, scratch, db, now, f"recordings/{rec_id}.json", probe=probe, log=lambda *a: None)
+        result["runs"].append({"n": n, "identical": e.get("identical"), "clean": e.get("clean"), "reasons": e.get("reasons"), "heapMb": e.get("heapMb"),
+                               "heapBeforeMb": e.get("heapBeforeMb"), "heapGrowthMb": e.get("heapGrowthMb"), "isolate": e.get("isolate"),
+                               "afterCollect": _snap(probe), "state": _module_state()})
+        log(f"measure(normal) run {n}/{repeats}: peak {e.get('heapMb')} MB, before {e.get('heapBeforeMb')}, growth {e.get('heapGrowthMb')}, cold {(e.get('isolate') or {}).get('cold')}, identical {e.get('identical')}")
+    result["finishedAt"] = now.isoformat()
+    await scratch.put_text(RESULT_KEY, publish.dumps(result), "application/json")
+    await rec_store.view("shadow/").put_text("measure-result-normal.json", publish.dumps(result), "application/json")
     return result

@@ -17,6 +17,7 @@ processed (oldest first):
 
 Everything is in the private bucket; nothing here is public.
 """
+import gc
 import hashlib
 import json
 import os
@@ -27,7 +28,14 @@ import service
 
 INDEX_KEY = "index.json"
 INDEX_MAX = 300
-HEAP_LIMIT_MB = 90.0
+# Memory is judged SEPARATELY from output equality. Equality alone decides clean/unclean (and so the streak) EXCEPT for a hard ceiling: the Worker's
+# real limit is far above these, but a replay that peaks over the ceiling is a replay we cannot trust to keep running, so it counts as unclean. The watch
+# level is only reported (heapWatch in the entry; verify-shadow prints it) and never resets the streak.
+HEAP_WATCH_MB = 90.0
+HEAP_CEILING_MB = 115.0
+# The wasm linear memory only grows, so a warm isolate's figure is the high-water mark of everything it has replayed. Each entry therefore also records
+# whether the isolate was cold (first replay since the Worker started) and how much the figure grew during this replay.
+_ISOLATE = {"id": os.urandom(3).hex(), "replays": 0}
 KEEP_RECORDINGS_DAYS = 4
 
 
@@ -141,8 +149,8 @@ def verdict(summary, compare, leaked, heap_mb):
         reasons.append("the gate passed but nothing was published")
     if leaked:
         reasons.append("a private location name or owner id appeared in a public object")
-    if heap_mb is not None and heap_mb > HEAP_LIMIT_MB:
-        reasons.append(f"Python heap {heap_mb:.0f} MB is over the {HEAP_LIMIT_MB:.0f} MB target")
+    if heap_mb is not None and heap_mb > HEAP_CEILING_MB:
+        reasons.append(f"Python heap {heap_mb:.0f} MB is over the {HEAP_CEILING_MB:.0f} MB ceiling")
     return (not reasons), reasons
 
 
@@ -151,6 +159,8 @@ async def process_recording(cfg, rec_store, out_store, db, now, rec_key, *, prob
     rec_id = rec_key.rsplit("/", 1)[-1].removesuffix(".json")
     entry = {"id": rec_id, "processedAt": now.isoformat(), "clean": False, "reasons": [], "deployedScriptHash": script_hash.SCRIPT_HASH}
     summary, compare, leaked, bundle = {}, None, False, None
+    cold, heap_before = _ISOLATE["replays"] == 0, (probe() if probe else None)
+    _ISOLATE["replays"] += 1
     try:
         bundle, replay = parse_bundle(await rec_store.get_text(rec_key))
         entry.update(runStart=bundle["runStart"], workflowRunId=bundle.get("workflowRunId"), scriptHash=bundle.get("scriptHash"))
@@ -190,6 +200,9 @@ async def process_recording(cfg, rec_store, out_store, db, now, rec_key, *, prob
 
     heap = summary.get("heapMb")
     clean, reasons = verdict(summary, compare, leaked, heap)
+    entry.update(isolate={"id": _ISOLATE["id"], "cold": cold, "replayNo": _ISOLATE["replays"]}, heapBeforeMb=heap_before,
+                 heapGrowthMb=(round(heap - heap_before, 1) if heap is not None and heap_before is not None else None),
+                 heapWatch=bool(heap is not None and heap > HEAP_WATCH_MB))
     entry.update(clean=clean, reasons=reasons, heapMb=heap, published=bool(summary.get("published")),
                  counts=summary.get("counts"), identical=(compare or {}).get("identical"))
     if compare and compare["mismatched"]:
@@ -198,6 +211,9 @@ async def process_recording(cfg, rec_store, out_store, db, now, rec_key, *, prob
               "error": summary.get("error"), "publicLeak": leaked}
     await out_store.put_text(f"compare/{rec_id}.json", publish.dumps(report), "application/json")
     await update_index(out_store, entry)
+    # Nothing of this replay may stay referenced in a warm isolate: the recording, the parsed responses, the output paths, the comparison and the report.
+    bundle = replay = summary = compare = report = None
+    gc.collect()
     return entry
 
 

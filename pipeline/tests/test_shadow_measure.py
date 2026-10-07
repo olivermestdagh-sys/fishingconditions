@@ -40,3 +40,20 @@ class Measure(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MeasureNormalPath(unittest.TestCase):
+    def test_normal_mode_runs_the_real_path_on_a_scratch_prefix_and_leaves_shadow_alone(self):
+        bundle, _ = make_bundle()
+        bucket = FakeStore()
+        put_bundle(bucket, bundle)
+        bucket.all[shadow_measure.REQUEST_KEY] = json.dumps({"id": bundle["runId"], "repeats": 3, "normal": True})
+        process(bucket, FakeDB(), probe=lambda: 60.0)
+        self.assertNotIn("shadow/index.json", bucket.objects)
+        self.assertFalse([k for k in bucket.objects if k.startswith("shadow/compare/") or k.startswith("shadow/runs/")])
+        self.assertIn("shadow-measure/index.json", bucket.objects)               # the scratch copy of the real path
+        res = json.loads(bucket.objects["shadow/measure-result-normal.json"])
+        self.assertEqual([r["n"] for r in res["runs"]], [1, 2, 3])
+        self.assertTrue(all(r["identical"] and r["clean"] for r in res["runs"]))
+        self.assertEqual([r["isolate"]["replayNo"] for r in res["runs"]], [res["runs"][0]["isolate"]["replayNo"] + i for i in range(3)])
+        self.assertTrue(all(r["heapMb"] == 60.0 and r["heapBeforeMb"] == 60.0 and r["heapGrowthMb"] == 0.0 for r in res["runs"]))

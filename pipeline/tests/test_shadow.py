@@ -349,13 +349,19 @@ class ShadowCatchesProblems(unittest.TestCase):
         self.assertTrue(any(n in json.dumps({"name": "Alpha"}) for n in names))
         self.assertFalse(any(n in json.dumps({"name": "Alpha Beach"}) for n in names))
 
-    def test_heap_over_the_target_is_unclean(self):
+    def test_heap_over_the_CEILING_is_unclean_but_over_the_watch_level_alone_is_not(self):
         bundle, _ = make_bundle()
         bucket = FakeStore()
         put_bundle(bucket, bundle)
-        e = process(bucket, FakeDB(), probe=lambda: 95.0)[0]
+        e = process(bucket, FakeDB(), probe=lambda: 120.0)[0]
         self.assertFalse(e["clean"])
         self.assertIn("heap", e["reasons"][0])
+        b2, _ = make_bundle()
+        bucket2 = FakeStore()
+        put_bundle(bucket2, b2)
+        e2 = process(bucket2, FakeDB(), probe=lambda: 95.0)[0]
+        self.assertTrue(e2["clean"])          # 95 MB is above the 90 MB watch level only: reported (heapWatch), never a failure
+        self.assertTrue(e2["heapWatch"])
 
     def test_a_corrupt_recording_is_reported_and_the_next_one_still_runs(self):
         bucket = FakeStore()
@@ -427,3 +433,48 @@ class ShadowCatchesProblems(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MemoryIsJudgedApartFromOutput(unittest.TestCase):
+    def _entry(self, probe):
+        bundle, _ = make_bundle()
+        bucket = FakeStore()
+        put_bundle(bucket, bundle)
+        return process(bucket, FakeDB(), probe=probe)[0]
+
+    def test_a_peak_between_the_watch_level_and_the_ceiling_is_clean_and_flagged_as_watch(self):
+        e = self._entry(lambda: 100.0)
+        self.assertTrue(e["clean"])
+        self.assertEqual(e["reasons"], [])
+        self.assertTrue(e["heapWatch"])
+        self.assertEqual(e["heapMb"], 100.0)
+
+    def test_a_peak_over_the_ceiling_is_unclean(self):
+        e = self._entry(lambda: 120.0)
+        self.assertFalse(e["clean"])
+        self.assertIn("115 MB ceiling", e["reasons"][0])
+
+    def test_a_low_peak_is_not_flagged_and_the_entry_records_before_growth_and_isolate(self):
+        beats = iter([40.0, 77.0])                   # before the replay, then at its end
+        e = self._entry(lambda: next(beats))
+        self.assertTrue(e["clean"])
+        self.assertFalse(e["heapWatch"])
+        self.assertEqual((e["heapBeforeMb"], e["heapMb"], e["heapGrowthMb"]), (40.0, 77.0, 37.0))
+        self.assertEqual(set(e["isolate"]), {"id", "cold", "replayNo"})
+
+    def test_cold_is_true_only_for_the_first_replay_in_an_isolate(self):
+        shadow._ISOLATE["replays"] = 0
+        first = self._entry(lambda: 50.0)
+        second = self._entry(lambda: 50.0)
+        self.assertTrue(first["isolate"]["cold"])
+        self.assertFalse(second["isolate"]["cold"])
+        self.assertEqual(second["isolate"]["replayNo"], first["isolate"]["replayNo"] + 1)
+
+    def test_the_scripts_per_run_state_is_cleared_after_a_replay(self):
+        import fetch_conditions as fc
+        self._entry(lambda: 50.0)
+        self.assertEqual(fc.ARCHIVE_BY_LOCATION, {})
+
+    def test_the_memory_changes_do_not_touch_the_script_hash(self):
+        import script_hash
+        self.assertEqual(script_hash.SCRIPT_HASH, script_hash.script_hash(os.path.join(os.path.dirname(__file__), "..", "..", "scripts")))

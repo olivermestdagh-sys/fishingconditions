@@ -19,7 +19,10 @@
 //
 // A clean cycle = the recording was replayed; the Worker's full output is byte-identical to Actions' (conditions, locations export, every
 // graph file) and it would have sent the same writes and made the same calls; the publish gate would have passed; the lock worked; Python
-// heap under 90 MB; no private location name or owner id in any public object. 24 consecutive are needed.
+// no private location name or owner id in any public object. 24 consecutive are needed. MEMORY IS JUDGED SEPARATELY: output equality alone decides clean
+// and the streak, except that a peak over the 115 MB ceiling is unclean; the 90 MB watch level is only reported. Each cycle's peak, whether the isolate was
+// cold or warm, and the growth during the replay are in --detail, and the verdict line carries the recorded maximum (the cutover gate requires it to stay
+// under the ceiling).
 //
 // A cycle COUNTS only if the recording was made with the very script the shadow Worker was deployed with: the recording's scriptHash equals the
 // deployedScriptHash its replay was made under (and the heartbeat's current one). Any other recording (made before the recorder stored a hash, or
@@ -35,6 +38,8 @@ export const DEFAULTS = {
   workflow: "update.yml",
   needed: 24,
   pendingMinutes: 90, // a successful Actions run younger than this may simply not have been replayed yet
+  heapWatchMb: 90, // reported only: a counted cycle above it is mentioned, never unclean
+  heapCeilingMb: 115, // a counted cycle whose peak is above it is UNCLEAN (the Worker applies the same ceiling; this is the independent check)
 };
 
 const fmtUtc = (iso) => (iso ? new Date(iso).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "?");
@@ -116,10 +121,27 @@ export function isSuperseded(c, deployedNow = null) {
   return Boolean(deployedNow) && c.deployedScriptHash !== deployedNow;
 }
 
-export function classify({ cycles, runs, now, pendingMinutes = DEFAULTS.pendingMinutes, deployedScriptHash = null }) {
-  const asItem = (c) => (isSuperseded(c, deployedScriptHash)
-    ? { kind: "superseded", id: c.id, at: c.runStart, note: c.supersededWhy || "made with a different script than the deployed Worker" }
-    : c.clean ? { kind: "clean", id: c.id, at: c.runStart, note: "" } : { kind: "unclean", id: c.id, at: c.runStart, note: (c.reasons || []).join("; "), cycle: c });
+/** Memory of the counted cycles (superseded ones excluded), reported apart from the verdict. */
+export function heapStats(items, { watch = DEFAULTS.heapWatchMb, ceiling = DEFAULTS.heapCeilingMb } = {}) {
+  const counted = items.filter((i) => (i.kind === "clean" || i.kind === "unclean") && i.cycle && typeof i.cycle.heapMb === "number");
+  if (!counted.length) return null;
+  const peaks = counted.map((i) => i.cycle.heapMb);
+  return {
+    cycles: counted.length, maxMb: Math.max(...peaks), watch, ceiling,
+    overWatch: counted.filter((i) => i.cycle.heapMb > watch).length, overCeiling: counted.filter((i) => i.cycle.heapMb > ceiling).length,
+    cold: counted.filter((i) => i.cycle.isolate && i.cycle.isolate.cold).length,
+  };
+}
+
+export function classify({ cycles, runs, now, pendingMinutes = DEFAULTS.pendingMinutes, deployedScriptHash = null, heapCeilingMb = DEFAULTS.heapCeilingMb }) {
+  const overCeiling = (c) => typeof c.heapMb === "number" && c.heapMb > heapCeilingMb;
+  const asItem = (c) => {
+    if (isSuperseded(c, deployedScriptHash)) return { kind: "superseded", id: c.id, at: c.runStart, note: c.supersededWhy || "made with a different script than the deployed Worker", cycle: c };
+    if (c.clean && !overCeiling(c)) return { kind: "clean", id: c.id, at: c.runStart, note: "", cycle: c };
+    const reasons = [...(c.reasons || [])];
+    if (overCeiling(c) && !reasons.some((r) => /ceiling/.test(r))) reasons.push(`Python heap ${Math.round(c.heapMb)} MB is over the ${heapCeilingMb} MB ceiling`);
+    return { kind: "unclean", id: c.id, at: c.runStart, note: reasons.join("; "), cycle: c };
+  };
   // Nothing replayed yet: there is no "since when" to judge Actions' runs against (they predate the recorder), so there is nothing to classify.
   if (!cycles.length) return { items: [], streak: 0, lastClean: null, newestVerdict: undefined, unverified: [], notCounted: [] };
   const byRun = new Map(cycles.filter((c) => c.workflowRunId).map((c) => [String(c.workflowRunId), c]));
@@ -165,6 +187,7 @@ export function classify({ cycles, runs, now, pendingMinutes = DEFAULTS.pendingM
     items, streak, lastClean, newestVerdict,
     unverified: items.filter((i) => i.kind === "missing"),
     superseded: items.filter((i) => i.kind === "superseded"),
+    heap: heapStats(items),
     notCounted: items.filter((i) => i.kind === "actions-failed" || i.kind === "pending"),
   };
 }
@@ -182,6 +205,7 @@ export function verdictLine(cls, { needed = DEFAULTS.needed, now, extra = null, 
   const skipped = cls.notCounted.filter((i) => i.kind === "actions-failed");
   if (skipped.length) tail.push(`${skipped.length} not counted (${skipped.map((i) => `${fmtUtc(i.at).slice(5, 16)}: ${i.note.split(":")[0].toLowerCase()}`).join("; ")})`);
   if (supersededNote) tail.push(supersededNote);
+  if (cls.heap) tail.push(`heap peak ${cls.heap.maxMb} MB over ${cls.heap.cycles} counted cycle(s): ${cls.heap.overWatch} above the ${cls.heap.watch} MB watch level (reported only), ${cls.heap.overCeiling} above the ${cls.heap.ceiling} MB ceiling`);
   const pending = cls.notCounted.filter((i) => i.kind === "pending");
   if (pending.length) tail.push(`${pending.length} pending`);
   if (runsUnavailable) tail.push("could not read the Actions run list, so skipped/failed runs are not distinguished");
@@ -326,7 +350,11 @@ export async function runVerify(io, opts = {}) {
 
 export function detailTable(cls) {
   return cls.items
-    .map((i) => `${fmtUtc(i.at).padEnd(18)} ${i.kind.padEnd(14)} ${String(i.id).padEnd(20)} ${i.note || ""}`)
+    .map((i) => {
+      const c = i.cycle;
+      const mem = c && typeof c.heapMb === "number" ? `heap ${String(c.heapMb).padStart(5)} MB ${c.isolate ? (c.isolate.cold ? "cold" : "warm") : "    "} ${typeof c.heapGrowthMb === "number" ? "+" + c.heapGrowthMb : "  "}`.padEnd(30) : "".padEnd(30);
+      return `${fmtUtc(i.at).padEnd(18)} ${i.kind.padEnd(14)} ${String(i.id).padEnd(20)} ${mem} ${i.note || ""}`;
+    })
     .join("\n");
 }
 

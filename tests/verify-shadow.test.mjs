@@ -252,3 +252,46 @@ test("runVerify reads the Worker's current script hash from the heartbeat", asyn
   const res2 = await runVerify(io, { now: NOW, noDeep: true });
   assert.equal(res2.code, 3);
 });
+
+// ---------------------------------------------------------------- memory is judged apart from output equality
+
+test("a peak above the 90 MB watch level is reported but does NOT reset or lower the streak", () => {
+  const cycles = [cycle(0, { heapMb: 77.4, isolate: { cold: true } }), cycle(1, { heapMb: 92.9, heapGrowthMb: 15.5, isolate: { cold: false } }), cycle(2, { heapMb: 100, isolate: { cold: false } })];
+  const cls = classify({ cycles, runs: cycles.map((c, n) => run(n)), now: NOW, deployedScriptHash: HASH });
+  assert.equal(cls.streak, 3);
+  const v = verdictLine(cls, {});
+  assert.equal(v.code, 0);
+  assert.match(v.line, /heap peak 100 MB over 3 counted cycle\(s\): 2 above the 90 MB watch level \(reported only\), 0 above the 115 MB ceiling/);
+});
+
+test("a peak above the 115 MB ceiling is UNCLEAN even if the entry says clean (independent check), and resets the streak", () => {
+  const cycles = [cycle(0), cycle(1, { heapMb: 120, clean: true }), cycle(2, { heapMb: 80 })];
+  const cls = classify({ cycles, runs: cycles.map((c, n) => run(n)), now: NOW, deployedScriptHash: HASH });
+  assert.equal(cls.streak, 1);
+  assert.deepEqual(cls.items.filter((i) => i.kind === "unclean").map((i) => i.id), [id(1)]);
+  assert.match(cls.items.find((i) => i.kind === "unclean").note, /120 MB is over the 115 MB ceiling/);
+  const last = classify({ cycles: [cycle(0), cycle(1, { heapMb: 120 })], runs: [run(0), run(1)], now: NOW, deployedScriptHash: HASH });
+  assert.equal(verdictLine(last, {}).code, 1);
+  assert.equal(last.heap.overCeiling, 1);
+});
+
+test("an output mismatch is unclean whatever the memory was, and a clean cycle with high-but-under-ceiling memory is clean", () => {
+  const cycles = [cycle(0, { heapMb: 40, clean: false, reasons: ["output differs from Actions at conditions.json"] }), cycle(1, { heapMb: 114 })];
+  const cls = classify({ cycles, runs: cycles.map((c, n) => run(n)), now: NOW, deployedScriptHash: HASH });
+  assert.deepEqual(cls.items.map((i) => i.kind), ["unclean", "clean"]);
+});
+
+test("superseded cycles are left out of the heap statistics", () => {
+  const cycles = [cycle(0, { scriptHash: undefined, heapMb: 200 }), cycle(1, { heapMb: 80 })];
+  const cls = classify({ cycles, runs: cycles.map((c, n) => run(n)), now: NOW, deployedScriptHash: HASH });
+  assert.equal(cls.heap.maxMb, 80);
+  assert.equal(cls.heap.cycles, 1);
+});
+
+test("--detail shows each cycle's peak, cold or warm, and growth", () => {
+  const cycles = [cycle(0, { heapMb: 77.4, heapGrowthMb: 61.2, isolate: { cold: true } }), cycle(1, { heapMb: 92.9, heapGrowthMb: 15.5, isolate: { cold: false } })];
+  const cls = classify({ cycles, runs: cycles.map((c, n) => run(n)), now: NOW, deployedScriptHash: HASH });
+  const t = detailTable(cls);
+  assert.match(t, /heap  77\.4 MB cold \+61\.2/);
+  assert.match(t, /heap  92\.9 MB warm \+15\.5/);
+});

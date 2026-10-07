@@ -126,6 +126,7 @@ def run(locations, raw, prev_text, api_key, *, frozen_iso=None, forecast_days=6,
     finally:
         for k, v in saved.items():
             setattr(fc, k, v)
+        fc.ARCHIVE_BY_LOCATION.clear()  # the script keeps every location's archive rows here for the run's POSTs; a warm isolate must not keep the last run's
 
 
 def cleanup(result):
