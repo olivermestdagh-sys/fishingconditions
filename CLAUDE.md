@@ -8,6 +8,7 @@ Full feature list, architecture diagram, tide-condition rules and privacy model 
 
 - `npm test` (= `node --test`) — runs everything in `tests/*.test.mjs`. Run a single file directly: `node --test tests/tide.test.mjs`.
 - `npm run check-pages` (= `node scripts/check-page-scripts.mjs`) — verifies every HTML page loads every shared `js/*.js` file it actually uses, in the right order. **Run this after adding/removing a function in a shared `js/*.js` file, or adding a `<script>` tag to any page** — it's the one check that catches a function only existing on some pages (see Architecture below).
+- `node scripts/build-site.mjs` — copies only the files the pages reference (plus `data/`, `config/locations.json`) into a git-ignored `dist/`; fails if a page/manifest/CSS references a missing file. The file list is discovered from the pages (`collectSiteFiles`, tested in `tests/build-site.test.mjs`); Pages still deploys the repo root, `dist/` is not wired into deploy yet.
 - Syntax-check a script: `node --check some-file.js`. `user-backend.js` is ESM despite the `.js` extension — copy it to a `.mjs` path first (`cp user-backend.js /tmp/user-backend.mjs && node --check /tmp/user-backend.mjs`), exactly as CI does.
 - `python -m py_compile scripts/fetch_conditions.py scripts/observation_archive.py` — compile-check the data pipeline (no Python test runner here).
 - No frontend build step — plain HTML/CSS/JS, no bundler, no `npm run dev`. Just edit and reload.
