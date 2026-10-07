@@ -252,10 +252,6 @@ async def process_pending(cfg, rec_store, out_store, db, now, *, probe=None, log
     keys = sorted(k for k in await rec_store.list_keys("recordings/") if k.endswith(".json"))
     if not keys:
         return []
-    import shadow_measure  # TEMPORARY (delete with shadow_measure.py): a measurement request in the listing replaces this fire's normal work
-    if shadow_measure.REQUEST_KEY in keys:
-        await shadow_measure.run_request(cfg, rec_store, out_store, db, now, probe, log=log)
-        return []
     replayed = await processed_ids(out_store)
     done = []
     for k in keys:

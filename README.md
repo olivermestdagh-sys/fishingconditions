@@ -116,8 +116,7 @@ replayed. Measured on the deployed shadow (cold isolate, one 9,000-row recording
 for the third to fifth: it plateaus, there is no leak (what a run leaves behind is a couple of GC objects; the script's per-run `ARCHIVE_BY_LOCATION` is cleared after every run and each replay drops its references and runs
 `gc.collect()`). Equality alone decides clean/unclean and the streak, with one exception: a peak over the **115 MB ceiling** is unclean. The **90 MB watch level** is only reported. Every index entry records the peak, the
 heap before, the growth, and whether the isolate was cold or warm; `verify-shadow` prints the recorded maximum and how many cycles were over each level (`--detail` per cycle). The cutover gate additionally requires
-that recorded maximum to stay under the ceiling. `pipeline/src/shadow_measure.py` is a TEMPORARY measurement mode (a request object `recordings/_measure.json` replays one recording N times and writes
-`shadow/measure-result*.json`; it touches no index or streak): delete it with its 4-line hook in `shadow.process_pending` once the question is closed. None of this touches the two scripts, so `SCRIPT_HASH` is unchanged.
+that recorded maximum to stay under the ceiling. A temporary measurement mode (replay one recording N times in one isolate) was used to take those figures and has been removed again. None of this touches the two scripts, so `SCRIPT_HASH` is unchanged.
 
 **Shadow mode** (stage 2; code written, not deployed): before the Worker replaces Actions it replays what Actions already did and proves it gets the same answer.
 `scripts/record_run.py` replaces the `python3 scripts/fetch_conditions.py` line of `update.yml`: it runs the same script with its clock pinned to the start of the run and

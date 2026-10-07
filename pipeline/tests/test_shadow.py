@@ -488,7 +488,7 @@ class WorkerImportRules(unittest.TestCase):
 
         def boom(*a, **k):
             raise OSError("entropy at import time")
-        names = ["shadow", "shadow_measure", "service", "publish", "plan", "runner", "net", "locking", "alerts", "script_hash"]  # store.py and entry.py need Pyodide's js module
+        names = ["shadow", "service", "publish", "plan", "runner", "net", "locking", "alerts", "script_hash"]  # store.py and entry.py need Pyodide's js module
         with mock.patch("os.urandom", boom), mock.patch("random.random", boom), mock.patch("random.seed", boom):
             for n in names:
                 importlib.reload(__import__(n))
