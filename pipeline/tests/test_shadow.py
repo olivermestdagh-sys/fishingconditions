@@ -273,7 +273,7 @@ class ShadowReplay(unittest.TestCase):
         self.assertEqual(sh["vars"]["SHADOW"], "1")
         for forbidden in ("PIPELINE_WORKER_URL", "WILLYWEATHER_API_KEY", "PIPELINE_API_TOKEN", "ALERT_WEBHOOK_URL"):
             self.assertNotIn(forbidden, sh["vars"])
-        self.assertEqual(sh["triggers"]["crons"], ["40 */3 * * *"])
+        self.assertEqual(sh["triggers"]["crons"], ["*/15 * * * *", "40 */3 * * *"])
         self.assertNotIn("services", sh)
         self.assertEqual(conf["r2_buckets"][0]["bucket_name"], "yepyepyep-data-public")  # production's, which shadow does not inherit
 

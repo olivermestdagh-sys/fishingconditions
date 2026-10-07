@@ -245,14 +245,17 @@ async def process_pending(cfg, rec_store, out_store, db, now, *, probe=None, log
 
 
 async def touch_heartbeat(out_store, now, cron):
-    """shadow/heartbeat.json: proof the cron reached the Worker, plus a fire COUNT (the object is overwritten each time, so without a counter
-    the number of fires is unrecoverable). One read + one write."""
+    """shadow/heartbeat.json: proof the cron reached the Worker, the cron STRING that fired, and fire counts in total and per cron string (the
+    object is overwritten each time, so without counters the history is unrecoverable). One read + one write."""
     prev = {}
     text = await out_store.get_text("heartbeat.json")
     try:
         prev = json.loads(text) if text else {}
     except ValueError:
         prev = {}
-    beat = {"at": now.isoformat(), "cron": cron, "fires": int(prev.get("fires", 0)) + 1, "firstFireAt": prev.get("firstFireAt") or now.isoformat()}
+    by_cron = dict(prev.get("byCron") or {})
+    by_cron[cron] = int(by_cron.get(cron, 0)) + 1          # which schedule fired, and how often each did (the shadow has two)
+    beat = {"at": now.isoformat(), "cron": cron, "fires": int(prev.get("fires", 0)) + 1, "byCron": by_cron,
+            "firstFireAt": prev.get("firstFireAt") or now.isoformat()}
     await out_store.put_text("heartbeat.json", json.dumps(beat), "application/json", "no-store")
     return beat

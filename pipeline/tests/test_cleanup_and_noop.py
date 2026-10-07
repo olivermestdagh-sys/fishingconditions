@@ -153,13 +153,16 @@ class NoOpFiresAreCheapAndIdempotent(Isolated):
     def test_the_heartbeat_adds_one_read_and_one_write_and_counts_fires(self):
         bucket = FakeStore()
         out = bucket.view("shadow/")
-        b1 = run(shadow.touch_heartbeat(out, FIRE, "*/5 * * * *"))
-        self.assertEqual((b1["fires"], b1["cron"]), (1, "*/5 * * * *"))
+        b1 = run(shadow.touch_heartbeat(out, FIRE, "*/15 * * * *"))
+        self.assertEqual((b1["fires"], b1["cron"]), (1, "*/15 * * * *"))
         bucket.reset_ops()
         b2 = run(shadow.touch_heartbeat(out, FIRE + timedelta(minutes=5), "40 */3 * * *"))
         self.assertEqual((b2["fires"], b2["firstFireAt"]), (2, FIRE.isoformat()))
-        self.assertEqual(bucket.ops["get"], 1)
-        self.assertEqual(bucket.ops["put"], 1)
+        self.assertEqual(b2["cron"], "40 */3 * * *")                                       # the string that fired THIS time
+        b3 = run(shadow.touch_heartbeat(out, FIRE + timedelta(minutes=15), "*/15 * * * *"))
+        self.assertEqual(b3["byCron"], {"*/15 * * * *": 2, "40 */3 * * *": 1})              # and how often each schedule has fired
+        self.assertEqual(bucket.ops["get"], 2)   # two touches since the reset (the second heartbeat in this test)
+        self.assertEqual(bucket.ops["put"], 2)
 
     def test_many_fires_replay_a_recording_exactly_once(self):
         bucket, ids = recorded_bucket(1)

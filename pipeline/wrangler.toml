@@ -67,8 +67,11 @@ enabled = true
 cpu_ms = 300000
 
 [env.shadow.triggers]
-# 40 minutes past: after the Actions job (:00, often delayed) has finished and uploaded its recording.
-crons = ["40 */3 * * *"]
+# Two schedules, both doing the same idempotent replay work (any scheduled fire does; a fire with nothing new is a cheap no-op):
+#   "*/15 * * * *"  every 15 minutes: Actions runs only a few times a day and unpredictably, so poll often (a no-op fire is ~2 R2 writes/lists + 2 reads, no D1).
+#   "40 */3 * * *"  the original schedule, kept so we learn whether hour-step expressions fire on this account (they had not in 4.5 hours).
+# The heartbeat records which of the two fired.
+crons = ["*/15 * * * *", "40 */3 * * *"]
 
 [[env.shadow.d1_databases]]
 binding = "DB"
