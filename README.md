@@ -70,15 +70,23 @@ How a run works (`pipeline/src/service.py`):
    builds the URLs with the script's own functions, so they cannot drift);
 4. run `fetch_conditions.main()` unmodified and synchronously, its HTTP / files / clock redirected (`runner.py`);
 5. split the output by owner and keep **Public's only** (`publish.py`; the per-owner private layout is reserved, not built);
-6. the **publish gate**: refuse to publish when under 80% of locations returned weather, rows fell under 70% of the last run, or the output is
-   empty. A refused run writes nothing under `runs/` and leaves `latest.json` alone, so the site keeps the last good data;
-7. write the objects one at a time to `runs/<runId>/...` (immutable, cached for a year), then `manifest.json` (sizes + sha-256), then flip
-   `latest.json` LAST; prune runs older than the newest 8;
-8. replay the script's write side effects to the user Worker exactly as today (the WillyWeather id cache PUTs, the observation archive POSTs, the prune), best effort;
+6. the **publish gate**, judged on **Public's** output only and on what the script actually produced: refuse when under 80% of public
+   location/type pairs have fresh forecast rows, when rows per location fall under 70% of the last run's (so removing locations is not a "drop"), when the
+   script asked for responses that were never prefetched (plan drift), or when the output is empty. A refused run writes nothing under `runs/`, leaves
+   `latest.json` alone, and sends **no** side effects; an admin override (`POST /run?force=1`) publishes anyway and records `gate.forced`;
+7. write the objects one at a time to `runs/<runId>/...` (immutable, cached for a year), then `manifest.json` (sizes + sha-256), re-check the D1 lock still
+   belongs to this run, then flip `latest.json` LAST; prune the newest-8 rule's leftovers (only real run ids with a manifest count; unfinished older prefixes are cleaned);
+8. **only for a published run**, replay the script's write side effects to the user Worker (the WillyWeather id cache PUTs, the observation archive POSTs, the prune), best
+   effort. A PUT that only *clears* a cached id is never sent (an outage would wipe the curated ids);
 9. write `status.json` and release the lock.
 
 R2 layout (public bucket `yepyepyep-data-public`): `latest.json` (pointer, 60 s cache), `status.json`, `heartbeat.json`, `runs/<runId>/{conditions,locations,manifest}.json`,
 `runs/<runId>/graph/{index,<hash>}.json`. Private owners (later stage) get `owner/<userId>/...` with the same shape in a separate, never-public bucket.
+
+**Safety limits**: at most 100 WillyWeather requests per run (a normal run makes 27; a WillyWeather timeout is not retried because it may already be billed),
+an 8-minute run deadline (the lock lease is 15), only the `0 */3 * * *` cron runs the billed pipeline (any other cron string does nothing), and a missing key fails cleanly before
+any request. **Public files are Public-scoped**: `manifest.json` and `status.json` carry no all-owner totals, fetch statistics or raw error text, and a non-public location that
+shares a name with a public one (the `locations` table has no unique name) causes that public pair to be *withheld* and counted in `counts.ambiguous`, never published mixed.
 
 **Stale-data alert** (required; `pipeline/src/alerts.py`, `service.watchdog`): an hourly watchdog cron, independent of the run cron, compares
 `latest.json`'s `generatedAt` with the clock (stale after `STALE_HOURS` = 7, i.e. two missed 3-hourly runs), records it in `status.json`, logs `STALE` and POSTs to

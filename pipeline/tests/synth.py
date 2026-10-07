@@ -133,6 +133,9 @@ class FakeStore:
     async def get_text(self, key):
         return self.objects.get(key)
 
+    async def exists(self, key):
+        return key in self.objects
+
     async def put_text(self, key, text, content_type="application/json", cache_control=None):
         self.objects[key] = text
         self.meta[key] = (content_type, cache_control)
@@ -168,6 +171,11 @@ class FakeDB:
                 cur = db.conn.execute(sql, self.args)
                 db.conn.commit()
                 return {"meta": {"changes": cur.rowcount}}
+
+            async def first(self):
+                cur = db.conn.execute(sql, self.args)
+                row = cur.fetchone()
+                return None if row is None else {d[0]: v for d, v in zip(cur.description, row)}
 
         return Stmt()
 

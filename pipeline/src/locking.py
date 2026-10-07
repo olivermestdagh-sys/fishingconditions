@@ -25,3 +25,12 @@ async def acquire(db, run_id, now_ms, lease_ms=DEFAULT_LEASE_MS):
 async def release(db, run_id):
     """Only the holder can release (a run whose lease already expired must not free a newer run's lock)."""
     await db.prepare("UPDATE pipeline_lock SET locked_until = 0 WHERE id = ? AND run_id = ?").bind(LOCK_ID, run_id).run()
+
+
+async def holds(db, run_id, now_ms):
+    """Does `run_id` still hold an unexpired lease? Checked just before latest.json is flipped: a run that overran its lease while a
+    newer run took over must not publish over it."""
+    row = await db.prepare("SELECT run_id, locked_until FROM pipeline_lock WHERE id = ?").bind(LOCK_ID).first()
+    if row is None:
+        return False
+    return row["run_id"] == run_id and int(row["locked_until"]) >= now_ms

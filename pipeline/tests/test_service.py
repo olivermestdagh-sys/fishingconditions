@@ -136,7 +136,7 @@ class Gate(unittest.TestCase):
         s = run(do_run(n2, store, db, c, now=later))
         self.assertFalse(s["published"])
         self.assertFalse(s["gate"]["ok"])
-        self.assertTrue(any("returned weather data" in r for r in s["gate"]["reasons"]), s["gate"])
+        self.assertTrue(any("fresh forecast data" in r for r in s["gate"]["reasons"]), s["gate"])
         # latest.json and every run object untouched; only status.json moved
         changed = {k for k in set(before) | set(store.objects) if before.get(k) != store.objects.get(k)}
         self.assertEqual(changed, {"status.json"})
@@ -145,17 +145,18 @@ class Gate(unittest.TestCase):
         self.assertTrue(status["lastRun"]["gateReasons"])
 
     def test_gate_unit_cases(self):
-        good = {"physical": 26, "weather_ok": 26, "rows": 9000, "public_locations": 23, "valid": True}
-        prev = {"counts": {"rows": 9000}}
+        good = {"pairs": 26, "fresh_pairs": 26, "rows": 9000, "locations": 23, "unplanned": 0, "valid": True}
+        prev = {"counts": {"rows": 9000, "locations": 23}}
         self.assertTrue(publish.evaluate_gate(prev, good)["ok"])
         self.assertTrue(publish.evaluate_gate(None, good)["ok"])  # first ever run: only absolute checks
-        self.assertFalse(publish.evaluate_gate(prev, dict(good, weather_ok=20))["ok"])  # 77% < 80%
-        self.assertTrue(publish.evaluate_gate(prev, dict(good, weather_ok=21))["ok"])   # 81%
-        self.assertFalse(publish.evaluate_gate(prev, dict(good, rows=6000))["ok"])       # < 70% of last run
+        self.assertFalse(publish.evaluate_gate(prev, dict(good, fresh_pairs=20))["ok"])  # 77% < 80%
+        self.assertTrue(publish.evaluate_gate(prev, dict(good, fresh_pairs=21))["ok"])   # 81%
+        self.assertFalse(publish.evaluate_gate(prev, dict(good, rows=6000))["ok"])       # per-location rows under 70% of last run
         self.assertTrue(publish.evaluate_gate(prev, dict(good, rows=6400))["ok"])
+        self.assertTrue(publish.evaluate_gate(prev, dict(good, rows=4500, locations=12))["ok"])  # fewer locations is not a drop
         self.assertFalse(publish.evaluate_gate(prev, dict(good, valid=False))["ok"])
-        self.assertFalse(publish.evaluate_gate(prev, dict(good, physical=0, weather_ok=0))["ok"])
-        self.assertFalse(publish.evaluate_gate(prev, dict(good, public_locations=0))["ok"])
+        self.assertFalse(publish.evaluate_gate(prev, dict(good, pairs=0, fresh_pairs=0))["ok"])
+        self.assertFalse(publish.evaluate_gate(prev, dict(good, unplanned=1))["ok"])
 
     def test_a_failed_locations_load_publishes_nothing(self):
         network, n, store, db, c = make()
@@ -206,7 +207,9 @@ class LockAndRetention(unittest.TestCase):
         ids = run(store.list_run_ids())
         self.assertEqual(ids, ["20261007T113000Z", "20261007T143000Z"])
         self.assertEqual(json.loads(store.objects["latest.json"])["runId"], "20261007T143000Z")
-        self.assertEqual(publish.runs_to_delete(["a", "b", "c"], 1, "a"), ["b"])  # the pointed-at run is never deleted
+        ids = ["20261001T000000Z", "20261002T000000Z", "20261003T000000Z"]
+        self.assertEqual(publish.runs_to_delete(ids, 1, "20261001T000000Z"), ["20261002T000000Z"])  # the pointed-at run is never deleted
+        self.assertEqual(publish.runs_to_delete(["a", "b"], 0, None), [])  # things that are not run ids are never candidates
 
 
 class Watchdog(unittest.TestCase):

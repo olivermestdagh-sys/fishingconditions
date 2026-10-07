@@ -159,6 +159,7 @@ class Parity(unittest.TestCase):
                              "runs/prev/manifest.json": json.dumps({"counts": {"rows": 1}}), "runs/prev/conditions.json": self.prev}
 
             async def get_text(s, k): return s.objects.get(k)
+            async def exists(s, k): return k in s.objects
             async def put_text(s, k, t, c="application/json", cc=None): s.objects[k] = t
             async def list_run_ids(s): return sorted({k.split("/")[1] for k in s.objects if k.startswith("runs/")})
             async def delete_run(s, r):

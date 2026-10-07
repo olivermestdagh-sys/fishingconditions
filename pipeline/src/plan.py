@@ -103,8 +103,13 @@ def _match_from(search_text, by_coords):
     return data[0] if isinstance(data, list) and data else None
 
 
-async def prefetch(get, locations, api_key, days, limit=6):
+async def prefetch(get, locations, api_key, days, limit=6, attempted=None):
     """Fetch every response the script will ask for. `get(url, host)` -> text or None (the caller supplies retries/stats).
+
+    EVERY location entry is handled, never de-duplicated by name: the `locations` table has no unique name (two owners, or one
+    owner, can have a same-named place) and the script processes each entry. Identical requests are still fetched ONCE, even when
+    several are in flight at the same moment. `attempted`, if given, receives the key of every request tried, so the caller can
+    tell a failed fetch from a request nobody planned for.
 
     Returns {key: text}. Never raises for a failed individual call: a missing key is what a failed HTTP call looks like to
     the script, which already tolerates it (and the publish gate watches how many locations came back empty).
@@ -112,18 +117,27 @@ async def prefetch(get, locations, api_key, days, limit=6):
     rec = _Recorder(api_key, days)
     sem = asyncio.Semaphore(limit)
     raw = {}
+    inflight = {}
 
-    async def fetch(url):
-        key = key_for(url, api_key)
-        if key in raw:
-            return raw[key]
+    async def _do(url, key):
         async with sem:
             text = await get(url, host_for(url))
         if text is not None:
             raw[key] = text
         return text
 
-    phys = physical_locations(locations)
+    async def fetch(url):
+        key = key_for(url, api_key)
+        if attempted is not None:
+            attempted.add(key)
+        if key in raw:
+            return raw[key]
+        task = inflight.get(key)
+        if task is None:
+            task = inflight[key] = asyncio.ensure_future(_do(url, key))
+        return await task
+
+    phys = list(locations)
 
     # Wave 1: everything that needs no earlier answer. A cached id -> weather straight away; a stored lat/lng -> Open-Meteo.
     async def wave1(loc):

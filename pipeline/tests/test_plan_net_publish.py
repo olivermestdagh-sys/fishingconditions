@@ -99,11 +99,6 @@ class Prefetch(unittest.TestCase):
         result = runner.run(locs, raw, None, synth.KEY, frozen_iso=synth.NOW_ISO)
         self.assertGreater(result["counts"]["miss"], 0)
 
-    def test_weather_ok_count_ignores_empty_responses(self):
-        raw = {"weather:1": json.dumps({"a": 1}), "weather:2": "{}", "weather:3": "", "om_fc:x": "{}"}
-        self.assertEqual(publish.weather_ok_count(raw, 3), 1)
-        self.assertEqual(publish.weather_ok_count({"weather:1": "{\"a\":1}", "weather:2": "{\"b\":1}"}, 1), 1)  # capped at the location count
-
 
 class NetPolicy(unittest.TestCase):
     def _net(self, script, **kw):

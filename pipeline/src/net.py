@@ -4,7 +4,12 @@ Retry policy (a deliberate, small deviation from the script's urllib helper, whi
   * network errors, timeouts, 408/425/429 and 5xx are retried up to `tries` times with exponential backoff + jitter, and a
     Retry-After header (capped) is honoured;
   * other 4xx (a bad request, a wrong id, 401/403/404) are NOT retried: asking again cannot change the answer, and every
-    WillyWeather request is billed.
+    WillyWeather request is billed;
+  * on WillyWeather a network error / timeout is NOT retried either: the request may already have reached the API and been
+    billed, so asking again could bill it twice (free hosts are retried);
+  * WillyWeather has a per-run request BUDGET: once spent, further requests fail without being sent, so no bug or outage can
+    multiply the bill (a normal run makes 27 requests);
+  * a run DEADLINE: after it, nothing more is sent.
 The API key travels inside WillyWeather URLs, so URLs are never logged or stored: errors are reduced to a type and a short,
 key-scrubbed message.
 """
@@ -40,11 +45,15 @@ class Stats:
 
 
 class Net:
-    def __init__(self, transport, *, secret="", tries=3, backoff=2.0, sleep=asyncio.sleep, clock=None, jitter=random.random):
+    def __init__(self, transport, *, secret="", tries=3, backoff=2.0, sleep=asyncio.sleep, clock=None, jitter=random.random,
+                 budgets=None, no_retry_errors=("willyweather",), deadline=None):
         self.transport, self.secret, self.tries, self.backoff = transport, secret, tries, backoff
         self.sleep, self.jitter = sleep, jitter
         import time
         self.clock = clock or time.time
+        self.budgets = dict(budgets or {})          # host -> attempts still allowed this run
+        self.no_retry_errors = set(no_retry_errors)  # hosts where a raised error (timeout) is not retried
+        self.deadline = deadline                     # absolute clock() value, or None
         self.stats = Stats()
 
     async def request(self, method, url, host, headers=None, body=None, tries=None):
@@ -52,16 +61,27 @@ class Net:
         tries = tries or self.tries
         status, text = 0, ""
         for attempt in range(tries):
+            if self.deadline is not None and self.clock() > self.deadline:
+                self.stats.errors.append("run deadline passed: request not sent")
+                return 0, ""
+            if host in self.budgets:
+                if self.budgets[host] <= 0:
+                    self.stats.errors.append(f"{host} request budget spent: request not sent")
+                    return 0, ""
+                self.budgets[host] -= 1
             t0 = self.clock()
             retry_after = None
+            raised = False
             try:
                 status, text, retry_after = await self.transport(method, url, headers or {}, body)
-            except Exception as e:  # noqa: BLE001 - network failure / timeout: retry
-                status, text = 0, ""
+            except Exception as e:  # noqa: BLE001 - network failure / timeout
+                status, text, raised = 0, "", True
                 self.stats.errors.append(scrub(f"{type(e).__name__}: {e}", self.secret)[:120])
             self.stats.add(host, status, len(text), int((self.clock() - t0) * 1000), attempt)
             if 200 <= status < 300:
                 return status, text
+            if raised and host in self.no_retry_errors:
+                break
             retryable = status == 0 or status in RETRY_STATUS or status >= 500
             if not retryable or attempt == tries - 1:
                 break

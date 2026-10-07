@@ -4,6 +4,7 @@ Shape (the one proven to fire on this account: a WorkerEntrypoint with `async de
 
   scheduled, cron "0 */3 * * *"  -> heartbeat FIRST, then one pipeline run (service.run_pipeline)
   scheduled, cron "15 * * * *"   -> the stale-data watchdog (service.watchdog)
+  scheduled, any other cron      -> heartbeat only (service.dispatch_cron): never a billed run by accident
   fetch, POST /run               -> a run on demand: how "Refresh data now" reaches the pipeline. There is NO public route
                                     (workers_dev = false): the user Worker calls this over a service binding, and the call must
                                     also carry X-Pipeline-Token, so a stray route could not trigger billed WillyWeather calls.
@@ -25,8 +26,6 @@ import service
 import store as storemod
 
 JSONH = {"content-type": "application/json"}
-CRON_RUN = "0 */3 * * *"
-CRON_WATCHDOG = "15 * * * *"
 
 
 async def _transport(method, url, headers, body):
@@ -47,6 +46,7 @@ def _config(env):
         pipeline_token=var("PIPELINE_API_TOKEN", ""), obs_prune=var("OBS_PRUNE", "dry"),
         forecast_days=int(var("FORECAST_DAYS", "6")), keep_runs=int(var("KEEP_RUNS", "8")),
         stale_hours=float(var("STALE_HOURS", "7")), alert_webhook=var("ALERT_WEBHOOK_URL"),
+        willyweather_budget=int(var("WILLYWEATHER_BUDGET", "100")), deadline_s=int(var("RUN_DEADLINE_S", "480")),
     )
 
 
@@ -63,8 +63,12 @@ class Default(WorkerEntrypoint):
         # Heartbeat first: proves the cron reached this handler even if everything after it fails.
         await store.put_text("heartbeat.json", json.dumps({"at": now.isoformat(), "cron": cron}), "application/json", "no-store")
         cfg = _config(env)
-        if cron == CRON_WATCHDOG:
+        job = service.dispatch_cron(cron)
+        if job == "watchdog":
             await service.watchdog(cfg, _net(cfg), store, now)
+            return
+        if job != "run":
+            print("scheduled: ignoring an unrecognised cron expression")
             return
         summary = await service.run_pipeline(cfg, _net(cfg), store, env.DB, now, "cron", python_version=sys.version.split()[0])
         print("pipeline run", json.dumps({k: summary.get(k) for k in ("runId", "ok", "published", "skipped", "error")}))
@@ -79,7 +83,8 @@ class Default(WorkerEntrypoint):
         store = storemod.R2Store(env.PUBLIC_DATA)
         if path == "/run" and method == "POST":
             now = datetime.now(timezone.utc)
-            summary = await service.run_pipeline(cfg, _net(cfg), store, env.DB, now, "manual", python_version=sys.version.split()[0])
+            force = "force=1" in (urlparse(request.url).query or "")  # admin override of the publish gate (recorded in the manifest)
+            summary = await service.run_pipeline(cfg, _net(cfg), store, env.DB, now, "manual", python_version=sys.version.split()[0], force=force)
             return Response(json.dumps(summary), status=200 if summary.get("ok") else 409, headers=JSONH)
         if path == "/status" and method == "GET":
             return Response((await store.get_text("status.json")) or "{}", headers=JSONH)

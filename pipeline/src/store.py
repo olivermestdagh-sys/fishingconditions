@@ -21,6 +21,10 @@ class R2Store:
             return None
         return await obj.text()
 
+    async def exists(self, key):
+        obj = await self.bucket.head(key)
+        return not (obj is None or str(obj) == "null")
+
     async def put_text(self, key, text, content_type="application/json", cache_control=None):
         meta = {"contentType": content_type}
         if cache_control:
