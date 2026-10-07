@@ -199,7 +199,7 @@ async function init() {
   makeCollapsible(document.getElementById("tiersSection"), "settingsCollapsed:tiers", true);
 
   document.getElementById("btnSignIn").addEventListener("click", () => {
-    window.location.href = `${USER_BACKEND_URL}/auth/login`;
+    window.location.href = `${USER_BACKEND_URL}/auth/login?return=${encodeURIComponent(window.location.origin + window.location.pathname)}`;
   });
   document.getElementById("btnSignOut").addEventListener("click", onSignOut);
   document.getElementById("btnToggleViewAsPublic").addEventListener("click", onToggleViewAsPublic);

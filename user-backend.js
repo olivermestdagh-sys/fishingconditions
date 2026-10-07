@@ -92,7 +92,9 @@
  *      - GOOGLE_CLIENT_ID (Text)
  *      - GOOGLE_CLIENT_SECRET (Secret)
  *      - ALLOWED_ORIGIN (Text) — e.g. https://olivermestdagh-sys.github.io
- *        (no trailing slash — same value as willyweather-search.js's own)
+ *        (no trailing slash — same value as willyweather-search.js's own).
+ *        May be a comma-separated list of origins; FRONTEND_ACCOUNT_URL is then
+ *        only the default sign-in landing page (the site passes ?return=).
  *      - FRONTEND_ACCOUNT_URL (Text) — where /auth/callback redirects to
  *        on success, e.g. https://olivermestdagh-sys.github.io/fishingconditions/locations.html
  *        (account.html/account.js were retired — Settings and Account
@@ -134,6 +136,7 @@ const SESSION_COOKIE = "session";
 const LOGIN_CODE_PREFIX = "lc_"; // one-time login codes live in the sessions table with this prefix and a short expiry
 const LOGIN_CODE_TTL_SECONDS = 120;
 const STATE_COOKIE = "oauth_state";
+const RETURN_COOKIE = "oauth_return"; // which allowed site started the sign-in (see resolveReturnUrl)
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 const STATE_MAX_AGE_SECONDS = 60 * 10; // 10 minutes — just needs to outlive the Google consent screen
 
@@ -157,7 +160,11 @@ export default {
     ctx.waitUntil(tlogPurgeDeleted(env).catch((err) => console.error("Trip log purge failed:", err)));
   },
 
-  async fetch(request, env) {
+  async fetch(request, rawEnv) {
+    // ALLOWED_ORIGIN may be a comma/space-separated list. Resolve it ONCE here to the single origin this request
+    // came from (if it is on the list, else the first entry), so corsHeaders() and the CSRF guard below keep
+    // reading a plain `env.ALLOWED_ORIGIN` exactly as before.
+    const env = withResolvedOrigin(rawEnv, request.headers.get("Origin"));
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
@@ -189,7 +196,7 @@ export default {
 
     try {
       if (url.pathname === "/auth/login" && request.method === "GET") {
-        return handleLogin(env);
+        return handleLogin(env, url);
       }
       if (url.pathname === "/auth/callback" && request.method === "GET") {
         return handleCallback(request, url, env);
@@ -489,8 +496,37 @@ export default {
 // Auth
 // ---------------------------------------------------------------------
 
-function handleLogin(env) {
+// ALLOWED_ORIGIN is one origin or a comma/space-separated list ("https://a.example, https://b.example"). Trailing
+// slashes and blanks are ignored.
+function parseAllowedOrigins(value) {
+  return String(value || "")
+    .split(/[\s,]+/)
+    .map((o) => o.replace(/\/+$/, ""))
+    .filter(Boolean);
+}
+
+// A copy of env whose ALLOWED_ORIGIN is the ONE origin this request is answered for: the request's Origin when it is
+// on the list, else the first listed (so a request from anywhere else still fails the CSRF check and gets no CORS
+// grant). `allowedOrigins` keeps the whole list for the sign-in redirect.
+function withResolvedOrigin(env, requestOrigin) {
+  const allowedOrigins = parseAllowedOrigins(env.ALLOWED_ORIGIN);
+  const resolved = requestOrigin && allowedOrigins.includes(requestOrigin) ? requestOrigin : allowedOrigins[0] || "";
+  return { ...env, ALLOWED_ORIGIN: resolved, allowedOrigins };
+}
+
+// Page URL to send the browser back to after Google sign-in: the `return` the site passed to /auth/login, but only
+// when its origin is on the list; otherwise FRONTEND_ACCOUNT_URL. Query/fragment are dropped.
+function resolveReturnUrl(env, candidate) {
+  try {
+    const u = new URL(candidate);
+    if (u.protocol === "https:" && env.allowedOrigins.includes(u.origin)) return u.origin + u.pathname;
+  } catch {}
+  return env.FRONTEND_ACCOUNT_URL;
+}
+
+function handleLogin(env, url) {
   requireEnv(env, ["GOOGLE_CLIENT_ID", "GOOGLE_REDIRECT_URI"]);
+  const returnUrl = url.searchParams.get("return");
   const state = randomToken();
 
   const authorizeUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -506,7 +542,7 @@ function handleLogin(env) {
   authorizeUrl.searchParams.set("access_type", "online");
   authorizeUrl.searchParams.set("prompt", "select_account");
 
-  return new Response(null, {
+  const res = new Response(null, {
     status: 302,
     headers: {
       Location: authorizeUrl.toString(),
@@ -514,6 +550,10 @@ function handleLogin(env) {
       ...corsHeaders(env),
     },
   });
+  if (returnUrl && resolveReturnUrl(env, returnUrl) !== env.FRONTEND_ACCOUNT_URL) {
+    res.headers.append("Set-Cookie", buildCookie(RETURN_COOKIE, returnUrl, STATE_MAX_AGE_SECONDS, "Lax"));
+  }
+  return res;
 }
 
 async function handleCallback(request, url, env) {
@@ -589,7 +629,8 @@ async function handleCallback(request, url, env) {
     .bind(loginCode, user.id, Date.now() + LOGIN_CODE_TTL_SECONDS * 1000)
     .run();
   const headers = new Headers();
-  headers.append("Location", `${env.FRONTEND_ACCOUNT_URL}#login=${loginCode}`);
+  headers.append("Location", `${resolveReturnUrl(env, readCookie(request, RETURN_COOKIE))}#login=${loginCode}`);
+  headers.append("Set-Cookie", buildCookie(RETURN_COOKIE, "", 0, "Lax"));
   // Overwrite the state cookie with an immediately-expired one so it can't
   // be reused (Max-Age 0 clears it) — belt-and-braces since the state
   // check above already succeeded, this just tidies up.
