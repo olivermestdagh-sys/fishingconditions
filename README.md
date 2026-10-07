@@ -100,8 +100,8 @@ the admin button calls the pipeline's `POST /run` (no public route; also needs `
 (the Worker), and its output must not depend on which. Two places did, and both now give the SAME values the site has always published, by rules that involve no float rounding:
 (1) the direction filled into a gap in the wind readings (`compass_midpoint`, `scripts/fetch_conditions.py`) is worked out in whole compass steps, no sin/cos/atan2. Two readings an even number of
 steps apart have a compass point exactly in the middle; two an odd number apart (say N and NNE) or exactly opposite have no single answer, and the old float code picked one by the last bit of
-its trig. Those 72 pairs are now a written-down table (`COMPASS_TIE_RESULTS`) of what the old code answered (identical on every CPython 3.11/3.13 tried and on Actions, and independent of which reading
-came first): 60 are "the counter-clockwise point" (E|ESE -> E), 12 are not (N|NNE -> NNE, N|NNW -> N, ...). They are arbitrary but stable, so they must not be "tidied" into a rule;
+its trig. Those 72 pairs are now a written-down table (`COMPASS_TIE_RESULTS`) of what the old code answered (derived on LINUX CPython 3.11/3.12/3.13, glibc 2.39 = Actions' platform, and independent of which reading
+came first; a first Windows-derived table differed on NE|SSW and NE|SW, so never regenerate it from another OS): 58 are "the counter-clockwise point" (E|ESE -> E), 14 are not (N|NNE -> NNE, N|NNW -> N, ...). They are arbitrary but stable, so they must not be "tidied" into a rule;
 (2) the means in the observation archive (`_mean`, `scripts/observation_archive.py`) add left to right with a plain loop, exactly what Python 3.11's `sum()` did, because 3.12 made `sum()` a
 compensated sum and moved a mean on a rounding tie (10.85) by 0.1. Any new float-sensitive step needs the same treatment; `pipeline/tests/test_platform_determinism.py` pins both (run the
 suite on 3.11 and 3.13 when touching either). `pipeline/src/fetch_conditions.py` and `observation_archive.py` stay byte copies of the `scripts/` ones (test-enforced).

@@ -19,11 +19,15 @@ import observation_archive as oa
 
 NAMES = list(fc.COMPASS_DEGREES)
 
-# The 12 table entries that are NOT "the counter-clockwise point of the tie" (the 60 others are). They are what the old code answered, by float
-# noise: arbitrary but stable, and live data has been published with them. See COMPASS_TIE_RESULTS in fetch_conditions.py.
+# The 14 table entries that are NOT "the counter-clockwise point of the tie" (the 58 others are). They are what the old code answered on LINUX
+# CPython (Actions' platform; checked on 3.11, 3.12 and 3.13 with glibc 2.39), by float noise: arbitrary but stable, and live data has been
+# published with them. See COMPASS_TIE_RESULTS in fetch_conditions.py.
+# DELIBERATE UPDATE: a first table derived on Windows had NE|SSW -> ESE and NE|SW -> SE (both happen to be the counter-clockwise answers); Linux
+# gives SE and S, so those two moved into this dict. Windows and Linux libm differ on exactly these two pairs: never regenerate from another OS.
 NOT_COUNTER_CLOCKWISE = {
     ("N", "NNE"): "NNE", ("N", "NNW"): "N", ("NNE", "NW"): "N", ("NE", "NNW"): "NNE", ("NE", "WNW"): "N", ("ENE", "W"): "N",
     ("E", "WNW"): "NNE", ("SE", "NNW"): "ENE", ("NNE", "SSW"): "SE", ("ENE", "WSW"): "NNW", ("ESE", "WNW"): "NNE", ("SSE", "NNW"): "ENE",
+    ("NE", "SSW"): "SE", ("NE", "SW"): "S",
 }
 
 
@@ -45,11 +49,11 @@ class CompassMidpoint(unittest.TestCase):
         self.assertEqual(len(fc.COMPASS_TIE_RESULTS), 72)
         self.assertTrue(all(v in NAMES for v in fc.COMPASS_TIE_RESULTS.values()))
 
-    def test_table_is_counter_clockwise_except_the_twelve_documented_pairs(self):
+    def test_table_is_counter_clockwise_except_the_fourteen_documented_pairs(self):
         for (a, b), got in fc.COMPASS_TIE_RESULTS.items():
             want = NOT_COUNTER_CLOCKWISE.get((a, b), counter_clockwise(a, b))
             self.assertEqual(got, want, f"{a}|{b}")
-        self.assertEqual(sum(1 for k in fc.COMPASS_TIE_RESULTS if k in NOT_COUNTER_CLOCKWISE), 12)
+        self.assertEqual(sum(1 for k in fc.COMPASS_TIE_RESULTS if k in NOT_COUNTER_CLOCKWISE), 14)
 
     def test_the_ties_the_platforms_used_to_disagree_on_keep_the_published_answer(self):
         self.assertEqual(fc.compass_midpoint("N", "NNE"), "NNE")  # Actions: NNE (Pyodide said N)

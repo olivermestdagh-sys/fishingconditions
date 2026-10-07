@@ -856,13 +856,20 @@ def fill_wind_gaps(rows):
 
 # What this script has always answered when the two readings either side of a gap in the wind direction are an ODD number of compass steps
 # apart, or exactly opposite. The midpoint is then exactly halfway between two compass points (or undefined), and the old code decided by the last
-# bit of sin/cos/atan2, so the result is ARBITRARY but STABLE: the same on Linux CPython 3.11 (GitHub Actions) and desktop CPython 3.11/3.13, and
-# independent of which reading came first. WebAssembly CPython (the Cloudflare Worker) rounds that last bit differently and disagreed, so the
-# answers are written down here instead of being computed, and nothing about them depends on floating point any more. Do not "tidy" them into a
-# rule: 60 of the 72 follow "the counter-clockwise point" (E|ESE -> E, S|SSW -> S) but 12 do not (N|NNE -> NNE, N|NNW -> N, NNE|NW -> N,
-# NE|NNW -> NNE, NE|WNW -> N, ENE|W -> N, E|WNW -> NNE, SE|NNW -> ENE and the opposites NNE|SSW, ENE|WSW, ESE|WNW, SSE|NNW), and changing any
-# of them changes published Wind Forecast Dir / Condition values. Keys are (lower index, higher index) in COMPASS_DEGREES order. Pairs an EVEN
-# number of steps apart are not listed: their midpoint is a compass point and the old code always found it exactly.
+# bit of sin/cos/atan2, so the result is ARBITRARY but STABLE: the same on every Linux CPython 3.11 / 3.12 / 3.13 on glibc 2.39 (what GitHub Actions'
+# ubuntu runners use) and independent of which reading came first. WebAssembly CPython (the Cloudflare Worker) rounds that last bit differently and
+# disagreed, so the answers are written down here instead of being computed, and nothing about them depends on floating point any more.
+#
+# PROVENANCE: this table is derived from LINUX CPython, which is Actions' platform and so the platform whose published data the site already has.
+# A first version derived on Windows differed from Linux on exactly two pairs (NE|SSW and NE|SW; entries below), which is why the table must be
+# regenerated from Linux, never from another OS: running the original formula (math.radians / cos / sin / atan2 / degrees, then the nearest compass
+# point) for each pair in either order must reproduce this table on Linux.
+#
+# Do not "tidy" them into a rule: 58 of the 72 follow "the counter-clockwise point" (E|ESE -> E, S|SSW -> S) but 14 do not (N|NNE -> NNE,
+# N|NNW -> N, NNE|NW -> N, NE|NNW -> NNE, NE|WNW -> N, ENE|W -> N, E|WNW -> NNE, SE|NNW -> ENE, NE|SSW -> SE and the opposites NNE|SSW, NE|SW,
+# ENE|WSW, ESE|WNW, SSE|NNW), and changing any of them changes published Wind Forecast Dir / Condition values. Keys are (lower index, higher index)
+# in COMPASS_DEGREES order. Pairs an EVEN number of steps apart are not listed: their midpoint is a compass point and the old code always found it
+# exactly.
 COMPASS_TIE_RESULTS = {
     # 1 step apart
     ("N", "NNE"): "NNE",
@@ -920,7 +927,7 @@ COMPASS_TIE_RESULTS = {
     ("N", "SSW"): "W",
     ("NNE", "S"): "E",
     ("NNE", "SW"): "WNW",
-    ("NE", "SSW"): "ESE",
+    ("NE", "SSW"): "SE",
     ("NE", "WSW"): "NW",
     ("ENE", "SW"): "SE",
     ("ENE", "W"): "N",
@@ -935,7 +942,7 @@ COMPASS_TIE_RESULTS = {
     # 8 steps apart (opposite)
     ("N", "S"): "E",
     ("NNE", "SSW"): "SE",
-    ("NE", "SW"): "SE",
+    ("NE", "SW"): "S",
     ("ENE", "WSW"): "NNW",
     ("E", "W"): "S",
     ("ESE", "WNW"): "NNE",
