@@ -185,5 +185,48 @@ class Parity(unittest.TestCase):
         self.assertEqual(s["effects"]["failed"], 0)
 
 
+    def _record(self, frozen):
+        import recording_world as rw
+        start = datetime.fromisoformat(frozen)
+        return rw.run_recorder(self.meta["locations"], self.raw, self.prev, API_KEY, start)
+
+    def test_the_recorder_is_byte_identical_to_the_plain_script_on_the_real_fixtures(self):
+        """The golden outputs were made by the PLAIN script under each clock; the RECORDER under the same clock must reproduce them exactly."""
+        for gname, frozen in CLOCKS:
+            with self.subTest(clock=frozen):
+                g = self.golden[gname]
+                outs, bundle, code, _ = self._record(frozen)
+                self.assertEqual(code, 0)
+                self.assertEqual(outs["data/conditions.json"], g["conditions"])
+                self.assertEqual(outs["config/locations.json"], g["export"])
+                self.assertEqual({k[len("data/graph/"):]: v for k, v in outs.items() if k.startswith("data/graph/")}, g["graph"])
+                self.assertEqual(bundle["expected"]["conditions"], sha(g["conditions"]))
+                self.assertEqual(len(bundle["responses"]), 79)
+
+    def test_shadow_replays_every_recording_to_identical_bytes_with_a_clean_cycle(self):
+        import shadow
+        from synth import FakeDB, FakeStore
+        for gname, frozen in CLOCKS:
+            with self.subTest(clock=frozen):
+                outs, bundle, code, _ = self._record(frozen)
+                bucket = FakeStore()
+                bucket.all[f"recordings/{bundle['runId']}.json"] = json.dumps(bundle, ensure_ascii=False, separators=(",", ":"))
+                cfg = service.Config(api_key="", pipeline_url="https://pipeline.invalid", pipeline_token="", keep_runs=3)
+                now = datetime.fromisoformat(frozen)
+                done = asyncio.run(shadow.process_pending(cfg, bucket, bucket.view("shadow/"), FakeDB(), now, probe=lambda: 60.0, log=lambda *a: None))
+                self.assertEqual(len(done), 1)
+                self.assertTrue(done[0]["identical"])
+                if frozen.startswith("2027"):
+                    # this clock is 6 months after the fixture's forecast data, so no row is fresh: the GATE correctly refuses; the bytes still replay identically
+                    self.assertEqual(len(done[0]["reasons"]), 1)
+                    self.assertIn("fresh forecast data", done[0]["reasons"][0])
+                else:
+                    self.assertTrue(done[0]["clean"], done[0]["reasons"])
+                private = sorted({l["name"] for l in self.meta["locations"] if l["ownerId"] != "public"})
+                blob = chr(10).join(v for k, v in bucket.all.items() if k.startswith("shadow/"))
+                for name in private:
+                    self.assertNotIn(name, blob)
+
+
 if __name__ == "__main__":
     unittest.main()

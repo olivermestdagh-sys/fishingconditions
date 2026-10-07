@@ -12,3 +12,6 @@ pipeline/.venv/
 pipeline/.venv-workers/
 pipeline/.wrangler/
 __pycache__/
+
+# Actions run recordings (scripts/record_run.py): they hold PRIVATE locations; they go only to the private shadow bucket, never to git
+recordings/

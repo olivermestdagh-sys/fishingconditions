@@ -39,7 +39,34 @@ jobs:
           # how many old rows would be deleted; change to "run" to actually delete rows older than 30 days
           # that aren't within 12 hours of a session; "off" skips the step.
           OBS_PRUNE: "dry"
-        run: python3 scripts/fetch_conditions.py
+        run: |
+          # record_run.py runs fetch_conditions.py itself (with its clock pinned to the start of the run) and records the run for the shadow
+          # Worker (pipeline/). It must never cost a data run: if it exits nonzero, run the original script exactly as before.
+          if ! python3 scripts/record_run.py; then
+            echo "::warning::scripts/record_run.py failed - falling back to the plain python3 scripts/fetch_conditions.py"
+            python3 scripts/fetch_conditions.py
+          fi
+
+      - name: Upload the recording to the private shadow bucket (best effort)
+        # A recording problem never fails the workflow: this step may fail, be skipped or be missing its secrets and the data run stands.
+        continue-on-error: true
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_SHADOW_BUCKET: fishingconditions-shadow-private
+        run: |
+          if [ -z "$R2_ACCOUNT_ID" ] || [ -z "$R2_ACCESS_KEY_ID" ] || [ -z "$R2_SECRET_ACCESS_KEY" ]; then
+            echo "R2 secrets are not set: skipping the recording upload"
+            exit 0
+          fi
+          shopt -s nullglob
+          for f in recordings/*.json; do
+            # The recording holds private locations: it goes ONLY to the private bucket (never an artifact, never git).
+            curl --fail-with-body -sS --max-time 180 --aws-sigv4 "aws:amz:auto:s3" --user "$R2_ACCESS_KEY_ID:$R2_SECRET_ACCESS_KEY" \
+              -H "x-amz-content-sha256: UNSIGNED-PAYLOAD" -T "$f" \
+              "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com/$R2_SHADOW_BUCKET/recordings/$(basename "$f")" && echo "uploaded $(basename "$f")"
+          done
 
       - name: Commit updated data file
         uses: stefanzweifel/git-auto-commit-action@v5

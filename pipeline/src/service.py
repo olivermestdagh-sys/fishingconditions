@@ -8,6 +8,12 @@ against recorded responses and in-memory fakes. entry.py wires the real Cloudfla
 
 If the gate says no (or the run fails, or overruns its time budget), nothing under runs/ is written, latest.json is untouched and NO
 side effect is sent: the site keeps serving the last good run and the user Worker's database is not touched by a bad run.
+
+REPLAY (shadow) MODE: `replay=` supplies the locations, the previous output, the recorded API responses and the clock of a run the
+GitHub Actions job already did (scripts/record_run.py). The same code then runs with NO network at all (the caller passes a NullNet),
+publishes into whatever store it is given (the shadow Worker passes a "shadow/" view of a private bucket), and sends no side effects:
+it only reports what it WOULD have sent. `inspect` (async, given the script's outputs) lets the caller compare them with what Actions
+produced; `on_object` sees every object written, so the caller can scan for private data.
 """
 import gc
 import json
@@ -23,10 +29,16 @@ CRON_RUN = "0 */3 * * *"
 CRON_WATCHDOG = "15 * * * *"
 
 
-def dispatch_cron(cron):
+CRON_SHADOW = "40 */3 * * *"
+
+
+def dispatch_cron(cron, shadow=False):
     """Which job a cron string means. ONLY the run cron runs the billed pipeline; an unknown string does nothing, so a schedule
-    change or a differently formatted cron can never turn the hourly watchdog into a full run."""
+    change or a differently formatted cron can never turn the hourly watchdog into a full run. The SHADOW deployment recognises only
+    its own cron (and nothing else); the production deployment never recognises it."""
     cron = (cron or "").strip()
+    if shadow:
+        return "shadow" if cron == CRON_SHADOW else "ignore"
     if cron == CRON_RUN:
         return "run"
     if cron == CRON_WATCHDOG:
@@ -103,17 +115,24 @@ async def replay_effects(cfg, net, effects):
     return {"sent": sent, "failed": failed, "skipped": skipped}
 
 
-async def run_pipeline(cfg, net, store, db, now, trigger, *, run_id=None, frozen_iso=None, python_version="", log=print, clock=None, force=False):
+async def run_pipeline(cfg, net, store, db, now, trigger, *, run_id=None, frozen_iso=None, python_version="", log=print, clock=None, force=False,
+                       replay=None, lock_id=locking.LOCK_ID, generated_at=None, inspect=None, on_object=None, probe=None):
     """now: aware UTC datetime. Returns a summary dict (never raises for an ordinary failed run: it reports it).
 
-    force: publish even if the gate objects (an admin override, recorded in the manifest as gate.forced)."""
+    force: publish even if the gate objects (an admin override, recorded in the manifest as gate.forced).
+    replay: None for a live run, or {"locations", "raw", "attempted", "prev_text", "frozen_iso", "forecast_days", "obs_prune"} (see top).
+    lock_id: which lock row ("conditions" for production, "shadow" for the shadow Worker).
+    generated_at: the data's own time for latest.json/manifest (replay passes the recorded run start; default `now`).
+    inspect: async fn(result) -> dict, stored as summary["inspect"] (replay: compare the script's outputs with the recording's).
+    on_object: fn(relative key, text) called for every object about to be written.
+    probe: fn() -> number (the Pyodide heap in MB), stored as summary["heapMb"] at the end."""
     if clock is not None:
         net.clock = clock
     clock = clock or net.clock or time.time
     t0 = clock()
     run_id = run_id or publish.make_run_id(now)
     now_ms = int(now.timestamp() * 1000)
-    if db is not None and not await locking.acquire(db, run_id, now_ms):
+    if db is not None and not await locking.acquire(db, run_id, now_ms, lock_id=lock_id):
         log("pipeline: another run holds the lock, skipping")
         return {"ok": False, "skipped": "locked", "runId": run_id}
     summary = {"runId": run_id, "trigger": trigger, "ok": False, "published": False}
@@ -124,29 +143,39 @@ async def run_pipeline(cfg, net, store, db, now, trigger, *, run_id=None, frozen
         return clock() > t0 + cfg.deadline_s
 
     try:
-        if not cfg.api_key:
-            raise PipelineError("WILLYWEATHER_API_KEY is not set")
-        locations = await load_locations(cfg, net)
         latest = await _json(store, "latest.json")
         prev_manifest = await _json(store, latest["manifest"]) if latest and latest.get("manifest") else None
-        prev_text = await store.get_text(latest["conditions"]) if latest and latest.get("conditions") else None
+        if replay is None:
+            if not cfg.api_key:
+                raise PipelineError("WILLYWEATHER_API_KEY is not set")
+            locations = await load_locations(cfg, net)
+            prev_text = await store.get_text(latest["conditions"]) if latest and latest.get("conditions") else None
+            attempted = set()
+            raw = await plan.prefetch(net.get_text, locations, cfg.api_key, cfg.forecast_days, cfg.concurrency, attempted)
+            summary["fetch"] = {"responses": len(raw), "calls": net.stats.total_calls()}  # internal only: never written to the public bucket
+            if over_budget():
+                raise PipelineError("run exceeded its time budget while fetching")
+            run_key, run_frozen, run_days, run_prune = cfg.api_key, frozen_iso, cfg.forecast_days, cfg.obs_prune
+            run_url, run_token = cfg.pipeline_url, cfg.pipeline_token
+        else:
+            # Replay: the recording IS the inputs. The previous output is the one ACTIONS read (not our own last run).
+            locations, raw, attempted, prev_text = replay["locations"], replay["raw"], replay["attempted"], replay["prev_text"]
+            summary["fetch"] = {"responses": len(raw), "calls": 0}
+            run_key, run_frozen, run_days, run_prune = "{KEY}", replay["frozen_iso"], replay["forecast_days"], replay["obs_prune"]
+            run_url, run_token = "https://pipeline.invalid", "t"
 
-        attempted = set()
-        raw = await plan.prefetch(net.get_text, locations, cfg.api_key, cfg.forecast_days, cfg.concurrency, attempted)
-        summary["fetch"] = {"responses": len(raw), "calls": net.stats.total_calls()}  # internal only: never written to the public bucket
-        if over_budget():
-            raise PipelineError("run exceeded its time budget while fetching")
-
-        result = runner.run(locations, raw, prev_text, cfg.api_key, frozen_iso=frozen_iso, forecast_days=cfg.forecast_days,
-                            obs_prune=cfg.obs_prune, pipeline_url=cfg.pipeline_url, pipeline_token=cfg.pipeline_token, attempted=attempted)
+        result = runner.run(locations, raw, prev_text, run_key, frozen_iso=run_frozen, forecast_days=run_days, obs_prune=run_prune,
+                            pipeline_url=run_url, pipeline_token=run_token, attempted=attempted)
         effects = result["effects"]
         unplanned = result["counts"]["unplanned"]
+        if inspect is not None:
+            summary["inspect"] = await inspect(result)
         del raw, prev_text
         gc.collect()
         if over_budget():
             raise PipelineError("run exceeded its time budget while scoring")
 
-        generated_at = now.isoformat()
+        generated_at = generated_at or now.isoformat()
         gen = publish.iter_owner_objects(publish.PUBLIC_OWNER, result)
         key, text, counts = next(gen)  # conditions.json for Public, computed once: it also feeds the gate
         verdict = publish.evaluate_gate(prev_manifest, {
@@ -165,6 +194,8 @@ async def run_pipeline(cfg, net, store, db, now, trigger, *, run_id=None, frozen
             objects = []
 
             async def put(rel, body, ctype="application/json"):
+                if on_object is not None:
+                    on_object(rel, body)
                 await store.put_text(prefix + rel, body, ctype, "public, max-age=31536000, immutable")
                 objects.append({"key": prefix + rel, "bytes": len(body.encode("utf-8")), "sha256": publish.sha256_text(body)})
 
@@ -178,7 +209,7 @@ async def run_pipeline(cfg, net, store, db, now, trigger, *, run_id=None, frozen
             await put("manifest.json", publish.dumps(manifest))
             # Everything the pointer names exists. Before flipping it, make sure we still OWN the run: a run that overran its lease
             # while a newer one took over must not publish over it.
-            if db is not None and not await locking.holds(db, run_id, now_ms + int((clock() - t0) * 1000)):
+            if db is not None and not await locking.holds(db, run_id, now_ms + int((clock() - t0) * 1000), lock_id=lock_id):
                 raise PipelineError("lost the run lock before publishing (another run took over)")
             await store.put_text(publish.latest_key(), publish.dumps(publish.make_latest(run_id, generated_at)), "application/json", "public, max-age=60")
             summary["published"] = True
@@ -193,7 +224,10 @@ async def run_pipeline(cfg, net, store, db, now, trigger, *, run_id=None, frozen
             except Exception as e:  # noqa: BLE001 - retention must never fail a published run
                 log(f"pipeline: pruning old runs failed: {type(e).__name__}")
 
-        if summary["published"]:
+        if replay is not None:
+            # Shadow: nothing is ever sent. The calls the script WOULD have made are only counted (and compared by `inspect`).
+            summary["effects"] = {"sent": 0, "failed": 0, "skipped": len(effects), "wouldSend": len(effects_to_send(effects)[0])}
+        elif summary["published"]:
             # The script's own side effects (id cache, observation archive, prune): sent only for a run that was published.
             summary["effects"] = await replay_effects(cfg, net, effects)
         else:
@@ -205,9 +239,14 @@ async def run_pipeline(cfg, net, store, db, now, trigger, *, run_id=None, frozen
     finally:
         if db is not None:
             try:
-                await locking.release(db, run_id)
+                await locking.release(db, run_id, lock_id=lock_id)
             except Exception as e:  # noqa: BLE001
                 log(f"pipeline: could not release the lock: {type(e).__name__}")
+    if probe is not None:
+        try:
+            summary["heapMb"] = probe()
+        except Exception:  # noqa: BLE001
+            summary["heapMb"] = None
     await write_status(store, now, summary, cfg)
     return summary
 

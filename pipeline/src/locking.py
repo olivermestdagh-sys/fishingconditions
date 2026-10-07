@@ -14,23 +14,24 @@ async def _changes(result):
     return int(meta["changes"] if isinstance(meta, dict) else meta.changes)
 
 
-async def acquire(db, run_id, now_ms, lease_ms=DEFAULT_LEASE_MS):
-    await db.prepare("INSERT OR IGNORE INTO pipeline_lock (id, run_id, locked_until) VALUES (?, '', 0)").bind(LOCK_ID).run()
+async def acquire(db, run_id, now_ms, lease_ms=DEFAULT_LEASE_MS, lock_id=LOCK_ID):
+    """lock_id: production uses "conditions", the shadow Worker "shadow": same table, separate rows, so they can never block each other."""
+    await db.prepare("INSERT OR IGNORE INTO pipeline_lock (id, run_id, locked_until) VALUES (?, '', 0)").bind(lock_id).run()
     res = await db.prepare(
         "UPDATE pipeline_lock SET run_id = ?, locked_until = ? WHERE id = ? AND locked_until < ?"
-    ).bind(run_id, now_ms + lease_ms, LOCK_ID, now_ms).run()
+    ).bind(run_id, now_ms + lease_ms, lock_id, now_ms).run()
     return await _changes(res) == 1
 
 
-async def release(db, run_id):
+async def release(db, run_id, lock_id=LOCK_ID):
     """Only the holder can release (a run whose lease already expired must not free a newer run's lock)."""
-    await db.prepare("UPDATE pipeline_lock SET locked_until = 0 WHERE id = ? AND run_id = ?").bind(LOCK_ID, run_id).run()
+    await db.prepare("UPDATE pipeline_lock SET locked_until = 0 WHERE id = ? AND run_id = ?").bind(lock_id, run_id).run()
 
 
-async def holds(db, run_id, now_ms):
+async def holds(db, run_id, now_ms, lock_id=LOCK_ID):
     """Does `run_id` still hold an unexpired lease? Checked just before latest.json is flipped: a run that overran its lease while a
     newer run took over must not publish over it."""
-    row = await db.prepare("SELECT run_id, locked_until FROM pipeline_lock WHERE id = ?").bind(LOCK_ID).first()
+    row = await db.prepare("SELECT run_id, locked_until FROM pipeline_lock WHERE id = ?").bind(lock_id).first()
     if row is None:
         return False
     return row["run_id"] == run_id and int(row["locked_until"]) >= now_ms

@@ -123,30 +123,71 @@ class FakeNetwork:
 
 
 class FakeStore:
-    """In-memory stand-in for R2Store."""
+    """In-memory stand-in for R2Store. `view(prefix)` shares the same backing dict, like R2Store.view."""
 
-    def __init__(self):
-        self.objects = {}
-        self.meta = {}
-        self.writes = []
+    def __init__(self, objects=None, prefix="", meta=None, writes=None):
+        self.all = {} if objects is None else objects
+        self.prefix = prefix
+        self.meta = {} if meta is None else meta
+        self.all_writes = [] if writes is None else writes
+
+    # the tests read/write `.objects` as if there were no prefix
+    @property
+    def objects(self):
+        return _PrefixDict(self.all, self.prefix)
+
+    @property
+    def writes(self):
+        return [w[len(self.prefix):] for w in self.all_writes if w.startswith(self.prefix)]
+
+    def view(self, prefix):
+        return FakeStore(self.all, self.prefix + prefix, self.meta, self.all_writes)
 
     async def get_text(self, key):
-        return self.objects.get(key)
+        return self.all.get(self.prefix + key)
 
     async def exists(self, key):
-        return key in self.objects
+        return self.prefix + key in self.all
 
     async def put_text(self, key, text, content_type="application/json", cache_control=None):
-        self.objects[key] = text
-        self.meta[key] = (content_type, cache_control)
-        self.writes.append(key)
+        self.all[self.prefix + key] = text
+        self.meta[self.prefix + key] = (content_type, cache_control)
+        self.all_writes.append(self.prefix + key)
+
+    async def list_keys(self, prefix=""):
+        p = self.prefix + prefix
+        return sorted(k[len(self.prefix):] for k in self.all if k.startswith(p))
+
+    async def delete_key(self, key):
+        self.all.pop(self.prefix + key, None)
 
     async def list_run_ids(self):
-        return sorted({k.split("/")[1] for k in self.objects if k.startswith("runs/")})
+        p = self.prefix + "runs/"
+        return sorted({k[len(p):].split("/")[0] for k in self.all if k.startswith(p)})
 
     async def delete_run(self, run_id):
-        for k in [k for k in self.objects if k.startswith(f"runs/{run_id}/")]:
-            del self.objects[k]
+        p = f"{self.prefix}runs/{run_id}/"
+        for k in [k for k in self.all if k.startswith(p)]:
+            del self.all[k]
+
+
+class _PrefixDict:
+    """dict-like view of FakeStore.all under a prefix (enough for the tests: [], in, get, items, values, keys, iteration)."""
+
+    def __init__(self, d, prefix):
+        self.d, self.p = d, prefix
+
+    def __getitem__(self, k): return self.d[self.p + k]
+    def __setitem__(self, k, v): self.d[self.p + k] = v
+    def __contains__(self, k): return self.p + k in self.d
+    def get(self, k, default=None): return self.d.get(self.p + k, default)
+    def keys(self): return [k[len(self.p):] for k in self.d if k.startswith(self.p)]
+    def __iter__(self): return iter(self.keys())
+    def values(self): return [self.d[self.p + k] for k in self.keys()]
+    def items(self): return [(k, self.d[self.p + k]) for k in self.keys()]
+    def __len__(self): return len(self.keys())
+    def __delitem__(self, k): del self.d[self.p + k]
+    def pop(self, k, *default): return self.d.pop(self.p + k, *default)
 
 
 class FakeDB:

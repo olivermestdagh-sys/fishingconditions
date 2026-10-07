@@ -4,7 +4,8 @@
   "description": "Static site + Cloudflare Worker; this file only declares dev tooling for the checks.",
   "scripts": {
     "test": "node --test",
-    "check-pages": "node scripts/check-page-scripts.mjs"
+    "check-pages": "node scripts/check-page-scripts.mjs",
+    "verify-shadow": "node scripts/verify-shadow.mjs"
   },
   "devDependencies": {
     "eslint": "^9.0.0",

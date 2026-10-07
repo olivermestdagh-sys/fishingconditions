@@ -47,3 +47,38 @@ STALE_HOURS = "7"        # data older than this is "stale" (two missed 3-hourly 
 
 # Secrets (set by the owner, never in this file): WILLYWEATHER_API_KEY, PIPELINE_API_TOKEN, and optionally ALERT_WEBHOOK_URL
 # (an ntfy / Slack / Discord incoming-webhook URL that receives the stale-data alert).
+
+# ---------------------------------------------------------------------------------------------------------------------------------
+# SHADOW deployment (stage 2): replays what GitHub Actions already did and compares the result, byte for byte. Deploy with:
+#     cd pipeline && uv sync && uv run pywrangler deploy --env shadow
+# It is a DIFFERENT Worker (fishingconditions-pipeline-shadow) with: no public route, no WillyWeather / pipeline secrets, only the
+# PRIVATE bucket below (the public bucket is not bound at all), and the D1 binding for its own lock row ("shadow") only. It makes no outbound
+# request (service.NullNet) and never sends the archive / id-cache / prune writes. Bindings and vars are NOT inherited by an environment,
+# so each is repeated here. Delete it when shadow ends: `npx wrangler delete --name fishingconditions-pipeline-shadow`.
+[env.shadow]
+name = "fishingconditions-pipeline-shadow"
+workers_dev = false
+preview_urls = false
+
+[env.shadow.observability]
+enabled = true
+
+[env.shadow.limits]
+cpu_ms = 300000
+
+[env.shadow.triggers]
+# 40 minutes past: after the Actions job (:00, often delayed) has finished and uploaded its recording.
+crons = ["40 */3 * * *"]
+
+[[env.shadow.d1_databases]]
+binding = "DB"
+database_name = "fishingconditions-users"
+database_id = "bf81bd8d-85ba-4532-a00e-c2ba3d480619"
+
+[[env.shadow.r2_buckets]]
+binding = "SHADOW_DATA"
+bucket_name = "fishingconditions-shadow-private"
+
+[env.shadow.vars]
+SHADOW = "1"
+KEEP_RUNS = "8"

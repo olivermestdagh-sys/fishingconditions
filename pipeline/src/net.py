@@ -107,3 +107,20 @@ class Net:
 
 
 UA = "fishingconditions-pipeline/1.0 (+https://github.com/olivermestdagh-sys/fishingconditions)"
+
+
+class NullNet:
+    """The network client of the SHADOW Worker: it has no transport at all, so nothing in shadow mode can reach WillyWeather, Open-Meteo,
+    the user Worker or anything else, even through a bug. Anything that tries gets an error that says so."""
+
+    def __init__(self):
+        import time
+        self.stats = Stats()
+        self.budgets = {}
+        self.deadline = None
+        self.clock = time.time
+
+    async def request(self, *a, **k):
+        raise RuntimeError("shadow mode makes no network requests")
+
+    get_text = send_json = request

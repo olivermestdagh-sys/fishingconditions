@@ -1,0 +1,352 @@
+"""The recorder (scripts/record_run.py) and SHADOW mode (pipeline/src/shadow.py): the recorder must not change what the script does, a
+recording must replay to the same bytes, shadow must make no requests / send no writes / write nothing outside shadow/, and anything wrong
+(a changed answer, a changed write, a leaked private name, too much memory, a broken recording) must show up as an unclean cycle."""
+import asyncio
+import json
+import os
+import tomllib
+import unittest
+from datetime import datetime, timedelta, timezone
+
+import recording_world as rw
+import synth
+from synth import FakeDB, FakeStore
+
+import net as netmod
+import publish
+import service
+import shadow
+
+START = datetime(2026, 10, 7, 5, 30, 0, 123456, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 7, 6, 40, tzinfo=timezone.utc)
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+def world(locs=None):
+    locs = locs or synth.locations()
+    return locs, synth.responses(locs)
+
+
+def cfg():
+    return service.Config(api_key="", pipeline_url="https://pipeline.invalid", pipeline_token="", keep_runs=3)
+
+
+def make_bundle(start=START, locs=None, resp=None, prev=None):
+    locs, default = world(locs)
+    outputs, bundle, code, path = rw.run_recorder(locs, resp or default, prev, synth.KEY, start)
+    assert code == 0 and bundle, "the recorder should have succeeded"
+    return bundle, outputs
+
+
+def put_bundle(store, bundle):
+    store.all[f"recordings/{bundle['runId']}.json"] = json.dumps(bundle, ensure_ascii=False, separators=(",", ":"))
+
+
+def process(bucket, db=None, probe=None, now=NOW):
+    out = bucket.view("shadow/")
+    return run(shadow.process_pending(cfg(), bucket, out, db, now, probe=probe, log=lambda *a: None))
+
+
+class RecorderMustNotChangeTheRun(unittest.TestCase):
+    def test_recorder_output_is_byte_identical_to_the_plain_script_under_the_same_clock(self):
+        locs, resp = world()
+        plain, plain_posts = rw.run_plain(locs, resp, None, synth.KEY, START)
+        recorded, bundle, code, _ = rw.run_recorder(locs, resp, None, synth.KEY, START)
+        self.assertEqual(code, 0)
+        self.assertEqual(sorted(plain), sorted(recorded))
+        for name in plain:
+            self.assertEqual(plain[name], recorded[name], f"{name} differs between the plain script and the recorder")
+        self.assertEqual(len(plain), 2 + 5)  # conditions, export, 4 graph files + the graph index
+
+    def test_it_is_also_identical_with_a_previous_output_to_carry_history_from(self):
+        locs, resp = world()
+        first, _ = rw.run_plain(locs, resp, None, synth.KEY, START - timedelta(hours=3))
+        prev = first["data/conditions.json"]
+        plain, _ = rw.run_plain(locs, resp, prev, synth.KEY, START)
+        recorded, bundle, code, _ = rw.run_recorder(locs, resp, prev, synth.KEY, START)
+        for name in plain:
+            self.assertEqual(plain[name], recorded[name], name)
+        self.assertEqual(bundle["previous"], prev)
+
+    def test_the_recorder_sends_exactly_the_requests_and_writes_the_plain_script_does(self):
+        locs, resp = world()
+        plain_get, plain_posts, rec_get, rec_posts = [], [], [], []
+        with rw.world(locs, resp, None, synth.KEY, __import__("tempfile").mkdtemp(), get_log=plain_get, posts=plain_posts):
+            rw.fc.datetime = rw.record_run.make_frozen(START)
+            rw.fc.main()
+        outs, bundle, code, _ = rw.run_recorder(locs, resp, None, synth.KEY, START, get_log=rec_get, posts=rec_posts)
+        self.assertEqual(plain_get, rec_get)
+        self.assertEqual(plain_posts, rec_posts)
+
+    def test_the_clock_is_pinned_to_the_start_of_the_run(self):
+        locs, resp = world()
+        _, bundle, _, _ = rw.run_recorder(locs, resp, None, synth.KEY, START)
+        cond = json.loads(rw.read_outputs.__globals__["os"].path and _read_conditions(locs, resp))
+        self.assertEqual(cond["generatedAt"], START.isoformat())
+        self.assertEqual(bundle["runStart"], START.isoformat())
+
+    def test_a_failing_script_exits_nonzero_and_writes_no_recording_so_the_workflow_falls_back(self):
+        locs, resp = world()
+        outdir = __import__("tempfile").mkdtemp()
+        rec = __import__("tempfile").mkdtemp()
+        with rw.world(locs, resp, None, "", outdir):  # no WillyWeather key: the script exits 1 straight away
+            code = rw.record_run.main(start=START, record_dir=rec)
+        self.assertEqual(code, 1)
+        self.assertEqual(os.listdir(rec), [])
+
+    def test_an_unexpected_crash_propagates_so_the_exit_is_nonzero(self):
+        locs, resp = world()
+        outdir = __import__("tempfile").mkdtemp()
+        with rw.world(locs, resp, None, synth.KEY, outdir):
+            rw.fc.load_locations = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+            with self.assertRaises(RuntimeError):
+                rw.record_run.main(start=START, record_dir=__import__("tempfile").mkdtemp())
+
+    def test_a_recording_that_cannot_be_written_never_fails_the_data_run(self):
+        locs, resp = world()
+        blocker = os.path.join(__import__("tempfile").mkdtemp(), "not-a-dir")
+        open(blocker, "w").close()          # a FILE where the recordings directory should be
+        outdir = __import__("tempfile").mkdtemp()
+        with rw.world(locs, resp, None, synth.KEY, outdir):
+            code = rw.record_run.main(start=START, record_dir=blocker)
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.exists(os.path.join(outdir, "data", "conditions.json")))
+
+    def test_the_effects_hash_is_the_same_function_in_the_recorder_and_the_worker(self):
+        effects = [{"method": "POST", "url": "https://x/api/pipeline/observations", "body": {"b": 1, "a": 2}, "retries": 2},
+                   {"method": "PUT", "url": "https://y/api/pipeline/locations/L1", "body": {"willyweatherId": 5}, "retries": 3}]
+        self.assertEqual(rw.record_run.effects_hash(effects), shadow.effects_hash(effects))
+        self.assertEqual(rw.record_run.effects_hash(effects), rw.record_run.effects_hash(list(reversed(effects))))  # order-independent
+
+
+def _read_conditions(locs, resp):
+    outs, _, _, _ = rw.run_recorder(locs, resp, None, synth.KEY, START)
+    return outs["data/conditions.json"]
+
+
+class ThreadedLikeActions(unittest.TestCase):
+    def test_a_threaded_run_records_and_replays_clean_and_matches_the_serial_output(self):
+        locs, resp = world()
+        serial, _ = rw.run_plain(locs, resp, None, synth.KEY, START)
+        for attempt in range(5):   # the thread interleaving differs every time: the result must not
+            outs, bundle, code, _ = rw.run_recorder(locs, resp, None, synth.KEY, START, threaded=True)
+            self.assertEqual(code, 0)
+            self.assertEqual(outs, serial, "a threaded recorded run must produce the same files as a serial plain run")
+            bucket = FakeStore()
+            put_bundle(bucket, bundle)
+            e = process(bucket, FakeDB())[0]
+            self.assertTrue(e["clean"], e["reasons"])
+            self.assertGreater(bundle["expected"]["counts"]["http"], 0)
+
+
+class ShadowReplay(unittest.TestCase):
+    def test_a_recording_replays_to_identical_bytes_and_the_cycle_is_clean(self):
+        bundle, _ = make_bundle()
+        bucket = FakeStore()
+        put_bundle(bucket, bundle)
+        done = process(bucket, FakeDB(), probe=lambda: 70.0)
+        self.assertEqual(len(done), 1)
+        e = done[0]
+        self.assertTrue(e["clean"], e["reasons"])
+        self.assertTrue(e["identical"])
+        self.assertEqual(e["id"], bundle["runId"])
+        index = json.loads(bucket.objects["shadow/index.json"])
+        self.assertEqual([c["id"] for c in index["cycles"]], [bundle["runId"]])
+        report = json.loads(bucket.objects[f"shadow/compare/{bundle['runId']}.json"])
+        self.assertTrue(report["compare"]["identical"])
+        self.assertEqual(report["compare"]["graphFiles"], 5)
+
+    def test_it_publishes_only_the_public_layout_and_only_under_shadow(self):
+        bundle, _ = make_bundle()
+        bucket = FakeStore()
+        put_bundle(bucket, bundle)
+        before = set(bucket.all)
+        process(bucket, FakeDB())
+        written = set(bucket.all) - before
+        self.assertTrue(written)
+        self.assertTrue(all(k.startswith("shadow/") for k in written), [k for k in written if not k.startswith("shadow/")])
+        rid = bundle["runId"]
+        self.assertIn(f"shadow/runs/{rid}/conditions.json", written)
+        self.assertIn("shadow/latest.json", written)
+        blob = "\n".join(bucket.all[k] for k in written)
+        self.assertNotIn(synth.PRIVATE_NAME, blob)
+        self.assertNotIn("owner-x", blob)
+
+    def test_no_network_and_no_writes_are_ever_sent(self):
+        bundle, _ = make_bundle()
+        bucket = FakeStore()
+        put_bundle(bucket, bundle)
+        done = process(bucket, FakeDB())
+        report = json.loads(bucket.objects[f"shadow/compare/{bundle['runId']}.json"])
+        self.assertTrue(done[0]["clean"])  # a NullNet raises on ANY request: a clean run proves none was attempted
+        self.assertEqual(report["effects"]["sent"], 0)
+        self.assertGreater(report["effects"]["wouldSend"], 0)  # the archive / prune writes were produced, and only counted
+        with self.assertRaises(RuntimeError):
+            run(netmod.NullNet().request("GET", "https://example.com", "h"))
+        with self.assertRaises(RuntimeError):
+            run(netmod.NullNet().send_json("PUT", "https://example.com", {}, "t"))
+
+    def test_the_d1_binding_is_touched_only_for_the_shadow_lock_row(self):
+        bundle, _ = make_bundle()
+        bucket = FakeStore()
+        put_bundle(bucket, bundle)
+        db = FakeDB()
+        statements = []
+        real_prepare = db.prepare
+
+        def spy(sql):
+            statements.append(sql)
+            return real_prepare(sql)
+
+        db.prepare = spy
+        self.assertTrue(process(bucket, db)[0]["clean"])
+        self.assertTrue(statements and all("pipeline_lock" in s for s in statements), statements)
+        rows = db.conn.execute("SELECT id, locked_until FROM pipeline_lock").fetchall()
+        self.assertEqual(rows, [("shadow", 0)])  # its own row, released; production's "conditions" row was never touched
+
+    def test_each_recording_is_processed_once_oldest_first_and_old_ones_are_cleaned_up(self):
+        bucket = FakeStore()
+        ids = []
+        for i in range(3):
+            b, _ = make_bundle(start=START - timedelta(days=[6, 5, 0][i]))
+            ids.append(b["runId"])
+            put_bundle(bucket, b)
+        self.assertEqual(ids, sorted(ids))
+        first = process(bucket, FakeDB())            # at most 2 per invocation
+        self.assertEqual([e["id"] for e in first], ids[:2])
+        second = process(bucket, FakeDB())
+        self.assertEqual([e["id"] for e in second], ids[2:])
+        self.assertEqual(process(bucket, FakeDB()), [])
+        # a recording is dropped once processed AND older than 4 days; the recent one stays
+        remaining = [k for k in bucket.all if k.startswith("recordings/")]
+        self.assertEqual(remaining, [f"recordings/{ids[2]}.json"])
+        index = json.loads(bucket.objects["shadow/index.json"])
+        self.assertEqual([c["id"] for c in index["cycles"]], ids)
+
+    def test_shadow_dispatch_only_recognises_its_own_cron(self):
+        self.assertEqual(service.dispatch_cron("40 */3 * * *", shadow=True), "shadow")
+        self.assertEqual(service.dispatch_cron("0 */3 * * *", shadow=True), "ignore")
+        self.assertEqual(service.dispatch_cron("15 * * * *", shadow=True), "ignore")
+        self.assertEqual(service.dispatch_cron("40 */3 * * *"), "ignore")  # production never runs the shadow cron
+
+    def test_the_shadow_environment_in_wrangler_toml_cannot_reach_production_or_the_public_bucket(self):
+        with open(os.path.join(os.path.dirname(__file__), "..", "wrangler.toml"), "rb") as f:
+            conf = tomllib.load(f)
+        sh = conf["env"]["shadow"]
+        self.assertEqual(sh["name"], "fishingconditions-pipeline-shadow")
+        self.assertFalse(sh["workers_dev"])
+        self.assertEqual([b["binding"] for b in sh["r2_buckets"]], ["SHADOW_DATA"])
+        self.assertEqual(sh["r2_buckets"][0]["bucket_name"], "fishingconditions-shadow-private")
+        self.assertEqual(sh["vars"]["SHADOW"], "1")
+        for forbidden in ("PIPELINE_WORKER_URL", "WILLYWEATHER_API_KEY", "PIPELINE_API_TOKEN", "ALERT_WEBHOOK_URL"):
+            self.assertNotIn(forbidden, sh["vars"])
+        self.assertEqual(sh["triggers"]["crons"], ["40 */3 * * *"])
+        self.assertNotIn("services", sh)
+        self.assertEqual(conf["r2_buckets"][0]["bucket_name"], "yepyepyep-data-public")  # production's, which shadow does not inherit
+
+
+class ShadowCatchesProblems(unittest.TestCase):
+    def _tampered(self, mutate):
+        bundle, _ = make_bundle()
+        mutate(bundle)
+        bucket = FakeStore()
+        put_bundle(bucket, bundle)
+        done = process(bucket, FakeDB(), probe=lambda: 60.0)
+        return bundle, bucket, done[0]
+
+    def test_a_changed_api_answer_is_an_unclean_cycle_that_keeps_the_full_output_for_diffing(self):
+        def mutate(b):
+            k = next(k for k in b["responses"] if "weather.json?forecasts=temperature" in k)
+            b["responses"][k] = b["responses"][k].replace("\"speed\": 4.5", "\"speed\": 99.5")
+        bundle, bucket, e = self._tampered(mutate)
+        self.assertFalse(e["clean"])
+        self.assertIn("conditions.json", e["reasons"][0])
+        self.assertEqual(e["firstDiff"]["file"], "conditions.json")
+        self.assertIn(f"shadow/diffs/{bundle['runId']}/conditions.json", bucket.all)
+
+    def test_a_changed_expected_hash_names_the_file(self):
+        def mutate(b):
+            name = sorted(b["expected"]["graph"])[0]
+            b["expected"]["graph"][name] = "0" * 64
+        bundle, bucket, e = self._tampered(mutate)
+        self.assertFalse(e["clean"])
+        self.assertTrue(e["firstDiff"]["file"].startswith("graph/"))
+
+    def test_a_different_set_of_writes_is_caught(self):
+        bundle, bucket, e = self._tampered(lambda b: b["expected"].__setitem__("effects", "f" * 64))
+        self.assertFalse(e["clean"])
+        self.assertIn("archive/id-cache/prune writes", e["reasons"][0])
+
+    def test_a_different_call_count_is_caught(self):
+        bundle, bucket, e = self._tampered(lambda b: b["expected"]["counts"].__setitem__("http", 999))
+        self.assertFalse(e["clean"])
+        self.assertIn("script calls", e["reasons"][0])
+
+    def test_a_missing_recorded_answer_is_a_plan_drift_not_a_silent_pass(self):
+        def mutate(b):
+            k = next(k for k in b["responses"] if "marine" in k)
+            del b["responses"][k]            # the script will ask for it, but it was never recorded at all
+        bundle, bucket, e = self._tampered(mutate)
+        self.assertFalse(e["clean"])
+        self.assertTrue(any("never prefetched" in r or "script calls" in r or "differs" in r for r in e["reasons"]), e["reasons"])
+
+    def test_a_private_name_in_a_public_object_is_flagged(self):
+        bundle, _ = make_bundle()
+        bucket = FakeStore()
+        put_bundle(bucket, bundle)
+        real = publish.iter_owner_objects
+
+        def leaky(owner, result, run_as_of=None):
+            for key, text, counts in real(owner, result, run_as_of):
+                yield key, (text.replace("Bravo Pier", synth.PRIVATE_NAME) if key == "locations.json" else text), counts
+
+        publish.iter_owner_objects = leaky
+        try:
+            e = process(bucket, FakeDB())[0]
+        finally:
+            publish.iter_owner_objects = real
+        self.assertFalse(e["clean"])
+        self.assertTrue(any("private location name" in r for r in e["reasons"]))
+        self.assertTrue(json.loads(bucket.objects[f"shadow/compare/{bundle['runId']}.json"])["publicLeak"])
+
+    def test_a_quoted_name_match_does_not_flag_a_public_name_that_merely_contains_a_private_one(self):
+        names, owners = shadow.private_markers([{"name": "Alpha", "ownerId": "u1"}, {"name": "Alpha Beach", "ownerId": "public"}])
+        self.assertTrue(any(n in json.dumps({"name": "Alpha"}) for n in names))
+        self.assertFalse(any(n in json.dumps({"name": "Alpha Beach"}) for n in names))
+
+    def test_heap_over_the_target_is_unclean(self):
+        bundle, _ = make_bundle()
+        bucket = FakeStore()
+        put_bundle(bucket, bundle)
+        e = process(bucket, FakeDB(), probe=lambda: 95.0)[0]
+        self.assertFalse(e["clean"])
+        self.assertIn("heap", e["reasons"][0])
+
+    def test_a_corrupt_recording_is_reported_and_the_next_one_still_runs(self):
+        bucket = FakeStore()
+        bucket.all["recordings/20261007T020000Z.json"] = "{not json"
+        good, _ = make_bundle(start=START)
+        put_bundle(bucket, good)
+        done = process(bucket, FakeDB())
+        self.assertEqual([d["id"] for d in done], ["20261007T020000Z", good["runId"]])
+        self.assertFalse(done[0]["clean"])
+        self.assertIn("JSONDecodeError", done[0]["reasons"][0])
+        self.assertTrue(done[1]["clean"])
+
+    def test_a_held_lock_is_reported_as_not_clean_not_as_a_pass(self):
+        bundle, _ = make_bundle()
+        bucket = FakeStore()
+        put_bundle(bucket, bundle)
+        db = FakeDB()
+        import locking
+        run(locking.acquire(db, "someone", int(NOW.timestamp() * 1000), lock_id="shadow"))
+        e = process(bucket, db)[0]
+        self.assertFalse(e["clean"])
+        self.assertIn("lock", e["reasons"][0])
+
+
+if __name__ == "__main__":
+    unittest.main()
