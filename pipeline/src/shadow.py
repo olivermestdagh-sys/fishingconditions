@@ -206,21 +206,53 @@ async def update_index(out_store, entry):
     await out_store.put_text(INDEX_KEY, publish.dumps(index), "application/json")
 
 
+async def processed_ids(out_store):
+    """The ids already replayed, from shadow/index.json (ONE read). An entry is written for every recording that was replayed, clean or not
+    (a corrupt recording is reported once, not retried every fire). A replay that died BEFORE its entry was written is simply absent here and
+    is tried again next fire; replaying it twice cannot count twice, because update_index replaces the entry with the same id."""
+    text = await out_store.get_text(INDEX_KEY)
+    try:
+        return {c["id"] for c in (json.loads(text)["cycles"] if text else [])}
+    except (ValueError, KeyError, TypeError):
+        return set()
+
+
 async def process_pending(cfg, rec_store, out_store, db, now, *, probe=None, log=print, max_per_run=2, clock=None):
-    """Process unprocessed recordings, oldest first (at most `max_per_run` per invocation), then drop old processed recordings."""
+    """Replay the recordings not yet replayed, oldest first (at most `max_per_run` per fire), then drop old replayed recordings.
+
+    A fire with nothing new is a cheap no-op by construction: ONE list of recordings/ and, only if there is at least one recording, ONE read
+    of index.json. It touches no D1 (the lock is taken only when there is something to replay) and no other R2 object."""
     keys = sorted(k for k in await rec_store.list_keys("recordings/") if k.endswith(".json"))
+    if not keys:
+        return []
+    replayed = await processed_ids(out_store)
     done = []
     for k in keys:
         rec_id = k.rsplit("/", 1)[-1].removesuffix(".json")
-        if await out_store.exists(f"compare/{rec_id}.json"):
+        if rec_id in replayed:
             continue
         if len(done) >= max_per_run:
             break
         done.append(await process_recording(cfg, rec_store, out_store, db, now, k, probe=probe, log=log, clock=clock))
-    # Retention: a recording is deleted once it has a compare report and is older than KEEP_RECORDINGS_DAYS (they are ~7 MB each).
+        replayed.add(rec_id)
+    # Retention: a recording is deleted once it was replayed and is older than KEEP_RECORDINGS_DAYS (they are ~7 MB each).
     cutoff = publish.make_run_id(now - __import__("datetime").timedelta(days=KEEP_RECORDINGS_DAYS))
     for k in keys:
         rec_id = k.rsplit("/", 1)[-1].removesuffix(".json")
-        if publish.is_run_id(rec_id) and rec_id < cutoff and await out_store.exists(f"compare/{rec_id}.json"):
+        if publish.is_run_id(rec_id) and rec_id < cutoff and rec_id in replayed:
             await rec_store.delete_key(k)
     return done
+
+
+async def touch_heartbeat(out_store, now, cron):
+    """shadow/heartbeat.json: proof the cron reached the Worker, plus a fire COUNT (the object is overwritten each time, so without a counter
+    the number of fires is unrecoverable). One read + one write."""
+    prev = {}
+    text = await out_store.get_text("heartbeat.json")
+    try:
+        prev = json.loads(text) if text else {}
+    except ValueError:
+        prev = {}
+    beat = {"at": now.isoformat(), "cron": cron, "fires": int(prev.get("fires", 0)) + 1, "firstFireAt": prev.get("firstFireAt") or now.isoformat()}
+    await out_store.put_text("heartbeat.json", json.dumps(beat), "application/json", "no-store")
+    return beat

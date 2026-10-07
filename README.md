@@ -100,12 +100,14 @@ the admin button calls the pipeline's `POST /run` (no public route; also needs `
 `scripts/record_run.py` replaces the `python3 scripts/fetch_conditions.py` line of `update.yml`: it runs the same script with its clock pinned to the start of the run and
 records every API answer, the locations, the previous output and SHA-256 hashes of every file produced, into `recordings/<runId>.json` (private locations are inside, so it is
 git-ignored and uploaded only to a private R2 bucket; if the recorder exits nonzero the workflow falls back to the plain script, and the upload step is `continue-on-error`). The
-**shadow Worker** (`wrangler --env shadow` -> `fishingconditions-pipeline-shadow`, cron `40 */3 * * *`) binds ONLY the private bucket and D1 (its own lock row, `shadow`), has no
+**shadow Worker** (`wrangler --env shadow` -> `fishingconditions-pipeline-shadow`, default cron `40 */3 * * *`; it replays on ANY scheduled fire, so the schedule can be changed freely, and a fire with nothing new is a cheap no-op: one list of `recordings/` and one read of `shadow/index.json`, no D1) binds ONLY the private bucket and D1 (its own lock row, `shadow`), has no
 secrets and no public route, and its network client (`NullNet`) cannot make a request; it never sends the archive / id-cache / prune writes. For each recording it runs the Worker's
 code (`shadow.py` -> `service.run_pipeline(replay=...)`), compares the script's full output with Actions' hashes byte for byte (and the set of writes it would have sent and the
 number of calls it made), scans every published object for private names, publishes into `shadow/runs/...`, and appends to `shadow/index.json`. `npm run verify-shadow` prints one
 line (`ON TRACK: N of 24 consecutive clean cycles, last clean at ...`, or `UNCLEAN: cycle ... first failing field ...`); an Actions run that failed neither counts nor resets the
 streak, and one that succeeded without being replayed is reported as unverified.
+
+The script's output folder (a full copy of every owner's rows, ~7 MB) is **removed** after every run (`runner.cleanup`, called in `service.run_pipeline`'s `finally`, and by `runner.run` itself if the script fails). In the Worker that folder is in Pyodide's in-memory filesystem, so a leftover is isolate memory that would pile up across invocations of a warm isolate. The tests pin this (`pipeline/tests/test_cleanup_and_noop.py`) and confine all their own temp files to one folder removed at exit (`tmpguard.py`).
 
 Deploying it (not done): create the R2 bucket, `CREATE TABLE` `pipeline_lock` on D1 (`schema-v2.sql`), then `cd pipeline && uv sync && uv run pywrangler deploy`, then
 enter `WILLYWEATHER_API_KEY`, `PIPELINE_API_TOKEN` (and optionally `ALERT_WEBHOOK_URL`) as secrets yourself. **New or changed cron schedules took about 30 minutes (once

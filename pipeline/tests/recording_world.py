@@ -15,6 +15,8 @@ from datetime import datetime
 
 HERE = os.path.dirname(__file__)
 sys.path.insert(0, os.path.join(HERE, "..", "src"))
+sys.path.insert(0, HERE)
+import tmpguard  # noqa: E402,F401  (all temp output of the tests goes to one folder removed at exit)
 
 import fetch_conditions as fc  # noqa: E402
 import plan  # noqa: E402
@@ -86,23 +88,23 @@ def read_outputs(outdir):
 
 def run_plain(locations, raw, prev_text, api_key, start, **kw):
     """The PLAIN script (fc.main) under a clock pinned to `start`. Returns (outputs, effects posts)."""
-    outdir = tempfile.mkdtemp()
     posts = []
-    with world(locations, raw, prev_text, api_key, outdir, posts=posts, **kw):
-        fc.datetime = record_run.make_frozen(start)
-        fc.main()
-    return read_outputs(outdir), posts
+    with tempfile.TemporaryDirectory() as outdir:
+        with world(locations, raw, prev_text, api_key, outdir, posts=posts, **kw):
+            fc.datetime = record_run.make_frozen(start)
+            fc.main()
+        return read_outputs(outdir), posts
 
 
 def run_recorder(locations, raw, prev_text, api_key, start, record_dir=None, **kw):
     """The RECORDER (scripts/record_run.py) over the same world. Returns (outputs, bundle dict or None, exit code)."""
-    outdir = tempfile.mkdtemp()
-    record_dir = record_dir or tempfile.mkdtemp()
-    with world(locations, raw, prev_text, api_key, outdir, **kw):
-        code = record_run.main(start=start, record_dir=record_dir)
-    path = os.path.join(record_dir, start.strftime("%Y%m%dT%H%M%SZ") + ".json")
-    bundle = None
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
-            bundle = json.load(f)
-    return read_outputs(outdir), bundle, code, path
+    with tempfile.TemporaryDirectory() as outdir, tempfile.TemporaryDirectory() as default_dir:
+        record_dir = record_dir or default_dir
+        with world(locations, raw, prev_text, api_key, outdir, **kw):
+            code = record_run.main(start=start, record_dir=record_dir)
+        path = os.path.join(record_dir, start.strftime("%Y%m%dT%H%M%SZ") + ".json")
+        bundle = None
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                bundle = json.load(f)
+        return read_outputs(outdir), bundle, code, path

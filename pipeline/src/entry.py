@@ -12,8 +12,8 @@ Shape (the one proven to fire on this account: a WorkerEntrypoint with `async de
     fetch, GET /status             -> status.json, same guard.
 
   SHADOW (`wrangler ... --env shadow`, SHADOW = "1"; binds ONLY the private SHADOW_DATA bucket + DB for its own lock row; NO secrets):
-    scheduled, cron "40 */3 * * *" -> heartbeat, then replay any unprocessed Actions recordings (shadow.process_pending)
-    everything else                -> nothing. fetch answers 404 to every request. There is no PUBLIC_DATA binding, so this deployment
+    scheduled, ANY cron            -> heartbeat (with a fire count), then replay any not-yet-replayed Actions recordings (shadow.process_pending);
+                                      "40 */3 * * *" is only the default schedule. fetch answers 404 to every request. There is no PUBLIC_DATA binding, so this deployment
                                       cannot write to the public bucket; it is given a NullNet, so it cannot make any outbound request.
 
 All the logic lives in service.py / shadow.py / plan.py / publish.py (importable and tested without Cloudflare); this file only turns
@@ -102,13 +102,11 @@ class Default(WorkerEntrypoint):
     async def _shadow(self, env, cron, now):
         bucket = storemod.R2Store(env.SHADOW_DATA)          # recordings/ live at the bucket root
         out = bucket.view("shadow/")                         # everything the shadow writes lives under shadow/
-        await out.put_text("heartbeat.json", json.dumps({"at": now.isoformat(), "cron": cron}), "application/json", "no-store")
-        if service.dispatch_cron(cron, shadow=True) != "shadow":
-            print("shadow: ignoring an unrecognised cron expression")
-            return
+        beat = await shadow.touch_heartbeat(out, now, cron)   # first: proves the cron reached the Worker, and counts the fires
+        # ANY scheduled fire does the replay work (service.dispatch_cron(shadow=True) is always "shadow"): the schedule can be changed freely.
         cfg = _config(env)
         done = await shadow.process_pending(cfg, bucket, out, env.DB, now, probe=heap_mb)
-        print("shadow cycle", json.dumps([{k: e.get(k) for k in ("id", "clean", "reasons", "heapMb")} for e in done]))
+        print("shadow fire", beat["fires"], json.dumps([{k: e.get(k) for k in ("id", "clean", "reasons", "heapMb")} for e in done]))
 
     async def fetch(self, request):
         env = self.env

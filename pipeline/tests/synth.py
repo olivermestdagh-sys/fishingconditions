@@ -8,6 +8,8 @@ import sys
 from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+sys.path.insert(0, os.path.dirname(__file__))
+import tmpguard  # noqa: E402,F401  (all temp output of the tests goes to one folder removed at exit)
 
 import plan  # noqa: E402
 
@@ -125,11 +127,17 @@ class FakeNetwork:
 class FakeStore:
     """In-memory stand-in for R2Store. `view(prefix)` shares the same backing dict, like R2Store.view."""
 
-    def __init__(self, objects=None, prefix="", meta=None, writes=None):
+    def __init__(self, objects=None, prefix="", meta=None, writes=None, ops=None):
         self.all = {} if objects is None else objects
         self.prefix = prefix
         self.meta = {} if meta is None else meta
         self.all_writes = [] if writes is None else writes
+        # R2 operation counters (shared by every view): the Cloudflare cost model is per operation, so tests can pin it
+        self.ops = {"get": 0, "head": 0, "put": 0, "list": 0, "delete": 0} if ops is None else ops
+
+    def reset_ops(self):
+        for k in self.ops:
+            self.ops[k] = 0
 
     # the tests read/write `.objects` as if there were no prefix
     @property
@@ -141,27 +149,33 @@ class FakeStore:
         return [w[len(self.prefix):] for w in self.all_writes if w.startswith(self.prefix)]
 
     def view(self, prefix):
-        return FakeStore(self.all, self.prefix + prefix, self.meta, self.all_writes)
+        return FakeStore(self.all, self.prefix + prefix, self.meta, self.all_writes, self.ops)
 
     async def get_text(self, key):
+        self.ops["get"] += 1
         return self.all.get(self.prefix + key)
 
     async def exists(self, key):
+        self.ops["head"] += 1
         return self.prefix + key in self.all
 
     async def put_text(self, key, text, content_type="application/json", cache_control=None):
+        self.ops["put"] += 1
         self.all[self.prefix + key] = text
         self.meta[self.prefix + key] = (content_type, cache_control)
         self.all_writes.append(self.prefix + key)
 
     async def list_keys(self, prefix=""):
+        self.ops["list"] += 1
         p = self.prefix + prefix
         return sorted(k[len(self.prefix):] for k in self.all if k.startswith(p))
 
     async def delete_key(self, key):
+        self.ops["delete"] += 1
         self.all.pop(self.prefix + key, None)
 
     async def list_run_ids(self):
+        self.ops["list"] += 1
         p = self.prefix + "runs/"
         return sorted({k[len(p):].split("/")[0] for k in self.all if k.startswith(p)})
 

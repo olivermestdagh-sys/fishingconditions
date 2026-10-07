@@ -27,6 +27,8 @@ import unittest
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+sys.path.insert(0, os.path.dirname(__file__))
+import tmpguard  # noqa: E402,F401  (the real fixtures contain private locations: all temp output goes to one folder removed at exit)
 
 import net as netmod
 import plan
@@ -98,7 +100,9 @@ class Parity(unittest.TestCase):
 
     def _run(self, frozen):
         got, _ = asyncio.run(prefetch_from(self.raw, self.meta["locations"]))
-        return runner.run(self.meta["locations"], got, self.prev, API_KEY, frozen_iso=frozen, obs_prune="dry", pipeline_url=URL, pipeline_token=TOKEN)
+        r = runner.run(self.meta["locations"], got, self.prev, API_KEY, frozen_iso=frozen, obs_prune="dry", pipeline_url=URL, pipeline_token=TOKEN)
+        self.addCleanup(runner.cleanup, r)   # the script's output holds private locations: never leave it behind
+        return r
 
     def test_every_golden_output_is_reproduced_with_zero_differences(self):
         for gname, frozen in CLOCKS:

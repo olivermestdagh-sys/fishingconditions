@@ -97,6 +97,7 @@ class Prefetch(unittest.TestCase):
         raw = run(plan.prefetch(self._get(resp), locs, synth.KEY, 6))
         self.assertNotIn("weather:102", raw)
         result = runner.run(locs, raw, None, synth.KEY, frozen_iso=synth.NOW_ISO)
+        self.addCleanup(runner.cleanup, result)
         self.assertGreater(result["counts"]["miss"], 0)
 
 
@@ -165,6 +166,7 @@ class OwnerLayout(unittest.TestCase):
         locs = synth.locations()
         raw = synth.responses(locs)
         result = runner.run(locs, raw, None, synth.KEY, frozen_iso=synth.NOW_ISO)
+        self.addCleanup(runner.cleanup, result)
         mine = {k: t for k, t, _ in publish.iter_owner_objects("owner-x", result)}
         self.assertEqual({e["name"] for e in json.loads(mine["locations.json"])}, {synth.PRIVATE_NAME})
         cond = json.loads(mine["conditions.json"])

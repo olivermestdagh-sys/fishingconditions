@@ -34,11 +34,16 @@ CRON_SHADOW = "40 */3 * * *"
 
 def dispatch_cron(cron, shadow=False):
     """Which job a cron string means. ONLY the run cron runs the billed pipeline; an unknown string does nothing, so a schedule
-    change or a differently formatted cron can never turn the hourly watchdog into a full run. The SHADOW deployment recognises only
-    its own cron (and nothing else); the production deployment never recognises it."""
+    change or a differently formatted cron can never turn the hourly watchdog into a full run.
+
+    The SHADOW deployment does its replay work on ANY scheduled fire, whatever the cron string (CRON_SHADOW is only its default schedule).
+    That is safe: shadow has no network and no side effects, replays each recording at most once, and exits at once when there is nothing
+    new. So the schedule can be changed in the dashboard (it was set to */5 for a test) without the shadow silently doing nothing. (An
+    earlier version acted only on its own cron string, so that */5 test fired 13 times and replayed nothing.) Production is unchanged: it
+    recognises exactly CRON_RUN and CRON_WATCHDOG."""
     cron = (cron or "").strip()
     if shadow:
-        return "shadow" if cron == CRON_SHADOW else "ignore"
+        return "shadow"
     if cron == CRON_RUN:
         return "run"
     if cron == CRON_WATCHDOG:
@@ -136,6 +141,7 @@ async def run_pipeline(cfg, net, store, db, now, trigger, *, run_id=None, frozen
         log("pipeline: another run holds the lock, skipping")
         return {"ok": False, "skipped": "locked", "runId": run_id}
     summary = {"runId": run_id, "trigger": trigger, "ok": False, "published": False}
+    result = None  # the script's output folder (runner.run); removed in the `finally` below whatever happens
     net.deadline = t0 + cfg.deadline_s
     net.budgets["willyweather"] = cfg.willyweather_budget
 
@@ -237,6 +243,9 @@ async def run_pipeline(cfg, net, store, db, now, trigger, *, run_id=None, frozen
         summary["error"] = public_error(e)
         log("pipeline: run failed: " + summary["error"])
     finally:
+        runner.cleanup(result)  # ~7 MB of every owner's output: never left behind (in the Worker it is memory, not just disk)
+        result = None
+        gc.collect()
         if db is not None:
             try:
                 await locking.release(db, run_id, lock_id=lock_id)

@@ -14,10 +14,16 @@ being edited in the script:
 
 The script's generated files are NOT read back here: the caller gets their paths and reads them one at a time, so the whole
 ~7 MB output never sits in memory twice.
+
+THE OUTPUT FOLDER IS TEMPORARY AND IS REMOVED. It holds a full copy of the run's output (every owner's rows, ~7 MB). run() deletes it itself if
+the script fails; otherwise the CALLER must call cleanup(result) when it has finished reading (service.run_pipeline does, in its `finally`).
+In the Worker this folder lives in Pyodide's in-memory filesystem, so a leftover is not just clutter: it is ~7 MB of the isolate's memory that
+stays allocated across invocations of a warm isolate, and each run would add another.
 """
 import copy
 import json
 import os
+import shutil
 import tempfile
 from datetime import datetime
 
@@ -99,20 +105,31 @@ def run(locations, raw, prev_text, api_key, *, frozen_iso=None, forecast_days=6,
         fc.ThreadPoolExecutor = SerialPool
         if frozen_iso:
             fc.datetime = make_frozen(datetime.fromisoformat(frozen_iso))
-        out = tempfile.mkdtemp()
+        out = tempfile.mkdtemp(prefix="pipeline-run-")
         fc.OUTPUT_PATH = os.path.join(out, "data", "conditions.json")
         fc.LOCATIONS_EXPORT_PATH = os.path.join(out, "config", "locations.json")
         fc.ARCHIVE_BY_LOCATION.clear()
         try:
-            fc.main()
-        except SystemExit as e:  # the script calls sys.exit(1) when its key is unset: a BaseException that `except Exception` would miss
-            raise RuntimeError(f"fetch_conditions.py exited with status {e.code}") from None
-        gdir = os.path.join(out, "data", "graph")
-        return {
-            "out": out, "conditions": fc.OUTPUT_PATH, "export": fc.LOCATIONS_EXPORT_PATH, "graph_dir": gdir,
-            "graph_files": sorted(os.listdir(gdir)), "counts": counts, "effects": effects,
-            "run_as_of": fc.RUN_AS_OF.isoformat() if fc.RUN_AS_OF else None,
-        }
+            try:
+                fc.main()
+            except SystemExit as e:  # the script calls sys.exit(1) when its key is unset: a BaseException that `except Exception` would miss
+                raise RuntimeError(f"fetch_conditions.py exited with status {e.code}") from None
+            gdir = os.path.join(out, "data", "graph")
+            return {
+                "out": out, "conditions": fc.OUTPUT_PATH, "export": fc.LOCATIONS_EXPORT_PATH, "graph_dir": gdir,
+                "graph_files": sorted(os.listdir(gdir)), "counts": counts, "effects": effects,
+                "run_as_of": fc.RUN_AS_OF.isoformat() if fc.RUN_AS_OF else None,
+            }
+        except BaseException:
+            shutil.rmtree(out, ignore_errors=True)  # a failed run leaves nothing behind
+            raise
     finally:
         for k, v in saved.items():
             setattr(fc, k, v)
+
+
+def cleanup(result):
+    """Remove the script's output folder. Safe to call twice, and with None."""
+    if result and result.get("out"):
+        shutil.rmtree(result["out"], ignore_errors=True)
+        result["out"] = None

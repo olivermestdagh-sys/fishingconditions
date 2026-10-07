@@ -4,6 +4,7 @@ recording must replay to the same bytes, shadow must make no requests / send no 
 import asyncio
 import json
 import os
+import tempfile
 import tomllib
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -51,6 +52,12 @@ def process(bucket, db=None, probe=None, now=NOW):
 
 
 class RecorderMustNotChangeTheRun(unittest.TestCase):
+    def tmp(self):
+        """A temporary directory that is removed when the test ends."""
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        return d.name
+
     def test_recorder_output_is_byte_identical_to_the_plain_script_under_the_same_clock(self):
         locs, resp = world()
         plain, plain_posts = rw.run_plain(locs, resp, None, synth.KEY, START)
@@ -74,7 +81,7 @@ class RecorderMustNotChangeTheRun(unittest.TestCase):
     def test_the_recorder_sends_exactly_the_requests_and_writes_the_plain_script_does(self):
         locs, resp = world()
         plain_get, plain_posts, rec_get, rec_posts = [], [], [], []
-        with rw.world(locs, resp, None, synth.KEY, __import__("tempfile").mkdtemp(), get_log=plain_get, posts=plain_posts):
+        with rw.world(locs, resp, None, synth.KEY, self.tmp(), get_log=plain_get, posts=plain_posts):
             rw.fc.datetime = rw.record_run.make_frozen(START)
             rw.fc.main()
         outs, bundle, code, _ = rw.run_recorder(locs, resp, None, synth.KEY, START, get_log=rec_get, posts=rec_posts)
@@ -90,8 +97,8 @@ class RecorderMustNotChangeTheRun(unittest.TestCase):
 
     def test_a_failing_script_exits_nonzero_and_writes_no_recording_so_the_workflow_falls_back(self):
         locs, resp = world()
-        outdir = __import__("tempfile").mkdtemp()
-        rec = __import__("tempfile").mkdtemp()
+        outdir = self.tmp()
+        rec = self.tmp()
         with rw.world(locs, resp, None, "", outdir):  # no WillyWeather key: the script exits 1 straight away
             code = rw.record_run.main(start=START, record_dir=rec)
         self.assertEqual(code, 1)
@@ -99,17 +106,17 @@ class RecorderMustNotChangeTheRun(unittest.TestCase):
 
     def test_an_unexpected_crash_propagates_so_the_exit_is_nonzero(self):
         locs, resp = world()
-        outdir = __import__("tempfile").mkdtemp()
+        outdir = self.tmp()
         with rw.world(locs, resp, None, synth.KEY, outdir):
             rw.fc.load_locations = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
             with self.assertRaises(RuntimeError):
-                rw.record_run.main(start=START, record_dir=__import__("tempfile").mkdtemp())
+                rw.record_run.main(start=START, record_dir=self.tmp())
 
     def test_a_recording_that_cannot_be_written_never_fails_the_data_run(self):
         locs, resp = world()
-        blocker = os.path.join(__import__("tempfile").mkdtemp(), "not-a-dir")
+        blocker = os.path.join(self.tmp(), "not-a-dir")
         open(blocker, "w").close()          # a FILE where the recordings directory should be
-        outdir = __import__("tempfile").mkdtemp()
+        outdir = self.tmp()
         with rw.world(locs, resp, None, synth.KEY, outdir):
             code = rw.record_run.main(start=START, record_dir=blocker)
         self.assertEqual(code, 0)
@@ -246,11 +253,14 @@ class ShadowReplay(unittest.TestCase):
         index = json.loads(bucket.objects["shadow/index.json"])
         self.assertEqual([c["id"] for c in index["cycles"]], ids)
 
-    def test_shadow_dispatch_only_recognises_its_own_cron(self):
-        self.assertEqual(service.dispatch_cron("40 */3 * * *", shadow=True), "shadow")
-        self.assertEqual(service.dispatch_cron("0 */3 * * *", shadow=True), "ignore")
-        self.assertEqual(service.dispatch_cron("15 * * * *", shadow=True), "ignore")
-        self.assertEqual(service.dispatch_cron("40 */3 * * *"), "ignore")  # production never runs the shadow cron
+    def test_shadow_replays_on_ANY_scheduled_fire_while_production_stays_strict(self):
+        for cron in ("40 */3 * * *", "*/5 * * * *", "*/15 * * * *", "0 */3 * * *", "", "anything"):
+            self.assertEqual(service.dispatch_cron(cron, shadow=True), "shadow", cron)
+        # production is unchanged: only its own two crons do anything, and it never recognises the shadow's
+        self.assertEqual(service.dispatch_cron("0 */3 * * *"), "run")
+        self.assertEqual(service.dispatch_cron("15 * * * *"), "watchdog")
+        self.assertEqual(service.dispatch_cron("40 */3 * * *"), "ignore")
+        self.assertEqual(service.dispatch_cron("*/5 * * * *"), "ignore")
 
     def test_the_shadow_environment_in_wrangler_toml_cannot_reach_production_or_the_public_bucket(self):
         with open(os.path.join(os.path.dirname(__file__), "..", "wrangler.toml"), "rb") as f:
