@@ -74,7 +74,7 @@ if ("serviceWorker" in navigator) {
 // this is exactly what caused that bug).
 // ---------------------------------------------------------------------
 
-const USER_BACKEND_URL = "https://fishingconditions-users.olies-fishing.workers.dev";
+const USER_BACKEND_URL = "https://api.yepyepyep.app"; // the Worker also still answers on https://fishingconditions-users.olies-fishing.workers.dev (old installs, the phone app, the pipeline)
 
 // --- Sign-in that survives blocked third-party cookies ------------------------------------------------------
 // The Worker's session cookie belongs to a different address from this site, so phone browsers increasingly

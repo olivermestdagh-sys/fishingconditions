@@ -47,7 +47,12 @@
  *
  * COOKIES ARE CROSS-ORIGIN: the frontend lives on GitHub Pages
  * (ALLOWED_ORIGIN), this Worker lives on *.workers.dev — a different
- * origin. That means every browser fetch() to this Worker's /api/* routes
+ * origin. (Now also on api.yepyepyep.app, next to the site on yepyepyep.app:
+ * that pair is same-SITE, so the cookie works there regardless, but the
+ * github.io copy is still cross-site, so SameSite=None stays. Cookies are
+ * host-only — no Domain attribute — so one set on workers.dev is NOT sent to
+ * api.yepyepyep.app; the bearer token, which isn't tied to a host, carries
+ * a sign-in across.) That means every browser fetch() to this Worker's /api/* routes
  * needs `credentials: "include"`, and this Worker's CORS response needs
  * Access-Control-Allow-Origin set to the EXACT origin (never "*") plus
  * Access-Control-Allow-Credentials: true, or the browser silently refuses
@@ -101,7 +106,11 @@
  *        merged into one page; update this value if it still points at
  *        the old account.html)
  *      - GOOGLE_REDIRECT_URI (Text) — this Worker's own URL + "/auth/callback",
- *        the exact value entered in Google Console step 1
+ *        the exact value entered in Google Console step 1. May be a comma-
+ *        separated list when the Worker answers on several addresses (its
+ *        workers.dev one and api.yepyepyep.app): each must be registered in
+ *        Google Console, and the one used is the one on the host the sign-in
+ *        started on (resolveRedirectUri).
  *      - PIPELINE_API_TOKEN (Secret) — a long, random string you generate
  *        yourself (e.g. `openssl rand -hex 32`, or any password generator).
  *        This is a completely different credential from everything above —
@@ -524,14 +533,36 @@ function resolveReturnUrl(env, candidate) {
   return env.FRONTEND_ACCOUNT_URL;
 }
 
+// GOOGLE_REDIRECT_URI is one callback URL or a comma/space-separated list of them (the Worker answers on several
+// addresses: its workers.dev one and a custom domain). Google requires the redirect_uri of the token exchange to equal
+// the one the sign-in STARTED with, and the browser lands back on whichever address that was, so the redirect URI is
+// derived from the host this request arrived on: the listed entry with the same origin. A host that isn't listed gets
+// null (the caller refuses). A single configured value is used as-is, whatever the host, exactly as before the list
+// existed.
+function resolveRedirectUri(env, url) {
+  const listed = String(env.GOOGLE_REDIRECT_URI || "").split(/[\s,]+/).filter(Boolean);
+  if (listed.length <= 1) return listed[0] || null;
+  return (
+    listed.find((entry) => {
+      try {
+        return new URL(entry).origin === url.origin;
+      } catch {
+        return false;
+      }
+    }) || null
+  );
+}
+
 function handleLogin(env, url) {
   requireEnv(env, ["GOOGLE_CLIENT_ID", "GOOGLE_REDIRECT_URI"]);
+  const redirectUri = resolveRedirectUri(env, url);
+  if (!redirectUri) return jsonResponse({ error: "Sign-in isn't available on this address." }, 400, env);
   const returnUrl = url.searchParams.get("return");
   const state = randomToken();
 
   const authorizeUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   authorizeUrl.searchParams.set("client_id", env.GOOGLE_CLIENT_ID);
-  authorizeUrl.searchParams.set("redirect_uri", env.GOOGLE_REDIRECT_URI);
+  authorizeUrl.searchParams.set("redirect_uri", redirectUri);
   authorizeUrl.searchParams.set("response_type", "code");
   authorizeUrl.searchParams.set("scope", "openid email profile");
   authorizeUrl.searchParams.set("state", state);
@@ -559,6 +590,9 @@ function handleLogin(env, url) {
 async function handleCallback(request, url, env) {
   requireEnv(env, ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI", "FRONTEND_ACCOUNT_URL"]);
 
+  const redirectUri = resolveRedirectUri(env, url);
+  if (!redirectUri) return jsonResponse({ error: "Sign-in isn't available on this address." }, 400, env);
+
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const cookieState = readCookie(request, STATE_COOKIE);
@@ -579,7 +613,7 @@ async function handleCallback(request, url, env) {
         code,
         client_id: env.GOOGLE_CLIENT_ID,
         client_secret: env.GOOGLE_CLIENT_SECRET,
-        redirect_uri: env.GOOGLE_REDIRECT_URI,
+        redirect_uri: redirectUri, // the same one /auth/login sent (it is derived from this very host)
         grant_type: "authorization_code",
       }),
     });
