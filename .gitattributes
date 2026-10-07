@@ -1,0 +1,6 @@
+# The shadow pipeline hashes these files (scripts/record_run.py, pipeline/src/script_hash.py) and a test requires the pipeline/src copies to be byte
+# copies of the scripts/ ones: pin LF so no checkout (Windows autocrlf, an editor) can ever change either. The hash also reads CRLF as LF, belt and braces.
+scripts/fetch_conditions.py text eol=lf
+scripts/observation_archive.py text eol=lf
+pipeline/src/fetch_conditions.py text eol=lf
+pipeline/src/observation_archive.py text eol=lf
