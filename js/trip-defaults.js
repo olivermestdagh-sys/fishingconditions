@@ -363,7 +363,7 @@ async function showTripDefaults({ onClose, start } = {}) {
         ${baitOptionsSection(r.bait, r.baitOptions, "data-rod-bait-opt")}
         ${r.rig ? section(`${r.rig} options`, sub.map((v) => choice(v, `data-sub="${esc(v)}"`, r.subListItems.includes(v), subThumbs[v])).join(""), "sub") : ""}
         ${inAction ? `<div class="td-delete"><button type="button" class="live-card-nav-btn td-delete-btn" data-remove-from-action>Remove from this action (keeps the rod setup)</button></div>` : ""}
-        ${confirmDeleteHtml("Delete this rod setup permanently (every action)")}`,
+        ${direct ? "" : confirmDeleteHtml("Delete this rod setup permanently (every action)")}`, // no delete while fishing: the quick-edit (opened from a running trip) never offers it
       nav: navHtml("Back"),
     };
   }
