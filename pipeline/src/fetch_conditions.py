@@ -813,8 +813,9 @@ def fill_wind_gaps(rows):
 
     Direction needs circular averaging, not a plain numeric mean — naively
     averaging 350° and 10° gives 180° (due south, wrong), when the real
-    answer is roughly 0° (due north). Averaging as unit vectors and taking
-    the angle of the resulting vector handles the wraparound correctly.
+    answer is roughly 0° (due north). compass_midpoint takes the midpoint of
+    the shorter arc, which handles the wraparound correctly, in whole compass
+    steps (no floats), with a fixed rule for the exact-tie cases.
     Mutates rows in place (all at once, after every fill value is computed).
     """
     n = len(rows)
@@ -843,19 +844,126 @@ def fill_wind_gaps(rows):
             prev_idx = nearest_real(original_dir, i - 1, -1)
             next_idx = nearest_real(original_dir, i + 1, 1)
             if prev_idx is not None and next_idx is not None:
-                deg1 = compass_to_degrees(original_dir[prev_idx])
-                deg2 = compass_to_degrees(original_dir[next_idx])
-                if deg1 is not None and deg2 is not None:
-                    rad1, rad2 = math.radians(deg1), math.radians(deg2)
-                    avg_x = (math.cos(rad1) + math.cos(rad2)) / 2
-                    avg_y = (math.sin(rad1) + math.sin(rad2)) / 2
-                    avg_deg = math.degrees(math.atan2(avg_y, avg_x)) % 360
-                    dir_fills[i] = degrees_to_compass(avg_deg)
+                mid = compass_midpoint(original_dir[prev_idx], original_dir[next_idx])
+                if mid is not None:
+                    dir_fills[i] = mid
 
     for i, value in speed_fills.items():
         rows[i]["Wind Forecast (km/h)"] = value
     for i, value in dir_fills.items():
         rows[i]["Wind Forecast Dir"] = value
+
+
+# What this script has always answered when the two readings either side of a gap in the wind direction are an ODD number of compass steps
+# apart, or exactly opposite. The midpoint is then exactly halfway between two compass points (or undefined), and the old code decided by the last
+# bit of sin/cos/atan2, so the result is ARBITRARY but STABLE: the same on Linux CPython 3.11 (GitHub Actions) and desktop CPython 3.11/3.13, and
+# independent of which reading came first. WebAssembly CPython (the Cloudflare Worker) rounds that last bit differently and disagreed, so the
+# answers are written down here instead of being computed, and nothing about them depends on floating point any more. Do not "tidy" them into a
+# rule: 60 of the 72 follow "the counter-clockwise point" (E|ESE -> E, S|SSW -> S) but 12 do not (N|NNE -> NNE, N|NNW -> N, NNE|NW -> N,
+# NE|NNW -> NNE, NE|WNW -> N, ENE|W -> N, E|WNW -> NNE, SE|NNW -> ENE and the opposites NNE|SSW, ENE|WSW, ESE|WNW, SSE|NNW), and changing any
+# of them changes published Wind Forecast Dir / Condition values. Keys are (lower index, higher index) in COMPASS_DEGREES order. Pairs an EVEN
+# number of steps apart are not listed: their midpoint is a compass point and the old code always found it exactly.
+COMPASS_TIE_RESULTS = {
+    # 1 step apart
+    ("N", "NNE"): "NNE",
+    ("N", "NNW"): "N",
+    ("NNE", "NE"): "NNE",
+    ("NE", "ENE"): "NE",
+    ("ENE", "E"): "ENE",
+    ("E", "ESE"): "E",
+    ("ESE", "SE"): "ESE",
+    ("SE", "SSE"): "SE",
+    ("SSE", "S"): "SSE",
+    ("S", "SSW"): "S",
+    ("SSW", "SW"): "SSW",
+    ("SW", "WSW"): "SW",
+    ("WSW", "W"): "WSW",
+    ("W", "WNW"): "W",
+    ("WNW", "NW"): "WNW",
+    ("NW", "NNW"): "NW",
+    # 3 steps apart
+    ("N", "ENE"): "NNE",
+    ("N", "WNW"): "NW",
+    ("NNE", "E"): "NE",
+    ("NNE", "NW"): "N",
+    ("NE", "ESE"): "ENE",
+    ("NE", "NNW"): "NNE",
+    ("ENE", "SE"): "E",
+    ("E", "SSE"): "ESE",
+    ("ESE", "S"): "SE",
+    ("SE", "SSW"): "SSE",
+    ("SSE", "SW"): "S",
+    ("S", "WSW"): "SSW",
+    ("SSW", "W"): "SW",
+    ("SW", "WNW"): "WSW",
+    ("WSW", "NW"): "W",
+    ("W", "NNW"): "WNW",
+    # 5 steps apart
+    ("N", "ESE"): "NE",
+    ("N", "WSW"): "WNW",
+    ("NNE", "SE"): "ENE",
+    ("NNE", "W"): "NW",
+    ("NE", "SSE"): "E",
+    ("NE", "WNW"): "N",
+    ("ENE", "S"): "ESE",
+    ("ENE", "NW"): "N",
+    ("E", "SSW"): "SE",
+    ("E", "NNW"): "NNE",
+    ("ESE", "SW"): "SSE",
+    ("SE", "WSW"): "S",
+    ("SSE", "W"): "SSW",
+    ("S", "WNW"): "SW",
+    ("SSW", "NW"): "WSW",
+    ("SW", "NNW"): "W",
+    # 7 steps apart
+    ("N", "SSE"): "ENE",
+    ("N", "SSW"): "W",
+    ("NNE", "S"): "E",
+    ("NNE", "SW"): "WNW",
+    ("NE", "SSW"): "ESE",
+    ("NE", "WSW"): "NW",
+    ("ENE", "SW"): "SE",
+    ("ENE", "W"): "N",
+    ("E", "WSW"): "SSE",
+    ("E", "WNW"): "NNE",
+    ("ESE", "W"): "S",
+    ("ESE", "NW"): "NNE",
+    ("SE", "WNW"): "SSW",
+    ("SE", "NNW"): "ENE",
+    ("SSE", "NW"): "SW",
+    ("S", "NNW"): "WSW",
+    # 8 steps apart (opposite)
+    ("N", "S"): "E",
+    ("NNE", "SSW"): "SE",
+    ("NE", "SW"): "SE",
+    ("ENE", "WSW"): "NNW",
+    ("E", "W"): "S",
+    ("ESE", "WNW"): "NNE",
+    ("SE", "NW"): "SW",
+    ("SSE", "NNW"): "ENE",
+}
+
+
+def compass_midpoint(dir1, dir2):
+    """The compass point halfway round the SHORTER arc between two compass
+    points (the circular average fill_wind_gaps needs), in whole compass steps
+    so no float arithmetic is involved and every platform gives the same answer.
+
+    Readings an even number of steps apart have a compass point exactly in the
+    middle. Readings an odd number of steps apart (midpoint between two compass
+    points) or opposite (no shorter arc) are looked up in COMPASS_TIE_RESULTS.
+    Order of the two readings never matters. Returns None for a direction that
+    is not one of the 16 compass points."""
+    names = list(COMPASS_DEGREES)  # the 16 points in clockwise order
+    key1, key2 = str(dir1).strip().upper(), str(dir2).strip().upper()
+    if key1 not in COMPASS_DEGREES or key2 not in COMPASS_DEGREES:
+        return None
+    i1, i2 = names.index(key1), names.index(key2)
+    gap = abs(i2 - i1)
+    if gap % 2 == 1 or gap == 8:
+        return COMPASS_TIE_RESULTS[(names[min(i1, i2)], names[max(i1, i2)])]
+    step = (i2 - i1 + 8) % 16 - 8  # signed shortest way round, even here
+    return names[(i1 + step // 2) % 16]
 
 
 def degrees_to_compass(deg):

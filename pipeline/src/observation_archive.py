@@ -21,10 +21,16 @@ def _hour_key(dt):
 
 
 def _mean(values, digits):
+    # Explicit left-to-right float addition, NOT sum(): Python 3.12 made sum() of floats a compensated sum, which
+    # moves a mean that sits on a rounding tie (e.g. 10.85) by 0.1 between 3.11 and 3.13. This loop is exactly what
+    # 3.11's sum() did (published data was produced that way), and it is the same on every Python and platform.
     values = [v for v in values if v is not None]
     if not values:
         return None
-    return round(sum(values) / len(values), digits)
+    total = 0.0
+    for v in values:
+        total += v
+    return round(total / len(values), digits)
 
 
 def build_observation_hours(base_rows, pressure_by_hour, sst_by_hour, velocity_by_hour, direction_by_hour, as_of):

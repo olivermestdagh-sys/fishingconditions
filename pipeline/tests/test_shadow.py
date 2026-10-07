@@ -242,10 +242,12 @@ class ShadowReplay(unittest.TestCase):
             ids.append(b["runId"])
             put_bundle(bucket, b)
         self.assertEqual(ids, sorted(ids))
-        first = process(bucket, FakeDB())            # at most 2 per invocation
-        self.assertEqual([e["id"] for e in first], ids[:2])
+        first = process(bucket, FakeDB())            # ONE per invocation (keeps the heap at a single replay's worth)
+        self.assertEqual([e["id"] for e in first], ids[:1])
         second = process(bucket, FakeDB())
-        self.assertEqual([e["id"] for e in second], ids[2:])
+        self.assertEqual([e["id"] for e in second], ids[1:2])
+        third = process(bucket, FakeDB())
+        self.assertEqual([e["id"] for e in third], ids[2:])
         self.assertEqual(process(bucket, FakeDB()), [])
         # a recording is dropped once processed AND older than 4 days; the recent one stays
         remaining = [k for k in bucket.all if k.startswith("recordings/")]
@@ -360,11 +362,56 @@ class ShadowCatchesProblems(unittest.TestCase):
         bucket.all["recordings/20261007T020000Z.json"] = "{not json"
         good, _ = make_bundle(start=START)
         put_bundle(bucket, good)
-        done = process(bucket, FakeDB())
+        done = process(bucket, FakeDB()) + process(bucket, FakeDB())      # one per fire
         self.assertEqual([d["id"] for d in done], ["20261007T020000Z", good["runId"]])
         self.assertFalse(done[0]["clean"])
         self.assertIn("JSONDecodeError", done[0]["reasons"][0])
         self.assertTrue(done[1]["clean"])
+        self.assertNotIn("superseded", done[0])      # a corrupt recording is a failure, not a hash mismatch
+
+    def test_the_entry_carries_both_script_hashes_and_a_matching_recording_is_not_superseded(self):
+        import script_hash
+        bundle, _ = make_bundle()
+        self.assertEqual(bundle["scriptHash"], script_hash.SCRIPT_HASH)      # the recorder hashed the very files the Worker was deployed with
+        bucket = FakeStore()
+        put_bundle(bucket, bundle)
+        e = process(bucket, FakeDB())[0]
+        self.assertTrue(e["clean"])
+        self.assertEqual((e["scriptHash"], e["deployedScriptHash"]), (script_hash.SCRIPT_HASH, script_hash.SCRIPT_HASH))
+        self.assertNotIn("superseded", e)
+
+    def test_a_recording_without_or_with_another_script_hash_is_replayed_as_information_and_marked_superseded(self):
+        for label, change, why in [("no hash", lambda b: b.pop("scriptHash"), "no script hash"), ("other script", lambda b: b.__setitem__("scriptHash", "0" * 64), "different script")]:
+            bundle, _ = make_bundle()
+            change(bundle)
+            bucket = FakeStore()
+            put_bundle(bucket, bundle)
+            e = process(bucket, FakeDB())[0]
+            self.assertTrue(e["superseded"], label)
+            self.assertIn(why, e["supersededWhy"], label)
+            self.assertTrue(e["clean"], label)          # the replay itself matched: the flag is what keeps it out of the count, not a failure
+            self.assertEqual(e["reasons"], [], label)
+
+    def test_a_recording_replayed_under_an_older_deployed_script_is_replayed_again_once_and_never_counted_twice(self):
+        bundle, _ = make_bundle()
+        bucket = FakeStore()
+        put_bundle(bucket, bundle)
+        self.assertEqual(len(process(bucket, FakeDB())), 1)
+        self.assertEqual(process(bucket, FakeDB()), [])                       # same deployed script: done
+        index = json.loads(bucket.objects["shadow/index.json"])
+        index["cycles"][0].pop("deployedScriptHash")                          # as the entries written before this change look
+        bucket.objects["shadow/index.json"] = json.dumps(index)
+        bucket.all["shadow/index.json"] = bucket.objects["shadow/index.json"]
+        again = process(bucket, FakeDB())
+        self.assertEqual([e["id"] for e in again], [bundle["runId"]])
+        self.assertEqual(process(bucket, FakeDB()), [])
+        self.assertEqual([c["id"] for c in json.loads(bucket.objects["shadow/index.json"])["cycles"]], [bundle["runId"]])   # replaced, not added
+
+    def test_the_heartbeat_names_the_deployed_script(self):
+        import script_hash
+        out = FakeStore().view("shadow/")
+        beat = run(shadow.touch_heartbeat(out, NOW, "*/15 * * * *"))
+        self.assertEqual(beat["scriptHash"], script_hash.SCRIPT_HASH)
 
     def test_a_held_lock_is_reported_as_not_clean_not_as_a_pass(self):
         bundle, _ = make_bundle()

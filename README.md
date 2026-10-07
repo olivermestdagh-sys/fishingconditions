@@ -96,6 +96,21 @@ shares a name with a public one (the `locations` table has no unique name) cause
 **Refresh data now** keeps working: once the Worker is bound as a service (`[[services]] PIPELINE` in `wrangler.toml`, deliberately commented out until cutover),
 the admin button calls the pipeline's `POST /run` (no public route; also needs `X-Pipeline-Token`). Without the binding it dispatches the GitHub workflow as before.
 
+**Same answer on every platform** (found by the first shadow replay): the script runs on Linux CPython 3.11 (Actions), on desktop CPython 3.13 and on CPython 3.13 in WebAssembly
+(the Worker), and its output must not depend on which. Two places did, and both now give the SAME values the site has always published, by rules that involve no float rounding:
+(1) the direction filled into a gap in the wind readings (`compass_midpoint`, `scripts/fetch_conditions.py`) is worked out in whole compass steps, no sin/cos/atan2. Two readings an even number of
+steps apart have a compass point exactly in the middle; two an odd number apart (say N and NNE) or exactly opposite have no single answer, and the old float code picked one by the last bit of
+its trig. Those 72 pairs are now a written-down table (`COMPASS_TIE_RESULTS`) of what the old code answered (identical on every CPython 3.11/3.13 tried and on Actions, and independent of which reading
+came first): 60 are "the counter-clockwise point" (E|ESE -> E), 12 are not (N|NNE -> NNE, N|NNW -> N, ...). They are arbitrary but stable, so they must not be "tidied" into a rule;
+(2) the means in the observation archive (`_mean`, `scripts/observation_archive.py`) add left to right with a plain loop, exactly what Python 3.11's `sum()` did, because 3.12 made `sum()` a
+compensated sum and moved a mean on a rounding tie (10.85) by 0.1. Any new float-sensitive step needs the same treatment; `pipeline/tests/test_platform_determinism.py` pins both (run the
+suite on 3.11 and 3.13 when touching either). `pipeline/src/fetch_conditions.py` and `observation_archive.py` stay byte copies of the `scripts/` ones (test-enforced).
+
+**Script hash**: every recording stores `scriptHash` (SHA-256 over the two script files, CRLF read as LF; `scripts/record_run.py`), and the shadow Worker carries the hash it was deployed with as a committed
+constant (`pipeline/src/script_hash.py` `SCRIPT_HASH`; a test fails when the scripts change without it, and `python scripts/record_run.py --script-hash` prints the new value). Each index entry records both,
+the heartbeat records the deployed one, and `verify-shadow` counts a cycle only when they agree: a recording made with another script (or before the hash existed) is replayed once as information and listed as
+**superseded**, never as unclean. A recording is replayed again when its entry was made under a different deployed hash (never counted twice: the entry is replaced), and the shadow takes one recording per fire.
+
 **Shadow mode** (stage 2; code written, not deployed): before the Worker replaces Actions it replays what Actions already did and proves it gets the same answer.
 `scripts/record_run.py` replaces the `python3 scripts/fetch_conditions.py` line of `update.yml`: it runs the same script with its clock pinned to the start of the run and
 records every API answer, the locations, the previous output and SHA-256 hashes of every file produced, into `recordings/<runId>.json` (private locations are inside, so it is

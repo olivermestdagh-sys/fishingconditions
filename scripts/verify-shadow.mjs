@@ -20,6 +20,10 @@
 // A clean cycle = the recording was replayed; the Worker's full output is byte-identical to Actions' (conditions, locations export, every
 // graph file) and it would have sent the same writes and made the same calls; the publish gate would have passed; the lock worked; Python
 // heap under 90 MB; no private location name or owner id in any public object. 24 consecutive are needed.
+//
+// A cycle COUNTS only if the recording was made with the very script the shadow Worker was deployed with: the recording's scriptHash equals the
+// deployedScriptHash its replay was made under (and the heartbeat's current one). Any other recording (made before the recorder stored a hash, or
+// by an older / newer script) is SUPERSEDED: it is listed separately, neither counts nor resets the streak, and is never reported as unclean.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -105,7 +109,17 @@ export function publicFilter(cond) {
  * @returns {{items, streak, lastClean, unverified, notCounted, state}}
  *   items: chronological [{kind, id, at, note}] with kind in clean | unclean | missing | actions-failed | pending
  */
-export function classify({ cycles, runs, now, pendingMinutes = DEFAULTS.pendingMinutes }) {
+/** Is this index entry a cycle that counts? The recording's script hash, the hash the replay was made under, and the Worker's current one must agree. */
+export function isSuperseded(c, deployedNow = null) {
+  if (c.superseded) return true;
+  if (!c.scriptHash || !c.deployedScriptHash || c.scriptHash !== c.deployedScriptHash) return true;
+  return Boolean(deployedNow) && c.deployedScriptHash !== deployedNow;
+}
+
+export function classify({ cycles, runs, now, pendingMinutes = DEFAULTS.pendingMinutes, deployedScriptHash = null }) {
+  const asItem = (c) => (isSuperseded(c, deployedScriptHash)
+    ? { kind: "superseded", id: c.id, at: c.runStart, note: c.supersededWhy || "made with a different script than the deployed Worker" }
+    : c.clean ? { kind: "clean", id: c.id, at: c.runStart, note: "" } : { kind: "unclean", id: c.id, at: c.runStart, note: (c.reasons || []).join("; "), cycle: c });
   // Nothing replayed yet: there is no "since when" to judge Actions' runs against (they predate the recorder), so there is nothing to classify.
   if (!cycles.length) return { items: [], streak: 0, lastClean: null, newestVerdict: undefined, unverified: [], notCounted: [] };
   const byRun = new Map(cycles.filter((c) => c.workflowRunId).map((c) => [String(c.workflowRunId), c]));
@@ -118,7 +132,7 @@ export function classify({ cycles, runs, now, pendingMinutes = DEFAULTS.pendingM
     const c = byRun.get(String(r.id));
     if (c) {
       used.add(c.id);
-      items.push(c.clean ? { kind: "clean", id: c.id, at: c.runStart, note: "" } : { kind: "unclean", id: c.id, at: c.runStart, note: (c.reasons || []).join("; "), cycle: c });
+      items.push(asItem(c));
     } else if (r.status !== "completed") {
       items.push({ kind: "pending", id: `run ${r.id}`, at: new Date(t).toISOString(), note: "Actions run still in progress" });
     } else if (r.conclusion !== "success") {
@@ -133,7 +147,7 @@ export function classify({ cycles, runs, now, pendingMinutes = DEFAULTS.pendingM
   for (const c of cycles) {
     if (used.has(c.id)) continue;
     if ((runs || []).some((r) => String(r.id) === String(c.workflowRunId))) continue;
-    items.push(c.clean ? { kind: "clean", id: c.id, at: c.runStart, note: "" } : { kind: "unclean", id: c.id, at: c.runStart, note: (c.reasons || []).join("; "), cycle: c });
+    items.push(asItem(c));
   }
   items.sort((a, b) => new Date(a.at) - new Date(b.at));
   // streak: newest first; clean counts, "not a verdict" items are skipped, unclean ends it
@@ -150,17 +164,24 @@ export function classify({ cycles, runs, now, pendingMinutes = DEFAULTS.pendingM
   return {
     items, streak, lastClean, newestVerdict,
     unverified: items.filter((i) => i.kind === "missing"),
+    superseded: items.filter((i) => i.kind === "superseded"),
     notCounted: items.filter((i) => i.kind === "actions-failed" || i.kind === "pending"),
   };
 }
 
 /** The one-line verdict + exit code from a classification (and optional extra problems found by the deep check). */
 export function verdictLine(cls, { needed = DEFAULTS.needed, now, extra = null, runsUnavailable = false } = {}) {
+  const superseded = cls.superseded || [];
+  const supersededNote = superseded.length ? `${superseded.length} recording(s) superseded (made with a different script than the deployed Worker: not counted, not failures)` : "";
+  if (superseded.length && !cls.items.some((i) => i.kind === "clean" || i.kind === "unclean")) {
+    return { code: 3, line: `NOT STARTED: no recording made with the deployed script has been replayed yet; ${supersededNote}` };
+  }
   if (!cls.items.length) return { code: 3, line: "NOT STARTED: no Actions recording has been replayed yet (expected until the first Actions run after the recorder is live and its upload secret is set, and the shadow Worker's cron has registered and fired)" };
   const tail = [];
   if (cls.unverified.length) tail.push(`${cls.unverified.length} cycle(s) unverified (${cls.unverified.map((i) => fmtUtc(i.at).slice(5, 16)).join(", ")}: Actions succeeded but nothing was replayed)`);
   const skipped = cls.notCounted.filter((i) => i.kind === "actions-failed");
   if (skipped.length) tail.push(`${skipped.length} not counted (${skipped.map((i) => `${fmtUtc(i.at).slice(5, 16)}: ${i.note.split(":")[0].toLowerCase()}`).join("; ")})`);
+  if (supersededNote) tail.push(supersededNote);
   const pending = cls.notCounted.filter((i) => i.kind === "pending");
   if (pending.length) tail.push(`${pending.length} pending`);
   if (runsUnavailable) tail.push("could not read the Actions run list, so skipped/failed runs are not distinguished");
@@ -274,7 +295,14 @@ export async function runVerify(io, opts = {}) {
       runsUnavailable = true;
     }
   }
-  const cls = classify({ cycles, runs, now, pendingMinutes: o.pendingMinutes });
+  let deployedScriptHash = null;
+  try {
+    const hb = await io.readObject("shadow/heartbeat.json");
+    deployedScriptHash = hb ? JSON.parse(hb).scriptHash || null : null;
+  } catch {
+    deployedScriptHash = null; // the entries themselves already carry the hash they were replayed under
+  }
+  const cls = classify({ cycles, runs, now, pendingMinutes: o.pendingMinutes, deployedScriptHash });
   let extra = null;
   const nv = cls.newestVerdict;
   if (nv && nv.kind === "unclean") {

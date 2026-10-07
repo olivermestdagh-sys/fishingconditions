@@ -10,7 +10,9 @@ processed (oldest first):
   2. compares the script's FULL output (all owners, before filtering) with Actions' hashes, byte for byte: conditions.json, the locations
      export, every graph file, the sequence of writes it would have sent, and how many calls it made / how many failed;
   3. scans every published object for any private location name or owner id;
-  4. writes shadow/compare/<runId>.json, appends a one-line entry to shadow/index.json (what scripts/verify-shadow.mjs reads), and, only on a
+  4. stamps the entry with the script hash of the recording and of this Worker (script_hash.py). A recording made with a DIFFERENT script
+     is still replayed, as information, but marked superseded: verify-shadow neither counts it nor treats it as a failure;
+  5. writes shadow/compare/<runId>.json, appends a one-line entry to shadow/index.json (what scripts/verify-shadow.mjs reads), and, only on a
      mismatch, keeps the shadow's full output under shadow/diffs/<runId>/ so the first differing field can be found.
 
 Everything is in the private bucket; nothing here is public.
@@ -20,6 +22,7 @@ import json
 import os
 
 import publish
+import script_hash
 import service
 
 INDEX_KEY = "index.json"
@@ -146,11 +149,16 @@ def verdict(summary, compare, leaked, heap_mb):
 async def process_recording(cfg, rec_store, out_store, db, now, rec_key, *, probe=None, log=print, clock=None):
     """Replay one recording. Returns the index entry written (and writes compare/<id>.json)."""
     rec_id = rec_key.rsplit("/", 1)[-1].removesuffix(".json")
-    entry = {"id": rec_id, "processedAt": now.isoformat(), "clean": False, "reasons": []}
+    entry = {"id": rec_id, "processedAt": now.isoformat(), "clean": False, "reasons": [], "deployedScriptHash": script_hash.SCRIPT_HASH}
     summary, compare, leaked, bundle = {}, None, False, None
     try:
         bundle, replay = parse_bundle(await rec_store.get_text(rec_key))
-        entry.update(runStart=bundle["runStart"], workflowRunId=bundle.get("workflowRunId"))
+        entry.update(runStart=bundle["runStart"], workflowRunId=bundle.get("workflowRunId"), scriptHash=bundle.get("scriptHash"))
+        if bundle.get("scriptHash") != script_hash.SCRIPT_HASH:
+            # Made with a different script than this Worker runs (or by a recorder that did not record one): the replay below is only
+            # informational. verify-shadow lists it as superseded; it never counts for or against the streak.
+            entry.update(superseded=True, supersededWhy="the recording has no script hash (older recorder)" if not bundle.get("scriptHash")
+                         else "the recording was made with a different script than this Worker runs")
         names, owners = private_markers(replay["locations"])
         found = []
 
@@ -207,18 +215,19 @@ async def update_index(out_store, entry):
 
 
 async def processed_ids(out_store):
-    """The ids already replayed, from shadow/index.json (ONE read). An entry is written for every recording that was replayed, clean or not
-    (a corrupt recording is reported once, not retried every fire). A replay that died BEFORE its entry was written is simply absent here and
-    is tried again next fire; replaying it twice cannot count twice, because update_index replaces the entry with the same id."""
+    """The ids already replayed BY THIS DEPLOYED SCRIPT, from shadow/index.json (ONE read). An entry is written for every recording that was replayed,
+    clean or not (a corrupt recording is reported once, not retried every fire). An entry made under another deployed script (or before entries carried
+    one) is not "done": the recording is replayed once more under the current script, and update_index replaces the entry with the same id, so a
+    recording can never count twice. A replay that died BEFORE its entry was written is simply absent here and is tried again next fire."""
     text = await out_store.get_text(INDEX_KEY)
     try:
-        return {c["id"] for c in (json.loads(text)["cycles"] if text else [])}
+        return {c["id"] for c in (json.loads(text)["cycles"] if text else []) if c.get("deployedScriptHash") == script_hash.SCRIPT_HASH}
     except (ValueError, KeyError, TypeError):
         return set()
 
 
-async def process_pending(cfg, rec_store, out_store, db, now, *, probe=None, log=print, max_per_run=2, clock=None):
-    """Replay the recordings not yet replayed, oldest first (at most `max_per_run` per fire), then drop old replayed recordings.
+async def process_pending(cfg, rec_store, out_store, db, now, *, probe=None, log=print, max_per_run=1, clock=None):
+    """Replay the recordings not yet replayed, oldest first (at most `max_per_run` = ONE per fire, which also keeps the Python heap at one replay's worth), then drop old replayed recordings.
 
     A fire with nothing new is a cheap no-op by construction: ONE list of recordings/ and, only if there is at least one recording, ONE read
     of index.json. It touches no D1 (the lock is taken only when there is something to replay) and no other R2 object."""
@@ -256,6 +265,6 @@ async def touch_heartbeat(out_store, now, cron):
     by_cron = dict(prev.get("byCron") or {})
     by_cron[cron] = int(by_cron.get(cron, 0)) + 1          # which schedule fired, and how often each did (the shadow has two)
     beat = {"at": now.isoformat(), "cron": cron, "fires": int(prev.get("fires", 0)) + 1, "byCron": by_cron,
-            "firstFireAt": prev.get("firstFireAt") or now.isoformat()}
+            "firstFireAt": prev.get("firstFireAt") or now.isoformat(), "scriptHash": script_hash.SCRIPT_HASH}
     await out_store.put_text("heartbeat.json", json.dumps(beat), "application/json", "no-store")
     return beat

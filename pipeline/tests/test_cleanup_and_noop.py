@@ -140,7 +140,8 @@ class NoOpFiresAreCheapAndIdempotent(Isolated):
 
     def test_a_fire_with_everything_already_replayed_is_one_list_plus_one_index_read(self):
         bucket, ids = recorded_bucket(2)
-        self.assertEqual(len(fire(bucket, FakeDB())), 2)
+        self.assertEqual(len(fire(bucket, FakeDB())), 1)   # one recording per fire
+        self.assertEqual(len(fire(bucket, FakeDB())), 1)
         bucket.reset_ops()
         db = FakeDB()
         statements = []

@@ -32,10 +32,23 @@ import fetch_conditions as fc  # noqa: E402
 
 SCHEMA = 1
 KEY_PLACEHOLDER = "{KEY}"
+SCRIPT_FILES = ("fetch_conditions.py", "observation_archive.py")  # everything that decides the output: the shadow replays these byte for byte
 
 
 def sha256_text(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def script_hash(directory):
+    """One hash of the script files that produced (or will replay) a run: SHA-256 over "name:sha256(bytes)" lines, with CRLF read as LF so a Windows
+    checkout and Actions' Linux one hash the same. pipeline/src/script_hash.py has the same function (a test keeps them identical) and the
+    constant SCRIPT_HASH the shadow Worker was deployed with; verify-shadow counts a recording only when the two agree."""
+    lines = []
+    for name in sorted(SCRIPT_FILES):
+        with open(os.path.join(directory, name), "rb") as f:
+            digest = hashlib.sha256(f.read().replace(b"\r\n", b"\n")).hexdigest()
+        lines.append(name + ":" + digest)
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
 def read_text(path):
@@ -139,6 +152,7 @@ def main(start=None, record_dir=None):
             "runStart": start.isoformat(),
             "workflowRunId": os.environ.get("GITHUB_RUN_ID"),
             "sha": os.environ.get("GITHUB_SHA"),
+            "scriptHash": script_hash(os.path.dirname(os.path.abspath(fc.__file__))),
             "env": {"FORECAST_DAYS": fc.FORECAST_DAYS, "OBS_PRUNE": fc.OBS_PRUNE},
             "locations": locations_text[0],
             "previous": previous,
@@ -164,4 +178,7 @@ def main(start=None, record_dir=None):
 
 
 if __name__ == "__main__":
+    if "--script-hash" in sys.argv[1:]:
+        print(script_hash(os.path.dirname(os.path.abspath(fc.__file__))))  # what pipeline/src/script_hash.py's SCRIPT_HASH must be
+        sys.exit(0)
     sys.exit(main())

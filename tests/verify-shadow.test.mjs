@@ -9,7 +9,8 @@ const at = (n) => new Date(T0 + n * 3 * H).toISOString();           // cycle n s
 const id = (n) => at(n).replace(/[-:]/g, "").replace(".000", "");   // 20261008T030000Z
 let runNo = 1000;
 const run = (n, extra = {}) => ({ id: 1000 + n, status: "completed", conclusion: "success", created_at: at(n), run_started_at: at(n), ...extra });
-const cycle = (n, extra = {}) => ({ id: id(n), runStart: at(n), processedAt: at(n), clean: true, reasons: [], workflowRunId: String(1000 + n), ...extra });
+const HASH = "a".repeat(64); // the script hash the fake shadow Worker was deployed with; a recording made with it counts
+const cycle = (n, extra = {}) => ({ id: id(n), runStart: at(n), processedAt: at(n), clean: true, reasons: [], workflowRunId: String(1000 + n), scriptHash: HASH, deployedScriptHash: HASH, ...extra });
 const NOW = T0 + 40 * H;
 
 test("a run of clean cycles is ON TRACK, and says when the last one was", () => {
@@ -190,4 +191,64 @@ test("only an unclean (replayed and wrong) cycle resets the streak: skipped, can
   const cycles = [cycle(0), cycle(1), cycle(2, { clean: false, reasons: ["output differs from Actions at conditions.json"], firstDiff: { file: "conditions.json" } }), cycle(3)];
   const cls = classify({ cycles, runs: cycles.map((c, n) => run(n)), now: NOW });
   assert.equal(cls.streak, 1);
+});
+
+// ---------------------------------------------------------------- script hash: only recordings made with the deployed script count
+
+test("a recording with no script hash, or another one, is SUPERSEDED: listed, never unclean, and it neither counts nor resets the streak", () => {
+  const cycles = [
+    cycle(0), cycle(1),
+    cycle(2, { scriptHash: undefined, clean: false, reasons: ["output differs from Actions at conditions.json"] }),   // a hash-less recording that differs
+    cycle(3, { scriptHash: "b".repeat(64), clean: false, reasons: ["output differs from Actions at conditions.json"] }), // made with another script
+    cycle(4),
+  ];
+  const cls = classify({ cycles, runs: cycles.map((c, n) => run(n)), now: NOW, deployedScriptHash: HASH });
+  assert.equal(cls.streak, 3, "the two superseded cycles are skipped, not counted and not a reset");
+  assert.deepEqual(cls.superseded.map((i) => i.id), [id(2), id(3)]);
+  assert.ok(!cls.items.some((i) => i.kind === "unclean"));
+  const v = verdictLine(cls, {});
+  assert.equal(v.code, 0);
+  assert.match(v.line, /^ON TRACK: 3 of 24 consecutive clean cycles/);
+  assert.match(v.line, /2 recording\(s\) superseded/);
+});
+
+test("with only superseded recordings the verdict is NOT STARTED (exit 3), not a failure", () => {
+  const cycles = [cycle(0, { scriptHash: undefined, clean: false, reasons: ["x"] }), cycle(1, { scriptHash: undefined })];
+  const cls = classify({ cycles, runs: cycles.map((c, n) => run(n)), now: NOW, deployedScriptHash: HASH });
+  const v = verdictLine(cls, {});
+  assert.equal(v.code, 3);
+  assert.match(v.line, /^NOT STARTED: no recording made with the deployed script has been replayed yet; 2 recording\(s\) superseded/);
+});
+
+test("the first matching recording after superseded ones starts the streak at 1", () => {
+  const cycles = [cycle(0, { scriptHash: undefined, clean: false, reasons: ["x"] }), cycle(1, { scriptHash: undefined }), cycle(2)];
+  const cls = classify({ cycles, runs: cycles.map((c, n) => run(n)), now: NOW, deployedScriptHash: HASH });
+  assert.equal(cls.streak, 1);
+  assert.match(verdictLine(cls, {}).line, /^ON TRACK: 1 of 24 consecutive clean cycles/);
+});
+
+test("a cycle replayed under an older deployment than the heartbeat's current script is superseded too", () => {
+  const cycles = [cycle(0, { scriptHash: "c".repeat(64), deployedScriptHash: "c".repeat(64) }), cycle(1)];
+  const cls = classify({ cycles, runs: cycles.map((c, n) => run(n)), now: NOW, deployedScriptHash: HASH });
+  assert.equal(cls.streak, 1);
+  assert.deepEqual(cls.superseded.map((i) => i.id), [id(0)]);
+});
+
+test("a superseded cycle still accounts for its Actions run (it is not reported as a missing replay)", () => {
+  const cycles = [cycle(0, { scriptHash: undefined }), cycle(1)];
+  const cls = classify({ cycles, runs: cycles.map((c, n) => run(n)), now: NOW, deployedScriptHash: HASH });
+  assert.equal(cls.unverified.length, 0);
+});
+
+test("runVerify reads the Worker's current script hash from the heartbeat", async () => {
+  const cycles = [cycle(0, { scriptHash: undefined, clean: false, reasons: ["x"] }), cycle(1), cycle(2)];
+  const objects = { "shadow/index.json": JSON.stringify({ cycles }), "shadow/heartbeat.json": JSON.stringify({ scriptHash: HASH }) };
+  const io = { readObject: async (k) => objects[k] ?? null, listRuns: async () => cycles.map((c, n) => run(n)) };
+  const res = await runVerify(io, { now: NOW, noDeep: true });
+  assert.equal(res.code, 0);
+  assert.match(res.line, /^ON TRACK: 2 of 24/);
+  assert.match(res.line, /1 recording\(s\) superseded/);
+  objects["shadow/heartbeat.json"] = JSON.stringify({ scriptHash: "d".repeat(64) });   // the Worker has since been redeployed with another script
+  const res2 = await runVerify(io, { now: NOW, noDeep: true });
+  assert.equal(res2.code, 3);
 });
