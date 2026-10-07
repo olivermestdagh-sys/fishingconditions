@@ -80,9 +80,9 @@ test("runs from before the recorder existed are ignored", () => {
   assert.equal(cls.streak, 2);
 });
 
-test("with nothing processed it says NOT STARTED, with a hint", () => {
+test("with nothing processed it says NOT STARTED (its own exit code, not a failure), with a hint", () => {
   const v = verdictLine(classify({ cycles: [], runs: [], now: NOW }), {});
-  assert.equal(v.code, 1);
+  assert.equal(v.code, 3);
   assert.match(v.line, /^NOT STARTED: no Actions recording has been replayed yet/);
 });
 
@@ -153,10 +153,14 @@ test("runVerify deep-checks the newest clean cycle's PUBLIC output against an in
   assert.match(bad.line, /^UNCLEAN: cycle .*PUBLIC conditions\.json differs from an independent filter of the live data/);
 });
 
-test("runVerify without the index says it cannot verify; with GitHub down it still gives a verdict", async () => {
+test("runVerify with no index yet is NOT STARTED, never UNCLEAN; with GitHub down it still gives a verdict", async () => {
   const none = await runVerify({ readObject: async () => null, listRuns: async () => [] }, { now: NOW });
-  assert.equal(none.code, 2);
-  assert.match(none.line, /^CANNOT VERIFY: shadow\/index\.json is not in the shadow bucket yet/);
+  assert.equal(none.code, 3);
+  assert.match(none.line, /^NOT STARTED: shadow\/index\.json does not exist yet/);
+  assert.doesNotMatch(none.line, /UNCLEAN|CANNOT/);
+  const emptyIndex = await runVerify({ readObject: async () => JSON.stringify({ cycles: [] }), listRuns: async () => [run(0)] }, { now: NOW });
+  assert.equal(emptyIndex.code, 3);
+  assert.match(emptyIndex.line, /^NOT STARTED/);
   const down = await runVerify(fakeIO({ cycles: [cycle(0)], runs: "down" }), { now: NOW, noDeep: true });
   assert.equal(down.code, 0);
   assert.match(down.line, /could not read the Actions run list/);

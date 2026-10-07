@@ -5,7 +5,9 @@
 // It prints a single verdict line, for example
 //   ON TRACK: 7 consecutive clean cycles (24 needed), last clean at 2026-10-08 15:40 UTC (Fri 02:40 local)
 //   UNCLEAN:  cycle 20261008T150000Z: output differs from Actions at conditions.json; first failing field rows[1234]["Wind Forecast (km/h)"] ...
-// and exits 0 (on track / passed), 1 (unclean, stalled or gap that matters) or 2 (could not read the data). `--detail` adds a table.
+// and exits 0 (on track / passed), 1 (unclean, stalled or gap that matters), 2 (could not read the data) or 3 (NOT STARTED: nothing has
+// been recorded/replayed yet, which is the normal state before the first Actions run after the recorder goes live: it is not a failure
+// and never an "unclean cycle"). `--detail` adds a table.
 //
 // Where it looks:
 //   * shadow/index.json in the PRIVATE shadow bucket, via your own `wrangler` login (one small object), written by the shadow Worker
@@ -104,6 +106,8 @@ export function publicFilter(cond) {
  *   items: chronological [{kind, id, at, note}] with kind in clean | unclean | missing | actions-failed | pending
  */
 export function classify({ cycles, runs, now, pendingMinutes = DEFAULTS.pendingMinutes }) {
+  // Nothing replayed yet: there is no "since when" to judge Actions' runs against (they predate the recorder), so there is nothing to classify.
+  if (!cycles.length) return { items: [], streak: 0, lastClean: null, newestVerdict: undefined, unverified: [], notCounted: [] };
   const byRun = new Map(cycles.filter((c) => c.workflowRunId).map((c) => [String(c.workflowRunId), c]));
   const start = cycles.length ? new Date(cycles[0].runStart || cycles[0].processedAt).getTime() - 30 * 60000 : null;
   const items = [];
@@ -152,7 +156,7 @@ export function classify({ cycles, runs, now, pendingMinutes = DEFAULTS.pendingM
 
 /** The one-line verdict + exit code from a classification (and optional extra problems found by the deep check). */
 export function verdictLine(cls, { needed = DEFAULTS.needed, now, extra = null, runsUnavailable = false } = {}) {
-  if (!cls.items.length) return { code: 1, line: "NOT STARTED: no Actions recording has been replayed yet (is the recorder merged, the upload secret set, and the shadow Worker's cron registered?)" };
+  if (!cls.items.length) return { code: 3, line: "NOT STARTED: no Actions recording has been replayed yet (expected until the first Actions run after the recorder is live and its upload secret is set, and the shadow Worker's cron has registered and fired)" };
   const tail = [];
   if (cls.unverified.length) tail.push(`${cls.unverified.length} cycle(s) unverified (${cls.unverified.map((i) => fmtUtc(i.at).slice(5, 16)).join(", ")}: Actions succeeded but nothing was replayed)`);
   const skipped = cls.notCounted.filter((i) => i.kind === "actions-failed");
@@ -258,7 +262,8 @@ export async function runVerify(io, opts = {}) {
   const o = { ...DEFAULTS, ...opts };
   const now = o.now ?? Date.now();
   const indexText = await io.readObject("shadow/index.json");
-  if (!indexText) return { code: 2, line: "CANNOT VERIFY: shadow/index.json is not in the shadow bucket yet (the shadow Worker has not processed a recording)", cls: null };
+  // No index object = the shadow Worker has not replayed anything yet. That is "not started", never an unclean cycle.
+  if (!indexText) return { code: 3, line: "NOT STARTED: shadow/index.json does not exist yet, so no recording has been replayed (expected until the first Actions run after the recorder is live, its upload secret is set, and the shadow Worker's cron has fired)", cls: null };
   const cycles = JSON.parse(indexText).cycles || [];
   let runs = null;
   let runsUnavailable = false;

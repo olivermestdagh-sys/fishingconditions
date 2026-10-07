@@ -127,6 +127,26 @@ def _read_conditions(locs, resp):
     return outs["data/conditions.json"]
 
 
+class NothingToReplay(unittest.TestCase):
+    def test_an_empty_recordings_prefix_is_not_an_error_and_writes_nothing(self):
+        bucket = FakeStore()
+        before = dict(bucket.all)
+        self.assertEqual(process(bucket, FakeDB()), [])
+        self.assertEqual(bucket.all, before)   # no index, no compare report, no status: an empty bucket stays empty
+
+    def test_only_non_recording_objects_there_is_also_fine(self):
+        bucket = FakeStore()
+        bucket.all["recordings/notes.txt"] = "x"
+        bucket.all["recordings/"] = ""
+        bucket.all["shadow/index.json"] = json.dumps({"schema": 1, "cycles": []})
+        self.assertEqual(process(bucket, FakeDB()), [])
+
+    def test_the_lock_row_is_not_even_created_when_there_is_nothing_to_do(self):
+        db = FakeDB()
+        process(FakeStore(), db)
+        self.assertEqual(db.conn.execute("SELECT COUNT(*) FROM pipeline_lock").fetchone()[0], 0)
+
+
 class ThreadedLikeActions(unittest.TestCase):
     def test_a_threaded_run_records_and_replays_clean_and_matches_the_serial_output(self):
         locs, resp = world()
