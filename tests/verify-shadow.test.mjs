@@ -17,13 +17,13 @@ test("a run of clean cycles is ON TRACK, and says when the last one was", () => 
   const cls = classify({ cycles, runs: cycles.map((c, n) => run(n)), now: NOW });
   const v = verdictLine(cls, { needed: 24, now: NOW });
   assert.equal(v.code, 0);
-  assert.match(v.line, /^ON TRACK: 5 consecutive clean cycles \(24 needed\), last clean at 2026-10-08 15:00 UTC/);
+  assert.match(v.line, /^ON TRACK: 5 of 24 consecutive clean cycles, last clean at 2026-10-08 15:00 UTC/);
 });
 
 test("24 clean cycles is PASSED", () => {
   const cycles = Array.from({ length: 24 }, (_, n) => cycle(n));
   const cls = classify({ cycles, runs: cycles.map((c, n) => run(n)), now: T0 + 100 * H });
-  assert.match(verdictLine(cls, { needed: 24 }).line, /^PASSED: 24 consecutive clean cycles/);
+  assert.match(verdictLine(cls, { needed: 24 }).line, /^PASSED: 24 of 24 consecutive clean cycles/);
 });
 
 test("an unclean cycle resets the streak and the line names the cycle, the reason and the first failing file", () => {
@@ -39,7 +39,7 @@ test("the streak after an unclean cycle counts from the next clean one", () => {
   const cycles = [cycle(0), cycle(1, { clean: false, reasons: ["x"] }), cycle(2), cycle(3)];
   const cls = classify({ cycles, runs: cycles.map((c, n) => run(n)), now: NOW });
   assert.equal(cls.streak, 2);
-  assert.match(verdictLine(cls, {}).line, /^ON TRACK: 2 consecutive/);
+  assert.match(verdictLine(cls, {}).line, /^ON TRACK: 2 of 24 consecutive/);
 });
 
 test("an Actions run that failed or was cancelled neither counts nor resets, and the line says why", () => {
@@ -173,4 +173,21 @@ test("--detail table lists every cycle with its kind and reason", async () => {
   assert.match(table, /clean/);
   assert.match(table, /unclean .* heap too high/);
   assert.match(table, /actions-failed .* cancelled/);
+});
+
+test("only an unclean (replayed and wrong) cycle resets the streak: skipped, cancelled, failed, timed-out or absent Actions runs do not", () => {
+  for (const conclusion of ["skipped", "cancelled", "failure", "timed_out", "neutral"]) {
+    const cycles = [cycle(0), cycle(1), cycle(3), cycle(4)];
+    const runs = [run(0), run(1), run(2, { conclusion }), run(3), run(4)];
+    const cls = classify({ cycles, runs, now: NOW });
+    assert.equal(cls.streak, 4, `a ${conclusion} Actions run must not reset the streak`);
+    assert.match(verdictLine(cls, {}).line, /^ON TRACK: 4 of 24 consecutive clean cycles/, conclusion);
+  }
+  // Actions simply did not run for a long stretch (the common GitHub behaviour): no item at all, so nothing to reset or count
+  const gap = [cycle(0), cycle(1), cycle(6), cycle(7)];
+  assert.equal(classify({ cycles: gap, runs: gap.map((c, n) => run([0, 1, 6, 7][n])), now: NOW }).streak, 4);
+  // a mismatch between the shadow and Actions is what resets it
+  const cycles = [cycle(0), cycle(1), cycle(2, { clean: false, reasons: ["output differs from Actions at conditions.json"], firstDiff: { file: "conditions.json" } }), cycle(3)];
+  const cls = classify({ cycles, runs: cycles.map((c, n) => run(n)), now: NOW });
+  assert.equal(cls.streak, 1);
 });

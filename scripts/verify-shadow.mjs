@@ -3,7 +3,7 @@
 //   npm run verify-shadow            (or: node scripts/verify-shadow.mjs)
 //
 // It prints a single verdict line, for example
-//   ON TRACK: 7 consecutive clean cycles (24 needed), last clean at 2026-10-08 15:40 UTC (Fri 02:40 local)
+//   ON TRACK: 7 of 24 consecutive clean cycles, last clean at 2026-10-08 15:40 UTC (Fri 02:40 local)
 //   UNCLEAN:  cycle 20261008T150000Z: output differs from Actions at conditions.json; first failing field rows[1234]["Wind Forecast (km/h)"] ...
 // and exits 0 (on track / passed), 1 (unclean, stalled or gap that matters), 2 (could not read the data) or 3 (NOT STARTED: nothing has
 // been recorded/replayed yet, which is the normal state before the first Actions run after the recorder goes live: it is not a failure
@@ -175,7 +175,7 @@ export function verdictLine(cls, { needed = DEFAULTS.needed, now, extra = null, 
     return { code: 1, line: `STALLED: ${cls.unverified.length} Actions run(s) since the last verified cycle (${nv ? fmtUtc(nv.at) : "none"}) were never replayed${suffix}` };
   }
   if (!cls.lastClean) return { code: 1, line: `NOT STARTED: no clean cycle yet${suffix}` };
-  const head = cls.streak >= needed ? `PASSED: ${cls.streak} consecutive clean cycles (${needed} needed)` : `ON TRACK: ${cls.streak} consecutive clean cycles (${needed} needed)`;
+  const head = cls.streak >= needed ? `PASSED: ${cls.streak} of ${needed} consecutive clean cycles` : `ON TRACK: ${cls.streak} of ${needed} consecutive clean cycles`;
   return { code: 0, line: `${head}, last clean at ${when(cls.lastClean.at)}${suffix}` };
 }
 

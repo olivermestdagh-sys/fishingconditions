@@ -104,7 +104,7 @@ git-ignored and uploaded only to a private R2 bucket; if the recorder exits nonz
 secrets and no public route, and its network client (`NullNet`) cannot make a request; it never sends the archive / id-cache / prune writes. For each recording it runs the Worker's
 code (`shadow.py` -> `service.run_pipeline(replay=...)`), compares the script's full output with Actions' hashes byte for byte (and the set of writes it would have sent and the
 number of calls it made), scans every published object for private names, publishes into `shadow/runs/...`, and appends to `shadow/index.json`. `npm run verify-shadow` prints one
-line (`ON TRACK: N consecutive clean cycles (24 needed), last clean at ...`, or `UNCLEAN: cycle ... first failing field ...`); an Actions run that failed neither counts nor resets the
+line (`ON TRACK: N of 24 consecutive clean cycles, last clean at ...`, or `UNCLEAN: cycle ... first failing field ...`); an Actions run that failed neither counts nor resets the
 streak, and one that succeeded without being replayed is reported as unverified.
 
 Deploying it (not done): create the R2 bucket, `CREATE TABLE` `pipeline_lock` on D1 (`schema-v2.sql`), then `cd pipeline && uv sync && uv run pywrangler deploy`, then
