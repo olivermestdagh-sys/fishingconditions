@@ -114,9 +114,9 @@ function tlRenderRuns() {
       const run = tlRuns.find((r) => r.runId === b.dataset.deleteRun);
       if (!run) return;
       const what = `${run.tripName || "this trip"} (${tripLogDateLabel(run.startDateTime)}, ${run.entries} line${run.entries === 1 ? "" : "s"})`;
-      if (!confirm(`Delete ${what} from the trip log?
+      if (!(await confirmDialog(`Delete ${what} from the trip log?
 
-Its catches stay on the map as marks. It is removed for good after 30 days.`)) return;
+Its catches stay on the map as marks. It is removed for good after 30 days.`, { title: "Delete trip", confirmLabel: "Delete", danger: true }))) return;
       b.disabled = true;
       try {
         await tlSend("DELETE", `/api/triplog/run?runId=${encodeURIComponent(run.runId)}`);
@@ -135,7 +135,7 @@ Its catches stay on the map as marks. It is removed for good after 30 days.`)) r
         tlLoadDeleted();
       } catch (err) {
         console.error("Could not delete the trip:", err);
-        alert("Couldn't delete the trip: " + err.message);
+        await alertDialog("Couldn't delete the trip: " + err.message, { title: "Not deleted" });
         b.disabled = false;
       }
     })
@@ -157,7 +157,7 @@ Its catches stay on the map as marks. It is removed for good after 30 days.`)) r
         if (runId === tlSelectedRunId) tlRenderDetail();
       } catch (err) {
         console.error("Could not rename the trip:", err);
-        alert("Couldn't save the trip name: " + err.message);
+        await alertDialog("Couldn't save the trip name: " + err.message, { title: "Not saved" });
         renameRow.querySelectorAll("button").forEach((b) => (b.disabled = false));
       }
     };
@@ -191,7 +191,7 @@ Its catches stay on the map as marks. It is removed for good after 30 days.`)) r
 // --- Lines (underneath) ----------------------------------------------------------------------------------------------
 
 async function tlSelectRun(runId, preloaded) {
-  if (tlEditing && runId !== tlSelectedRunId && !confirm("Discard the line you are editing?")) return;
+  if (tlEditing && runId !== tlSelectedRunId && !(await confirmDialog("Discard the line you are editing?", { title: "Discard changes", confirmLabel: "Discard", danger: true }))) return;
   tlEditing = null;
   tlSelectedRunId = runId;
   const token = ++tlLoadToken;
@@ -432,7 +432,7 @@ function tlReadEditor() {
 }
 
 async function tlOpenEditor(id) {
-  if (tlEditing && !confirm("Discard the line you are editing?")) return;
+  if (tlEditing && !(await confirmDialog("Discard the line you are editing?", { title: "Discard changes", confirmLabel: "Discard", danger: true }))) return;
   await tlEnsureLists();
   if (id) {
     const entry = tlEntries.find((e) => e.id === id);
@@ -469,7 +469,7 @@ async function tlSave() {
 }
 
 async function tlDelete() {
-  if (!tlEditing || !tlEditing.id || !confirm("Delete this line from the trip log? It is removed for good after 30 days.")) return;
+  if (!tlEditing || !tlEditing.id || !(await confirmDialog("Delete this line from the trip log? It is removed for good after 30 days.", { title: "Delete line", confirmLabel: "Delete", danger: true }))) return;
   try {
     await tlSend("DELETE", `/api/triplog/${encodeURIComponent(tlEditing.id)}`);
     await tlReloadAfterChange();
@@ -580,7 +580,7 @@ function tlRenderDeleted() {
         if (tlRuns.some((r) => r.runId === runId)) await tlSelectRun(runId);
       } catch (err) {
         console.error("Could not restore the trip:", err);
-        alert("Couldn't restore: " + err.message);
+        await alertDialog("Couldn't restore: " + err.message, { title: "Not restored" });
         b.disabled = false;
       }
     })

@@ -404,9 +404,9 @@ function tripOnAction(actionId) {
   });
 }
 
-function tripOnEnd() {
+async function tripOnEnd() {
   if (tripUi.busy || tripUi.overlayOpen) return;
-  if (!confirm("End this trip?")) return;
+  if (!(await confirmDialog("End this trip?", { title: "End trip", confirmLabel: "End trip", danger: true }))) return;
   tripGuard(async () => {
     await tsEndTrip();
     showLiveToast("Trip ended");

@@ -4097,3 +4097,12 @@ body.live-card-open { overflow: hidden; }
 .trip-add-pill { width: 100%; min-height: 56px; border: 2px dashed var(--grey-400, #aaa); border-radius: 14px; background: transparent; color: var(--grey-700, #444); font-size: 1.05rem; font-weight: 600; cursor: pointer; touch-action: manipulation; }
 .trip-add-row { display: flex; gap: 8px; align-items: center; }
 .trip-add-input { flex: 1; min-width: 0; min-height: 48px; padding: 6px 12px; border: 2px solid var(--grey-300, #ccc); border-radius: 12px; font-size: 1rem; box-sizing: border-box; }
+/* Our own confirm / alert dialogs (js/dialog.js) */
+.dlg-backdrop { position: fixed; inset: 0; z-index: 10100; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; }
+.dlg-box { width: 100%; max-width: 420px; max-height: 90dvh; overflow-y: auto; background: var(--white, #fff); color: var(--grey-900, #111); border-radius: 16px; padding: 18px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); box-sizing: border-box; }
+.dlg-title { margin: 0 0 8px; font-size: 1.15rem; }
+.dlg-message { margin: 0 0 16px; font-size: 1rem; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }
+.dlg-buttons { display: flex; gap: 10px; justify-content: flex-end; }
+.dlg-btn { flex: 1; min-height: 52px; padding: 8px 14px; border: 2px solid var(--grey-300, #ccc); border-radius: 12px; background: var(--white, #fff); color: inherit; font-size: 1rem; font-weight: 700; cursor: pointer; touch-action: manipulation; }
+.dlg-btn-ok { background: #1d5fa8; border-color: #1d5fa8; color: #fff; }
+.dlg-btn-danger { background: #dc2626; border-color: #dc2626; }

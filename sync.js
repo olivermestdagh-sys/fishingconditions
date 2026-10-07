@@ -2483,17 +2483,18 @@ function convertSegmentKind(trackIdx, dayIdx, segIdx) {
  * candidate, or genuinely nowhere left to go) rather than an intrusive
  * error for what's really just the edge of what's possible right now.
  */
-function onStepCandidateClick(trackIdx, dayIdx, segIdx, candIdx, direction) {
+async function onStepCandidateClick(trackIdx, dayIdx, segIdx, candIdx, direction) {
   const day = trackData[trackIdx].dayGroups[dayIdx];
   const result = stepCandidateTime(day, segIdx, candIdx, direction);
   if (result.ok === true) {
     renderTracksTree();
     renderReviewMap();
   } else if (result.ok === "confirm") {
-    const merge = confirm(
+    const merge = await confirmDialog(
       "This point would now touch another Fishing segment of the same kind.\n\n" +
-        "OK = merge them into one Fishing segment (keeping the outer Start/End, dropping the two in the middle)\n" +
-        "Cancel = keep them as two separate Fishing segments"
+        "Merge = one Fishing segment (keeping the outer Start/End, dropping the two in the middle)\n" +
+        "Keep separate = two separate Fishing segments",
+      { title: "Merge segments?", confirmLabel: "Merge", cancelLabel: "Keep separate" }
     );
     if (merge) result.applyMerge();
     else result.applyKeep();
@@ -2659,7 +2660,7 @@ async function syncInit() {
   }
 
   document.getElementById("btnClearSavedReview").addEventListener("click", async () => {
-    if (!confirm("Cancel this import? Nothing from the file has been saved, and this can't be undone.")) return;
+    if (!(await confirmDialog("Cancel this import? Nothing from the file has been saved, and this can't be undone.", { title: "Cancel import", confirmLabel: "Cancel import", cancelLabel: "Keep reviewing", danger: true }))) return;
     await finishImportReview("Import cancelled.");
   });
 

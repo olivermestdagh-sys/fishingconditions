@@ -452,7 +452,7 @@ async function onBackfillLegacyTripLog() {
 
 async function onRevokeControllerToken(id) {
   const token = controllerTokens.find((t) => t.id === id);
-  if (!token || !confirm(`Revoke the token for "${token.name}"?\n\nThat controller's phone app will stop being able to sync until you give it a new token.`)) return;
+  if (!token || !(await confirmDialog(`Revoke the token for "${token.name}"?\n\nThat controller's phone app will stop being able to sync until you give it a new token.`, { title: "Revoke token", confirmLabel: "Revoke", danger: true }))) return;
   try {
     const res = await fetch(`${USER_BACKEND_URL}/api/controller/tokens/${encodeURIComponent(id)}`, { method: "DELETE", credentials: "include" });
     if (!res.ok && res.status !== 404) throw new Error(`status ${res.status}`);
@@ -583,7 +583,7 @@ document.getElementById("myMessagesList").addEventListener("click", async (e) =>
   const btn = e.target.closest("[data-delete-my-message]");
   if (!btn) return;
   const id = btn.closest("[data-my-message-id]").dataset.myMessageId;
-  if (!confirm("Delete this message? This can't be undone.")) return;
+  if (!(await confirmDialog("Delete this message? This can't be undone.", { title: "Delete message", confirmLabel: "Delete", danger: true }))) return;
   try {
     const res = await fetch(`${USER_BACKEND_URL}/api/messages/${encodeURIComponent(id)}`, { method: "DELETE", credentials: "include" });
     if (!res.ok && res.status !== 404) throw new Error((await res.json().catch(() => ({}))).error || `status ${res.status}`);
@@ -706,7 +706,7 @@ document.getElementById("adminMessagesList").addEventListener("click", async (e)
       if (typeof refreshMessagesBadge === "function") refreshMessagesBadge();
       renderAdminMessages();
     } else if (e.target.closest("[data-message-delete]")) {
-      if (!confirm("Delete this message? This can't be undone.")) return;
+      if (!(await confirmDialog("Delete this message? This can't be undone.", { title: "Delete message", confirmLabel: "Delete", danger: true }))) return;
       await adminMessageRequest(id, "DELETE");
       adminMessages = adminMessages.filter((m) => m.id !== id);
       openAdminMessages.delete(id);
@@ -955,7 +955,7 @@ async function onAddTier() {
 
 async function onRemoveTier(idx) {
   const tier = tiers[idx];
-  if (!confirm(`Remove the "${tier.name}" tier?`)) return;
+  if (!(await confirmDialog(`Remove the "${tier.name}" tier?`, { title: "Remove tier", confirmLabel: "Remove", danger: true }))) return;
   try {
     const res = await fetch(`${USER_BACKEND_URL}/api/admin/tiers/${tier.id}`, { method: "DELETE", credentials: "include" });
     if (!res.ok && res.status !== 404) {
@@ -1509,7 +1509,7 @@ function openImageViewer(target, startIndex) {
       if (await runImageUpload(target, images[index].id)) render();
     });
     overlay.querySelector('[data-v="delete"]').addEventListener("click", async () => {
-      if (!confirm(`Delete this picture of ${title}?`)) return;
+      if (!(await confirmDialog(`Delete this picture of ${title}?`, { title: "Delete picture", confirmLabel: "Delete", danger: true }))) return;
       try {
         await holder.remove(images[index].id);
         setMarkListsSaveStatus("", false);
@@ -1581,7 +1581,7 @@ async function onChangeSpeciesLinks(speciesValue, detailsEl) {
   }
   if (needsConfirm) {
     const shared = entry.maxQty == null ? "no Max Qty set" : `a Max Qty of ${entry.maxQty}`;
-    const ok = confirm(`Combine ${entry.value} with ${[...affected].join(", ")}?\n\nEveryone in the combined group will share ${shared} (this species' Max Qty).`);
+    const ok = await confirmDialog(`Combine ${entry.value} with ${[...affected].join(", ")}?\n\nEveryone in the combined group will share ${shared} (this species' Max Qty).`, { title: "Combine species", confirmLabel: "Combine" });
     if (!ok) {
       renderMarkLists(); // put the ticks back as they were
       return;
@@ -1782,7 +1782,7 @@ async function saveRigSublistOverride(rigId, subList) {
 
 async function onClearRigSublistOverride(rigId) {
   const pictureCount = Object.values(rigOverrideOptionImages.get(rigId) || {}).reduce((n, list) => n + list.length, 0);
-  if (!confirm(`Remove your private sub list for this one?${pictureCount ? `\n\nIts ${pictureCount} picture${pictureCount === 1 ? "" : "s"} will be deleted too.` : ""}`)) return;
+  if (!(await confirmDialog(`Remove your private sub list for this one?${pictureCount ? `\n\nIts ${pictureCount} picture${pictureCount === 1 ? "" : "s"} will be deleted too.` : ""}`, { title: "Remove sub list", confirmLabel: "Remove", danger: true }))) return;
   try {
     const res = await fetch(`${USER_BACKEND_URL}/api/rig-sublist-overrides/${rigId}`, { method: "DELETE", credentials: "include" });
     if (!res.ok && res.status !== 404) throw new Error(`status ${res.status}`);
@@ -2595,7 +2595,7 @@ async function confirmRemoveListItem({ label, key, value, option, rig, pictures,
   if (pictures) lines.push(`Its ${pictures} picture${pictures === 1 ? "" : "s"} will be deleted too.`);
   if (used) lines.push(`${used} of your marks use it. They keep the name, but this can't be undone — "Restore missing values" only brings back the name.`);
   else lines.push("This can't be undone.");
-  return confirm(lines.join("\n\n"));
+  return confirmDialog(lines.join("\n\n"), { title: "Remove from list", confirmLabel: "Remove", danger: true });
 }
 
 /**
