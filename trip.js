@@ -128,6 +128,10 @@ function tripRenderRunning(root, state) {
       <div class="trip-status-name">${escapeHtml(trip.name)}</div>
       <div class="trip-status-time" id="tripElapsed" aria-label="Time on this trip"></div>
     </div>
+    <div class="trip-conditions">
+      <button type="button" class="trip-cond" id="tripWaterBtn"><span class="trip-cond-label">Water</span><span class="trip-cond-value">${escapeHtml(d.water || "—")}</span></button>
+      <button type="button" class="trip-cond" id="tripDepthBtn"><span class="trip-cond-label">Depth</span><span class="trip-cond-value">${d.depth != null ? escapeHtml(d.depth.toFixed(1)) + " m" : "—"}</span></button>
+    </div>
     <div class="trip-card">
       <h2 class="trip-title">Actions</h2>
       ${actions.length
@@ -138,10 +142,6 @@ function tripRenderRunning(root, state) {
           </div>`).join("")}</div>`
         : `<p class="trip-muted">No actions in ${escapeHtml(trip.name)} yet — add some in Trip Defaults.</p>`}
       <p class="trip-muted trip-hint">${running ? "Tap the running action to end it, or another to switch." : "Tap an action to start it."}</p>
-    </div>
-    <div class="trip-conditions">
-      <button type="button" class="trip-cond" id="tripWaterBtn"><span class="trip-cond-label">Water</span><span class="trip-cond-value">${escapeHtml(d.water || "—")}</span></button>
-      <button type="button" class="trip-cond" id="tripDepthBtn"><span class="trip-cond-label">Depth</span><span class="trip-cond-value">${d.depth != null ? escapeHtml(d.depth.toFixed(1)) + " m" : "—"}</span></button>
     </div>
     <button type="button" class="trip-big trip-end" id="tripEndBtn"${dis}>${TRIP_STOP_ICON}<span>End trip</span></button>`;
   root.querySelectorAll("[data-action]").forEach((btn) => btn.addEventListener("click", () => {
@@ -183,7 +183,8 @@ function tripRenderRods(root, state, trip) {
     // bottom right opens that rod setup's whole edit screen; tapping the box itself changes its bait / rig option
     return `<div class="trip-rod-wrap"><button type="button" class="${cls}${image ? " has-img" : ""}" data-rod="${i}"${dis}>${picture}<span class="trip-rod-name">${escapeHtml(c.name)}</span><span class="trip-rod-bait">${escapeHtml(c.bait)}</span><span class="trip-rod-rig">${escapeHtml(c.rig)}</span></button>` +
       `<button type="button" class="trip-rod-catch" data-rod-catch="${escapeHtml(setup.id)}" aria-label="Catch on ${escapeHtml(setup.name)}"${dis}>${TRIP_FISH_ICON}</button>` +
-      `<button type="button" class="trip-rod-gear" data-rod-edit="${escapeHtml(setup.id)}" aria-label="Edit ${escapeHtml(setup.name)}"${dis}>${TD_GEAR_SVG}</button></div>`;
+      `<button type="button" class="trip-rod-gear" data-rod-edit="${escapeHtml(setup.id)}" aria-label="Edit ${escapeHtml(setup.name)}"${dis}>${TD_GEAR_SVG}</button>` +
+      `<button type="button" class="trip-rod-remove" data-rod-remove="${i}" aria-label="Remove ${escapeHtml(setup.name)} from this action"${dis}>&times;</button></div>`;
   });
   const hint = moving ? (moving.from == null ? "Move: tap the rod to pick up." : "Tap a position to drop it there.") : "Tap a rod to change its bait or rig option; the fish logs a catch on it; tap empty to fill it.";
   root.innerHTML = `
@@ -191,12 +192,12 @@ function tripRenderRods(root, state, trip) {
       <div><div class="trip-status-name">${escapeHtml(trip.name)}</div><div class="trip-muted trip-status-action">${escapeHtml(action.name)}</div></div>
       <div class="trip-status-time" id="tripElapsed" aria-label="Time on this trip"></div>
     </div>
-    <div class="trip-rods">${cells.join("")}</div>
-    <p class="trip-muted trip-hint">${hint}</p>
     <div class="trip-conditions">
       <button type="button" class="trip-cond" id="tripWaterBtn"><span class="trip-cond-label">Water</span><span class="trip-cond-value">${escapeHtml(d.water || "—")}</span></button>
       <button type="button" class="trip-cond" id="tripDepthBtn"><span class="trip-cond-label">Depth</span><span class="trip-cond-value">${d.depth != null ? escapeHtml(d.depth.toFixed(1)) + " m" : "—"}</span></button>
     </div>
+    <div class="trip-rods">${cells.join("")}</div>
+    <p class="trip-muted trip-hint">${hint}</p>
     <div class="trip-row">
       <button type="button" class="trip-small${moving ? " on" : ""}" id="tripMoveBtn"${dis}>${moving ? "Cancel move" : "Move rods"}</button>
       <button type="button" class="trip-small" id="tripCatchBtn"${dis}>+ Catch (any rod)</button>
@@ -207,6 +208,12 @@ function tripRenderRods(root, state, trip) {
     <button type="button" class="trip-big trip-end" id="tripEndBtn"${dis}>${TRIP_STOP_ICON}<span>End trip</span></button>`;
   root.querySelectorAll("[data-rod]").forEach((btn) => btn.addEventListener("click", () => tripOnRod(Number(btn.dataset.rod), action, slots)));
   root.querySelectorAll("[data-rod-catch]").forEach((btn) => btn.addEventListener("click", () => { if (!tripUi.busy && !tripUi.overlayOpen && !tripUi.move) tripStartCatch(btn.dataset.rodCatch); }));
+  root.querySelectorAll("[data-rod-remove]").forEach((btn) => btn.addEventListener("click", () => {
+    if (tripUi.busy || tripUi.overlayOpen || tripUi.move) return;
+    const next = slots.slice();
+    next[Number(btn.dataset.rodRemove)] = null; // off this action's grid; the rod setup itself stays
+    tripGuard(() => tsSetRodSlots(action.id, next));
+  }));
   root.querySelectorAll("[data-rod-edit]").forEach((btn) => btn.addEventListener("click", () => tripOpenDefaults({ tripId: state.tripId, actionId: action.id, rodId: btn.dataset.rodEdit })));
   document.getElementById("tripMoveBtn").addEventListener("click", () => { tripUi.move = tripUi.move ? null : { from: null }; tripRender(); });
   document.getElementById("tripCatchBtn").addEventListener("click", () => tripStartCatch());
