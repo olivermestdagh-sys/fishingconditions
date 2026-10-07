@@ -1,10 +1,13 @@
-# Olie's Kayak and Surf Fishing Conditions
+# Yepyepyep - Conditions, trips and catches for anglers
 
-A personal fishing-conditions site: week-ahead tide/wind/weather for a set of
+Yepyepyep is a personal fishing site: week-ahead tide/wind/weather for a set of
 locations, a live "what's happening near me" map, a catch log (marks) with
 reports, and import/export with Lowrance and Garmin chartplotters.
 
-Live site: https://olivermestdagh-sys.github.io/fishingconditions/
+Production site: https://yepyepyep.app (Cloudflare Pages, rebuilt from `main`). The GitHub Pages copy at
+https://olivermestdagh-sys.github.io/fishingconditions/ is a legacy copy that will be switched off. The repo, the Workers
+(`fishingconditions-users`, `fishingconditions-search`), the D1 database and the localStorage keys keep their old
+"fishingconditions" names on purpose: they are internal, and renaming them would break things.
 
 > The previous, very detailed README (design history and per-feature notes)
 > is kept in [`docs/architecture-notes-archive.md`](docs/architecture-notes-archive.md).
