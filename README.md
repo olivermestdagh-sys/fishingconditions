@@ -42,7 +42,7 @@ https://olivermestdagh-sys.github.io/fishingconditions/ is a legacy copy that wi
   marks), Import (a Garmin/
   Lowrance export under review; `sync.js`). `sync.html` only redirects here (Live mode was removed; trips are recorded on the Trip tab).
   Export writes just the marks the current filters leave visible.
-- **Data job**: `scripts/fetch_conditions.py` reads the tracked locations from
+- **Data job** (until the Pipeline Worker below takes over): `scripts/fetch_conditions.py` reads the tracked locations from
   the worker, fetches forecasts (locations in parallel), scores them and writes
   `data/conditions.json` (compact JSON). The pages load that file for the graphs.
 - **Live configuration**: display names, groups, timings, tide offsets etc. are
@@ -53,6 +53,48 @@ https://olivermestdagh-sys.github.io/fishingconditions/ is a legacy copy that wi
 - **Database (Cloudflare D1, `fishingconditions-users`)**: schema in
   `schema-v2.sql` (`schema.sql` is the original v1 layout, still the source for
   the settings table).
+
+## Pipeline Worker (built, NOT deployed yet)
+
+`pipeline/` is the scheduled Cloudflare Worker that will replace the GitHub Actions data job (`update.yml` + `scripts/fetch_conditions.py`)
+and stop committing generated data to git. It is a **Python Worker** (Pyodide): the scoring script was proven byte-identical there
+(stage 0), so it runs **unmodified**. Status: code, config and tests are on the `pipeline-worker` branch; nothing is deployed, no R2
+bucket, secret or domain exists yet, the site still reads `data/conditions.json` from git and Actions still runs. Cutover stages are in the
+plan (shadow runs on replayed responses, 24 clean cycles, then the site switches, then Actions is retired).
+
+How a run works (`pipeline/src/service.py`):
+
+1. take a lock in D1 (`pipeline_lock`, so "Refresh data now" can never overlap the cron);
+2. load the locations from the user Worker (`/api/pipeline/locations`, with `PIPELINE_API_TOKEN`), and the previous run from R2 (history rows);
+3. **prefetch** every response the script will ask for, asynchronously (`js.fetch`, at most 6 in flight, retries with backoff; `plan.py`
+   builds the URLs with the script's own functions, so they cannot drift);
+4. run `fetch_conditions.main()` unmodified and synchronously, its HTTP / files / clock redirected (`runner.py`);
+5. split the output by owner and keep **Public's only** (`publish.py`; the per-owner private layout is reserved, not built);
+6. the **publish gate**: refuse to publish when under 80% of locations returned weather, rows fell under 70% of the last run, or the output is
+   empty. A refused run writes nothing under `runs/` and leaves `latest.json` alone, so the site keeps the last good data;
+7. write the objects one at a time to `runs/<runId>/...` (immutable, cached for a year), then `manifest.json` (sizes + sha-256), then flip
+   `latest.json` LAST; prune runs older than the newest 8;
+8. replay the script's write side effects to the user Worker exactly as today (the WillyWeather id cache PUTs, the observation archive POSTs, the prune), best effort;
+9. write `status.json` and release the lock.
+
+R2 layout (public bucket `yepyepyep-data-public`): `latest.json` (pointer, 60 s cache), `status.json`, `heartbeat.json`, `runs/<runId>/{conditions,locations,manifest}.json`,
+`runs/<runId>/graph/{index,<hash>}.json`. Private owners (later stage) get `owner/<userId>/...` with the same shape in a separate, never-public bucket.
+
+**Stale-data alert** (required; `pipeline/src/alerts.py`, `service.watchdog`): an hourly watchdog cron, independent of the run cron, compares
+`latest.json`'s `generatedAt` with the clock (stale after `STALE_HOURS` = 7, i.e. two missed 3-hourly runs), records it in `status.json`, logs `STALE` and POSTs to
+`ALERT_WEBHOOK_URL` (an ntfy / Slack / Discord webhook secret) at most every 6 h. The second signal is an in-site banner the pages show from the same `latest.json`
+(built in the stage that moves the site onto R2). Cloudflare Notifications on the Worker's error rate are the third; none of them can look inside an object.
+
+**Refresh data now** keeps working: once the Worker is bound as a service (`[[services]] PIPELINE` in `wrangler.toml`, deliberately commented out until cutover),
+the admin button calls the pipeline's `POST /run` (no public route; also needs `X-Pipeline-Token`). Without the binding it dispatches the GitHub workflow as before.
+
+Deploying it (not done): create the R2 bucket, `CREATE TABLE` `pipeline_lock` on D1 (`schema-v2.sql`), then `cd pipeline && uv sync && uv run pywrangler deploy`, then
+enter `WILLYWEATHER_API_KEY`, `PIPELINE_API_TOKEN` (and optionally `ALERT_WEBHOOK_URL`) as secrets yourself. **New or changed cron schedules took about 30 minutes (once
+longer) to start firing** in testing, so deploy early. Limits chosen from the gate: CPU limit 300 s (a run uses 5-10 s), Python heap peak about 67 MB cold / 81 MB warm
+(limit 128 MB).
+
+Tests: `pipeline/tests/` (unittest) run inside `npm test` through `tests/pipeline.test.mjs` when Python is available. The **parity gate** (`test_parity.py`) needs recorded fixtures
+and golden outputs that contain private locations, so it runs only with `PIPELINE_PARITY_DIR` pointing at a folder outside the repo.
 
 ## Tide condition and tide extreme
 

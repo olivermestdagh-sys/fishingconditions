@@ -623,3 +623,14 @@ CREATE TABLE IF NOT EXISTS site_settings (
   value TEXT NOT NULL,
   updated_at INTEGER NOT NULL      -- ms since the epoch
 ) WITHOUT ROWID;
+
+
+-- ---------------------------------------------------------------------
+-- Pipeline run lock (pipeline/src/locking.py): one row, so a manual "Refresh data now" and the 3-hourly cron can never run at the same
+-- time. Needs a manual CREATE TABLE on D1 before the pipeline Worker's first run.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS pipeline_lock (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL DEFAULT '',
+  locked_until INTEGER NOT NULL DEFAULT 0   -- ms epoch; the lease, so a crashed run never blocks the next for long
+);

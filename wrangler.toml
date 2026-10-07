@@ -19,6 +19,13 @@ binding = "DB"
 database_name = "fishingconditions-users"
 database_id = "bf81bd8d-85ba-4532-a00e-c2ba3d480619"
 
+# CUTOVER (pipeline stage 5), not yet: bind the scheduled pipeline Worker so "Refresh data now" runs it directly (user-backend.js
+# refreshViaPipeline) instead of dispatching the GitHub workflow. Deploying with this uncommented BEFORE fishingconditions-pipeline
+# exists fails the deploy, so it stays commented until then.
+# [[services]]
+# binding = "PIPELINE"
+# service = "fishingconditions-pipeline"
+
 [vars]
 ALLOWED_ORIGIN = "https://olivermestdagh-sys.github.io,https://yepyepyep.app"
 FRONTEND_ACCOUNT_URL = "https://olivermestdagh-sys.github.io/fishingconditions/locations.html"

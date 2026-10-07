@@ -5,3 +5,10 @@ workers/
 node_modules/
 .wrangler/
 dist/
+
+# pipeline Worker (Python): pywrangler / uv build output
+pipeline/python_modules/
+pipeline/.venv/
+pipeline/.venv-workers/
+pipeline/.wrangler/
+__pycache__/

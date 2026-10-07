@@ -1,0 +1,10 @@
+[project]
+name = "fishingconditions-pipeline"
+version = "0.1.0"
+description = "Scheduled Python Worker: WillyWeather + Open-Meteo -> scored conditions -> R2"
+requires-python = ">=3.12"
+# tzdata: zoneinfo needs it on Pyodide (Australia/Melbourne).
+dependencies = ["tzdata"]
+
+[dependency-groups]
+dev = ["workers-py"]

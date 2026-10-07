@@ -2804,10 +2804,15 @@ async function onRefreshDataNow() {
       const errBody = await res.json().catch(() => ({}));
       throw new Error(errBody.error || `status ${res.status}`);
     }
-    setSaveStatus("Refresh triggered — check the Actions tab, then the Conditions tab in a minute or two.");
+    const done = await res.json().catch(() => ({}));
+    setSaveStatus(
+      done.via === "pipeline"
+        ? `Data updated${done.runId ? " (run " + done.runId + ")" : ""} — reload the Conditions tab to see it.`
+        : "Refresh triggered — check the Actions tab, then the Conditions tab in a minute or two."
+    );
   } catch (err) {
     console.error("Failed to trigger refresh:", err);
-    setSaveStatus("Couldn't trigger the refresh automatically — run it manually from the Actions tab: " + err.message, true);
+    setSaveStatus("Couldn't refresh the data automatically (the scheduled update still runs every 3 hours): " + err.message, true);
   }
 }
 

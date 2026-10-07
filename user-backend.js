@@ -3418,6 +3418,25 @@ async function handleHomeLocation(request, env) {
   return jsonResponse({ ...result.home, homeLat: result.home.lat, homeLng: result.home.lng }, 200, env);
 }
 
+// POST /run on the pipeline Worker runs a whole data update and answers when it is done (~15-40 s). 200 = published, 409 = it ran but
+// did not publish (the publish gate refused it, or another run holds the D1 lock), anything else = the Worker itself failed.
+async function refreshViaPipeline(env) {
+  try {
+    const res = await env.PIPELINE.fetch("https://pipeline.internal/run", { method: "POST", headers: { "X-Pipeline-Token": env.PIPELINE_API_TOKEN || "" } });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) return jsonResponse({ triggered: true, via: "pipeline", runId: body.runId || null, published: !!body.published }, 200, env);
+    if (res.status === 409) {
+      const why = body.skipped === "locked" ? "A data update is already running." : "The update ran but was not published: " + ((body.gate && body.gate.reasons && body.gate.reasons.join("; ")) || body.error || "the publish gate refused it") + ".";
+      return jsonResponse({ triggered: false, via: "pipeline", error: why }, 409, env);
+    }
+    console.error(`Pipeline Worker returned ${res.status}`);
+    return jsonResponse({ error: `The pipeline Worker returned ${res.status}.` }, 502, env);
+  } catch (err) {
+    console.error("Failed to call the pipeline Worker:", err);
+    return jsonResponse({ error: "Could not reach the pipeline Worker." }, 502, env);
+  }
+}
+
 /**
  * Triggers the site's GitHub Actions data-refresh workflow — replaces
  * locationsadmin.js's old onRefreshDataNow, which called GitHub's
@@ -3432,6 +3451,11 @@ async function handleHomeLocation(request, env) {
  * the admin checks above, for the same reason.
  */
 async function handleAdminRefreshDataNow(env) {
+  // Once the scheduled pipeline Worker (fishingconditions-pipeline, folder pipeline/) is bound as a service (wrangler.toml,
+  // [[services]] binding PIPELINE), "Refresh data now" runs the pipeline directly instead of dispatching the GitHub workflow.
+  // Until then env.PIPELINE is undefined and the GitHub path below is exactly what it always was. The pipeline has no public
+  // route, so this binding IS the only way in; it also checks the same shared token as /api/pipeline/*.
+  if (env.PIPELINE) return refreshViaPipeline(env);
   requireEnv(env, ["GH_ACTIONS_TOKEN", "GH_REPO_OWNER", "GH_REPO_NAME", "GH_WORKFLOW_FILE"]);
   // NOTE: this function is only ever reached via the route above, which
   // does not itself check requireUser/role — callers MUST check before

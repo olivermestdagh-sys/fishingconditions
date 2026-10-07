@@ -1,0 +1,49 @@
+# fishingconditions-pipeline: the scheduled Python Worker that replaces the GitHub Actions data job (.github/workflows/update.yml
+# + scripts/fetch_conditions.py). NOT deployed by deploy-worker.yml (that only watches user-backend.js / wrangler.toml). Deploy by hand
+# from this folder, after reading README.md "Pipeline Worker":
+#     cd pipeline && uv sync && uv run pywrangler deploy
+#
+# A new or changed cron registration took about 30 MINUTES (once longer) to start firing in the stage 0 gate, so deploy early and
+# expect to wait. Nothing here has been deployed yet; the R2 bucket and the secrets below do not exist yet either.
+name = "fishingconditions-pipeline"
+main = "src/entry.py"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["python_workers"]
+# No public route at all: the only callers are the cron and the user Worker over a service binding ("Refresh data now").
+workers_dev = false
+preview_urls = false
+
+[observability]
+enabled = true
+
+# A full run measured ~5-10 s of CPU (a cold run after a deploy 10.5 s) and 5-6 s of wall time to fetch. Far above both, so
+# adding locations never trips it. (Workers Paid cron limits go up to 15 minutes.)
+[limits]
+cpu_ms = 300000
+
+[triggers]
+# The data run, every 3 hours as update.yml did; and the stale-data watchdog, hourly, independent of the run.
+crons = ["0 */3 * * *", "15 * * * *"]
+
+# The same D1 database as the user Worker: only for the run lock (table pipeline_lock, schema-v2.sql).
+[[d1_databases]]
+binding = "DB"
+database_name = "fishingconditions-users"
+database_id = "bf81bd8d-85ba-4532-a00e-c2ba3d480619"
+
+# Public output. A private bucket (per-owner prefixes, owner/<userId>/...) is a LATER stage: add its binding here then.
+[[r2_buckets]]
+binding = "PUBLIC_DATA"
+bucket_name = "yepyepyep-data-public"
+
+[vars]
+# Where /api/pipeline/* (locations, id-cache PUTs, observation archive, prune) lives. These stay HTTP + token until every
+# consumer is moved; then they can become a service binding and PIPELINE_API_TOKEN can be retired.
+PIPELINE_WORKER_URL = "https://api.yepyepyep.app"
+OBS_PRUNE = "dry"        # "dry" reports what would be pruned, "run" deletes, "off" skips: same meaning as update.yml's
+FORECAST_DAYS = "6"
+KEEP_RUNS = "8"          # published runs kept in R2 for rollback
+STALE_HOURS = "7"        # data older than this is "stale" (two missed 3-hourly runs)
+
+# Secrets (set by the owner, never in this file): WILLYWEATHER_API_KEY, PIPELINE_API_TOKEN, and optionally ALERT_WEBHOOK_URL
+# (an ntfy / Slack / Discord incoming-webhook URL that receives the stale-data alert).
