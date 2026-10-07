@@ -139,7 +139,6 @@ function tripRenderRunning(root, state) {
         : `<p class="trip-muted">No actions in ${escapeHtml(trip.name)} yet — add some in Trip Defaults.</p>`}
       <p class="trip-muted trip-hint">${running ? "Tap the running action to end it, or another to switch." : "Tap an action to start it."}</p>
     </div>
-    <button type="button" class="trip-big trip-catch" id="tripCatchBtn"${session && !tripUi.busy ? "" : " disabled"}>${TRIP_FISH_ICON}<span>+ Catch</span></button>
     <div class="trip-conditions">
       <button type="button" class="trip-cond" id="tripWaterBtn"><span class="trip-cond-label">Water</span><span class="trip-cond-value">${escapeHtml(d.water || "—")}</span></button>
       <button type="button" class="trip-cond" id="tripDepthBtn"><span class="trip-cond-label">Depth</span><span class="trip-cond-value">${d.depth != null ? escapeHtml(d.depth.toFixed(1)) + " m" : "—"}</span></button>
@@ -150,7 +149,6 @@ function tripRenderRunning(root, state) {
     else tripOnAction(btn.dataset.action);
   }));
   root.querySelectorAll("[data-action-edit]").forEach((btn) => btn.addEventListener("click", () => tripOpenDefaults({ tripId: state.tripId, actionId: btn.dataset.actionEdit })));
-  document.getElementById("tripCatchBtn").addEventListener("click", () => tripStartCatch());
   document.getElementById("tripWaterBtn").addEventListener("click", tripOnWater);
   document.getElementById("tripDepthBtn").addEventListener("click", tripOpenDepth);
   document.getElementById("tripEndBtn").addEventListener("click", tripOnEnd);

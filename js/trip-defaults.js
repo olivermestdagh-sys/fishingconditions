@@ -352,6 +352,7 @@ async function showTripDefaults({ onClose, start } = {}) {
     const rigRow = data.rigRows.find((row) => row.value === r.rig);
     const sub = tdRigSublist(rigRow, data.overrides);
     const subThumbs = rigOptionThumbs(rigRow, data.overrideImages);
+    const inAction = !!action() && tdRodSlots(action(), data.rodSetups).includes(r.id); // opened from an action that holds it
     return {
       title: r.name,
       prompt: "Rod setup name",
@@ -361,7 +362,8 @@ async function showTripDefaults({ onClose, start } = {}) {
         ${section("Bait", o.baits.map((v) => choice(v, `data-rod-bait="${esc(v)}"`, (r.bait || []).includes(v), o.thumbs.baits[v])).join("") || "", "bait")}
         ${baitOptionsSection(r.bait, r.baitOptions, "data-rod-bait-opt")}
         ${r.rig ? section(`${r.rig} options`, sub.map((v) => choice(v, `data-sub="${esc(v)}"`, r.subListItems.includes(v), subThumbs[v])).join(""), "sub") : ""}
-        ${confirmDeleteHtml("Delete this rod setup")}`,
+        ${inAction ? `<div class="td-delete"><button type="button" class="live-card-nav-btn td-delete-btn" data-remove-from-action>Remove from this action (keeps the rod setup)</button></div>` : ""}
+        ${confirmDeleteHtml("Delete this rod setup permanently (every action)")}`,
       nav: navHtml("Back"),
     };
   }
@@ -553,6 +555,18 @@ async function showTripDefaults({ onClose, start } = {}) {
         if (e.key === "Enter") saveNewValue();
       });
     }
+
+    // Remove a rod setup from THIS action's rod positions (the setup itself stays, for other actions)
+    on("[data-remove-from-action]", () => {
+      const a = action();
+      const id = view.rodId;
+      attempt(async () => {
+        const slots = tdRodSlots(a, data.rodSetups).map((v) => (v === id ? null : v));
+        await put("/api/tripactions", data.actions, a.id, { rodSlots: slots });
+        if (direct && direct.name === "rod") { close(); return; }
+        view = { name: "action", tripId: view.tripId, actionId: view.actionId };
+      });
+    });
 
     // Delete (two taps)
     on("[data-delete]", (el) => {
