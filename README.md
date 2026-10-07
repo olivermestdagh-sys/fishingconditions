@@ -111,6 +111,14 @@ constant (`pipeline/src/script_hash.py` `SCRIPT_HASH`; a test fails when the scr
 the heartbeat records the deployed one, and `verify-shadow` counts a cycle only when they agree: a recording made with another script (or before the hash existed) is replayed once as information and listed as
 **superseded**, never as unclean. A recording is replayed again when its entry was made under a different deployed hash (never counted twice: the entry is replaced), and the shadow takes one recording per fire.
 
+**Memory is judged apart from output** (2026-10-08): the Worker's `heap` figure is the size of Pyodide's wasm linear memory, which only grows, so in a warm isolate it is the high-water mark of everything
+replayed. Measured on the deployed shadow (cold isolate, one 9,000-row recording replayed five times back to back): 24 MB at start, 74.9 MB after the first replay, 89.9 MB after the second, then exactly 89.9 MB
+for the third to fifth: it plateaus, there is no leak (what a run leaves behind is a couple of GC objects; the script's per-run `ARCHIVE_BY_LOCATION` is cleared after every run and each replay drops its references and runs
+`gc.collect()`). Equality alone decides clean/unclean and the streak, with one exception: a peak over the **115 MB ceiling** is unclean. The **90 MB watch level** is only reported. Every index entry records the peak, the
+heap before, the growth, and whether the isolate was cold or warm; `verify-shadow` prints the recorded maximum and how many cycles were over each level (`--detail` per cycle). The cutover gate additionally requires
+that recorded maximum to stay under the ceiling. `pipeline/src/shadow_measure.py` is a TEMPORARY measurement mode (a request object `recordings/_measure.json` replays one recording N times and writes
+`shadow/measure-result*.json`; it touches no index or streak): delete it with its 4-line hook in `shadow.process_pending` once the question is closed. None of this touches the two scripts, so `SCRIPT_HASH` is unchanged.
+
 **Shadow mode** (stage 2; code written, not deployed): before the Worker replaces Actions it replays what Actions already did and proves it gets the same answer.
 `scripts/record_run.py` replaces the `python3 scripts/fetch_conditions.py` line of `update.yml`: it runs the same script with its clock pinned to the start of the run and
 records every API answer, the locations, the previous output and SHA-256 hashes of every file produced, into `recordings/<runId>.json` (private locations are inside, so it is
