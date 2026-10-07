@@ -88,7 +88,8 @@
  *      used as the WILLYWEATHER_API_KEY GitHub Actions secret → Save.
  *   5. Settings → Variables and Secrets → Add another → name it
  *      ALLOWED_ORIGIN, type "Text", value the site's own origin, e.g.
- *      https://olivermestdagh-sys.github.io (no trailing slash) → Save.
+ *      https://olivermestdagh-sys.github.io (no trailing slash) → Save. It may
+ *      be a comma-separated list when the site is served from several origins.
  *   6. Copy the Worker's own URL (shown at the top of its dashboard page,
  *      looks like https://fishingconditions-search.<your-subdomain>.workers.dev)
  *      and paste it into locationsadmin.js's WILLYWEATHER_SEARCH_WORKER_URL
@@ -120,7 +121,10 @@ const MAX_WEATHER_DAYS = 6;
 const DEFAULT_SEARCH_RANGE_KM = 25;
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, rawEnv) {
+    // ALLOWED_ORIGIN may be a comma/space-separated list (same pattern as user-backend.js): resolve it ONCE here to
+    // the single origin this request came from, so corsHeaders() below keeps reading a plain env.ALLOWED_ORIGIN.
+    const env = withResolvedOrigin(rawEnv, request.headers.get("Origin"));
     const url = new URL(request.url);
 
     // Cloudflare requires an explicit response to the CORS preflight
@@ -316,11 +320,34 @@ function isFiniteNumber(str) {
   return Number.isFinite(n);
 }
 
+// ALLOWED_ORIGIN is one origin or a comma/space-separated list ("https://a.example, https://b.example"). Trailing
+// slashes and blanks are ignored.
+function parseAllowedOrigins(value) {
+  return String(value || "")
+    .split(/[\s,]+/)
+    .map((o) => o.replace(/\/+$/, ""))
+    .filter(Boolean);
+}
+
+// A copy of env whose ALLOWED_ORIGIN is the ONE origin this request is answered for: the request's Origin when it
+// is on the list, else the first listed (so a request from anywhere else only ever sees the first origin, which a
+// browser then refuses to match). With nothing configured it stays empty and corsHeaders() falls back to "*".
+function withResolvedOrigin(env, requestOrigin) {
+  const allowed = parseAllowedOrigins(env.ALLOWED_ORIGIN);
+  const resolved = requestOrigin && allowed.includes(requestOrigin) ? requestOrigin : allowed[0] || "";
+  return { ...env, ALLOWED_ORIGIN: resolved };
+}
+
 function corsHeaders(env) {
   return {
+    // The "*" fallback (nothing configured) is kept: unlike the user Worker this one sends no cookies or
+    // credentials, so a wildcard can't be abused to act as anyone, it just means any web page may call it (which a
+    // direct curl can anyway — see the COST / ABUSE NOTE above).
     "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "*",
     "Access-Control-Allow-Methods": "GET, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
+    // The allowed origin now depends on who is asking, so caches must not reuse one origin's answer for another.
+    Vary: "Origin",
   };
 }
 

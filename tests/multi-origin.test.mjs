@@ -112,3 +112,49 @@ test("sign-in returns to the allowed site that started it, and ignores anything 
     globalThis.fetch = realFetch;
   }
 });
+
+// --- the WillyWeather search proxy (willyweather-search.js) uses the same ALLOWED_ORIGIN list pattern ---
+const tmpSearch = path.join(os.tmpdir(), `ww-search-multiorigin-test-${process.pid}.mjs`);
+fs.copyFileSync(new URL("../willyweather-search.js", import.meta.url), tmpSearch);
+const search = (await import(pathToFileURL(tmpSearch).href)).default;
+
+const searchCall = (allowed, method, origin, p = "/search?query=x") =>
+  search.fetch(new Request("https://search.example" + p, { method, headers: origin ? { Origin: origin } : {} }), { ALLOWED_ORIGIN: allowed });
+
+test("search proxy: each listed origin is echoed back on a normal response and on preflight, with Vary: Origin", async () => {
+  for (const value of [`${A},${B}`, `${A}, ${B}/`, `${A} ${B}`]) {
+    for (const o of [A, B]) {
+      for (const method of ["OPTIONS", "GET"]) {
+        const r = await searchCall(value, method, o); // GET: no API key configured -> 500, still CORS-headed
+        assert.equal(r.headers.get("access-control-allow-origin"), o, `${method} ${value}`);
+        assert.equal(r.headers.get("vary"), "Origin");
+      }
+    }
+  }
+});
+
+test("search proxy: an unlisted origin is never echoed back (it only sees the first listed one)", async () => {
+  for (const method of ["OPTIONS", "GET"]) {
+    const r = await searchCall(`${A},${B}`, method, "https://evil.example");
+    assert.equal(r.headers.get("access-control-allow-origin"), A);
+    assert.notEqual(r.headers.get("access-control-allow-origin"), "https://evil.example");
+  }
+  const none = await searchCall(`${A},${B}`, "GET", null);
+  assert.equal(none.headers.get("access-control-allow-origin"), A);
+});
+
+test("search proxy: a single value works as before, and nothing configured keeps the '*' fallback", async () => {
+  assert.equal((await searchCall(A, "OPTIONS", A)).headers.get("access-control-allow-origin"), A);
+  assert.equal((await searchCall(A, "OPTIONS", B)).headers.get("access-control-allow-origin"), A);
+  const open = await searchCall(undefined, "OPTIONS", B);
+  assert.equal(open.headers.get("access-control-allow-origin"), "*");
+  assert.equal(open.headers.get("vary"), "Origin");
+});
+
+test("search proxy: /weather and 404 responses carry the resolved origin too", async () => {
+  const w = await searchCall(`${A},${B}`, "GET", B, "/weather");
+  assert.equal(w.headers.get("access-control-allow-origin"), B);
+  const nf = await searchCall(`${A},${B}`, "GET", B, "/nope");
+  assert.equal(nf.status, 404);
+  assert.equal(nf.headers.get("access-control-allow-origin"), B);
+});

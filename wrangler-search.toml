@@ -1,0 +1,19 @@
+# Config for the WillyWeather search proxy (willyweather-search.js) — a SEPARATE Worker from the user backend
+# (wrangler.toml), with its own secret (WILLYWEATHER_API_KEY, set in the dashboard / `wrangler secret put`, never here).
+# NOT covered by .github/workflows/deploy-worker.yml (that only watches user-backend.js / wrangler.toml); deploy by hand:
+#   npx wrangler deploy --config wrangler-search.toml
+# `wrangler deploy` replaces the Worker's plain-text variables with the ones below (secrets are kept), so every plain
+# variable the dashboard has must be listed here.
+name = "fishingconditions-search"
+main = "willyweather-search.js"
+compatibility_date = "2026-09-01"
+workers_dev = true
+preview_urls = false
+
+# The dashboard copy has Workers Logs on; keep it on (a deploy otherwise resets observability to the config).
+[observability]
+enabled = true
+
+[vars]
+# One origin or a comma-separated list of the sites allowed to call this Worker from a browser.
+ALLOWED_ORIGIN = "https://olivermestdagh-sys.github.io,https://yepyepyep.app"
