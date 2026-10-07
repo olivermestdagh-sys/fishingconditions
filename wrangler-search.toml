@@ -16,4 +16,4 @@ enabled = true
 
 [vars]
 # One origin or a comma-separated list of the sites allowed to call this Worker from a browser.
-ALLOWED_ORIGIN = "https://olivermestdagh-sys.github.io,https://yepyepyep.app"
+ALLOWED_ORIGIN = "https://olivermestdagh-sys.github.io,https://yepyepyep.app,https://fish2catch.app"

@@ -74,7 +74,15 @@ if ("serviceWorker" in navigator) {
 // this is exactly what caused that bug).
 // ---------------------------------------------------------------------
 
-const USER_BACKEND_URL = "https://api.yepyepyep.app"; // the Worker also still answers on https://fishingconditions-users.olies-fishing.workers.dev (old installs, the phone app, the pipeline)
+// Which API host this site talks to, chosen by the page's own hostname so each site stays same-site with its API (the
+// session cookie then works without third-party cookies). fish2catch.app (and www.) -> api.fish2catch.app; EVERY other
+// host (yepyepyep.app, the legacy github.io copy, localhost, file://) keeps api.yepyepyep.app, exactly as before.
+// Both hosts are the same Worker/D1, so a bearer token works on either. The Worker also still answers on
+// https://fishingconditions-users.olies-fishing.workers.dev (old installs, the phone app, the pipeline).
+const USER_BACKEND_URL =
+  typeof location !== "undefined" && /^(www.)?fish2catch.app$/i.test(location.hostname || "")
+    ? "https://api.fish2catch.app"
+    : "https://api.yepyepyep.app";
 
 // --- Sign-in that survives blocked third-party cookies ------------------------------------------------------
 // The Worker's session cookie belongs to a different address from this site, so phone browsers increasingly

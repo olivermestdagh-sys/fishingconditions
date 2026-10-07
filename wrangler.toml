@@ -5,7 +5,10 @@ workers_dev = true
 preview_urls = false
 # Also served from a custom domain (Cloudflare creates the DNS record + certificate on deploy: the zone is in this
 # account). workers_dev stays true so the old workers.dev address keeps working during the move.
-routes = [{ pattern = "api.yepyepyep.app", custom_domain = true }]
+routes = [
+  { pattern = "api.yepyepyep.app", custom_domain = true },
+  { pattern = "api.fish2catch.app", custom_domain = true },
+]
 
 [observability]
 enabled = true
@@ -27,14 +30,14 @@ database_id = "bf81bd8d-85ba-4532-a00e-c2ba3d480619"
 # service = "fishingconditions-pipeline"
 
 [vars]
-ALLOWED_ORIGIN = "https://olivermestdagh-sys.github.io,https://yepyepyep.app"
+ALLOWED_ORIGIN = "https://olivermestdagh-sys.github.io,https://yepyepyep.app,https://fish2catch.app"
 FRONTEND_ACCOUNT_URL = "https://olivermestdagh-sys.github.io/fishingconditions/locations.html"
 GH_REPO_NAME = "fishingconditions"
 GH_REPO_OWNER = "olivermestdagh-sys"
 GH_WORKFLOW_FILE = "update.yml"
 GOOGLE_CLIENT_ID = "980249471001-mspp2fvr1ovomu1068u9o2nvvr6tam3e.apps.googleusercontent.com"
 # One per address the Worker answers on; the one used is the one on the host the sign-in started on (resolveRedirectUri).
-GOOGLE_REDIRECT_URI = "https://api.yepyepyep.app/auth/callback,https://fishingconditions-users.olies-fishing.workers.dev/auth/callback"
+GOOGLE_REDIRECT_URI = "https://api.yepyepyep.app/auth/callback,https://api.fish2catch.app/auth/callback,https://fishingconditions-users.olies-fishing.workers.dev/auth/callback"
 
 # Secrets (not stored here; already set on the deployed worker, kept on deploy):
 #   GH_ACTIONS_TOKEN, GOOGLE_CLIENT_SECRET, PIPELINE_API_TOKEN

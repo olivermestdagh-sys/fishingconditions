@@ -186,3 +186,5 @@ wherever their data is shown (see the credit in the page header). Map tiles ©
 OpenStreetMap contributors; the optional sea-chart base map is
 [Open Waters: Seamap](https://openwaters.io/charts/seamap) (CC BY 4.0, derived from
 OpenStreetMap, VersaTiles, Seascape and Mapterhorn data — not for navigation).
+
+> **Domain transition:** fish2catch.app runs side by side with yepyepyep.app (its API is api.fish2catch.app; both are the same Worker and database). Still intentionally on yepyepyep for now: the sign-in fallback URL, the pipeline's `PIPELINE_WORKER_URL`, the R2 bucket name and the site branding. See CLAUDE.md.

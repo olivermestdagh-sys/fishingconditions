@@ -13,7 +13,8 @@ const worker = (await import(pathToFileURL(tmp).href)).default;
 
 const NEW = "https://api.yepyepyep.app";
 const OLD = "https://fishingconditions-users.olies-fishing.workers.dev";
-const LIST = `${NEW}/auth/callback,${OLD}/auth/callback`;
+const F2C = "https://api.fish2catch.app";
+const LIST = `${NEW}/auth/callback,${F2C}/auth/callback,${OLD}/auth/callback`;
 
 function makeEnv(redirect) {
   return {
@@ -42,6 +43,11 @@ test("login on either host sends Google that host's callback", async () => {
   assert.equal(redirectParam(await get(env, OLD, "/auth/login")), `${OLD}/auth/callback`);
 });
 
+test("login on api.fish2catch.app sends Google its own callback", async () => {
+  const env = makeEnv(LIST);
+  assert.equal(redirectParam(await get(env, F2C, "/auth/login")), `${F2C}/auth/callback`);
+});
+
 test("login on a host that isn't listed is refused", async () => {
   const env = makeEnv(LIST);
   const res = await get(env, "https://evil.example", "/auth/login");
@@ -60,7 +66,7 @@ test("the callback's token exchange uses the redirect_uri of the host it landed 
   const payload = Buffer.from(JSON.stringify({ sub: "s1", email: "a@example.com", name: "A" })).toString("base64url");
   const realFetch = globalThis.fetch;
   try {
-    for (const host of [NEW, OLD]) {
+    for (const host of [NEW, F2C, OLD]) {
       const login = await get(env, host, "/auth/login");
       const state = /oauth_state=([0-9a-f]+)/.exec(login.headers.get("set-cookie"))[1];
       let sent;
@@ -91,9 +97,11 @@ test("a callback on an unlisted host is refused before anything is exchanged", a
   }
 });
 
-test("wrangler.toml lists both callbacks and the custom domain, and keeps workers.dev on", () => {
+test("wrangler.toml lists all callbacks and both custom domains, and keeps workers.dev on", () => {
   const toml = fs.readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
-  assert.match(toml, /GOOGLE_REDIRECT_URI = "[^"]*api\.yepyepyep\.app\/auth\/callback[^"]*fishingconditions-users\.olies-fishing\.workers\.dev\/auth\/callback"/);
-  assert.match(toml, /routes = \[\{ pattern = "api\.yepyepyep\.app", custom_domain = true \}\]/);
+  const uri = /GOOGLE_REDIRECT_URI = "([^"]*)"/.exec(toml)[1];
+  assert.deepEqual(uri.split(","), [`${NEW}/auth/callback`, `${F2C}/auth/callback`, `${OLD}/auth/callback`]);
+  assert.match(toml, /pattern = "api.yepyepyep.app", custom_domain = true/);
+  assert.match(toml, /pattern = "api.fish2catch.app", custom_domain = true/);
   assert.match(toml, /^workers_dev = true/m);
 });
