@@ -3938,7 +3938,8 @@ body.live-card-open { overflow: hidden; }
 .species-image-viewer-actions button.primary { background: #16a34a; border-color: #bbf7d0; }
 /* A pick-card choice that has a picture (the first picture of that rod/rig/bait/berley/method/rig option, js/live-cards.js): picture above the name; in
    Trip Defaults' pill-shaped choices it sits to the left of the name instead. */
-.live-card-choice-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; flex: 0 0 auto; background: rgba(255, 255, 255, 0.9); }
+.live-card-choice-thumb { width: 100%; max-width: 100%; height: auto; max-height: 140px; object-fit: contain; border-radius: 10px; flex: 0 1 auto; min-height: 0; background: rgba(255, 255, 255, 0.9); } /* the whole picture, fitted inside the pill: never cropped or stretched */
+.live-card-choice.has-thumb { overflow: hidden; min-width: 0; }
 .td-choices .live-card-choice.has-thumb { flex-direction: row; gap: 8px; padding: 6px 16px 6px 6px; }
 .td-choices .live-card-choice-thumb { width: 34px; height: 34px; border-radius: 999px; }
 /* Tap a choice's thumbnail on a touch screen (js/species-image.js's showImageLightbox): the picture in a popup over a dimmed page. */
