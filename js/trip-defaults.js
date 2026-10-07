@@ -188,7 +188,9 @@ async function showTripDefaults({ onClose, start } = {}) {
   const direct = start && data.actions.some((a) => a.id === start.actionId)
     ? { name: start.rodId && data.rodSetups.some((r) => r.id === start.rodId) ? "rod" : "action", tripId: start.tripId, actionId: start.actionId, rodId: start.rodId }
     : null;
-  let view = direct || { name: "trips" }; // trips | trip {tripId} | action {tripId, actionId} | rod {tripId, actionId, rodId}
+  // `start` with just a tripId (the Trip tab's gear on a trip pill) opens straight on that trip; Back closes the hub.
+  const directTrip = !direct && start && !start.actionId && data.trips.some((t) => t.id === start.tripId) ? { name: "trip", tripId: start.tripId } : null;
+  let view = direct || directTrip || { name: "trips" }; // trips | trip {tripId} | action {tripId, actionId} | rod {tripId, actionId, rodId}
   let status = "";
   let actionCategory = null; // quick-edit only (see actionScreen): which category's options are open
   let adding = null; // {kind, viewKey}: which "+ Add" pill is open as an inline text box, and on which screen
@@ -398,6 +400,10 @@ async function showTripDefaults({ onClose, start } = {}) {
 
   function goBack() {
     status = "";
+    if (directTrip && view.name === "trip" && view.tripId === directTrip.tripId) {
+      close();
+      return;
+    }
     if (direct && view.name === direct.name && view.actionId === direct.actionId) {
       close();
       return;

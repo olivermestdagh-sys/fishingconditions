@@ -2,7 +2,7 @@
 // + Catch -> Water / Depth always on screen -> End trip. Tap-only (no rotary dial). The logic is js/trip-session.js; the catch question
 // cards are js/live-cards.js (showCardFlow); editing an Action / Rod Setup is Trip Defaults (js/trip-defaults.js).
 
-const tripUi = { busy: false, overlayOpen: false, waterOptions: null, catches: [], catchesLoaded: false, lastKey: "", rodView: false, move: null, td: null };
+const tripUi = { busy: false, overlayOpen: false, waterOptions: null, catches: [], catchesLoaded: false, lastKey: "", rodView: false, move: null, td: null, adding: false };
 
 // Trip Defaults' data (mark lists with their pictures, private sub lists), for the rod pictures and the quick bait / rig-option edit.
 async function tripLoadTd() {
@@ -94,12 +94,27 @@ function tripRenderIdle(root) {
     <div class="trip-card">
       <h2 class="trip-title">Start a trip</h2>
       ${trips.length
-        ? `<div class="trip-list">${trips.map((t) => `<button type="button" class="trip-big trip-go" data-trip="${escapeHtml(t.id)}"${tripUi.busy ? " disabled" : ""}>${TRIP_PLAY_ICON}<span>${escapeHtml(t.name)}</span></button>`).join("")}</div>`
-        : `<p class="trip-muted">No trips yet — add one in Trip Defaults.</p>`}
-      <button type="button" class="trip-link" id="tripDefaultsBtn">Trip Defaults</button>
+        ? `<div class="trip-list">${trips.map((t) => `<div class="trip-pill trip-trip-pill">
+            <button type="button" class="trip-pill-main" data-trip="${escapeHtml(t.id)}"${tripUi.busy ? " disabled" : ""}>${TRIP_PLAY_ICON}<span>${escapeHtml(t.name)}</span></button>
+            <button type="button" class="trip-pill-gear" data-trip-edit="${escapeHtml(t.id)}" aria-label="Settings for ${escapeHtml(t.name)}"${tripUi.busy ? " disabled" : ""}>${TD_GEAR_SVG}</button>
+          </div>`).join("")}</div>`
+        : `<p class="trip-muted">No trips yet — add one below.</p>`}
+      ${tripUi.adding
+        ? `<div class="trip-add-row"><input type="text" id="tripNewName" class="trip-add-input" maxlength="80" placeholder="Trip name" /><button type="button" class="trip-small" id="tripAddSave">Add</button><button type="button" class="trip-small" id="tripAddCancel">Cancel</button></div>`
+        : `<button type="button" class="trip-add-pill" id="tripAddBtn">+ Add trip</button>`}
     </div>`;
   root.querySelectorAll("[data-trip]").forEach((btn) => btn.addEventListener("click", () => tripOnStart(btn.dataset.trip)));
-  document.getElementById("tripDefaultsBtn").addEventListener("click", () => tripOpenDefaults());
+  root.querySelectorAll("[data-trip-edit]").forEach((btn) => btn.addEventListener("click", () => tripOpenDefaults({ tripId: btn.dataset.tripEdit })));
+  const addBtn = document.getElementById("tripAddBtn");
+  if (addBtn) addBtn.addEventListener("click", () => { tripUi.adding = true; tripRender(); const i = document.getElementById("tripNewName"); if (i) i.focus(); });
+  const save = document.getElementById("tripAddSave");
+  if (save) {
+    const input = document.getElementById("tripNewName");
+    input.focus();
+    save.addEventListener("click", () => tripAddTrip(input.value));
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") tripAddTrip(input.value); });
+    document.getElementById("tripAddCancel").addEventListener("click", () => { tripUi.adding = false; tripRender(); });
+  }
 }
 
 function tripRenderRunning(root, state) {
@@ -405,11 +420,33 @@ async function tripOnWater() {
   tripRender();
 }
 
+// "+ Add trip": creates it, then opens its settings to add actions.
+async function tripAddTrip(name) {
+  const value = String(name || "").trim();
+  tripUi.adding = false;
+  if (!value) { tripRender(); return; }
+  if (tdHasValue(liveTripData.trips.map((t) => t.name), value)) {
+    showLiveToast(`You already have a trip named "${value}".`, true);
+    tripRender();
+    return;
+  }
+  try {
+    const created = await tdApi("/api/tripsetups", "POST", { name: value });
+    liveTripData.trips.push(created);
+    liveTripData.trips.sort((x, y) => x.name.localeCompare(y.name));
+    tripRender();
+    tripOpenDefaults({ tripId: created.id });
+  } catch (err) {
+    showLiveToast("Trip not added: " + err.message, true);
+    tripRender();
+  }
+}
+
 async function tripOpenDefaults(start) {
   if (tripUi.overlayOpen) return;
   tripUi.overlayOpen = true;
   await showTripDefaults({
-    start: start && start.actionId ? start : undefined,
+    start: start && (start.actionId || start.tripId) ? start : undefined,
     onClose: () => {
       tripUi.overlayOpen = false;
       tripLoadData().then(tripRender); // its trips / actions / rod setups may just have been edited

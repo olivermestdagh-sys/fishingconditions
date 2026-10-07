@@ -4091,3 +4091,9 @@ body.live-card-open { overflow: hidden; }
 .trip-rod-catch svg { width: 24px; height: 24px; }
 .trip-rod-gear { z-index: 2; }
 .trip-rod-remove { position: absolute; top: 6px; right: 6px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 10px; background: rgba(255, 255, 255, 0.7); color: #dc2626; font-size: 1.6rem; line-height: 1; cursor: pointer; z-index: 2; }
+.trip-trip-pill { border-color: #16a34a; background: #16a34a; color: #fff; }
+.trip-trip-pill .trip-pill-main { display: flex; align-items: center; gap: 10px; font-size: 1.15rem; font-weight: 700; }
+.trip-trip-pill .trip-pill-gear { color: #fff; }
+.trip-add-pill { width: 100%; min-height: 56px; border: 2px dashed var(--grey-400, #aaa); border-radius: 14px; background: transparent; color: var(--grey-700, #444); font-size: 1.05rem; font-weight: 600; cursor: pointer; touch-action: manipulation; }
+.trip-add-row { display: flex; gap: 8px; align-items: center; }
+.trip-add-input { flex: 1; min-width: 0; min-height: 48px; padding: 6px 12px; border: 2px solid var(--grey-300, #ccc); border-radius: 12px; font-size: 1rem; box-sizing: border-box; }
