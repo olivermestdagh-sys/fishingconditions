@@ -58,9 +58,9 @@ https://olivermestdagh-sys.github.io/fishingconditions/ is a legacy copy that wi
 
 `pipeline/` is the scheduled Cloudflare Worker that will replace the GitHub Actions data job (`update.yml` + `scripts/fetch_conditions.py`)
 and stop committing generated data to git. It is a **Python Worker** (Pyodide): the scoring script was proven byte-identical there
-(stage 0), so it runs **unmodified**. Status: code, config and tests are on the `pipeline-worker` branch; nothing is deployed. The public R2 bucket `yepyepyep-data-public` (Oceania, Standard, `r2.dev` URL disabled) exists, with the
+(stage 0), so it runs **unmodified**. Status: code, config and tests are in `pipeline/`. The **shadow** Worker is deployed (it replays Actions' recorded runs); the **production** pipeline Worker is not. The public R2 bucket `yepyepyep-data-public` (Oceania, Standard, `r2.dev` URL disabled) exists, with the
 custom domain `data.fish2catch.app` and a CORS policy for https://fish2catch.app and https://yepyepyep.app (GET/HEAD; stage 3, verified 2026-10-08 with a throwaway
-object, bucket left empty); the pipeline Worker's secrets and the shadow's private bucket are separate. The site still reads `data/conditions.json` from git and Actions still runs. Cutover stages are in the
+object, bucket left empty). Edge caching on `data.fish2catch.app` is off (responses are `cf-cache-status: DYNAMIC`) until a Cache Rule is added, before stage 4. The site still reads `data/conditions.json` from git and Actions still runs. Cutover stages are in the
 plan (shadow runs on replayed responses, 24 clean cycles, then the site switches, then Actions is retired).
 
 How a run works (`pipeline/src/service.py`):
