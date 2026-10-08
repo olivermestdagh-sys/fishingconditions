@@ -48,5 +48,5 @@ def should_alert(prev_status, fresh, now, repeat_hours=DEFAULT_REPEAT_HOURS):
 
 def alert_text(fresh):
     if fresh.get("ageHours") is None:
-        return "Yepyepyep: no conditions data has been published yet."
-    return f"Yepyepyep: conditions data is {fresh['ageHours']:.1f} hours old (alert after {fresh['staleHours']:.0f} h). The 3-hourly update may be failing."
+        return "fish2catch: no conditions data has been published yet."
+    return f"fish2catch: conditions data is {fresh['ageHours']:.1f} hours old (alert after {fresh['staleHours']:.0f} h). The 3-hourly update may be failing."

@@ -70,12 +70,11 @@ body.settings-page .sitebar {
 }
 
 /* Wordmark (the h1 in every page's header; js/backend.js renderWordmark() fills in the three spans, the h1 holds
-   plain "Yepyepyep" until then and with scripts off): "yep" small / light / muted, "Yep" medium / semi-bold / teal,
-   "YEP!" large / black / extra-wide / orange — the same word getting louder, all on one baseline. Colours are the
-   navy-header ones (the bar is navy in every theme of the site). Archivo is self-hosted (fonts/, OFL) rather than
-   linked from Google Fonts: sw.js only caches same-origin files and the pinned CDNs, so a Google Fonts file would be
-   missing offline (and every page load would depend on a third party). The width axis only exists in Archivo; if the
-   file fails to load, the system font still shows the same three sizes / weights, just without the stretch. */
+   plain "fish2catch" until then and with scripts off): "fish" and "catch" in a calm light blue, the "2" picked out
+   larger, heavier and orange. Colours are the navy-header ones (the bar is navy in every theme of the site, so there
+   is no separate dark/light variant). Archivo is self-hosted (fonts/, OFL) rather than linked from Google Fonts: sw.js
+   only caches same-origin files and the pinned CDNs, so a Google Fonts file would be missing offline (and every page
+   load would depend on a third party). If the file fails to load, the system font shows the same sizes / weights. */
 @font-face {
   font-family: "Archivo";
   font-style: normal;
@@ -88,21 +87,21 @@ body.settings-page .sitebar {
 .topbar h1.wordmark {
   display: flex;
   align-items: baseline;
-  gap: 0.28em;
+  gap: 0.02em;
   font-family: "Archivo", system-ui, sans-serif;
-  font-size: 15px; /* the three spans are sized in em of this, so the whole mark scales from one number */
+  font-size: 20px; /* the three spans are sized in em of this, so the whole mark scales from one number */
   line-height: 1;
   white-space: nowrap;
   min-width: max-content; /* never squeezed by its neighbours: they wrap to the next row instead */
 }
 
-.wordmark .wm-1 { font-size: 1em; font-weight: 300; font-stretch: 70%; color: #8fb3cf; }
-.wordmark .wm-2 { font-size: 1.4em; font-weight: 600; color: #7fd1d8; }
-.wordmark .wm-3 { font-size: 2em; font-weight: 900; font-stretch: 125%; color: #ff8a3d; letter-spacing: 0.02em; }
+.wordmark .wm-fish,
+.wordmark .wm-catch { font-size: 1em; font-weight: 500; color: #cfe3f5; letter-spacing: 0.01em; }
+.wordmark .wm-2 { font-size: 1.3em; font-weight: 900; color: #ff8a3d; }
 
 /* Phones: scale the whole mark down a step rather than hide it or push the tabs off screen. */
 @media (max-width: 480px) {
-  .topbar h1.wordmark { font-size: 12px; }
+  .topbar h1.wordmark { font-size: 17px; }
 }
 
 .updated {

@@ -804,7 +804,7 @@ function buildGpxDocument(marks, device) {
     .join("\n");
   return (
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
-    `<gpx version="1.1" creator="Yepyepyep" xmlns="http://www.topografix.com/GPX/1/1">\n` +
+    `<gpx version="1.1" creator="fish2catch" xmlns="http://www.topografix.com/GPX/1/1">\n` +
     `${wpts}\n` +
     `</gpx>\n`
   );

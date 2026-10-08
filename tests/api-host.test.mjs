@@ -10,7 +10,7 @@ import vm from "node:vm";
 import { pathToFileURL } from "node:url";
 
 const src = fs.readFileSync(new URL("../js/backend.js", import.meta.url), "utf8");
-const m = /const USER_BACKEND_URL =[\s\S]*?;\n/.exec(src);
+const m = /const USER_BACKEND_URL =[\s\S]*?;\r?\n/.exec(src);
 assert.ok(m, "USER_BACKEND_URL declaration found");
 const urlFor = (location) => vm.runInNewContext(`${m[0]}; USER_BACKEND_URL`, location === undefined ? {} : { location });
 

@@ -1,10 +1,10 @@
-# Yepyepyep - Conditions, trips and catches for anglers
+# fish2catch - Conditions, trips and catches for anglers
 
-Yepyepyep is a personal fishing site: week-ahead tide/wind/weather for a set of
+fish2catch is a personal fishing site: week-ahead tide/wind/weather for a set of
 locations, a live "what's happening near me" map, a catch log (marks) with
 reports, and import/export with Lowrance and Garmin chartplotters.
 
-Production site: https://yepyepyep.app (Cloudflare Pages, rebuilt from `main`). The GitHub Pages copy at
+Production site: https://fish2catch.app (Cloudflare Pages, rebuilt from `main`); https://yepyepyep.app, the previous name, is still served alongside it during the transition and will later redirect. The GitHub Pages copy at
 https://olivermestdagh-sys.github.io/fishingconditions/ is a legacy copy that will be switched off. The repo, the Workers
 (`fishingconditions-users`, `fishingconditions-search`), the D1 database and the localStorage keys keep their old
 "fishingconditions" names on purpose: they are internal, and renaming them would break things.
@@ -188,4 +188,4 @@ OpenStreetMap contributors; the optional sea-chart base map is
 [Open Waters: Seamap](https://openwaters.io/charts/seamap) (CC BY 4.0, derived from
 OpenStreetMap, VersaTiles, Seascape and Mapterhorn data — not for navigation).
 
-> **Domain transition:** fish2catch.app runs side by side with yepyepyep.app (its API is api.fish2catch.app; both are the same Worker and database). Still intentionally on yepyepyep for now: the sign-in fallback URL, the pipeline's `PIPELINE_WORKER_URL`, the R2 bucket name and the site branding. See CLAUDE.md.
+> **Domain transition:** fish2catch.app runs side by side with yepyepyep.app (its API is api.fish2catch.app; both are the same Worker and database). Still intentionally on yepyepyep for now: the sign-in fallback URL, the pipeline's `PIPELINE_WORKER_URL`, and the R2 bucket name (the site branding is now fish2catch). See CLAUDE.md.

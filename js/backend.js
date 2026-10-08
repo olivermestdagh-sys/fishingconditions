@@ -5,15 +5,15 @@
 
 // --- Wordmark ---------------------------------------------------------------
 //
-// The header title on every page: <h1 class="wordmark" aria-label="Yepyepyep">. The markup lives HERE (and its CSS in
+// The header title on every page: <h1 class="wordmark" aria-label="fish2catch">. The markup lives HERE (and its CSS in
 // style.css) so the six pages can't drift apart; each page's HTML only holds the plain-text fallback. The visible
 // spans are decoration, so they are aria-hidden and the h1's aria-label is what a screen reader says.
 function renderWordmark() {
   for (const h1 of document.querySelectorAll("h1.wordmark")) {
     h1.innerHTML =
-      '<span class="wm-1" aria-hidden="true">yep</span>' +
-      '<span class="wm-2" aria-hidden="true">Yep</span>' +
-      '<span class="wm-3" aria-hidden="true">YEP!</span>';
+      '<span class="wm-fish" aria-hidden="true">fish</span>' +
+      '<span class="wm-2" aria-hidden="true">2</span>' +
+      '<span class="wm-catch" aria-hidden="true">catch</span>';
   }
 }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", renderWordmark);
