@@ -1671,8 +1671,10 @@ def keep_recent_history(old_rows, hours_to_keep=30):
 
 
 # The fields of a row the controller's graph draws (the handheld fetches ONE location's file, not the whole 5 MB conditions.json).
+# "Tide Status" is there so the phone can find the REAL High / Low event rows (they carry the exact event time and height, off the hourly
+# grid): the website prints its high / low labels from those, and estimating them from the hourly heights is up to ~half an hour out.
 GRAPH_ROW_FIELDS = (
-    "dateTime", "Tide Height (m)", "Wind Forecast (km/h)", "Wind Realtime (km/h)", "Temp Forecast (C)", "Temp Realtime (C)",
+    "dateTime", "Tide Height (m)", "Tide Status", "Wind Forecast (km/h)", "Wind Realtime (km/h)", "Temp Forecast (C)", "Temp Realtime (C)",
     "Rainfall Probability (%)", "Condition", "Fishing Condition",
 )
 
