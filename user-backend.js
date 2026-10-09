@@ -5540,6 +5540,11 @@ const CTL_MARK_LIST_FIELDS = {
   tideCondition: ["tide_condition", "Tide Condition"], tideExtreme: ["tide_extreme", "Tide Extreme"], waterCondition: ["water_condition", "Water Condition"],
 };
 const CTL_MARK_SINGLE_FIELDS = new Set(["species", "weatherCondition", "tideCondition", "tideExtreme", "waterCondition"]); // one value even on a Session
+// The columns a mark and its trip-log catch line share under the same name (what a mark_update also writes to the log).
+const CTL_MARK_TO_LOG_COLUMNS = new Set([
+  "species", "size", "released", "water_condition", "water_depth", "weather_condition", "tide_condition", "tide_extreme", "wind_speed", "wind_direction",
+  "barometer", "temperature", "water_temperature",
+]);
 const CTL_MARK_NUMBER_FIELDS = {
   size: ["size", 0, 1000], waterDepth: ["water_depth", 0, 1000], barometer: ["barometer", 800, 1200], temperature: ["temperature", -50, 60],
   waterTemperature: ["water_temperature", -5, 50], windSpeed: ["wind_speed", 0, 400],
@@ -5639,9 +5644,40 @@ async function ctlMarkUpdateStatements(env, uid, ev) {
   }
   const cols = Object.keys(sets);
   if (!cols.length) return { error: "nothing to change" };
-  return {
-    stmts: [env.DB.prepare(`UPDATE marks SET ${cols.map((c) => `${c} = ?`).join(", ")} WHERE id = ? AND user_id = ?`).bind(...cols.map((c) => sets[c]), row.id, uid)],
-  };
+  const stmts = [env.DB.prepare(`UPDATE marks SET ${cols.map((c) => `${c} = ?`).join(", ")} WHERE id = ? AND user_id = ?`).bind(...cols.map((c) => sets[c]), row.id, uid)];
+
+  // The trip log keeps its own copy of what a catch recorded, and the Trip Logs tab and the Reports read THAT, not the mark. So the same
+  // edit goes to the catch's log line (and, for the gear fields, its rod row). Deleted (hidden) lines are left alone, and the line is
+  // stamped edited_at like an edit made in the Trip Logs tab (a run with an edited line is never rebuilt by the automatic backfills).
+  const logSets = {};
+  for (const c of cols) if (CTL_MARK_TO_LOG_COLUMNS.has(c)) logSets[c] = sets[c];
+  if (sets.date_time !== undefined) {
+    const tzRow = await env.DB.prepare("SELECT tz_offset_min FROM trip_log WHERE user_id = ? AND mark_id = ? AND deleted_at IS NULL LIMIT 1").bind(uid, row.id).first();
+    logSets.date_time = sets.date_time;
+    logSets.ts = ctlParseNaive(sets.date_time) - ((tzRow && tzRow.tz_offset_min) || 0) * 60000; // naive = real time + the zone offset
+  }
+  const logCols = Object.keys(logSets);
+  if (logCols.length) {
+    stmts.push(
+      env.DB.prepare(`UPDATE trip_log SET ${logCols.map((c) => `${c} = ?`).join(", ")}, edited_at = ? WHERE user_id = ? AND mark_id = ? AND deleted_at IS NULL`).bind(...logCols.map((c) => logSets[c]), Date.now(), uid, row.id)
+    );
+  }
+  // gear: the mark keeps comma-joined text, the rod row JSON arrays (rod and rig are plain text)
+  const gear = {};
+  if (sets.rod !== undefined) gear.rod = sets.rod;
+  if (sets.rig !== undefined) gear.rig = sets.rig;
+  if (sets.rig_options !== undefined) gear.rig_options = ctlJsonOrNull(ctlUniq((sets.rig_options || "").split(",")));
+  if (sets.bait !== undefined) gear.bait = ctlJsonOrNull(ctlUniq((sets.bait || "").split(",")));
+  if (sets.bait_options !== undefined) gear.bait_options = ctlJsonOrNull(ctlUniq((sets.bait_options || "").split(",")));
+  const gearCols = Object.keys(gear);
+  if (gearCols.length) {
+    stmts.push(
+      env.DB.prepare(
+        `UPDATE trip_log_rods SET ${gearCols.map((c) => `${c} = ?`).join(", ")} WHERE user_id = ? AND log_id IN (SELECT id FROM trip_log WHERE user_id = ? AND mark_id = ? AND event_type = 'catch' AND deleted_at IS NULL)`
+      ).bind(...gearCols.map((c) => gear[c]), uid, uid, row.id)
+    );
+  }
+  return { stmts };
 }
 
 /** Everything the controller's phone app needs to offer choices: your trips, their actions, rod setups and the pick-lists, plus the running trip. */

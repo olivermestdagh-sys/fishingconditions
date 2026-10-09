@@ -619,6 +619,53 @@ test("trip log: marks of a trip run are listed for the controller, and mark_upda
   assert.equal((await update(env, token, "mark_update", 40, { markId: "hand", changes: { size: 3 } }))[0].status, "rejected");
 });
 
+test("mark_update also edits the catch's trip log line and rod row (the Trip Logs tab reads those, not the mark)", async () => {
+  const { sqlite, env, token } = await seeded();
+  sqlite.prepare("INSERT INTO user_mark_lists (id, user_id, field, value, created_at) VALUES ('w1', 'u1', 'Weather Condition', 'Overcast', 1)").run();
+  await send(env, token, [ev(1, "trip_start", { tripId: "t1" }), ev(2, "action_start", { actionId: "a1" }), ev(3, "catch", { actionId: "a1", species: "Bream", size: 31, fate: "keep", rodSetupId: "r1" })]);
+  const id = sqlite.prepare("SELECT id FROM marks WHERE type = 'Catch'").get().id;
+  const logLine = () => sqlite.prepare("SELECT * FROM trip_log WHERE mark_id = ? AND event_type = 'catch'").get(id);
+  const rodRow = () => sqlite.prepare("SELECT r.* FROM trip_log_rods r JOIN trip_log l ON l.id = r.log_id WHERE l.mark_id = ? AND l.event_type = 'catch'").get(id);
+  assert.equal(logLine().size, 31);
+  assert.equal(logLine().edited_at, null);
+
+  let r = await update(env, token, "mark_update", 10, { markId: id, changes: { species: "Flathead", size: 42, released: true, weatherCondition: "Overcast", windDirection: "NE", waterDepth: 3.5, temperature: 21 } });
+  assert.equal(r[0].status, "created");
+  let l = logLine();
+  assert.equal(l.species, "Flathead");
+  assert.equal(l.size, 42);
+  assert.equal(l.released, 1);
+  assert.equal(l.weather_condition, "Overcast");
+  assert.equal(l.wind_direction, "NE");
+  assert.equal(l.water_depth, 3.5);
+  assert.equal(l.temperature, 21);
+  assert.ok(l.edited_at > 0, "stamped as hand-edited so no backfill rebuilds over it");
+  assert.equal(sqlite.prepare("SELECT size FROM marks WHERE id = ?").get(id).size, 42, "the mark still takes it too");
+
+  // clearing a value clears it on the log line too
+  await update(env, token, "mark_update", 11, { markId: id, changes: { windDirection: null } });
+  assert.equal(logLine().wind_direction, null);
+
+  // the time moves the log line's own date_time and its real UTC time (naive = real + the zone offset)
+  assert.equal((await update(env, token, "mark_update", 12, { markId: id, changes: { dateTime: "2026-10-02 10:25:00" } }))[0].status, "created");
+  l = logLine();
+  assert.equal(l.date_time, "2026-10-02 10:25:00");
+  assert.equal(l.ts, Date.parse("2026-10-02T10:25:00Z") - l.tz_offset_min * 60000);
+
+  // gear goes to the rod row (text for rod and rig, JSON arrays for the option lists)
+  assert.equal((await update(env, token, "mark_update", 13, { markId: id, changes: { rod: "L Wilson", rig: "Jig Head", rigOptions: ["Vibe"] } }))[0].status, "created");
+  const g = rodRow();
+  assert.equal(g.rod, "L Wilson");
+  assert.equal(g.rig, "Jig Head");
+  assert.deepEqual(JSON.parse(g.rig_options), ["Vibe"]);
+
+  // a line the user deleted stays hidden and untouched, other users' lines are never reached
+  sqlite.prepare("UPDATE trip_log SET deleted_at = 1 WHERE mark_id = ?").run(id);
+  assert.equal((await update(env, token, "mark_update", 14, { markId: id, changes: { size: 50 } }))[0].status, "created");
+  assert.equal(sqlite.prepare("SELECT size FROM marks WHERE id = ?").get(id).size, 50);
+  assert.equal(logLine().size, 42, "a deleted line is left as it was");
+});
+
 test("trip log: the run id survives actions starting and ending, and a trip started elsewhere gets one at its first action", async () => {
   const { sqlite, env, token } = await seeded();
   await send(env, token, [ev(1, "trip_start", { tripId: "t1" })]);
