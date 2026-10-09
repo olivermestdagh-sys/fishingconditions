@@ -214,11 +214,27 @@ function exactTideExtrema(rows, offsetMinutes) {
 }
 
 /**
+ * Why a low's printed time moves by only 30% of its widening offset (2026-10-10). The offset exists to push the two
+ * window edges (the falling minTideHeight crossing earlier, the rising one later) out to where the real water crosses
+ * the threshold, and those edges need the FULL offset. The low's own printed time used to move by the full offset too,
+ * but four logged days at Lang Lang (6-9 Oct, offset 40 then) read about 26 minutes LATE (+19, +16, +33, +34 min), i.e.
+ * the label only needed about 14-15 min of the 40 (~0.35, rounded to 0.3). The shallow trough is flat and broad: the
+ * real low sits close to the model's own, while the real threshold crossings are far apart. So the label takes a
+ * fraction of the offset and the edges keep all of it. Highs never move their label. Applies to HLW and LLW alike
+ * (no data yet on a LLW label; it simply follows the same rule). 55 min -> 17 (16.5 rounds up), 30 -> 9, 0 -> 0.
+ */
+const LOW_LABEL_SHIFT_FRACTION = 0.3;
+
+function lowLabelShiftMinutes(offsetMinutes) {
+  return Math.round((Number(offsetMinutes) || 0) * LOW_LABEL_SHIFT_FRACTION);
+}
+
+/**
  * Tide-extremum widening (docs/lang-lang-trough-widening-spec V2.md): the synthetic tide curve rushes through a shallow
  * low faster than the real tide, so the "too low" / "high enough" crossings of minTideHeight come out too narrow.
  * `offsets` ({hhw, lhw, hlw, llw} minutes, by rankExtremum class) widen the feature around each extremum:
  *  - LOW with offset O: the falling crossing on the leg into it moves O earlier, the rising crossing out of it O later,
- *    and the low itself O later (the displayed low was measured ~29 min early). Needs a crossing on both legs.
+ *    and the low itself lowLabelShiftMinutes(O) (30% of O) later. Needs a crossing on both legs.
  *  - HIGH with offset O: the crossing on the leg into it moves O earlier and the one out of it O later (a wider
  *    high-water plateau); the displayed high time is deliberately NOT moved (logged highs are accurate).
  * Each leg's crossing is owned by the low if the threshold is at or below the leg's height-midpoint, else by the high
@@ -246,12 +262,13 @@ function applyTroughWideningToRows(rows, offsets, minTideHeight, exact) {
   const MIN_GAP = 60000;
   const offMs = extrema.map((ex) => (byClass[rankExtremum(extrema, ex)] || 0) * 60000);
   const legCrossing = (i) => crossings.find((c) => c.t > extrema[i].t && c.t < extrema[i + 1].t);
-  // New time of each extremum: only lows move (and only if both neighbouring legs have a crossing to widen).
+  // New time of each extremum: only lows move (and only if both neighbouring legs have a crossing to widen), and only
+  // by lowLabelShiftMinutes(offset), NOT the full offset (the window edges still take the full offset, below).
   const newT = extrema.map((ex, i) => {
     if (ex.type !== "low" || offMs[i] <= 0 || i === 0 || i === extrema.length - 1) return ex.t;
     if (!legCrossing(i - 1) || !legCrossing(i)) return ex.t;
     const room = Math.min(ex.t - extrema[i - 1].t, extrema[i + 1].t - ex.t) / 2;
-    return ex.t + Math.min(offMs[i], room);
+    return ex.t + Math.min(lowLabelShiftMinutes(offMs[i] / 60000) * 60000, room);
   });
   // Key points of the re-timed curve: [newTime, oldTime, height, isExtremum]. The times are exactly the spec's numbers
   // (crossings at +/-O, the low O later); only the line drawn BETWEEN them is smoothed (see below).

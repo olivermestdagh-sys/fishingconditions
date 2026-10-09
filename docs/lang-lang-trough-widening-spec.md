@@ -67,7 +67,7 @@ This requires knowing each extremum's HHW/LHW/HLW/LLW classification at scoring 
 
 For the bracket between the high immediately before a low and the high immediately after it, using that low's classification's offset (call it `O`, e.g. `hlwOffset`):
 - "Too low" crossing (falling through `minTideHeight`, before the low): `correctedTooLowTime = originalTooLowTime - O`.
-- The low itself: `correctedLowTime = originalLowTime + O`.
+- The low itself: `correctedLowTime = originalLowTime + round(0.3 * O)` (**revised 2026-10-10**; the first version used the full `+ O`). The window edges need the full `O`, but four logged days (6-9 Oct, offset 40 then) showed the printed low about 26 min late (+19, +16, +33, +34), so only ~30% of `O` is applied to the printed low time (`LOW_LABEL_SHIFT_FRACTION` in `js/chart-render.js`; 55 -> 17 min, 30 -> 9 min). The same fraction is used for HLW and LLW (no LLW label data yet). The drawn trough is re-timed to the label (slope 0), so the curve minimum and the printed time agree.
 - "High enough" crossing (rising through `minTideHeight`, after the low): `correctedHighEnoughTime = originalHighEnoughTime + O`.
 - Everything outside this bracket (the highs, and the bulk of the rise/fall away from the threshold) is untouched.
 

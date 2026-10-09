@@ -18,8 +18,10 @@ const fns = new Function(
     grab(/function interpolatedTideHeightAt[\s\S]*?\r?\n}\r?\n/),
     grab(/function findTideExtrema[\s\S]*?\r?\n}\r?\n/),
     grab(/function exactTideExtrema[\s\S]*?\r?\n}\r?\n/),
+    grab(/const LOW_LABEL_SHIFT_FRACTION[^\n]*\n/),
+    grab(/function lowLabelShiftMinutes[\s\S]*?\r?\n}\r?\n/),
     grab(/function applyTroughWideningToRows[\s\S]*?\r?\n}\r?\n/),
-    "return { applyTroughWideningToRows, findTideExtrema, findTideThresholdCrossings, exactTideExtrema };",
+    "return { lowLabelShiftMinutes, LOW_LABEL_SHIFT_FRACTION, applyTroughWideningToRows, findTideExtrema, findTideThresholdCrossings, exactTideExtrema };",
   ].join("\n")
 )();
 
@@ -46,7 +48,7 @@ test("zero / missing offsets and missing threshold leave rows untouched", () => 
   assert.equal(fns.applyTroughWideningToRows(rows, { hlw: 40 }, null), rows);
 });
 
-test("HLW offset widens the window around the higher low and moves the low later", () => {
+test("HLW offset widens the window around the higher low and moves the low later by 30% of the offset", () => {
   const before = crossings(rows).filter((c) => c.t > T0 && c.t < T0 + 12 * H);
   const lowBefore = firstLow(rows);
   const out = fns.applyTroughWideningToRows(rows, { hlw: 40 }, THRESH);
@@ -57,7 +59,7 @@ test("HLW offset widens the window around the higher low and moves the low later
   const tol = 2 * 60000; // the exact widened times are handed to findTideExtrema / findTideThresholdCrossings
   assert.ok(Math.abs(before[0].t - after[0].t - O) < tol, "too-low crossing ~40 min earlier");
   assert.ok(Math.abs(after[1].t - before[1].t - O) < tol, "high-enough crossing ~40 min later");
-  assert.ok(Math.abs(firstLow(out).t - lowBefore.t - O) < 2 * 60000, "the low itself exactly 40 min later");
+  assert.ok(Math.abs(firstLow(out).t - lowBefore.t - 12 * 60000) < 2 * 60000, "the low itself only 12 min (30% of 40) later");
 });
 
 test("rows outside the bracket, and the other low, are untouched with hlw only", () => {
@@ -157,7 +159,7 @@ test("exactTideExtrema: real High/Low event rows + tideOffset, near-duplicates c
   assert.deepEqual(out.map((e) => [e.type, (e.t - T0) / 60000, e.height]), [["low", 115, 0.9], ["high", 430, 2.5]]);
 });
 
-test("labels use the exact event time: findTideExtrema honours rows.exactExtrema, and widening moves the exact low by exactly O", () => {
+test("labels use the exact event time: findTideExtrema honours rows.exactExtrema, and widening moves the exact low by 30% of O", () => {
   const exactLow = { t: T0 + 6 * H + 17 * 60000, height: 0.5, type: "low" }; // 06:17, not on the hourly grid
   const plain = rows.slice();
   plain.exactExtrema = [exactLow];
@@ -171,5 +173,27 @@ test("labels use the exact event time: findTideExtrema honours rows.exactExtrema
     { t: T0 + 24 * H, height: 2.0, type: "high" },
   ];
   const out = fns.applyTroughWideningToRows(rows, { hlw: 40 }, THRESH, ex);
-  assert.equal(fns.findTideExtrema(out).filter((e) => e.type === "low")[0].t, exactLow.t + 40 * 60000);
+  assert.equal(fns.findTideExtrema(out).filter((e) => e.type === "low")[0].t, exactLow.t + 12 * 60000);
+});
+
+test("low label shift is Math.round(offset * 0.3): 55 -> 17, 30 -> 9, 0 -> 0, bad input -> 0", () => {
+  assert.equal(fns.LOW_LABEL_SHIFT_FRACTION, 0.3);
+  assert.equal(fns.lowLabelShiftMinutes(55), 17); // 16.5 rounds up
+  assert.equal(fns.lowLabelShiftMinutes(30), 9);
+  assert.equal(fns.lowLabelShiftMinutes(0), 0);
+  assert.equal(fns.lowLabelShiftMinutes(null), 0);
+});
+
+test("LLW 55: label moves 17 min but both window edges keep the full 55 min, and the drawn trough sits on the label", () => {
+  const before = crossings(rows).filter((c) => c.t > T0 + 12 * H && c.t < T0 + 24 * H);
+  const lowBefore = fns.findTideExtrema(rows).filter((e) => e.type === "low")[1];
+  const out = fns.applyTroughWideningToRows(rows, { llw: 55 }, THRESH);
+  const after = crossings(out).filter((c) => c.t > T0 + 12 * H && c.t < T0 + 24 * H);
+  assert.equal(after[0].t, before[0].t - 55 * 60000);
+  assert.equal(after[1].t, before[1].t + 55 * 60000);
+  const lowAfter = fns.findTideExtrema(out).filter((e) => e.type === "low")[1];
+  assert.equal(lowAfter.t - lowBefore.t, 17 * 60000);
+  // drawn minimum (lowest row) agrees with the printed label to within one hourly sample step
+  const drawn = out.filter((r) => r._t > T0 + 13 * H && r._t < T0 + 23 * H).reduce((a, r) => (r["Tide Height (m)"] < a["Tide Height (m)"] ? r : a));
+  assert.ok(Math.abs(drawn._t - lowAfter.t) <= 30 * 60000);
 });
