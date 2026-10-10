@@ -289,6 +289,24 @@ test("events: the Bait answer on a catch is the mark's bait; [] means none; leav
   assert.equal(bad[0].status, "rejected");
 });
 
+test("events: a catch's Bait options (the bait's sub list) become the mark's bait options and the log line's; others are rejected", async () => {
+  const { sqlite, env, token } = await seeded();
+  sqlite.prepare("UPDATE user_mark_lists SET has_sublist = 1, sub_list = ? WHERE id = 'ba2'").run(JSON.stringify(["Wing Strip", "Whole"]));
+  await send(env, token, [ev(1, "trip_start", { tripId: "t1" }), ev(2, "action_start", { actionId: "a1" })]);
+  const res = await send(env, token, [
+    ev(3, "catch", { actionId: "a1", species: "Bream", size: 30, fate: "keep", rodSetupId: "r1", bait: ["Squid"], baitOptions: ["Wing Strip"] }),
+    ev(4, "catch", { actionId: "a1", species: "Bream", size: 31, fate: "keep", rodSetupId: "r1", bait: ["Squid"], baitOptions: [] }),
+    ev(5, "catch", { actionId: "a1", species: "Bream", size: 32, fate: "keep", rodSetupId: "r1", bait: ["Squid"], baitOptions: ["Nonsense"] }),
+  ]);
+  assert.deepEqual(res.map((r) => r.status), ["created", "created", "rejected"]);
+  const by = Object.fromEntries(marks(sqlite, "type = 'Catch'").map((m) => [m.size, m]));
+  assert.equal(by[30].bait, "Squid");
+  assert.equal(by[30].bait_options, "Wing Strip");
+  assert.equal(by[31].bait_options, null, "answered no options");
+  const log = sqlite.prepare("SELECT l.size, r.bait, r.bait_options FROM trip_log l JOIN trip_log_rods r ON r.log_id = l.id WHERE l.event_type = 'catch' ORDER BY l.size").all();
+  assert.deepEqual(log.map((x) => [x.size, x.bait, x.bait_options]), [[30, '["Squid"]', '["Wing Strip"]'], [31, '["Squid"]', null]]);
+});
+
 test("config: carries the first picture of each value that has one, and of a rig's options (your private override wins)", async () => {
   const { sqlite, env, token } = await seeded();
   sqlite.prepare("UPDATE user_mark_lists SET image_index = ? WHERE id = 's1'").run(JSON.stringify([{ id: "img-bream-1", v: 11 }, { id: "img-bream-2", v: 12 }]));

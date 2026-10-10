@@ -5848,6 +5848,9 @@ async function ctlProcessEvent(env, user, ev) {
     // the bait used (the controller's last catch question): a list of names; [] = none; absent = keep the action's bait
     const catchBait = ev.bait == null ? null : ctlNameList(ev.bait);
     if (ev.bait != null && (!catchBait || catchBait.length > 10)) return bad("bait must be a list of names");
+    // the options picked from the bait's sub list (the controller's Bait options question): [] = none; absent = the setup's own
+    const catchBaitOptions = ev.baitOptions == null ? null : ctlNameList(ev.baitOptions);
+    if (ev.baitOptions != null && (!catchBaitOptions || catchBaitOptions.length > 20)) return bad("baitOptions must be a list of names");
     let action = null;
     let tripName = "";
     let rodSetups = [];
@@ -5859,6 +5862,13 @@ async function ctlProcessEvent(env, user, ev) {
         rodSetups = await ctlLoadRodSetups(env, uid);
       }
     }
+    if (catchBaitOptions && catchBaitOptions.length) {
+      const chosenSetup = rodSetups.find((r) => r.id === ev.rodSetupId);
+      const baitsForOptions = catchBait || (chosenSetup ? chosenSetup.bait || [] : ctlUniq(rodSetups.flatMap((r) => r.bait || [])));
+      const valid = await ctlBaitOptionsOf(env, uid, baitsForOptions);
+      const badOption = catchBaitOptions.find((o) => !valid.has(o));
+      if (badOption) return bad(`"${badOption}" is not an option of the chosen bait`);
+    }
     // the running action's number goes into the catch's default name ("[Species] [Trip] [Action] [Number]")
     const runningNumber = action && state.actionId && state.sessionGroupId && Number.isFinite(state.sessionNumber) ? state.sessionNumber : null;
     addMark(
@@ -5867,6 +5877,7 @@ async function ctlProcessEvent(env, user, ev) {
           id: ctlNewId(), ...position, dateTime, species: ev.species.trim(), size: ev.size ?? null, released: ev.fate === "release", tooSmall: !!ev.tooSmall,
           water: typeof ev.water === "string" ? ev.water : "", waterDepth: ev.depth ?? null, setupId: typeof ev.rodSetupId === "string" ? ev.rodSetupId : null, source, tripName, sessionNumber: runningNumber,
           bait: catchBait ? catchBait.join(", ") : undefined,
+          baitOptions: catchBaitOptions || undefined,
         },
         action,
         rodSetups
@@ -5884,7 +5895,10 @@ async function ctlProcessEvent(env, user, ev) {
           addLog("cond", { ...common, type: "change", changeField: waterChanged && depthChanged ? "water+depth" : waterChanged ? "water" : "depth", ...actionState(action) }, tlogRodRows(action, rodSetups));
         }
       }
-      const usedSetup = tlogCatchRodRows(action, rodSetups, typeof ev.rodSetupId === "string" ? ev.rodSetupId : null);
+      // the controller's Bait / Bait options answers replace the rod setup's own on this catch (the log is what the Reports read)
+      const usedSetup = tlogCatchRodRows(action, rodSetups, typeof ev.rodSetupId === "string" ? ev.rodSetupId : null).map((r) =>
+        catchBait || catchBaitOptions ? { ...r, ...(catchBait ? { bait: catchBait, baitOptions: catchBaitOptions || [] } : { baitOptions: catchBaitOptions }) } : r
+      );
       addLog("catch", {
         ...common, type: "catch", markId: catchMarkId, species: ev.species.trim(), size: ev.tooSmall ? null : ev.size ?? null, released: ev.fate === "release" || !!ev.tooSmall,
         rodSetupId: usedSetup.length ? usedSetup[0].rodSetupId : null,
