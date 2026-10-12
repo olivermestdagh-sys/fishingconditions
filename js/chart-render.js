@@ -46,7 +46,7 @@ async function loadTideOffsets(allLocations) {
     for (const loc of allLocations) {
       if (offsetByName.has(loc.name)) loc.tideOffset = offsetByName.get(loc.name);
       const cfg = configByName.get(loc.name);
-      if (cfg) for (const f of ["hhwOffset", "lhwOffset", "hlwOffset", "llwOffset"]) loc[f] = cfg[f] ?? null;
+      if (cfg) for (const f of ["hhwOffset", "lhwOffset", "hlwOffset", "llwOffset", "troughBaseMinutes", "troughRiseMinutes"]) loc[f] = cfg[f] ?? null;
     }
   } catch (err) {
     console.error("Could not load tide offsets from config/locations.json:", err);
@@ -117,7 +117,7 @@ async function mergeLiveLocationConfig(allLocations) {
     if (!Array.isArray(live)) return false;
     const byName = new Map(live.map((l) => [l.name, l]));
     const SHARED = ["ownerId", "displayName", "shore", "tidal", "locationGroup", "locationGroups", "tideOffset", "tideMaxObserved", "lat", "lng"];
-    const TROUGH = ["hhwOffset", "lhwOffset", "hlwOffset", "llwOffset"];
+    const TROUGH = ["hhwOffset", "lhwOffset", "hlwOffset", "llwOffset", "troughBaseMinutes", "troughRiseMinutes"];
     const PER_TYPE = ["driveTo", "driveBack", "setUp", "packUp", "timeToSpot", "timeFromSpot", "minTideHeight"];
     for (const loc of allLocations) {
       const src = byName.get(loc.name);
@@ -230,6 +230,37 @@ function lowLabelShiftMinutes(offsetMinutes) {
 }
 
 /**
+ * Depth-scaled widening of a low (2026-10-13; replaces the per-class hlwOffset / llwOffset for a location whose
+ * troughBaseMinutes is set). The class split (HLW vs LLW) was only a stand-in for how far the low dips below
+ * minTideHeight: at Lang Lang the higher lows were shallow (0.18-0.48 m under 1.2 m) and the lower lows deep (0.28-0.85 m).
+ * Twelve logged lows (5-12 Oct) showed the too-low edge needs MORE widening the shallower the dip (r about -0.74, about
+ * -0.88 without the one strong-west-wind day), because the real water lingers near the threshold while the model rushes
+ * through it. The fit was about 65-77 minutes minus 86-102 minutes per metre of depth, reaching 0 near 0.75 m. So a low's
+ * widening is W = clamp(troughBaseMinutes - TROUGH_MINUTES_PER_METRE * depth, 0, TROUGH_MAX_MINUTES) with
+ * depth = max(0, minTideHeight - low height): 100 minutes per metre (the round number inside the fitted range) and a 70 minute
+ * cap (the largest need seen was 68). The floor of 0 matters: a deep low must not be narrowed (the site cannot make a window
+ * narrower than the model, and the deepest low, 0.85 m, needed about 0). The per-location base is the only tuned number
+ * (Lang Lang: 80, a little above the fits so the unsafe side, under-widening, is the one that is avoided). The RISE
+ * (high-enough) edge did NOT depend on depth in the data (r about -0.1), so it has its own flat value, troughRiseMinutes
+ * (Lang Lang: 40), and mirrors W when that is empty. The printed low time still moves only LOW_LABEL_SHIFT_FRACTION of W.
+ */
+const TROUGH_MINUTES_PER_METRE = 100;
+const TROUGH_MAX_MINUTES = 70;
+
+function troughWideningMinutes(baseMinutes, depthMetres) {
+  const base = Number(baseMinutes);
+  if (!Number.isFinite(base)) return 0;
+  const depth = Math.max(0, Number(depthMetres) || 0);
+  return Math.round(Math.min(TROUGH_MAX_MINUTES, Math.max(0, base - TROUGH_MINUTES_PER_METRE * depth)));
+}
+
+function optionalMinutes(v) {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
  * Tide-extremum widening (docs/lang-lang-trough-widening-spec V2.md): the synthetic tide curve rushes through a shallow
  * low faster than the real tide, so the "too low" / "high enough" crossings of minTideHeight come out too narrow.
  * `offsets` ({hhw, lhw, hlw, llw} minutes, by rankExtremum class) widen the feature around each extremum:
@@ -241,13 +272,19 @@ function lowLabelShiftMinutes(offsetMinutes) {
  * (no double-application). Shifts are capped at 50% of the leg's duration and kept inside the leg. Each affected leg is
  * redrawn as one smooth monotone curve through (extremum, crossing, extremum), so the drawn curve, the extrema labels
  * and the crossing dots all agree.
+ * DEPTH MODE: when offsets.troughBase is set, every LOW uses W = troughWideningMinutes(troughBase, minTideHeight - lowHeight)
+ * for its falling crossing and label shift, and offsets.troughRise (else W) for its rising crossing; offsets.hlw / offsets.llw
+ * are ignored. Highs (hhw / lhw), the ownership rule and the half-a-leg cap are unchanged.
  * Only moves crossings that already exist. Needs minTideHeight. Returns a new array (`rows` is never mutated); run it
  * AFTER applyTideOffsetToRows. `exact` = exactTideExtrema(...) of the same rows, when available.
  */
 function applyTroughWideningToRows(rows, offsets, minTideHeight, exact) {
   if (!offsets || minTideHeight == null || minTideHeight === "") return rows;
   const byClass = { HHW: Number(offsets.hhw) || 0, LHW: Number(offsets.lhw) || 0, HLW: Number(offsets.hlw) || 0, LLW: Number(offsets.llw) || 0 };
-  if (!byClass.HHW && !byClass.LHW && !byClass.HLW && !byClass.LLW) return rows;
+  const troughBase = optionalMinutes(offsets.troughBase);
+  const troughRise = optionalMinutes(offsets.troughRise);
+  const depthMode = troughBase != null;
+  if (!depthMode && !byClass.HHW && !byClass.LHW && !byClass.HLW && !byClass.LLW) return rows;
   const tideRows = rows
     .filter((r) => r["Tide Height (m)"] != null)
     .slice()
@@ -260,15 +297,29 @@ function applyTroughWideningToRows(rows, offsets, minTideHeight, exact) {
   if (extrema.length < 2) return rows;
   const crossings = findTideThresholdCrossings(tideRows, threshold);
   const MIN_GAP = 60000;
-  const offMs = extrema.map((ex) => (byClass[rankExtremum(extrema, ex)] || 0) * 60000);
+  // Per extremum: how far its FALLING-side crossing (the leg into a low) and RISING-side crossing (the leg out of it) move.
+  // Class offsets move both by the same amount; depth mode gives a low its own W and rise.
+  const fallMs = [];
+  const riseMs = [];
+  extrema.forEach((ex) => {
+    if (depthMode && ex.type === "low") {
+      const w = troughWideningMinutes(troughBase, threshold - ex.height);
+      fallMs.push(w * 60000);
+      riseMs.push((troughRise != null ? Math.max(0, troughRise) : w) * 60000);
+    } else {
+      const o = (byClass[rankExtremum(extrema, ex)] || 0) * 60000;
+      fallMs.push(o);
+      riseMs.push(o);
+    }
+  });
   const legCrossing = (i) => crossings.find((c) => c.t > extrema[i].t && c.t < extrema[i + 1].t);
   // New time of each extremum: only lows move (and only if both neighbouring legs have a crossing to widen), and only
   // by lowLabelShiftMinutes(offset), NOT the full offset (the window edges still take the full offset, below).
   const newT = extrema.map((ex, i) => {
-    if (ex.type !== "low" || offMs[i] <= 0 || i === 0 || i === extrema.length - 1) return ex.t;
+    if (ex.type !== "low" || fallMs[i] <= 0 || i === 0 || i === extrema.length - 1) return ex.t;
     if (!legCrossing(i - 1) || !legCrossing(i)) return ex.t;
     const room = Math.min(ex.t - extrema[i - 1].t, extrema[i + 1].t - ex.t) / 2;
-    return ex.t + Math.min(lowLabelShiftMinutes(offMs[i] / 60000) * 60000, room);
+    return ex.t + Math.min(lowLabelShiftMinutes(fallMs[i] / 60000) * 60000, room);
   });
   // Key points of the re-timed curve: [newTime, oldTime, height, isExtremum]. The times are exactly the spec's numbers
   // (crossings at +/-O, the low O later); only the line drawn BETWEEN them is smoothed (see below).
@@ -286,7 +337,8 @@ function applyTroughWideningToRows(rows, offsets, minTideHeight, exact) {
     const high = a.type === "low" ? i + 1 : i;
     const lowOwned = threshold <= (extrema[low].height + extrema[high].height) / 2;
     const owner = lowOwned ? low : high;
-    const O = Math.min(offMs[owner], (b.t - a.t) / 2);
+    // the leg into the owner is its falling side, the leg out of it its rising side
+    const O = Math.min(owner === i + 1 ? fallMs[owner] : riseMs[owner], (b.t - a.t) / 2);
     if (O <= 0) continue;
     // the leg into an extremum moves its crossing earlier, the leg out of it later
     const delta = owner === i + 1 ? -O : O;

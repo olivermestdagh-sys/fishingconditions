@@ -136,6 +136,8 @@ CREATE TABLE IF NOT EXISTS locations (
   lhw_offset REAL,                  -- this class (HHW/LHW/HLW/LLW) — see applyTroughWideningToRows, js/chart-render.js.
   hlw_offset REAL,                  -- NULL/0 = off. Manual ALTER TABLE on existing D1 (done 2026-10-05).
   llw_offset REAL,
+  trough_base_minutes REAL,         -- depth-scaled trough widening (replaces hlw/llw for a location when set): W = clamp(base - 100*depth, 0, 70)
+  trough_rise_minutes REAL,         -- rising (high-enough) edge shift; NULL = same as W. Manual ALTER TABLE on existing D1 (2026-10-13).
   tide_max_observed REAL,
   tidal INTEGER NOT NULL DEFAULT 1, -- 0/1 — strips tide/current data at the scoring source for
                                      -- inland rivers/lakes regardless of what the tide/marine

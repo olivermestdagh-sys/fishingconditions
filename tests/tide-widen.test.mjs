@@ -20,8 +20,12 @@ const fns = new Function(
     grab(/function exactTideExtrema[\s\S]*?\r?\n}\r?\n/),
     grab(/const LOW_LABEL_SHIFT_FRACTION[^\n]*\n/),
     grab(/function lowLabelShiftMinutes[\s\S]*?\r?\n}\r?\n/),
+    grab(/const TROUGH_MINUTES_PER_METRE[^\n]*\n/),
+    grab(/const TROUGH_MAX_MINUTES[^\n]*\n/),
+    grab(/function troughWideningMinutes[\s\S]*?\r?\n}\r?\n/),
+    grab(/function optionalMinutes[\s\S]*?\r?\n}\r?\n/),
     grab(/function applyTroughWideningToRows[\s\S]*?\r?\n}\r?\n/),
-    "return { lowLabelShiftMinutes, LOW_LABEL_SHIFT_FRACTION, applyTroughWideningToRows, findTideExtrema, findTideThresholdCrossings, exactTideExtrema };",
+    "return { troughWideningMinutes, TROUGH_MINUTES_PER_METRE, TROUGH_MAX_MINUTES, lowLabelShiftMinutes, LOW_LABEL_SHIFT_FRACTION, applyTroughWideningToRows, findTideExtrema, findTideThresholdCrossings, exactTideExtrema };",
   ].join("\n")
 )();
 
@@ -196,4 +200,68 @@ test("LLW 55: label moves 17 min but both window edges keep the full 55 min, and
   // drawn minimum (lowest row) agrees with the printed label to within one hourly sample step
   const drawn = out.filter((r) => r._t > T0 + 13 * H && r._t < T0 + 23 * H).reduce((a, r) => (r["Tide Height (m)"] < a["Tide Height (m)"] ? r : a));
   assert.ok(Math.abs(drawn._t - lowAfter.t) <= 30 * 60000);
+});
+
+// ---- depth-scaled widening (troughBase / troughRise): W = clamp(base - 100 * depth, 0, 70), depth = max(0, threshold - low height)
+
+test("troughWideningMinutes: base - 100/m * depth, floored at 0, capped at 70, bad input -> 0", () => {
+  assert.equal(fns.TROUGH_MINUTES_PER_METRE, 100);
+  assert.equal(fns.TROUGH_MAX_MINUTES, 70);
+  assert.equal(fns.troughWideningMinutes(80, 0.18), 62);
+  assert.equal(fns.troughWideningMinutes(80, 0.48), 32);
+  assert.equal(fns.troughWideningMinutes(80, 0.85), 0, "a deep low is never narrowed (floor 0)");
+  assert.equal(fns.troughWideningMinutes(80, 0.05), 70, "cap 70");
+  assert.equal(fns.troughWideningMinutes(80, -0.3), 70, "a negative depth counts as 0 (then the cap applies)");
+  assert.equal(fns.troughWideningMinutes(null, 0.2), 0);
+  assert.equal(fns.troughWideningMinutes("abc", 0.2), 0);
+});
+
+test("depth mode: each low gets its own W from its height, hlw/llw are ignored, label moves 30% of W", () => {
+  // THRESH 1.0: HLW 06:00 is 0.5 m (depth 0.5 -> W 40 at base 90); LLW 18:00 is 0.2 m (depth 0.8 -> W 10)
+  const beforeA = crossings(rows).filter((c) => c.t > T0 && c.t < T0 + 12 * H);
+  const beforeB = crossings(rows).filter((c) => c.t > T0 + 12 * H && c.t < T0 + 24 * H);
+  const lowsBefore = fns.findTideExtrema(rows).filter((e) => e.type === "low");
+  const out = fns.applyTroughWideningToRows(rows, { hlw: 999, llw: 999, troughBase: 90 }, THRESH);
+  const afterA = crossings(out).filter((c) => c.t > T0 && c.t < T0 + 12 * H);
+  const afterB = crossings(out).filter((c) => c.t > T0 + 12 * H && c.t < T0 + 24 * H);
+  assert.equal(afterA[0].t, beforeA[0].t - 40 * 60000);
+  assert.equal(afterA[1].t, beforeA[1].t + 40 * 60000, "no troughRise: the rise mirrors W");
+  assert.equal(afterB[0].t, beforeB[0].t - 10 * 60000);
+  assert.equal(afterB[1].t, beforeB[1].t + 10 * 60000);
+  const lowsAfter = fns.findTideExtrema(out).filter((e) => e.type === "low");
+  assert.equal(lowsAfter[0].t - lowsBefore[0].t, 12 * 60000);
+  assert.equal(lowsAfter[1].t - lowsBefore[1].t, 3 * 60000);
+});
+
+test("troughRise moves the rising (high-enough) edge on its own; the falling edge and label still follow W", () => {
+  const before = crossings(rows).filter((c) => c.t > T0 && c.t < T0 + 12 * H);
+  const lowBefore = fns.findTideExtrema(rows).filter((e) => e.type === "low")[0];
+  const out = fns.applyTroughWideningToRows(rows, { troughBase: 90, troughRise: 25 }, THRESH);
+  const after = crossings(out).filter((c) => c.t > T0 && c.t < T0 + 12 * H);
+  assert.equal(after[0].t, before[0].t - 40 * 60000);
+  assert.equal(after[1].t, before[1].t + 25 * 60000);
+  assert.equal(fns.findTideExtrema(out).filter((e) => e.type === "low")[0].t - lowBefore.t, 12 * 60000);
+});
+
+test("a deep low (W 0) keeps its falling edge and label but still gets the separate rise", () => {
+  const before = crossings(rows).filter((c) => c.t > T0 + 12 * H && c.t < T0 + 24 * H);
+  const lowBefore = fns.findTideExtrema(rows).filter((e) => e.type === "low")[1];
+  const out = fns.applyTroughWideningToRows(rows, { troughBase: 80, troughRise: 25 }, THRESH); // depth 0.8 -> W 0
+  const after = crossings(out).filter((c) => c.t > T0 + 12 * H && c.t < T0 + 24 * H);
+  assert.equal(after[0].t, before[0].t);
+  assert.equal(after[1].t, before[1].t + 25 * 60000);
+  assert.equal(fns.findTideExtrema(out).filter((e) => e.type === "low")[1].t, lowBefore.t);
+});
+
+test("troughBase empty / null behaves exactly as the class offsets; highs still use hhw / lhw in depth mode", () => {
+  const a = fns.applyTroughWideningToRows(rows, { hlw: 40, troughBase: null, troughRise: 30 }, THRESH);
+  const b = fns.applyTroughWideningToRows(rows, { hlw: 40 }, THRESH);
+  assert.deepEqual(a.map((r) => r["Tide Height (m)"]), b.map((r) => r["Tide Height (m)"]));
+  assert.equal(fns.applyTroughWideningToRows(rows, { troughBase: "", troughRise: 30 }, THRESH), rows, "empty string = off, nothing else set");
+  // a plateau-widening high next to a depth-mode low: THRESH 1.9 sits above the 12:00 high's leg midpoint, so the high owns it
+  const t19 = (r) => fns.findTideThresholdCrossings(r, 1.9);
+  const hb = t19(rows).filter((c) => c.t > T0 + 6 * H && c.t < T0 + 24 * H);
+  const ho = t19(fns.applyTroughWideningToRows(rows, { troughBase: 90, hhw: 20, lhw: 20 }, 1.9)).filter((c) => c.t > T0 + 6 * H && c.t < T0 + 24 * H);
+  assert.equal(ho.length, hb.length);
+  assert.ok(ho.some((c, i) => c.t !== hb[i].t), "hhw / lhw still widen the high crossings in depth mode");
 });

@@ -85,6 +85,8 @@ async function locEdLoad(name) {
         lhwOffset: p.lhwOffset,
         hlwOffset: p.hlwOffset,
         llwOffset: p.llwOffset,
+        troughBaseMinutes: p.troughBaseMinutes,
+        troughRiseMinutes: p.troughRiseMinutes,
         locationGroups: rows[0].groups.map((g) => g.name),
         types: rows.map(typeOf),
       },
@@ -222,6 +224,8 @@ async function openLocationEditor(name, { onChanged, onRemoved } = {}) {
         lhwOffset: loc.lhwOffset ?? null,
         hlwOffset: loc.hlwOffset ?? null,
         llwOffset: loc.llwOffset ?? null,
+        troughBaseMinutes: loc.troughBaseMinutes ?? null,
+        troughRiseMinutes: loc.troughRiseMinutes ?? null,
         tidal: loc.tidal !== false,
       }),
       "the location"
@@ -358,12 +362,18 @@ async function openLocationEditor(name, { onChanged, onRemoved } = {}) {
            <label class="mark-edit-field">Tide offset (min)
              <input type="number" step="1" inputmode="numeric" data-loced-tideoffset value="${loc.tideOffset != null ? loc.tideOffset : ""}" placeholder="0"
                title="Positive: this location's tide runs later than the matched station. Negative: earlier." style="${MARK_POPUP_INPUT_STYLE}" /></label>
+           <label class="mark-edit-field">Low-tide widening by depth, base (min)
+             <input type="number" step="1" min="0" inputmode="numeric" data-loced-trough="troughBaseMinutes" value="${loc.troughBaseMinutes != null ? loc.troughBaseMinutes : ""}" placeholder="off"
+               title="Depth-scaled widening for every low (replaces the two low settings below while set): the too-low time moves earlier by this base minus 100 minutes per metre the low dips below the minimum tide height (never below 0, capped at 70). A shallow dip widens more, a deep one less. The low's printed time moves about 30% of that later. Needs a minimum tide height. Leave empty to use the higher/lower-low settings below." style="${MARK_POPUP_INPUT_STYLE}" /></label>
+           <label class="mark-edit-field">Low-tide widening by depth, rise (min)
+             <input type="number" step="1" min="0" inputmode="numeric" data-loced-trough="troughRiseMinutes" value="${loc.troughRiseMinutes != null ? loc.troughRiseMinutes : ""}" placeholder="same as widening"
+               title="How many minutes later the high-enough time moves after each low, when the depth-scaled base is set. Empty = the same as the too-low widening." style="${MARK_POPUP_INPUT_STYLE}" /></label>
            <label class="mark-edit-field">Low-tide window widening, higher low (min)
              <input type="number" step="1" min="0" inputmode="numeric" data-loced-trough="hlwOffset" value="${loc.hlwOffset != null ? loc.hlwOffset : ""}" placeholder="0"
-               title="Widens the too-low / launchable window around a higher-low (HLW) tide: the 'too low' time moves this many minutes earlier and the 'high enough' time this many later; the low's printed time moves about 30% of that later. Needs a minimum tide height." style="${MARK_POPUP_INPUT_STYLE}" /></label>
+               title="Widens the too-low / launchable window around a higher-low (HLW) tide: the 'too low' time moves this many minutes earlier and the 'high enough' time this many later; the low's printed time moves about 30% of that later. Needs a minimum tide height. Ignored while the depth-scaled base above is set." style="${MARK_POPUP_INPUT_STYLE}" /></label>
            <label class="mark-edit-field">Low-tide window widening, lower low (min)
              <input type="number" step="1" min="0" inputmode="numeric" data-loced-trough="llwOffset" value="${loc.llwOffset != null ? loc.llwOffset : ""}" placeholder="0"
-               title="Same as the higher-low setting, for the lower low (LLW) of the day." style="${MARK_POPUP_INPUT_STYLE}" /></label>
+               title="Same as the higher-low setting, for the lower low (LLW) of the day. Ignored while the depth-scaled base above is set." style="${MARK_POPUP_INPUT_STYLE}" /></label>
            <label class="mark-edit-field">High-tide widening, higher high (min)
              <input type="number" step="1" min="0" inputmode="numeric" data-loced-trough="hhwOffset" value="${loc.hhwOffset != null ? loc.hhwOffset : ""}" placeholder="0"
                title="Widens the high-water plateau around the higher high (HHW) of the day: crossings of the minimum tide height just before it move this many minutes earlier and just after it later. The high's own time does not move. Only matters where the minimum tide height is above the middle of the tide leg (a high-water-only launch)." style="${MARK_POPUP_INPUT_STYLE}" /></label>

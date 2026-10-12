@@ -312,6 +312,8 @@ def export_locations_json(locations):
             "lhwOffset": loc.get("lhwOffset"),
             "hlwOffset": loc.get("hlwOffset"),
             "llwOffset": loc.get("llwOffset"),
+            "troughBaseMinutes": loc.get("troughBaseMinutes"),
+            "troughRiseMinutes": loc.get("troughRiseMinutes"),
             "willyweatherId": loc.get("willyweatherId"),
             "willyweatherName": loc.get("willyweatherName"),
             "willyweatherRegion": loc.get("willyweatherRegion"),

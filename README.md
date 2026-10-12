@@ -45,7 +45,7 @@ https://olivermestdagh-sys.github.io/fishingconditions/ is a legacy copy that wi
 - **Data job** (until the Pipeline Worker below takes over): `scripts/fetch_conditions.py` reads the tracked locations from
   the worker, fetches forecasts (locations in parallel), scores them and writes
   `data/conditions.json` (compact JSON). The pages load that file for the graphs.
-- **Tide trough widening**: a location's HLW/LLW offsets (minutes, set in the Map's location editor) push the "too low" / "high enough" edges around a shallow low out by the full offset; the low's printed time moves only 30% of it (rounded). Highs don't move. Details in `docs/lang-lang-trough-widening-spec.md`.
+- **Tide trough widening**: a location's HLW/LLW offsets (minutes, set in the Map's location editor) push the "too low" / "high enough" edges around a shallow low out by the full offset; the low's printed time moves only 30% of it (rounded). Highs don't move. A location can instead set a depth-scaled base (`troughBaseMinutes`, plus an optional `troughRiseMinutes`): each low's widening is the base minus 100 min per metre it dips below the minimum tide height (0 to 70 min), so shallow dips widen more and the HLW/LLW offsets are ignored there. Details in `docs/lang-lang-trough-widening-spec.md`.
 - **Live configuration**: display names, groups, timings, tide offsets etc. are
   read straight from the database at page load (`/api/public/locations`, merged
   by `mergeLiveLocationConfig` in `js/chart-render.js`), so a Settings edit shows up

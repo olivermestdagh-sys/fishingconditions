@@ -79,3 +79,17 @@ The mirrored logic (for highs, using `hhwOffset`/`lhwOffset`) would apply the sa
 - Decide whether these four fields are hardcoded constants or exposed in the locations editor (`locations.html` / `locationsadmin.js`) — likely exposed, consistent with how `tideOffset`/`minTideHeight` already work.
 - No decision yet on what drives the day-to-day magnitude swing (13–100 min) — a single fixed offset will overcorrect on small-range days and undercorrect on large-range ones. Could eventually scale the offset by that day's tidal range (high − low height) rather than using a flat constant, but that's a bigger change — flat constants are the pragmatic first cut.
 - `hhwOffset`/`lhwOffset`/`llwOffset` are placeholders with no supporting data yet — don't tune them until there's logged evidence for an HHW/LHW high or an LLW low, per the original "cheap to loosen later" principle.
+
+
+---
+
+## Depth-scaled widening (added 2026-10-13, supersedes hlwOffset / llwOffset for a location that sets it)
+
+The open question above ("what drives the day-to-day magnitude swing") was answered by twelve logged lows at Lang Lang (5-12 Oct). The too-low edge needs more widening the SHALLOWER the low dips below `minTideHeight` (correlation about -0.74, about -0.88 without the strong-west-wind day 6 Oct); the rise (high-enough) edge showed no depth dependence (about -0.1). HLW/LLW had only been a stand-in for depth. So, per low:
+
+- `depth = max(0, minTideHeight - low height)`
+- **Too-low edge and label:** `W = clamp(troughBaseMinutes - 100 * depth, 0, 70)` minutes (`TROUGH_MINUTES_PER_METRE` = 100, `TROUGH_MAX_MINUTES` = 70 in `js/chart-render.js`, `troughWideningMinutes`). The falling crossing moves W earlier; the printed low moves `round(0.3 * W)` later. The 0 floor means a deep low is never narrowed.
+- **Rise edge:** the rising crossing moves `troughRiseMinutes` later (flat); empty = W.
+- New per-location fields `troughBaseMinutes` / `troughRiseMinutes` (D1 `locations.trough_base_minutes` / `trough_rise_minutes`, editor Tides group). Lang Lang: **80 / 40**. When `troughBaseMinutes` is set, `hlwOffset` / `llwOffset` are ignored for that location (Lang Lang's are cleared); `hhwOffset` / `lhwOffset` are untouched. A location with `troughBaseMinutes` null behaves exactly as before.
+- Ownership of each leg's crossing (low if `minTideHeight` is at/below the leg's height-midpoint, else the high) and the half-a-leg cap are unchanged.
+- Fit behind the numbers: too-low need about 65-77 minus 86-102 min/m x depth (R2 0.55, 0.78 without 6 Oct; leave-one-out error 20 / 14.5 min against 27 for a flat mean); base 80 sits a little above the fits so the unsafe side (under-widening) is avoided. Backtest 5-12 Oct: no too-low edge short by more than 10 min, no rise edge short by more than 19 min. Known limit: days where the real window needed LESS than the model (6 Oct, 10 Oct am, 12 Oct) are over-widened, and a deep low (W 0) still gets the flat rise.

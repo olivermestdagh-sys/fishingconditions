@@ -12,7 +12,7 @@ import hashlib
 import os
 
 SCRIPT_FILES = ("fetch_conditions.py", "observation_archive.py")  # everything that decides the output
-SCRIPT_HASH = "b94bc334041a767dc8d28d385a4bb3534a7509bac1ecf4dc4ed443fcd869790a"
+SCRIPT_HASH = "394085ab386d85a8aed54597df8c928559542fd083afe40656cf92d0d4265f1f"
 
 
 def script_hash(directory):

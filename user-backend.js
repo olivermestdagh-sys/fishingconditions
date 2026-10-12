@@ -881,7 +881,7 @@ async function handleTrackedCollection(request, url, env) {
               ula.time_to_spot, ula.time_from_spot, ula.min_tide_height,
               l.id as location_id, l.name, l.display_name, l.lat, l.lng, l.willyweather_id, l.willyweather_name,
               l.willyweather_region, l.willyweather_state, l.shore, l.tide_offset, l.tide_max_observed,
-              l.hhw_offset, l.lhw_offset, l.hlw_offset, l.llw_offset,
+              l.hhw_offset, l.lhw_offset, l.hlw_offset, l.llw_offset, l.trough_base_minutes, l.trough_rise_minutes,
               l.tidal, l.created_by_user_id,
               t.id as type_id, t.name as type_name, t.behaves_like
        FROM user_location_access ula
@@ -956,8 +956,8 @@ async function handleTrackedCollection(request, url, env) {
       await env.DB.prepare(
         `INSERT INTO locations (id, created_by_user_id, name, display_name, lat, lng, willyweather_id, willyweather_name,
                                  willyweather_region, willyweather_state, shore, tide_offset, tide_max_observed, tidal, created_at,
-                                 hhw_offset, lhw_offset, hlw_offset, llw_offset)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                                 hhw_offset, lhw_offset, hlw_offset, llw_offset, trough_base_minutes, trough_rise_minutes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           locationId,
@@ -984,7 +984,9 @@ async function handleTrackedCollection(request, url, env) {
           body.hhwOffset ?? null,
           body.lhwOffset ?? null,
           body.hlwOffset ?? null,
-          body.llwOffset ?? null
+          body.llwOffset ?? null,
+          body.troughBaseMinutes ?? null,
+          body.troughRiseMinutes ?? null
         )
         .run();
     } else {
@@ -1075,7 +1077,7 @@ async function handleTrackedItem(request, url, env, accessId) {
     // allowed for whoever created it — tracking a location (having an
     // access row) is not the same as owning its base record. An admin
     // reaches this by passing ?userId=<the owner>, same as everywhere else.
-    const placeFields = ["name", "displayName", "lat", "lng", "willyweatherId", "willyweatherName", "willyweatherRegion", "willyweatherState", "shore", "tideOffset", "hhwOffset", "lhwOffset", "hlwOffset", "llwOffset", "tideMaxObserved", "tidal"];
+    const placeFields = ["name", "displayName", "lat", "lng", "willyweatherId", "willyweatherName", "willyweatherRegion", "willyweatherState", "shore", "tideOffset", "hhwOffset", "lhwOffset", "hlwOffset", "llwOffset", "troughBaseMinutes", "troughRiseMinutes", "tideMaxObserved", "tidal"];
     const wantsPlaceEdit = placeFields.some((f) => body[f] !== undefined);
     if (wantsPlaceEdit) {
       if (existing.location_owner !== uid) {
@@ -1098,13 +1100,15 @@ async function handleTrackedItem(request, url, env, accessId) {
         lhwOffset: body.lhwOffset !== undefined ? body.lhwOffset : place.lhw_offset,
         hlwOffset: body.hlwOffset !== undefined ? body.hlwOffset : place.hlw_offset,
         llwOffset: body.llwOffset !== undefined ? body.llwOffset : place.llw_offset,
+        troughBaseMinutes: body.troughBaseMinutes !== undefined ? body.troughBaseMinutes : place.trough_base_minutes,
+        troughRiseMinutes: body.troughRiseMinutes !== undefined ? body.troughRiseMinutes : place.trough_rise_minutes,
         tideMaxObserved: body.tideMaxObserved ?? place.tide_max_observed,
         tidal: body.tidal !== undefined ? (body.tidal ? 1 : 0) : place.tidal,
       };
       await env.DB.prepare(
         `UPDATE locations SET name=?, display_name=?, lat=?, lng=?, willyweather_id=?, willyweather_name=?, willyweather_region=?,
                                willyweather_state=?, shore=?, tide_offset=?, tide_max_observed=?, tidal=?,
-                               hhw_offset=?, lhw_offset=?, hlw_offset=?, llw_offset=?
+                               hhw_offset=?, lhw_offset=?, hlw_offset=?, llw_offset=?, trough_base_minutes=?, trough_rise_minutes=?
          WHERE id = ?`
       )
         .bind(
@@ -1124,6 +1128,8 @@ async function handleTrackedItem(request, url, env, accessId) {
           merged.lhwOffset,
           merged.hlwOffset,
           merged.llwOffset,
+          merged.troughBaseMinutes,
+          merged.troughRiseMinutes,
           existing.location_id
         )
         .run();
@@ -1170,7 +1176,7 @@ async function fetchOneTracked(env, accessId) {
             ula.time_to_spot, ula.time_from_spot, ula.min_tide_height,
             l.id as location_id, l.name, l.display_name, l.lat, l.lng, l.willyweather_id, l.willyweather_name,
             l.willyweather_region, l.willyweather_state, l.shore, l.tide_offset, l.tide_max_observed,
-            l.hhw_offset, l.lhw_offset, l.hlw_offset, l.llw_offset,
+            l.hhw_offset, l.lhw_offset, l.hlw_offset, l.llw_offset, l.trough_base_minutes, l.trough_rise_minutes,
             l.tidal, l.created_by_user_id,
             t.id as type_id, t.name as type_name, t.behaves_like
      FROM user_location_access ula
@@ -1210,6 +1216,8 @@ function rowToTracked(row, groups) {
       lhwOffset: row.lhw_offset ?? null,
       hlwOffset: row.hlw_offset ?? null,
       llwOffset: row.llw_offset ?? null,
+      troughBaseMinutes: row.trough_base_minutes ?? null,
+      troughRiseMinutes: row.trough_rise_minutes ?? null,
       tideMaxObserved: row.tide_max_observed,
       tidal: !!row.tidal,
       createdByUserId: row.created_by_user_id,
@@ -2741,6 +2749,8 @@ async function buildLocationList(env) {
       lhwOffset: loc.lhw_offset ?? null,
       hlwOffset: loc.hlw_offset ?? null,
       llwOffset: loc.llw_offset ?? null,
+      troughBaseMinutes: loc.trough_base_minutes ?? null,
+      troughRiseMinutes: loc.trough_rise_minutes ?? null,
       willyweatherId: loc.willyweather_id,
       willyweatherName: loc.willyweather_name,
       willyweatherRegion: loc.willyweather_region,
