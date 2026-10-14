@@ -210,6 +210,7 @@ class FakeDB:
     def __init__(self):
         self.conn = sqlite3.connect(":memory:")
         self.conn.execute("CREATE TABLE pipeline_lock (id TEXT PRIMARY KEY, run_id TEXT NOT NULL DEFAULT '', locked_until INTEGER NOT NULL DEFAULT 0)")
+        self.conn.execute("CREATE TABLE pipeline_budget (day TEXT PRIMARY KEY, attempts INTEGER NOT NULL DEFAULT 0, calls INTEGER NOT NULL DEFAULT 0, last_attempt_ms INTEGER NOT NULL DEFAULT 0)")
 
     def prepare(self, sql):
         db = self

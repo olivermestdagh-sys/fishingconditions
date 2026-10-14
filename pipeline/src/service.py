@@ -20,6 +20,7 @@ import json
 import time
 
 import alerts
+import guard
 import locking
 import plan
 import publish
@@ -57,7 +58,7 @@ class PipelineError(Exception):
 
 class Config:
     def __init__(self, *, api_key, pipeline_url, pipeline_token, obs_prune="dry", forecast_days=6, keep_runs=8,
-                 stale_hours=alerts.DEFAULT_STALE_HOURS, concurrency=6, alert_webhook=None, willyweather_budget=100, deadline_s=480):
+                 stale_hours=alerts.DEFAULT_STALE_HOURS, concurrency=6, alert_webhook=None, willyweather_budget=100, deadline_s=480, limits=None):
         self.api_key, self.pipeline_url, self.pipeline_token = api_key, pipeline_url.rstrip("/"), pipeline_token
         self.obs_prune, self.forecast_days, self.keep_runs = obs_prune, forecast_days, keep_runs
         self.stale_hours, self.concurrency, self.alert_webhook = stale_hours, concurrency, alert_webhook
@@ -65,6 +66,8 @@ class Config:
         self.willyweather_budget = willyweather_budget
         # A run takes about 20-40 s; 8 minutes is far past anything normal and well inside the 15-minute lock lease.
         self.deadline_s = deadline_s
+        # The run-due guard (guard.py): daily caps, minimum interval between attempts, "is a run due?". None = guard.DEFAULTS.
+        self.limits = dict(guard.DEFAULTS, **(limits or {}))
 
 
 def public_error(e):
@@ -137,9 +140,24 @@ async def run_pipeline(cfg, net, store, db, now, trigger, *, run_id=None, frozen
     t0 = clock()
     run_id = run_id or publish.make_run_id(now)
     now_ms = int(now.timestamp() * 1000)
+    counted = False  # this live run was recorded in today's budget (guard.begin_attempt), so its requests are added at the end
     if db is not None and not await locking.acquire(db, run_id, now_ms, lock_id=lock_id):
         log("pipeline: another run holds the lock, skipping")
         return {"ok": False, "skipped": "locked", "runId": run_id}
+    if replay is None and db is not None:
+        # With the lock held but before anything is fetched: may a run start now at all? (daily caps, spacing, "is one due?").
+        # A refusal writes nothing and frees the lock; an attempt that only found the lock taken never counts against the budget.
+        try:
+            latest_pre = await _json(store, "latest.json")
+            ok_now, why = await guard.begin_attempt(db, trigger, now, guard.parse_iso_ms((latest_pre or {}).get("generatedAt")), cfg.limits, force=force)
+        except Exception:
+            await locking.release(db, run_id, lock_id=lock_id)  # a broken guard must not leave the lock held for its whole lease
+            raise
+        if not ok_now:
+            await locking.release(db, run_id, lock_id=lock_id)
+            log("pipeline: run refused by the guard: " + why)
+            return {"ok": False, "skipped": "guard", "reason": why, "runId": run_id}
+        counted = True
     summary = {"runId": run_id, "trigger": trigger, "ok": False, "published": False}
     result = None  # the script's output folder (runner.run); removed in the `finally` below whatever happens
     net.deadline = t0 + cfg.deadline_s
@@ -243,6 +261,11 @@ async def run_pipeline(cfg, net, store, db, now, trigger, *, run_id=None, frozen
         summary["error"] = public_error(e)
         log("pipeline: run failed: " + summary["error"])
     finally:
+        if counted:
+            try:
+                await guard.record_calls(db, now, (net.stats.by_host.get("willyweather") or {}).get("calls", 0))
+            except Exception as e:  # noqa: BLE001
+                log(f"pipeline: could not record the request count: {type(e).__name__}")
         runner.cleanup(result)  # ~7 MB of every owner's output: never left behind (in the Worker it is memory, not just disk)
         result = None
         gc.collect()

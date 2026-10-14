@@ -70,6 +70,8 @@ def _config(env):
         forecast_days=int(_var(env, "FORECAST_DAYS", "6")), keep_runs=int(_var(env, "KEEP_RUNS", "8")),
         stale_hours=float(_var(env, "STALE_HOURS", "7")), alert_webhook=_var(env, "ALERT_WEBHOOK_URL"),
         willyweather_budget=int(_var(env, "WILLYWEATHER_BUDGET", "100")), deadline_s=int(_var(env, "RUN_DEADLINE_S", "480")),
+        limits={k: int(_var(env, v)) for k, v in (("daily_call_cap", "DAILY_CALL_CAP"), ("max_attempts_per_day", "MAX_ATTEMPTS_PER_DAY"),
+                                                  ("min_interval_min", "MIN_INTERVAL_MIN"), ("due_after_min", "DUE_AFTER_MIN")) if _var(env, v) is not None},
     )
 
 

@@ -636,3 +636,11 @@ CREATE TABLE IF NOT EXISTS pipeline_lock (
   run_id TEXT NOT NULL DEFAULT '',
   locked_until INTEGER NOT NULL DEFAULT 0   -- ms epoch; the lease, so a crashed run never blocks the next for long
 );
+
+-- The production pipeline's run-due guard (pipeline/src/guard.py): one row per UTC day. Manual CREATE TABLE on D1 like pipeline_lock.
+CREATE TABLE IF NOT EXISTS pipeline_budget (
+  day TEXT PRIMARY KEY,                           -- YYYYMMDD (UTC)
+  attempts INTEGER NOT NULL DEFAULT 0,            -- runs that started (recorded BEFORE the run, so a crash still counts)
+  calls INTEGER NOT NULL DEFAULT 0,               -- WillyWeather requests those runs made (retries included)
+  last_attempt_ms INTEGER NOT NULL DEFAULT 0      -- when the last attempt started
+);
