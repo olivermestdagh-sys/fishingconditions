@@ -61,6 +61,12 @@ function hashStringToHue(str) {
 const MARK_NO_VALUE_STYLE = { color: "#374151", fillColor: "#9ca3af", radius: 4, weight: 1 };
 
 function markStyleFor(mark, state) {
+  const style = markBaseStyleFor(mark, state);
+  const scale = (state && state.radiusScale) || 1; // zoom scaling when clustering is off (installMarkerLayer, js/marks-layer.js)
+  return scale === 1 ? style : { ...style, radius: Math.max(1.5, style.radius * scale) };
+}
+
+function markBaseStyleFor(mark, state) {
   // A Session Start/End's species are its TARGETS, not what it is: coloured by species, every session aimed at (say) Whiting
   // would wear Whiting's colour and the Start/End types would be indistinguishable. While colouring by Species they take
   // their Mark Type's colour instead (Session Start / Session End in Settings); any other Colour by field applies as usual.
@@ -2188,4 +2194,4 @@ function wireMarkPopupButtons(popupEl, marker, mark, markListsCache, options = {
     });
   }
 }
-
+

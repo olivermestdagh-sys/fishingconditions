@@ -398,43 +398,9 @@ async function loadAndRenderMarks(map, state) {
   // and flags the old state as discarded — nothing left to draw onto.
   if (state._discarded) return;
 
-  // Every mark marker lives inside this ONE cluster group, never added to
-  // `map` directly — real-world mark counts (a couple thousand, all real
-  // fishing spots) cluster heavily at anything but the closest zoom, and
-  // without this, overlapping pins in the same popular spot would be
-  // impossible to see or click individually. See createMarkClusterIcon
-  // below for the numbered-circle styling, and zoomToShowLayer's use
-  // throughout this file for how a SPECIFIC mark (e.g. one just added)
-  // still gets reliably shown un-clustered when that's what's needed.
-  // chunkedLoading spreads the initial add of a couple thousand markers
-  // over several animation frames instead of doing it all in one go,
-  // so the tab doesn't visibly freeze while this first render happens.
-  state.markerLayer = L.markerClusterGroup({
-    chunkedLoading: true,
-    iconCreateFunction: createMarkClusterIcon,
-    maxClusterRadius: 30, // px; plugin default is 80, which grouped marks too eagerly
-    // No disableClusteringAtZoom here: tried at 16 and marks vanished on zoom-in
-    // (this layer holds canvas CircleMarker/Path shapes, not plain L.Markers).
-  });
-  map.addLayer(state.markerLayer);
-  attachClusterBreakdownTooltip(state.markerLayer, state);
-
-  // Hovering a cluster lists the marks inside it. Reuses each child's own
-  // already-bound (and already-escaped) tooltip text, so it stays in step
-  // with edits — see the unbindTooltip/bindTooltip calls on mark edits.
-  const MAX_CLUSTER_TOOLTIP_ROWS = 15;
-  state.markerLayer.on("clustermouseover", (e) => {
-    const cluster = e.layer;
-    const rows = cluster.getAllChildMarkers()
-      .map((child) => child.getTooltip && child.getTooltip() && child.getTooltip().getContent())
-      .filter(Boolean)
-      .sort();
-    const shown = rows.slice(0, MAX_CLUSTER_TOOLTIP_ROWS).map((r) => `<div>${r}</div>`).join("");
-    const extra = rows.length > MAX_CLUSTER_TOOLTIP_ROWS ? `<div><em>+${rows.length - MAX_CLUSTER_TOOLTIP_ROWS} more</em></div>` : "";
-    cluster.unbindTooltip();
-    cluster.bindTooltip(shown + extra, { direction: "top", offset: [0, -14] }).openTooltip();
-  });
-  state.markerLayer.on("clustermouseout", (e) => e.layer.closeTooltip());
+  // Every mark marker lives inside ONE layer (state.markerLayer), never added to `map` directly: a cluster group by
+  // default, or a flat group when clustering is switched off (installMarkerLayer below builds either).
+  installMarkerLayer(map, state);
 
   const renderer = L.canvas({ padding: 0.5 });
   state.canvasRenderer = renderer; // reused by startNewMarkEntry below for a freshly-created mark, so every shape on this map — loaded or brand new — draws on the same Canvas renderer (see getDiamondMarkerClass/getCrossMarkerClass's own comment on why that's required)
@@ -537,7 +503,7 @@ async function loadAndRenderMarks(map, state) {
   }
   state.spiderfyOverlayRenderer = L.svg({ pane: "spiderfyOverlayPane" });
   state.spiderfyOverlayLayer = L.layerGroup().addTo(map);
-  state.markerLayer.on("spiderfied", (e) => {
+  state.onSpiderfied = (e) => {
     state.spiderfyOverlayLayer.clearLayers();
     for (const spiderfiedMarker of e.markers) {
       let markId = null;
@@ -594,10 +560,10 @@ async function loadAndRenderMarks(map, state) {
     // which isn't reliable enough to depend on for "is this actually
     // clickable" to hold every time.
     state.spiderfyOverlayLayer.eachLayer((l) => l.bringToFront());
-  });
-  state.markerLayer.on("unspiderfied", () => {
+  };
+  state.onUnspiderfied = () => {
     state.spiderfyOverlayLayer.clearLayers();
-  });
+  };
 
   // One delegated listener for the whole map rather than one per marker —
   // same reasoning as the canvas renderer above: with a couple thousand
@@ -637,6 +603,7 @@ async function loadAndRenderMarks(map, state) {
     detachDetailPanel();
   });
 
+  refreshMarkWebs(map, state);
   initMarkControls(map, state);
   initMarkSelectionBoxDrag(map, state);
   if (typeof globalThis.tripMapRedraw === "function") globalThis.tripMapRedraw(); // trip catch pins wear their mark's shape/colour, known only now (js/trip-map.js)
@@ -799,4 +766,128 @@ function showMarkerOnceVisible(markerLayer, marker, callback) {
   };
   setTimeout(checkVisible, 150); // give the zoom/spiderfy animation a moment to actually start before the first check
 }
-
+
+// --- Clustering on/off, zoom-scaled marks and shared-spot webs ---------------
+
+/** Mark size at a zoom level, as a multiple of its normal radius (flat/no-clustering mode only): small when zoomed out so
+ * thousands of marks stay readable, growing as you zoom in. 1 at zoom 12. Tune here. */
+function markZoomScale(zoom) {
+  return Math.min(2, Math.max(0.3, 0.3 + (zoom - 6) * 0.12));
+}
+const MARK_WEB_MIN_ZOOM = 16; // marks sharing one spot fan out on a web from this zoom up
+
+/** Builds the mark layer for the current state.clusterMarks (a cluster group, or a flat group), moves every mark across
+ * from the previous layer if there was one, and (re)registers the cluster-only listeners. Safe to call again to toggle. */
+function installMarkerLayer(map, state) {
+  const clustered = state.clusterMarks !== false;
+  const old = state.markerLayer;
+  const carried = [];
+  if (old) {
+    state.markersById.forEach((marker) => { if (old.hasLayer(marker)) carried.push(marker); });
+    old.clearLayers();
+    map.removeLayer(old);
+  }
+  state.map = map;
+  state.layerClustered = clustered;
+  state.radiusScale = clustered ? 1 : markZoomScale(map.getZoom());
+
+  let layer;
+  if (clustered) {
+    // chunkedLoading spreads the initial add of a couple thousand markers over several animation frames.
+    layer = L.markerClusterGroup({
+      chunkedLoading: true,
+      iconCreateFunction: createMarkClusterIcon,
+      maxClusterRadius: 30, // px; plugin default is 80, which grouped marks too eagerly
+      // No disableClusteringAtZoom here: tried at 16 and marks vanished on zoom-in
+      // (this layer holds canvas CircleMarker/Path shapes, not plain L.Markers).
+    });
+  } else {
+    layer = L.featureGroup();
+    layer.zoomToShowLayer = (marker, callback) => { if (callback) callback(); }; // nothing is ever hidden behind a cluster
+  }
+  state.markerLayer = layer;
+  map.addLayer(layer);
+  for (const marker of carried) layer.addLayer(marker);
+
+  if (clustered) {
+    attachClusterBreakdownTooltip(layer, state);
+    // Hovering a cluster lists the marks inside it. Reuses each child's own already-bound (and already-escaped) tooltip
+    // text, so it stays in step with edits.
+    const MAX_CLUSTER_TOOLTIP_ROWS = 15;
+    layer.on("clustermouseover", (e) => {
+      const cluster = e.layer;
+      const rows = cluster.getAllChildMarkers()
+        .map((child) => child.getTooltip && child.getTooltip() && child.getTooltip().getContent())
+        .filter(Boolean)
+        .sort();
+      const shown = rows.slice(0, MAX_CLUSTER_TOOLTIP_ROWS).map((r) => `<div>${r}</div>`).join("");
+      const extra = rows.length > MAX_CLUSTER_TOOLTIP_ROWS ? `<div><em>+${rows.length - MAX_CLUSTER_TOOLTIP_ROWS} more</em></div>` : "";
+      cluster.unbindTooltip();
+      cluster.bindTooltip(shown + extra, { direction: "top", offset: [0, -14] }).openTooltip();
+    });
+    layer.on("clustermouseout", (e) => e.layer.closeTooltip());
+    layer.on("spiderfied", (e) => state.onSpiderfied && state.onSpiderfied(e));
+    layer.on("unspiderfied", () => state.onUnspiderfied && state.onUnspiderfied());
+    attachClusterSelectionHandlers(map, state, layer);
+  }
+
+  if (state._zoomScaleHandler) map.off("zoomend", state._zoomScaleHandler);
+  state._zoomScaleHandler = () => updateMarkZoomScale(map, state);
+  map.on("zoomend", state._zoomScaleHandler);
+  if (old) updateMarkZoomScale(map, state);
+}
+
+/** Resizes every mark for the current zoom (flat mode; back to normal size when clustered), then redraws the webs. */
+function updateMarkZoomScale(map, state) {
+  state.radiusScale = state.layerClustered ? 1 : markZoomScale(map.getZoom());
+  state.marksById.forEach((mark, id) => {
+    const marker = state.markersById.get(id);
+    if (!marker || state.selectedMarkIds.has(id)) return; // a selected mark keeps its highlight size
+    marker.setRadius(markStyleFor(mark, state).radius);
+  });
+  refreshMarkWebs(map, state);
+}
+
+/** Flat mode, zoomed in: marks sharing one spot (same coordinates to ~1 m) are moved out onto a ring around it, each joined
+ * to the true point by a thin spoke. Everywhere else every mark sits on its real position. */
+function refreshMarkWebs(map, state) {
+  if (!state.webLayer) {
+    if (!map.getPane("markWebPane")) {
+      map.createPane("markWebPane");
+      map.getPane("markWebPane").style.zIndex = 399; // under the marks, over the tiles
+    }
+    state.webRenderer = L.svg({ pane: "markWebPane" });
+    state.webLayer = L.layerGroup().addTo(map);
+  }
+  state.webLayer.clearLayers();
+  const web = !state.layerClustered && map.getZoom() >= MARK_WEB_MIN_ZOOM;
+  const groups = new Map();
+  state.marksById.forEach((mark, id) => {
+    const marker = state.markersById.get(id);
+    if (!marker) return;
+    if (marker._webMoved) {
+      marker.setLatLng([mark.lat, mark.lng]);
+      marker._webMoved = false;
+    }
+    if (!web || mark.lat == null || mark.lng == null || !state.markerLayer.hasLayer(marker)) return;
+    const key = `${mark.lat.toFixed(5)},${mark.lng.toFixed(5)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ mark, marker });
+  });
+  const zoom = map.getZoom();
+  for (const members of groups.values()) {
+    if (members.length < 2) continue;
+    const centre = L.latLng(members[0].mark.lat, members[0].mark.lng);
+    const c = map.project(centre, zoom);
+    const rad = members.reduce((m, x) => Math.max(m, x.marker.getRadius()), 0);
+    const ring = Math.max(16, (members.length * (2 * rad + 4)) / (2 * Math.PI));
+    L.circleMarker(centre, { renderer: state.webRenderer, radius: 2.5, color: "#374151", weight: 1, fillColor: "#374151", fillOpacity: 1, interactive: false }).addTo(state.webLayer);
+    members.forEach(({ marker }, i) => {
+      const angle = -Math.PI / 2 + (2 * Math.PI * i) / members.length;
+      const to = map.unproject(L.point(c.x + ring * Math.cos(angle), c.y + ring * Math.sin(angle)), zoom);
+      L.polyline([centre, to], { renderer: state.webRenderer, color: "#374151", weight: 1.2, opacity: 0.7, interactive: false }).addTo(state.webLayer);
+      marker.setLatLng(to);
+      marker._webMoved = true;
+    });
+  }
+}

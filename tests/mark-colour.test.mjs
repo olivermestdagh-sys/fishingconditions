@@ -17,6 +17,7 @@ const code = [
   grab(core, /function hashStringToHue[\s\S]*?\n}\n/),
   grab(core, /const MARK_NO_VALUE_STYLE[^\n]*\n/),
   grab(core, /function markStyleFor[\s\S]*?\n}\n/),
+  grab(core, /function markBaseStyleFor[\s\S]*?\n}\n/),
   grab(layer, /function resolveMarkColorFormat[\s\S]*?\n}\n/),
   grab(layer, /function resolveColorFormatForFieldValue[\s\S]*?\n}\n/),
   "const MARK_LIST_FIELDS = [{ key: 'species', label: 'Species' }, { key: 'type', label: 'Mark Type' }, { key: 'bait', label: 'Bait' }];",

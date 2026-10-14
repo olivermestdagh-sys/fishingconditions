@@ -44,6 +44,15 @@ function loadMarkViewSettings() {
   }
 }
 
+// Clustering on/off is per device (like the base map), not synced.
+const MARK_CLUSTER_PREF_KEY = "goodConditionsClusterMarks";
+function loadClusterMarksPref() {
+  try { return localStorage.getItem(MARK_CLUSTER_PREF_KEY) !== "0"; } catch { return true; }
+}
+function saveClusterMarksPref(on) {
+  try { localStorage.setItem(MARK_CLUSTER_PREF_KEY, on ? "1" : "0"); } catch { /* not remembered, harmless */ }
+}
+
 /** Mirror of loadMarkViewSettings — Sets serialized back to plain arrays for
  * JSON.stringify, which doesn't know how to handle a Set on its own. */
 function saveMarkViewSettings(state) {
@@ -126,6 +135,7 @@ function getVisibleMarks(state) {
  * the modal, or an active-filter chip is removed directly.
  */
 function applyMarkFiltersAndGrouping(map, state) {
+  if (state.markerLayer && state.layerClustered !== (state.clusterMarks !== false)) installMarkerLayer(map, state); // the Colour by dialog's clustering toggle
   const layer = state.markerLayer || map; // markerLayer should always be set by the time this runs; falling back to `map` only as a defensive no-crash guard
   state.marksById.forEach((mark, id) => {
     const marker = state.markersById.get(id);
@@ -142,6 +152,7 @@ function applyMarkFiltersAndGrouping(map, state) {
       layer.removeLayer(marker);
     }
   });
+  refreshMarkWebs(map, state);
 }
 
 /**
@@ -320,13 +331,19 @@ function showMarkFilterModal(state, mode = "filter") {
       return `<span class="loc-chip mark-colour-by-chip" data-colour-by="${key}" aria-pressed="${on}" style="cursor:pointer;${on ? chipStyleFor("range") : ""}">${label}</span>`;
     }).join("")}</div>`;
 
+    const clusterHtml = `<p class="footnote" style="margin:0 0 6px;">Clustering. Off shows every mark, sized to the zoom; marks sharing one spot fan out on a web when zoomed in.</p>
+      <div style="display:flex;gap:6px;margin-bottom:12px;">${[[true, "On"], [false, "Off"]].map(([v, label]) => {
+        const on = (state.clusterMarks !== false) === v;
+        return `<span class="loc-chip mark-cluster-chip" data-cluster="${v}" aria-pressed="${on}" style="cursor:pointer;${on ? chipStyleFor("range") : ""}">${label}</span>`;
+      }).join("")}</div>`;
+
     overlay.innerHTML = `
       <div class="ww-candidate-dialog">
         <button type="button" class="ww-candidate-close" aria-label="Close">&times;</button>
         <h3 style="margin:0 0 8px;">${colourOnly ? "Colour marks by" : "Filter marks"}</h3>
         ${
           colourOnly
-            ? `<p class="footnote" style="margin:0 0 10px;">Pick the field the marks are coloured by.</p>${colourByHtml}`
+            ? `<p class="footnote" style="margin:0 0 10px;">Pick the field the marks are coloured by.</p>${colourByHtml}${clusterHtml}`
             : `<p class="footnote" style="margin:0 0 12px;">Filters: tap once to require it, tap again to exclude it, tap again to clear.</p>
         ${sectionsHtml || `<p class="footnote" style="margin:0;">No pick-list options set up yet — add some on the Settings tab first.</p>`}`
         }
@@ -379,6 +396,18 @@ function showMarkFilterModal(state, mode = "filter") {
       chip.addEventListener("click", () => {
         state.groupByKey = chip.dataset.colourBy;
         overlay.querySelectorAll("[data-colour-by]").forEach((c) => {
+          const on = c === chip;
+          c.setAttribute("aria-pressed", String(on));
+          c.style.cssText = `cursor:pointer;${on ? chipStyleFor("range") : ""}`;
+        });
+      });
+    });
+
+    overlay.querySelectorAll("[data-cluster]").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        state.clusterMarks = chip.dataset.cluster === "true";
+        saveClusterMarksPref(state.clusterMarks);
+        overlay.querySelectorAll("[data-cluster]").forEach((c) => {
           const on = c === chip;
           c.setAttribute("aria-pressed", String(on));
           c.style.cssText = `cursor:pointer;${on ? chipStyleFor("range") : ""}`;
@@ -661,19 +690,24 @@ function initMarkSelectionBoxDrag(map, state) {
    * handler below has used them, never left off longer than that one
    * click needs.
    */
+}
+
+/** The Ctrl+click-a-cluster handlers (see the long comment in initMarkSelectionBoxDrag's history: they switch the cluster's own
+ * zoom/spiderfy options off for that one click). Registered on whichever cluster layer is current; a flat layer has no clusters. */
+function attachClusterSelectionHandlers(map, state, layer) {
   let clusterZoomOptionsBackup = null;
-  state.markerLayer.on("clustermousedown", (e) => {
+  layer.on("clustermousedown", (e) => {
     if (!isSelectModifierKey(e.originalEvent)) return;
     clusterZoomOptionsBackup = {
-      zoomToBoundsOnClick: state.markerLayer.options.zoomToBoundsOnClick,
-      spiderfyOnMaxZoom: state.markerLayer.options.spiderfyOnMaxZoom,
-      spiderfyOnEveryZoom: state.markerLayer.options.spiderfyOnEveryZoom,
+      zoomToBoundsOnClick: layer.options.zoomToBoundsOnClick,
+      spiderfyOnMaxZoom: layer.options.spiderfyOnMaxZoom,
+      spiderfyOnEveryZoom: layer.options.spiderfyOnEveryZoom,
     };
-    state.markerLayer.options.zoomToBoundsOnClick = false;
-    state.markerLayer.options.spiderfyOnMaxZoom = false;
-    state.markerLayer.options.spiderfyOnEveryZoom = false;
+    layer.options.zoomToBoundsOnClick = false;
+    layer.options.spiderfyOnMaxZoom = false;
+    layer.options.spiderfyOnEveryZoom = false;
   });
-  state.markerLayer.on("clusterclick", (e) => {
+  layer.on("clusterclick", (e) => {
     if (!isSelectModifierKey(e.originalEvent)) return;
     L.DomEvent.stop(e);
     for (const marker of e.layer.getAllChildMarkers()) {
@@ -681,9 +715,9 @@ function initMarkSelectionBoxDrag(map, state) {
     }
     renderSelectionPanel(map, state);
     if (clusterZoomOptionsBackup) {
-      state.markerLayer.options.zoomToBoundsOnClick = clusterZoomOptionsBackup.zoomToBoundsOnClick;
-      state.markerLayer.options.spiderfyOnMaxZoom = clusterZoomOptionsBackup.spiderfyOnMaxZoom;
-      state.markerLayer.options.spiderfyOnEveryZoom = clusterZoomOptionsBackup.spiderfyOnEveryZoom;
+      layer.options.zoomToBoundsOnClick = clusterZoomOptionsBackup.zoomToBoundsOnClick;
+      layer.options.spiderfyOnMaxZoom = clusterZoomOptionsBackup.spiderfyOnMaxZoom;
+      layer.options.spiderfyOnEveryZoom = clusterZoomOptionsBackup.spiderfyOnEveryZoom;
       clusterZoomOptionsBackup = null;
     }
   });
@@ -1045,7 +1079,7 @@ async function handleBulkEditSave(map, state) {
  */
 function createMarkLayerState() {
   const saved = loadMarkViewSettings();
-  return { marksById: new Map(), markersById: new Map(), markLists: [], groupByKey: saved.groupByKey, filters: saved.filters, canvasRenderer: null, highlightedSessionGroupId: null, selectedMarkIds: new Set() };
+  return { marksById: new Map(), markersById: new Map(), markLists: [], groupByKey: saved.groupByKey, filters: saved.filters, canvasRenderer: null, highlightedSessionGroupId: null, selectedMarkIds: new Set(), clusterMarks: loadClusterMarksPref(), radiusScale: 1 };
 }
 
 /**
@@ -1405,4 +1439,4 @@ async function handleMapClickForMarks(map, lat, lng, state, onLocationPreviewCli
   startNewMarkEntry(map, lat, lng, state, defaults);
 }
 
-
+
