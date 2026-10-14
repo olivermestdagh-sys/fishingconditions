@@ -392,9 +392,9 @@ async function init() {
   computedSessions = loadComputedSessions();
 
   try {
-    const res = await fetch(DATA_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+    const loaded = await loadSiteData("conditions", DATA_URL);
+    const data = loaded.json;
+    showStaleDataBanner(loaded.generatedAt);
     allRows = data.rows.map((r) => ({ ...r, _t: parseNaive(r.dateTime) }));
     allLocations = data.locations || [];
     sunTimesData = data.sunTimes || {};

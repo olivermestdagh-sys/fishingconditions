@@ -38,9 +38,7 @@ async function loadTideOffsets(allLocations) {
     // from origin — the same fix already used elsewhere on this site for
     // this exact class of problem (see the Tide Offset per-row field's
     // own frontend-interpolation notes).
-    const res = await fetch(`config/locations.json?_=${Date.now()}`, { cache: "no-store" });
-    if (!res.ok) return;
-    const configLocations = await res.json();
+    const configLocations = (await loadSiteData("locations", "config/locations.json")).json;
     const offsetByName = new Map(configLocations.map((l) => [l.name, l.tideOffset]));
     const configByName = new Map(configLocations.map((l) => [l.name, l]));
     for (const loc of allLocations) {

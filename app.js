@@ -51,9 +51,9 @@ function locationKey(name, type) {
 async function init() {
   await Prefs.load(); // a signed-in user's saved settings (js/prefs.js); the device's own values when signed out or offline
   try {
-    const res = await fetch(DATA_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    state.data = await res.json();
+    const loaded = await loadSiteData("conditions", DATA_URL);
+    state.data = loaded.json;
+    showStaleDataBanner(loaded.generatedAt);
   } catch (err) {
     document.getElementById("updated").textContent = "Could not load data — has the site run its first update yet?";
     console.error(err);

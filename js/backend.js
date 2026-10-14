@@ -84,6 +84,67 @@ const USER_BACKEND_URL =
     ? "https://api.fish2catch.app"
     : "https://api.yepyepyep.app";
 
+// --- Published data (the conditions + locations files) --------------------------------------------------------
+// The data job publishes to a public bucket served at DATA_BASE_URL: latest.json is the only mutable pointer
+// ({runId, generatedAt, conditions, locations, graphIndex, manifest}, each a path under the host), and the run
+// files it names are immutable. Until the cutover the site still reads the copies committed to git, so this is OFF
+// (USE_PUBLISHED_DATA) unless a page is opened with ?data=bucket (and ?data=git forces git); with it on, any bucket
+// problem falls back to the git file, so the bucket being empty or down can't blank the site.
+const DATA_BASE_URL = "https://data.fish2catch.app";
+const USE_PUBLISHED_DATA = false; // flipped to true at cutover (stage 5), once the bucket is the source of truth
+const DATA_STALE_HOURS = 7; // two missed 3-hourly runs: the same threshold the pipeline's watchdog uses
+
+function publishedDataWanted() {
+  let override = null;
+  try {
+    override = new URLSearchParams(window.location.search).get("data");
+  } catch {}
+  if (override === "bucket") return true;
+  if (override === "git") return false;
+  return USE_PUBLISHED_DATA;
+}
+
+/** Loads one published file. kind: "conditions" | "locations"; gitPath: the committed copy ("data/conditions.json").
+ * Resolves {json, source: "bucket"|"git", generatedAt: ISO string|null}; throws only if the git fallback fails too. */
+async function loadSiteData(kind, gitPath) {
+  if (publishedDataWanted()) {
+    try {
+      const ptrRes = await fetch(`${DATA_BASE_URL}/latest.json?_=${Date.now()}`, { cache: "no-store" });
+      if (ptrRes.ok) {
+        const ptr = await ptrRes.json();
+        if (ptr && typeof ptr[kind] === "string" && !ptr[kind].startsWith("/") && !ptr[kind].includes("..")) {
+          const res = await fetch(`${DATA_BASE_URL}/${ptr[kind]}`); // immutable per run: the browser/CDN may cache it
+          if (res.ok) return { json: await res.json(), source: "bucket", generatedAt: ptr.generatedAt || null };
+        }
+      }
+    } catch (err) {
+      console.error("Published data unavailable, using the committed copy:", err);
+    }
+  }
+  const res = await fetch(`${gitPath}?_=${Date.now()}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  return { json, source: "git", generatedAt: (json && !Array.isArray(json) && json.generatedAt) || null };
+}
+
+/** Hours since an ISO time (null when unknown). */
+function dataAgeHours(generatedAt, now = Date.now()) {
+  const t = Date.parse(generatedAt || "");
+  return Number.isFinite(t) ? (now - t) / 3600000 : null;
+}
+
+/** A thin notice at the top of the page when the data is older than DATA_STALE_HOURS (the 3-hourly job has stalled). */
+function showStaleDataBanner(generatedAt) {
+  const age = dataAgeHours(generatedAt);
+  if (age == null || age <= DATA_STALE_HOURS || document.getElementById("staleDataBanner")) return;
+  const bar = document.createElement("div");
+  bar.id = "staleDataBanner";
+  bar.setAttribute("role", "status");
+  bar.style.cssText = "background:#fff3cd;color:#5c4400;padding:6px 12px;font-size:0.85rem;text-align:center;";
+  bar.textContent = `Conditions data is ${Math.round(age)} hours old - the automatic update may have stopped.`;
+  document.body.insertBefore(bar, document.body.firstChild);
+}
+
 // --- Sign-in that survives blocked third-party cookies ------------------------------------------------------
 // The Worker's session cookie belongs to a different address from this site, so phone browsers increasingly
 // refuse to send it on the site's own requests — signing in "worked" but the next page saw nobody signed in.

@@ -181,8 +181,7 @@ async function loadTrackedLocationsForLookup() {
     console.error("Live locations unavailable, falling back to config/locations.json:", err);
   }
   try {
-    const res = await fetch(`config/locations.json?_=${Date.now()}`, { cache: "no-store" });
-    _trackedLocationsForLookupCache = res.ok ? (await res.json()).filter(locationVisibleToViewer) : [];
+    _trackedLocationsForLookupCache = (await loadSiteData("locations", "config/locations.json")).json.filter(locationVisibleToViewer);
   } catch (err) {
     console.error("Could not load config/locations.json for nearest-location lookup:", err);
     _trackedLocationsForLookupCache = [];
