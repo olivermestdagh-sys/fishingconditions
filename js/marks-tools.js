@@ -47,7 +47,7 @@ function loadMarkViewSettings() {
 // Clustering on/off is per device (like the base map), not synced.
 const MARK_CLUSTER_PREF_KEY = "goodConditionsClusterMarks";
 function loadClusterMarksPref() {
-  try { return localStorage.getItem(MARK_CLUSTER_PREF_KEY) !== "0"; } catch { return true; }
+  try { return localStorage.getItem(MARK_CLUSTER_PREF_KEY) === "1"; } catch { return false; }
 }
 function saveClusterMarksPref(on) {
   try { localStorage.setItem(MARK_CLUSTER_PREF_KEY, on ? "1" : "0"); } catch { /* not remembered, harmless */ }
