@@ -22,10 +22,11 @@ const fns = new Function(
     grab(/function lowLabelShiftMinutes[\s\S]*?\r?\n}\r?\n/),
     grab(/const TROUGH_MINUTES_PER_METRE[^\n]*\n/),
     grab(/const TROUGH_MAX_MINUTES[^\n]*\n/),
+    grab(/const TROUGH_MIN_MINUTES[^\n]*\n/),
     grab(/function troughWideningMinutes[\s\S]*?\r?\n}\r?\n/),
     grab(/function optionalMinutes[\s\S]*?\r?\n}\r?\n/),
     grab(/function applyTroughWideningToRows[\s\S]*?\r?\n}\r?\n/),
-    "return { troughWideningMinutes, TROUGH_MINUTES_PER_METRE, TROUGH_MAX_MINUTES, lowLabelShiftMinutes, LOW_LABEL_SHIFT_FRACTION, applyTroughWideningToRows, findTideExtrema, findTideThresholdCrossings, exactTideExtrema };",
+    "return { troughWideningMinutes, TROUGH_MINUTES_PER_METRE, TROUGH_MAX_MINUTES, TROUGH_MIN_MINUTES, lowLabelShiftMinutes, LOW_LABEL_SHIFT_FRACTION, applyTroughWideningToRows, findTideExtrema, findTideThresholdCrossings, exactTideExtrema };",
   ].join("\n")
 )();
 
@@ -202,14 +203,18 @@ test("LLW 55: label moves 17 min but both window edges keep the full 55 min, and
   assert.ok(Math.abs(drawn._t - lowAfter.t) <= 30 * 60000);
 });
 
-// ---- depth-scaled widening (troughBase / troughRise): W = clamp(base - 100 * depth, 0, 70), depth = max(0, threshold - low height)
+// ---- depth-scaled widening (troughBase / troughRise): W = clamp(base - 100 * depth, 20, 70), depth = max(0, threshold - low height)
 
-test("troughWideningMinutes: base - 100/m * depth, floored at 0, capped at 70, bad input -> 0", () => {
+test("troughWideningMinutes: base - 100/m * depth, floored at 20, capped at 70, bad input -> 0", () => {
   assert.equal(fns.TROUGH_MINUTES_PER_METRE, 100);
   assert.equal(fns.TROUGH_MAX_MINUTES, 70);
+  assert.equal(fns.TROUGH_MIN_MINUTES, 20);
   assert.equal(fns.troughWideningMinutes(80, 0.18), 62);
   assert.equal(fns.troughWideningMinutes(80, 0.48), 32);
-  assert.equal(fns.troughWideningMinutes(80, 0.85), 0, "a deep low is never narrowed (floor 0)");
+  assert.equal(fns.troughWideningMinutes(80, 0.85), 20, "a deep low still gets the 20 minute floor");
+  assert.equal(fns.troughWideningMinutes(80, 0.98), 20);
+  assert.equal(fns.troughWideningMinutes(80, 0.68), 20, "80 - 68 = 12 is floored to 20");
+  assert.equal(fns.troughWideningMinutes(80, 0.5), 30, "above the floor nothing changes");
   assert.equal(fns.troughWideningMinutes(80, 0.05), 70, "cap 70");
   assert.equal(fns.troughWideningMinutes(80, -0.3), 70, "a negative depth counts as 0 (then the cap applies)");
   assert.equal(fns.troughWideningMinutes(null, 0.2), 0);
@@ -217,7 +222,7 @@ test("troughWideningMinutes: base - 100/m * depth, floored at 0, capped at 70, b
 });
 
 test("depth mode: each low gets its own W from its height, hlw/llw are ignored, label moves 30% of W", () => {
-  // THRESH 1.0: HLW 06:00 is 0.5 m (depth 0.5 -> W 40 at base 90); LLW 18:00 is 0.2 m (depth 0.8 -> W 10)
+  // THRESH 1.0: HLW 06:00 is 0.5 m (depth 0.5 -> W 40 at base 90); LLW 18:00 is 0.2 m (depth 0.8 -> 80-90 < 20, so the floor: W 20)
   const beforeA = crossings(rows).filter((c) => c.t > T0 && c.t < T0 + 12 * H);
   const beforeB = crossings(rows).filter((c) => c.t > T0 + 12 * H && c.t < T0 + 24 * H);
   const lowsBefore = fns.findTideExtrema(rows).filter((e) => e.type === "low");
@@ -226,11 +231,11 @@ test("depth mode: each low gets its own W from its height, hlw/llw are ignored, 
   const afterB = crossings(out).filter((c) => c.t > T0 + 12 * H && c.t < T0 + 24 * H);
   assert.equal(afterA[0].t, beforeA[0].t - 40 * 60000);
   assert.equal(afterA[1].t, beforeA[1].t + 40 * 60000, "no troughRise: the rise mirrors W");
-  assert.equal(afterB[0].t, beforeB[0].t - 10 * 60000);
-  assert.equal(afterB[1].t, beforeB[1].t + 10 * 60000);
+  assert.equal(afterB[0].t, beforeB[0].t - 20 * 60000);
+  assert.equal(afterB[1].t, beforeB[1].t + 20 * 60000);
   const lowsAfter = fns.findTideExtrema(out).filter((e) => e.type === "low");
   assert.equal(lowsAfter[0].t - lowsBefore[0].t, 12 * 60000);
-  assert.equal(lowsAfter[1].t - lowsBefore[1].t, 3 * 60000);
+  assert.equal(lowsAfter[1].t - lowsBefore[1].t, 6 * 60000);
 });
 
 test("troughRise moves the rising (high-enough) edge on its own; the falling edge and label still follow W", () => {
@@ -243,14 +248,14 @@ test("troughRise moves the rising (high-enough) edge on its own; the falling edg
   assert.equal(fns.findTideExtrema(out).filter((e) => e.type === "low")[0].t - lowBefore.t, 12 * 60000);
 });
 
-test("a deep low (W 0) keeps its falling edge and label but still gets the separate rise", () => {
+test("a deep low gets the 20 minute floor (edge 20 earlier, label 6 later) and the separate rise", () => {
   const before = crossings(rows).filter((c) => c.t > T0 + 12 * H && c.t < T0 + 24 * H);
   const lowBefore = fns.findTideExtrema(rows).filter((e) => e.type === "low")[1];
-  const out = fns.applyTroughWideningToRows(rows, { troughBase: 80, troughRise: 25 }, THRESH); // depth 0.8 -> W 0
+  const out = fns.applyTroughWideningToRows(rows, { troughBase: 80, troughRise: 25 }, THRESH); // depth 0.8 -> raw W 0, floored to 20
   const after = crossings(out).filter((c) => c.t > T0 + 12 * H && c.t < T0 + 24 * H);
-  assert.equal(after[0].t, before[0].t);
+  assert.equal(after[0].t, before[0].t - 20 * 60000);
   assert.equal(after[1].t, before[1].t + 25 * 60000);
-  assert.equal(fns.findTideExtrema(out).filter((e) => e.type === "low")[1].t, lowBefore.t);
+  assert.equal(fns.findTideExtrema(out).filter((e) => e.type === "low")[1].t - lowBefore.t, 6 * 60000);
 });
 
 test("troughBase empty / null behaves exactly as the class offsets; highs still use hhw / lhw in depth mode", () => {

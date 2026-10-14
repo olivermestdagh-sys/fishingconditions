@@ -236,22 +236,31 @@ function lowLabelShiftMinutes(offsetMinutes) {
  * Twelve logged lows (5-12 Oct) showed the too-low edge needs MORE widening the shallower the dip (r about -0.74, about
  * -0.88 without the one strong-west-wind day), because the real water lingers near the threshold while the model rushes
  * through it. The fit was about 65-77 minutes minus 86-102 minutes per metre of depth, reaching 0 near 0.75 m. So a low's
- * widening is W = clamp(troughBaseMinutes - TROUGH_MINUTES_PER_METRE * depth, 0, TROUGH_MAX_MINUTES) with
+ * widening is W = clamp(troughBaseMinutes - TROUGH_MINUTES_PER_METRE * depth, TROUGH_MIN_MINUTES, TROUGH_MAX_MINUTES) with
  * depth = max(0, minTideHeight - low height): 100 minutes per metre (the round number inside the fitted range) and a 70 minute
- * cap (the largest need seen was 68). The floor of 0 matters: a deep low must not be narrowed (the site cannot make a window
- * narrower than the model, and the deepest low, 0.85 m, needed about 0). The per-location base is the only tuned number
+ * cap (the largest need seen was 68). The floor, TROUGH_MIN_MINUTES = 20 (added 2026-10-15): the first version floored at 0
+ * because the 0.85 m low of 12 Oct needed about -7. Then 13 and 14 Oct brought two deeper evening lows (0.95 m and 0.98 m) that
+ * needed +16 and +39, and the 0.68 m low of 11 Oct needed 22. Four deep lows (0.68-0.98 m) needed -7, 16, 22 and 39 (mean about
+ * 17), i.e. real water still lingers near the threshold even when the dip is deep, so the line a - b * depth, which reaches 0
+ * at 0.8 m, left the 14 Oct low 39 minutes short (the unsafe side: the site said fishable while the ramp was still too low).
+ * A 20 minute floor leaves no logged event more than 19 minutes short; 10 and 15 left 29 and 24 short. It costs little: the
+ * deep lows it touches were already over-widened or near zero (-7 becomes +27 over, the only price), and every shallower
+ * low is unchanged because its W is already above 20. The floor only sets the minimum for the falling edge (and so the
+ * label, which is still 30% of W: a deep low now moves its printed time 6 minutes); the rise edge is unaffected. The
+ * per-location base is the only tuned number
  * (Lang Lang: 80, a little above the fits so the unsafe side, under-widening, is the one that is avoided). The RISE
  * (high-enough) edge did NOT depend on depth in the data (r about -0.1), so it has its own flat value, troughRiseMinutes
  * (Lang Lang: 40), and mirrors W when that is empty. The printed low time still moves only LOW_LABEL_SHIFT_FRACTION of W.
  */
 const TROUGH_MINUTES_PER_METRE = 100;
 const TROUGH_MAX_MINUTES = 70;
+const TROUGH_MIN_MINUTES = 20;
 
 function troughWideningMinutes(baseMinutes, depthMetres) {
-  const base = Number(baseMinutes);
-  if (!Number.isFinite(base)) return 0;
+  const base = optionalMinutes(baseMinutes);
+  if (base == null) return 0; // no base = depth mode off: no widening at all (the floor only applies once a base is set)
   const depth = Math.max(0, Number(depthMetres) || 0);
-  return Math.round(Math.min(TROUGH_MAX_MINUTES, Math.max(0, base - TROUGH_MINUTES_PER_METRE * depth)));
+  return Math.round(Math.min(TROUGH_MAX_MINUTES, Math.max(TROUGH_MIN_MINUTES, base - TROUGH_MINUTES_PER_METRE * depth)));
 }
 
 function optionalMinutes(v) {
