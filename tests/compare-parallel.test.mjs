@@ -51,3 +51,12 @@ test("graph file lists must match", () => {
   assert.equal(compareRuns(doc(), doc(), { worker: g(["a", "b"]), git: g(["b", "a"]) }).ok, true);
   assert.equal(compareRuns(doc(), doc(), { worker: g(["a"]), git: g(["a", "b"]) }).ok, false);
 });
+
+test("git's private rows, private sun entries and older history are ignored", () => {
+  const g = doc({
+    locations: [{ ...loc("A"), ownerId: "public" }, { ...loc("B"), ownerId: "public" }, loc("P", "Kayak", "u1")],
+    rows: [...rows("A"), ...rows("B"), ...rows("P"), ...rows("A", "Kayak", 3).map((r) => ({ ...r, dateTime: "2026-10-14 00:00" }))],
+    sunTimes: { A: 1, B: 1, P: 1 },
+  });
+  assert.equal(compareRuns(doc(), g).ok, true);
+});

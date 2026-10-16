@@ -41,8 +41,12 @@ export function compareRuns(worker, git, graph = null, limits = LIMITS) {
     }
     return m;
   };
+  // Git's file also holds private owners' rows, and (on the Worker's very first run, which has no previous output) history from before
+  // the Worker's earliest hour: compare only Public's pairs and only the hours the Worker has.
+  const gKeys = new Set(gl.keys());
+  const tmin = (worker.rows || []).reduce((m, r) => (m === null || r.dateTime < m ? r.dateTime : m), null);
   const wr = group(worker.rows || []);
-  const gr = group(git.rows || []);
+  const gr = group((git.rows || []).filter((r) => gKeys.has(`${r["Location Name"]}|${r.Type}`) && (tmin === null || r.dateTime >= tmin)));
   let overlap = 0, tideBad = 0, windBad = 0, tempBad = 0, condSame = 0, condN = 0, rowBad = 0;
   for (const [k, gm] of gr) {
     const wm = wr.get(k);
@@ -65,7 +69,7 @@ export function compareRuns(worker, git, graph = null, limits = LIMITS) {
       }
     }
   }
-  stats.rows = { worker: (worker.rows || []).length, git: (git.rows || []).length, overlapping: overlap };
+  stats.rows = { worker: (worker.rows || []).length, git: [...gr.values()].reduce((n, m) => n + m.size, 0), overlapping: overlap };
   if (rowBad) problems.push(`${rowBad} pair(s) with row counts more than ${Math.round((1 - limits.rowsRatio) * 100)}% apart`);
   if (!overlap) problems.push("no overlapping hours to compare");
   // A few rows differing is normal (forecast moved); a systematic difference is not: allow 1% of the overlap.
@@ -76,7 +80,8 @@ export function compareRuns(worker, git, graph = null, limits = LIMITS) {
   if (condN && condSame / condN < limits.conditionAgree) problems.push(`Fishing Condition agrees on only ${Math.round((100 * condSame) / condN)}% of overlapping rows`);
   stats.conditionAgree = condN ? Math.round((1000 * condSame) / condN) / 10 : null;
   const sw = Object.keys(worker.sunTimes || {}).sort().join();
-  const sg = Object.keys(git.sunTimes || {}).sort().join();
+  const publicNames = new Set([...gl.values()].map((l) => l.name));
+  const sg = Object.keys(git.sunTimes || {}).filter((n) => publicNames.has(n)).sort().join();
   if (sw !== sg) problems.push("sunTimes locations differ");
   if (graph) {
     const a = (graph.worker || []).map((f) => f.file).sort().join();
