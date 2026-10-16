@@ -137,7 +137,7 @@ ${helpFig("map-overview.jpg", "The Map signed out: blue pins are kayak spots, br
 <p>Selecting a pin opens a panel with the same conditions graph used on Week Ahead (tide, wind, pressure, temperature, rain, and the Location and Fishing condition strips), the spot's name, its Kayak / Land based toggle, its session chips and the planning buttons (<strong>+ Fishing times</strong>, <strong>+ Home to home</strong>). See the Week Ahead help for how to read the graph.</p>
 <ul>
 <li><strong>Double-tap</strong> the graph to expand it. <strong>Hold for 2 seconds</strong> to turn the data-point tooltip on or off.</li>
-<li>If you can edit a location (your own, or you are an administrator) a <strong>gear</strong> next to its name opens the location editor: display name, group, shore direction, set-up/pack-up and travel times, tide offset, the tide-widening values for shallow lows, and so on. Changes appear straight away.</li>
+<li>If you can edit a location (for example one of your own) a <strong>gear</strong> next to its name opens the location editor: display name, group, shore direction, set-up/pack-up and travel times, tide offset, the tide-widening values for shallow lows, and so on. Changes appear straight away.</li>
 <li>You can move a location's pin if you have permission; the map shows a hint while a pin is picked up and the next tap puts it down.</li>
 </ul>`,
       },
@@ -406,7 +406,7 @@ ${helpFig("map-overview.jpg", "The Map signed out: blue pins are kayak spots, br
         html: `
 ${helpFig("settings-signin.jpg", "Settings when you're signed out: what signing in gets you, and the Sign in with Google button.")}
 <p>Press <strong>Sign in with Google</strong>. Without signing in you can still browse Week Ahead and the Map for the shared locations. Signed in you can log catches and trips, see reports, add homes, set your own location timings and keep your lists. Everything personal is private to you.</p>
-<p>When you're signed in the card shows who you are, with <strong>Sign out</strong>. If you're an administrator, <strong>View as Public</strong> shows the site as an ordinary visitor sees it. Your filters, pinned spots, planned trips and other settings follow you across devices, so signing in on a new phone brings them with you. Things stored only on one device (like which trips are ticked on the Map) don't move.</p>
+<p>When you're signed in the card shows who you are, with <strong>Sign out</strong>. Your filters, pinned spots, planned trips and other settings follow you across devices, so signing in on a new phone brings them with you. Things stored only on one device (like which trips are ticked on the Map) don't move.</p>
 <p class="help-tip">The site is served from fish2catch.app and, for now, yepyepyep.app. Browser sign-in data isn't shared between them, so sign in again on whichever one you use.</p>`,
       },
       {
@@ -440,11 +440,6 @@ ${helpFig("settings-signin.jpg", "Settings when you're signed out: what signing 
         html: `
 <p>The Fishing Controller is a separate handheld device that talks to a phone app. The phone app signs in with its own <strong>token</strong>: press <strong>+ Create token</strong>, copy the token (it is shown once only) into the app, and <strong>revoke</strong> it here if a phone is lost. A token can only be used by the controller app, never to sign in to the website.</p>
 <p>Two buttons rebuild the trip log of older activity: <strong>Build trip log from past trips</strong> (controller trips) and <strong>Build trip log from old sessions</strong> (Session Start/End and catch marks from before trips existed). They're safe to repeat and never overwrite a trip you've edited.</p>`,
-      },
-      {
-        id: "admin",
-        title: "Administrator-only cards",
-        html: `<p>Administrators also see <strong>Data refresh</strong> (run the forecast update now instead of waiting for the next one, every 3 hours), <strong>Messages</strong> (read and reply to users), <strong>Users</strong> (roles and tiers) and <strong>Tiers</strong> (limits such as how many locations an account may add). These don't appear for other accounts.</p>`,
       },
     ],
   },
