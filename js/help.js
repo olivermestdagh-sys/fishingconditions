@@ -223,18 +223,21 @@ ${helpFig("trip-start.jpg", "The Trip tab when no trip is running: tap a trip to
         html: `
 <ol>
 <li><strong>Start trip</strong>: pick one of your trips. Its Actions appear as buttons.</li>
-<li><strong>Tap an Action</strong> to start it. If another Action was running it ends first, so switching is a single tap. Tap the running Action again to end it; the screen's hint tells you what a tap will do ("Tap an action to start it" or "Tap the running action to end it, or another to switch").</li>
-<li>Starting an Action opens the <strong>rod screen</strong> (next section).</li>
+<li><strong>Tap an Action</strong> to start it. If another Action was running it ends first, so switching is a single tap. The Action you started is shown in green and named under the trip name at the top.</li>
+<li>Starting an Action opens the <strong>rod screen</strong> (next section). Starting or ending an Action needs a GPS fix, so allow location for the site when your browser asks. Without one the buttons grey out for about 15 seconds, then it tells you it couldn't get your location and saves nothing.</li>
+<li>Tapping the running Action again takes you back to its rod screen; <strong>End action</strong> there ends it, and <strong>All actions</strong> returns to the list below.</li>
 <li><strong>+ Catch</strong> logs a fish. Answer the cards in turn (species, size, whether it was released, and so on). The list starts with the Action's targets and the trip's other targets, and the gear is taken from the running Action. Press <strong>Save catch</strong> at the end.</li>
 <li>Keep <strong>Water</strong> condition and <strong>Depth</strong> up to date at the bottom of the screen: tap Water to cycle through the water conditions, and use the depth stepper (<em>One metre deeper / One metre shallower</em>). Each change is recorded against the trip so reports know the conditions you were fishing in.</li>
 <li><strong>End trip</strong> when you're done. The screen shows the <em>Time on this trip</em>.</li>
 </ol>
+${helpFig("trip-actions.jpg", "A trip running with the Trawling action started (green). The timer at the top is the time on this trip; Water and Depth are always visible, and End trip is at the bottom.")}
 <p>The trip survives closing the page, switching tabs or locking your phone. It is kept in your account, so a trip started here can be continued on another device, and the screen re-syncs when you return to it.</p>`,
       },
       {
         id: "rods",
         title: "The rod screen",
         html: `
+${helpFig("trip-rods.jpg", "The rod screen: one rod filled in (bait or lure, with its picture behind it, the X to remove it, the fish to log a catch, the gear for its settings) and three empty positions, with Move rods, + Catch (any rod), Edit action, All actions, End action and End trip below.")}
 <p>When an Action is running you see its <strong>four rod positions</strong> as a 2×2 grid. Each filled position shows the rod's name, its bait (with options) and its rig options, with a picture of the bait behind it when you've added one.</p>
 <div class="help-diagram" aria-label="Illustration of the 2 by 2 rod grid">
   <div class="help-rod help-rod-on"><b>Rod 1</b><span>Squid · 2 hooks</span></div>
@@ -249,6 +252,7 @@ ${helpFig("trip-start.jpg", "The Trip tab when no trip is running: tap a trip to
 <li><strong>Tap an empty position</strong> ("Fill position") to put a rod setup there.</li>
 <li><strong>X</strong> (top right of a rod) removes it from this action; the setup itself is kept for next time.</li>
 <li><strong>Gear icon</strong> (bottom right of a rod) opens Trip Defaults straight onto that rod setup.</li>
+<li><strong>+ Catch (any rod)</strong> logs a catch and asks which rod. <strong>Edit action</strong> opens Trip Defaults on this Action.</li>
 <li><strong>Move rods</strong>: tap it, tap a rod to pick it up, then tap another position to drop it there ("Tap a position to drop it there"); if the target is taken the two swap. Use <em>Cancel move</em> to back out.</li>
 </ul>
 <p>Tap the running Action's button to come back to this screen at any time. <strong>End action</strong> is on it.</p>`,
