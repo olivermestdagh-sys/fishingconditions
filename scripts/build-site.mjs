@@ -13,7 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ALWAYS_FILES = ["config/locations.json"];
-const ALWAYS_DIRS = ["data"];
+const ALWAYS_DIRS = ["data", "images/help"]; // images/help: js/help.js builds those paths in a template string, so no reference to scan
 
 const isExternal = (ref) => /^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(ref);
 

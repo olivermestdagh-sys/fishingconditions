@@ -4141,3 +4141,74 @@ body.live-card-open { overflow: hidden; }
 .dlg-btn { flex: 1; min-height: 52px; padding: 8px 14px; border: 2px solid var(--grey-300, #ccc); border-radius: 12px; background: var(--white, #fff); color: inherit; font-size: 1rem; font-weight: 700; cursor: pointer; touch-action: manipulation; }
 .dlg-btn-ok { background: #1d5fa8; border-color: #1d5fa8; color: #fff; }
 .dlg-btn-danger { background: #dc2626; border-color: #dc2626; }
+
+/* Help: the "?" button in every page's header bar and the Help dialog (js/help.js). */
+.help-btn {
+  order: 5;
+  margin: 0 0 8px 8px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--white);
+  background: transparent;
+  border: 1px solid #b7c9e0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.help-btn:hover { background: rgba(255, 255, 255, 0.12); }
+@media (max-width: 1200px) {
+  .help-btn { order: 3; margin: 0 0 4px 6px; width: 22px; height: 22px; font-size: 0.78rem; }
+}
+body.help-open { overflow: hidden; }
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10100;
+  background: rgba(11, 42, 74, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.help-dialog {
+  background: var(--white);
+  color: #111827;
+  width: min(860px, 100%);
+  max-height: 100%;
+  border-radius: var(--radius);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.help-head { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--blue-900); color: var(--white); }
+.help-head h2 { margin: 0; font-size: 1.05rem; }
+.help-close { background: transparent; border: 0; color: var(--white); font-size: 1.6rem; line-height: 1; cursor: pointer; padding: 0 4px; }
+.help-tabs { flex-shrink: 0; display: flex; gap: 6px; padding: 8px 12px; overflow-x: auto; border-bottom: 1px solid var(--grey-200); background: var(--blue-100); }
+.help-tab { flex: 0 0 auto; padding: 5px 12px; font-size: 0.82rem; font-weight: 600; color: var(--blue-700); background: var(--white); border: 1px solid #c3d4e8; border-radius: 999px; cursor: pointer; }
+.help-tab.active { color: var(--white); background: var(--blue-700); border-color: var(--blue-700); }
+.help-scroll { overflow-y: auto; padding: 4px 18px 18px; font-size: 0.92rem; line-height: 1.5; -webkit-overflow-scrolling: touch; }
+.help-intro { font-size: 1rem; }
+.help-toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; padding-bottom: 10px; border-bottom: 1px solid var(--grey-200); }
+.help-toc a { font-size: 0.8rem; padding: 3px 10px; border-radius: 999px; background: var(--blue-100); color: var(--blue-700); text-decoration: none; }
+.help-section h3 { margin: 20px 0 6px; font-size: 1.05rem; color: var(--blue-900); }
+.help-section p, .help-section ul, .help-section ol { margin: 0 0 10px; }
+.help-section li { margin-bottom: 4px; }
+.help-section code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+.help-figure { margin: 10px 0 14px; }
+.help-figure img { display: block; max-width: 100%; height: auto; border: 1px solid var(--grey-200); border-radius: 8px; }
+.help-figure figcaption, .help-caption { margin-top: 4px; font-size: 0.78rem; color: var(--grey-500); }
+.help-tip { padding: 8px 12px; background: #fff8e6; border-left: 3px solid #f59e0b; border-radius: 6px; }
+.help-foot { margin-top: 22px; font-size: 0.8rem; color: var(--grey-500); }
+.help-diagram { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-width: 360px; margin: 8px 0 2px; }
+.help-rod { display: flex; flex-direction: column; justify-content: center; min-height: 64px; padding: 8px 10px; border-radius: 10px; font-size: 0.8rem; }
+.help-rod b { font-size: 0.9rem; }
+.help-rod-on { background: #15803d; color: #fff; }
+.help-rod-off { background: #f1f5f9; color: var(--grey-500); border: 2px dashed #c3d4e8; }
+@media (max-width: 600px) {
+  .help-overlay { padding: 0; }
+  .help-dialog { width: 100%; height: 100%; border-radius: 0; }
+}
