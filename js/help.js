@@ -1,7 +1,7 @@
 // help.js
-// The "?" button at the top right of every page's header bar, and the Help dialog it opens. Loaded in each page's <head>
+// The "?" button at the top right of every page's header bar, and the Help panel (a right-hand column) it opens. Loaded in each page's <head>
 // (like install-app.js, so it is the same one line on every page); the button is added once the page is ready.
-// The dialog opens on the help for the tab you are on and has a strip to read any other tab's help too.
+// The panel opens on the help for the tab you are on and has a strip to read any other tab's help too.
 // All the help text lives in HELP_PAGES below: one entry per page (the file name without .html), each a list of
 // sections {id, title, html}. Screenshots are in images/help/ and sit in <figure class="help-figure"> blocks; they show
 // the signed-out site (the signed-in screens can't be captured without an account), so the signed-in tabs use short
@@ -502,11 +502,7 @@ ${helpFig("settings-signin.jpg", "Settings when you're signed out: what signing 
     overlay = document.createElement("div");
     overlay.className = "help-overlay";
     overlay.innerHTML = `<div class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="helpTitle"></div>`;
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) close();
-    });
     document.body.appendChild(overlay);
-    document.body.classList.add("help-open");
     document.addEventListener("keydown", onKey);
     render(currentPage());
   }
@@ -515,7 +511,6 @@ ${helpFig("settings-signin.jpg", "Settings when you're signed out: what signing 
     if (!overlay) return;
     overlay.remove();
     overlay = null;
-    document.body.classList.remove("help-open");
     document.removeEventListener("keydown", onKey);
     if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
   }

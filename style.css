@@ -4162,24 +4162,34 @@ body.live-card-open { overflow: hidden; }
 @media (max-width: 1200px) {
   .help-btn { order: 3; margin: 0 0 4px 6px; width: 22px; height: 22px; font-size: 0.78rem; }
 }
-body.help-open { overflow: hidden; }
+/* Narrow bars wrap Install app onto its own row: keep it and the ? together at the right-hand end. */
+@media (max-width: 1200px) {
+  .install-btn { margin-left: auto; }
+  .install-btn[hidden] ~ .help-btn { margin-left: auto; }
+}
+/* Phones: tighten the header row so Install app and the ? both stay on the first line. */
+@media (max-width: 600px) {
+  .sitebar { column-gap: 8px; }
+  .ww-credit span { display: none; }
+  .updated { font-size: 0.64rem; }
+}
+/* The Help is a right-hand column over the page; the page behind stays usable (the overlay itself ignores clicks). */
 .help-overlay {
   position: fixed;
   inset: 0;
   z-index: 10100;
-  background: rgba(11, 42, 74, 0.6);
+  pointer-events: none;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
+  justify-content: flex-end;
 }
 .help-dialog {
+  pointer-events: auto;
   background: var(--white);
   color: #111827;
-  width: min(860px, 100%);
-  max-height: 100%;
-  border-radius: var(--radius);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  width: min(440px, 100%);
+  height: 100%;
+  border-left: 1px solid var(--grey-200);
+  box-shadow: -6px 0 28px rgba(0, 0, 0, 0.3);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -4208,7 +4218,3 @@ body.help-open { overflow: hidden; }
 .help-rod b { font-size: 0.9rem; }
 .help-rod-on { background: #15803d; color: #fff; }
 .help-rod-off { background: #f1f5f9; color: var(--grey-500); border: 2px dashed #c3d4e8; }
-@media (max-width: 600px) {
-  .help-overlay { padding: 0; }
-  .help-dialog { width: 100%; height: 100%; border-radius: 0; }
-}
