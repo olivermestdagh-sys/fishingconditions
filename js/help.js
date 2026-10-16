@@ -208,6 +208,7 @@ ${helpFig("map-overview.jpg", "The Map signed out: blue pins are kayak spots, br
         id: "idea",
         title: "How a trip is organised",
         html: `
+${helpFig("trip-start.jpg", "The Trip tab when no trip is running: tap a trip to start it, the gear opens that trip's defaults, and + Add trip creates a new one.")}
 <p>There are three levels, all set up in advance so that on the water you only tap:</p>
 <ul>
 <li><strong>Trip</strong>: the outing, for example "Saturday kayak". A trip has a name and a list of target species.</li>
@@ -289,6 +290,7 @@ ${helpFig("map-overview.jpg", "The Map signed out: blue pins are kayak spots, br
         id: "list",
         title: "The list of trips",
         html: `
+${helpFig("triplogs-list.jpg", "The trip list: one row per trip with its duration, time fished, number of actions and catches, plus Rename and Delete.")}
 <p>Each trip is one row, newest first, showing:</p>
 <ul>
 <li>the <strong>date</strong>, the <strong>trip</strong> name and the <strong>start to end</strong> time,</li>
@@ -302,7 +304,8 @@ ${helpFig("map-overview.jpg", "The Map signed out: blue pins are kayak spots, br
         id: "lines",
         title: "The lines of one trip",
         html: `
-<p>Opening a trip shows its log lines in time order. For each line you'll see the time and how long after the start it was (<code>+h:mm</code>), the event, the action, the gear on each rod, water and depth, tide and weather, how long each action ran, and the position. A <code>~</code> beside a time means it is approximate.</p>
+${helpFig("triplogs-lines.jpg", "A trip opened: each line with its time, event, action, water, tide and weather, time fished, position and an Edit button, with the rod set-ups listed under the action lines. The small \"edited\" tag marks a line you changed by hand.")}
+<p>Opening a trip shows its log lines in time order. For each line you'll see the time and how long after the start it was (<code>+h:mm</code>), the event, the action, the gear on each rod, the water condition and depth, a combined <strong>Tide · weather</strong> column (tide stage, sky, wind speed and direction, temperature and pressure), how long each action ran (<strong>Fished</strong>), and the position. A <code>~</code> beside a time means it is approximate.</p>
 <p>The events are:</p>
 <ul>
 <li><strong>trip start / trip end</strong>: the outing begins and ends.</li>
@@ -356,13 +359,14 @@ ${helpFig("map-overview.jpg", "The Map signed out: blue pins are kayak spots, br
         id: "sessions",
         title: "Sessions",
         html: `
-<p>Steps through your sessions one at a time, newest first, with <strong>◀ Previous session</strong> and <strong>Next session ▶</strong> (within the date range you've set). The graph covers from 12 hours before the session to 12 hours after: the same conditions graph as the rest of the site, with the session shaded green and a dot for every catch in that species' colour. Use <strong>Condition scored for: Kayak / Land based</strong> to choose which scoring the strips use. Open <strong>Table view</strong> for the same catches as rows (date, time, species, length, tide, wind and weather).</p>`,
+${helpFig("reports-session.jpg", "The Sessions report: the session shaded green, a dot for each catch (here one Ray, named in the legend above the graph), and the tide, wind and condition strips behind it.")}
+<p>Steps through your sessions one at a time, newest first, with <strong>◀ Previous session</strong> and <strong>Next session ▶</strong> (within the date range you've set). The graph covers from 12 hours before the session to 12 hours after: the same conditions graph as the rest of the site, with the session shaded green and a dot for every catch in that species' colour. Use <strong>Condition scored for: Kayak / Land based</strong> to choose which scoring the strips use. Hover or tap a catch dot for its details; press and hold the graph for 2 seconds to turn its hover tip on or off. The line above the graph says which location the session was at, its date and times, and how many sessions and catches the filters leave. Open <strong>Table view</strong> for the same catches as rows (date, time, species, length, tide, wind and weather).</p>`,
       },
       {
         id: "tide-clock",
         title: "Tide clock",
         html: `
-<p>Answers <em>"when in the tide do I catch fish?"</em>. Each session is laid onto one full tide cycle (both highs and both lows), measured in hours since the lower low water, about 25 hours in all. The blue curve is a typical tide built from your sessions, with the differences between the highs and the lows exaggerated so they stand out. Bars show how much you fished and how many fish you caught at each point, and the catch rate shows where you do best. A bump in the catch rate with plenty of fishing time behind it is a genuine pattern; a spike with very little time behind it is probably luck.</p>`,
+<p>Answers <em>"when in the tide do I catch fish?"</em>. Each session is laid onto one full tide cycle (both highs and both lows), measured in hours since the lower low water, about 25 hours in all. The blue curve is a typical tide built from the average of your sessions' tides, with the differences between the highs and the lows exaggerated so they stand out (it shows the shape, not real heights). The four tide points are marked LLW (lower low), LHW (lower high), HLW (higher low) and HHW (higher high). <strong>Grey columns</strong> are how long you fished at each point, <strong>coloured columns</strong> are catches (coloured by species) and the <strong>red line</strong> is catches per hour of fishing, drawn only where you have fished at least an hour. A bump in the red line with plenty of grey behind it is a genuine pattern; a spike over a thin grey column is probably luck.</p>`,
       },
       {
         id: "tide-stage",
