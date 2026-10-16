@@ -11,7 +11,10 @@ function addHomeMarker(home) {
   const marker = L.marker([home.lat, home.lng], { icon: buildMapPinDivIcon("home"), zIndexOffset: 500, title: "Home" });
   marker.bindPopup(
     `<div class="home-popup">
-      <div class="home-popup-title">${escapeHtml(homeLabel(home))}</div>
+      <label class="home-popup-title" style="display:block;">Name
+        <input type="text" data-home-name maxlength="80" value="${escapeHtml(homeLabel(home))}" style="width:100%;box-sizing:border-box;margin-top:2px;">
+      </label>
+      <button type="button" class="btn-secondary" data-save-home-name>Save name</button>
       <button type="button" class="btn-secondary" data-delete-home style="color:#dc2626;">Delete home</button>
       <div class="home-popup-status" data-home-status></div>
     </div>`,
@@ -20,6 +23,28 @@ function addHomeMarker(home) {
   marker.on("popupopen", (e) => {
     const el = e.popup.getElement();
     L.DomEvent.disableClickPropagation(el);
+    el.querySelector("[data-save-home-name]").addEventListener("click", async (ev) => {
+      L.DomEvent.stop(ev);
+      const status = el.querySelector("[data-home-status]");
+      const input = el.querySelector("[data-home-name]");
+      status.textContent = "Saving…";
+      // A blank name goes back to the closest town (the default label).
+      const name = input.value.trim() || (await homeTownName(home.lat, home.lng));
+      const res = await fetch(`${USER_BACKEND_URL}/api/homes/${encodeURIComponent(home.id)}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      }).catch(() => null);
+      if (!res || !res.ok) {
+        status.textContent = "Couldn't save the name — try again.";
+        return;
+      }
+      home.name = name;
+      input.value = homeLabel(home);
+      status.textContent = "Saved.";
+      if (typeof refreshTripOriginSelects === "function") refreshTripOriginSelects();
+    });
     el.querySelector("[data-delete-home]").addEventListener("click", async (ev) => {
       L.DomEvent.stop(ev);
       const status = el.querySelector("[data-home-status]");
